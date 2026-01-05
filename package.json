@@ -69,8 +69,8 @@
     "vite-plugin-electron-renderer": "^0.14.6"
   },
   "build": {
-    "appId": "com.midnight.ssh",
-    "productName": "Midnight SSH",
+    "appId": "com.zync.ssh",
+    "productName": "Zync",
     "directories": {
       "output": "release/${version}"
     },

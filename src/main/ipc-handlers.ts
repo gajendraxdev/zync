@@ -86,8 +86,18 @@ export function setupIPC() {
       // Then connect SFTP (file manager)
       // Sequential execution prevents potential race conditions or auth rate limiting on some servers
       await sftpManager.connect(config);
+
+      // Auto-start Tunnels
+      const client = sshManager.getClient(config.id);
+      if (client) {
+        // Run in background so we don't block the connect response
+        tunnelManager.startAutoTunnels(client, config.id).catch(err => {
+          console.error('Failed to auto-start tunnels:', err);
+        });
+      }
+
     } catch (error) {
-      console.error('SFTP Connection Failed:', error);
+      console.error('Connection Failed:', error);
       // If SFTP fails, should we disconnect SSH? 
       // For now, let's treat it as a partial failure but allow terminal access?
       // But the UI expects both. Let's disconnect SSH and throw to ensure consistent state.
@@ -95,6 +105,12 @@ export function setupIPC() {
       throw error;
     }
 
+    return { success: true };
+  });
+
+  ipcMain.handle('shell:open', async (_, url: string) => {
+    const { shell } = require('electron');
+    await shell.openExternal(url);
     return { success: true };
   });
 
