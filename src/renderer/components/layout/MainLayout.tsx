@@ -20,7 +20,7 @@ function TabContent({ tab, isActive }: {
 
     // Each tab content is rendered but hidden if not active
     return (
-        <div className={cn("absolute inset-0 flex flex-col bg-app-bg", !isActive && "hidden")}>
+        <div className={cn("absolute inset-0 flex flex-col bg-app-bg", !isActive && "hidden", isActive && "animate-fade-in")}>
             {/* Tab Toolbar (View Switcher) */}
             <div className="h-10 shrink-0 border-b border-app-border flex items-center px-4 bg-app-panel gap-4">
                 <button

@@ -37,6 +37,19 @@ export function TerminalManager({ connectionId }: { connectionId?: string }) {
         setActiveTabId(newId);
     };
 
+    // Event Listener for external commands (Snippets)
+    useEffect(() => {
+        const handleRunCommand = (e: any) => { // CustomEvent is generic
+             const { connectionId: targetConnId, command } = e.detail;
+             if (targetConnId === activeConnectionId && activeTabId) {
+                 window.ipcRenderer.send('terminal:write', { termId: activeTabId, data: command });
+             }
+        };
+
+        window.addEventListener('ssh-ui:run-command', handleRunCommand);
+        return () => window.removeEventListener('ssh-ui:run-command', handleRunCommand);
+    }, [activeConnectionId, activeTabId]);
+
     const handleCloseTab = (id: string, e: React.MouseEvent) => {
         e.stopPropagation();
 
@@ -112,7 +125,7 @@ export function TerminalManager({ connectionId }: { connectionId?: string }) {
             </div>
 
             {/* Terminal Content Area */}
-            <div className="flex-1 overflow-hidden relative bg-[#0f172a]">
+            <div className="flex-1 overflow-hidden relative bg-app-bg">
                 {tabs.length === 0 ? (
                     <div className="h-full flex flex-col items-center justify-center text-app-muted">
                         <TerminalIcon size={48} className="mb-4 opacity-20" />
