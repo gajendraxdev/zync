@@ -6,7 +6,8 @@ node_modules/
 # Production
 dist/
 dist-electron/
-release/
+
+release/1.*
 build/
 
 # Local Environment
