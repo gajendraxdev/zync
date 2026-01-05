@@ -77,10 +77,11 @@
     "linux": {
       "target": [
         "AppImage",
-        "deb"
+        "tar.gz"
       ],
       "icon": "public/icon.png",
-      "category": "Development"
+      "category": "Development",
+      "executableName": "zync"
     },
     "win": {
       "target": "nsis",
