@@ -7,7 +7,7 @@ node_modules/
 dist/
 dist-electron/
 
-release/1.*
+release/
 build/
 
 # Local Environment
