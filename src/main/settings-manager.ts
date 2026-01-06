@@ -13,6 +13,9 @@ export interface AppSettings {
     confirmDelete: boolean;
     defaultDownloadPath: string;
   };
+  localTerm: {
+    windowsShell: string;
+  };
 }
 
 const defaultSettings: AppSettings = {
@@ -27,6 +30,9 @@ const defaultSettings: AppSettings = {
     showHiddenFiles: true,
     confirmDelete: true,
     defaultDownloadPath: '', // Default to User Download dir (resolved at runtime if empty)
+  },
+  localTerm: {
+    windowsShell: 'default',
   },
 };
 

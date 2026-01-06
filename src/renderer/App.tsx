@@ -1,4 +1,5 @@
 import { MainLayout } from './components/layout/MainLayout';
+import { UpdateNotification } from './components/UpdateNotification';
 import { ConnectionProvider } from './context/ConnectionContext';
 import { ToastProvider, useToast } from './context/ToastContext';
 import { TransferProvider } from './context/TransferContext';
@@ -17,6 +18,7 @@ function AppContent() {
         <ConnectionProvider>
             <TransferProvider>
                 <MainLayout>
+                    <UpdateNotification />
                     <FileManager />
                 </MainLayout>
                 <TransferManager />

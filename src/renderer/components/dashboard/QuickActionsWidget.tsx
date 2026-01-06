@@ -24,6 +24,15 @@ const DEFAULT_ACTIONS: QuickAction[] = [
     { id: '6', label: 'Open htop', command: 'htop', icon: Terminal, description: 'Interactive process viewer', type: 'terminal' },
 ];
 
+const WINDOWS_ACTIONS: QuickAction[] = [
+    { id: 'w1', label: 'Check Disk Space', command: 'powershell "Get-PSDrive -PSProvider FileSystem | Format-Table"', icon: Server, description: 'Show disk usage', type: 'exec' },
+    { id: 'w2', label: 'Docker Containers', command: 'docker ps -a', icon: Layers, description: 'Show running containers', type: 'exec' },
+    { id: 'w3', label: 'Listening Ports', command: 'netstat -an | findstr LISTENING', icon: Activity, description: 'Show listening ports', type: 'exec' },
+    { id: 'w4', label: 'System Info', command: 'systeminfo | findstr /B /C:"OS Name" /C:"OS Version"', icon: RefreshCw, description: 'Show OS details', type: 'exec' },
+    { id: 'w5', label: 'Network Connections', command: 'netstat -an', icon: Shield, description: 'Show all connections', type: 'exec' },
+    { id: 'w6', label: 'Open PowerShell', command: 'powershell', icon: Terminal, description: 'Start PowerShell session', type: 'terminal' },
+];
+
 export function QuickActionsWidget({ className, connectionId }: { className?: string; connectionId: string }) {
     const { openTab } = useConnections();
     const { showToast } = useToast();
@@ -64,6 +73,9 @@ export function QuickActionsWidget({ className, connectionId }: { className?: st
         }
     };
 
+    const isWindowsLocal = connectionId === 'local' && navigator.userAgent.indexOf('Windows') !== -1;
+    const actions = isWindowsLocal ? WINDOWS_ACTIONS : DEFAULT_ACTIONS;
+
     return (
         <>
             <div className={cn("bg-app-panel border border-app-border rounded-2xl p-6 shadow-sm backdrop-blur-xl bg-opacity-60 flex flex-col", className)}>
@@ -72,7 +84,7 @@ export function QuickActionsWidget({ className, connectionId }: { className?: st
                 </h3>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {DEFAULT_ACTIONS.map(action => (
+                    {actions.map(action => (
                         <button
                             key={action.id}
                             onClick={() => handleAction(action)}

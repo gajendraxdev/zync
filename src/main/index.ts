@@ -1,5 +1,8 @@
 import path from 'node:path';
-import { app, BrowserWindow, nativeImage } from 'electron';
+import { app, BrowserWindow, nativeImage, dialog } from 'electron';
+import { autoUpdater } from 'electron-updater';
+import log from 'electron-log';
+
 
 process.env.DIST = path.join(__dirname, '../dist');
 process.env.VITE_PUBLIC = app.isPackaged ? process.env.DIST : path.join(process.env.DIST, '../public');
@@ -91,7 +94,6 @@ app.on('window-all-closed', () => {
 // import { sshManager } from './ssh-manager'; // already available globally if imported via handlers or similar. 
 // However, we need to ensure it's imported.
 import { sshManager } from './ssh-manager';
-import { dialog } from 'electron';
 
 // Note: We need to handle 'close' event on the window instance, 
 // usually done inside createWindow or just after assigning 'win'.
@@ -108,4 +110,53 @@ app.on('activate', () => {
   }
 });
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  createWindow();
+  
+  // Auto Updater Logic
+  if (app.isPackaged) {
+    autoUpdater.logger = log;
+    // @ts-ignore
+    autoUpdater.logger.transports.file.level = 'info';
+
+    // Check for updates after a short delay to ensure window is ready
+    setTimeout(() => {
+        log.info('Checking for updates...');
+        autoUpdater.checkForUpdatesAndNotify();
+    }, 3000);
+  }
+});
+
+// Auto Updater Events
+autoUpdater.on('checking-for-update', () => {
+    log.info('Checking for update...');
+    win?.webContents.send('update:status', 'Checking for update...');
+});
+
+autoUpdater.on('update-available', (info) => {
+    log.info('Update available:', info);
+    win?.webContents.send('update:available', info);
+});
+
+autoUpdater.on('update-not-available', (info) => {
+    log.info('Update not available:', info);
+    win?.webContents.send('update:status', 'Update not available.');
+});
+
+autoUpdater.on('error', (err) => {
+    log.error('Error in auto-updater:', err);
+    win?.webContents.send('update:error', err.message);
+});
+
+autoUpdater.on('download-progress', (progressObj) => {
+    let log_message = "Download speed: " + progressObj.bytesPerSecond;
+    log_message = log_message + ' - Downloaded ' + progressObj.percent + '%';
+    log_message = log_message + ' (' + progressObj.transferred + "/" + progressObj.total + ')';
+    log.info(log_message);
+    win?.webContents.send('update:progress', progressObj);
+});
+
+autoUpdater.on('update-downloaded', (info) => {
+    log.info('Update downloaded:', info);
+    win?.webContents.send('update:downloaded', info);
+});

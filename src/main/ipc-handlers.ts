@@ -114,6 +114,24 @@ export function setupIPC() {
     return { success: true };
   });
 
+  ipcMain.handle('shell:getWslDistros', async () => {
+    if (process.platform !== 'win32') return [];
+    try {
+      // Use wsl --list --quiet for cleaner output (utf-16le issue possible, but usually handled by node exec?)
+      // exec returns buffer usually? no string.
+      const { stdout } = await execPromise('wsl --list --quiet');
+      // Normalize output: split by newlines, trim, remove empty/null chars (formatting issues)
+      return stdout
+        .toString()
+        .split(/[\r\n]+/)
+        .map(s => s.trim().replace(/\0/g, '')) // Remove null bytes if UTF-16 issues
+        .filter(s => s.length > 0);
+    } catch (e) {
+      console.error('Failed to list WSL distros:', e);
+      return [];
+    }
+  });
+
   ipcMain.handle('ssh:disconnect', async (_, id: string) => {
     sshManager.disconnect(id);
     await sftpManager.disconnect(id);
@@ -302,5 +320,10 @@ export function setupIPC() {
   ipcMain.handle('window:is-maximized', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     return win?.isMaximized();
+  });
+  // Auto Update handlers
+  ipcMain.handle('update:install', () => {
+    const { autoUpdater } = require('electron-updater');
+    autoUpdater.quitAndInstall();
   });
 }

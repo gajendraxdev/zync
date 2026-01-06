@@ -19,6 +19,9 @@ export interface AppSettings {
         confirmDelete: boolean;
         defaultDownloadPath: string;
     };
+    localTerm: {
+        windowsShell: string;
+    };
 }
 
 const defaultSettings: AppSettings = {
@@ -39,6 +42,9 @@ const defaultSettings: AppSettings = {
         showHiddenFiles: true,
         confirmDelete: true,
         defaultDownloadPath: ''
+    },
+    localTerm: {
+        windowsShell: 'default'
     }
 };
 
@@ -47,6 +53,7 @@ interface SettingsContextType {
     isLoading: boolean;
     updateSettings: (settings: Partial<AppSettings>) => Promise<void>;
     updateTerminalSettings: (updates: Partial<AppSettings['terminal']>) => Promise<void>;
+    updateLocalTermSettings: (updates: Partial<AppSettings['localTerm']>) => Promise<void>;
     updateFileManagerSettings: (updates: Partial<AppSettings['fileManager']>) => Promise<void>;
     isSettingsOpen: boolean;
     openSettings: () => void;
@@ -119,7 +126,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
                 ...defaultSettings,
                 ...loaded,
                 terminal: { ...defaultSettings.terminal, ...(loaded?.terminal || {}) },
-                fileManager: { ...defaultSettings.fileManager, ...(loaded?.fileManager || {}) }
+                fileManager: { ...defaultSettings.fileManager, ...(loaded?.fileManager || {}) },
+                localTerm: { ...defaultSettings.localTerm, ...(loaded?.localTerm || {}) }
             };
             setSettings(merged);
         } catch (error) {
@@ -160,6 +168,16 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         }
     };
 
+    const updateLocalTermSettings = async (updates: Partial<AppSettings['localTerm']>) => {
+        const newLocal = { ...settings.localTerm, ...updates };
+        setSettings(prev => ({ ...prev, localTerm: newLocal }));
+        try {
+            await window.ipcRenderer.invoke('settings:set', { localTerm: newLocal });
+        } catch (error) {
+            console.error('Failed to save local terminal settings:', error);
+        }
+    };
+
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
     const openSettings = () => setIsSettingsOpen(true);
@@ -171,6 +189,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
             isLoading,
             updateSettings,
             updateTerminalSettings,
+            updateLocalTermSettings,
             updateFileManagerSettings,
             isSettingsOpen,
             openSettings,

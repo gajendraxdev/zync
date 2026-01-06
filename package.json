@@ -3,7 +3,7 @@
   "version": "1.2.1",
   "description": "A modern, beautiful SSH client for the web generation.",
   "main": "dist-electron/index.js",
-  "homepage": "https://github.com/gajendra/ssh-ui",
+  "homepage": "https://github.com/FDgajju/zync",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -18,7 +18,7 @@
     "electron",
     "react"
   ],
-  "author": "Gajendra <gajendra@example.com>",
+  "author": "Gajendra gajendravmy22@gmail.com",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
@@ -35,7 +35,9 @@
     "@uiw/react-codemirror": "^4.25.4",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "electron-log": "^5.4.3",
     "electron-store": "^11.0.2",
+    "electron-updater": "^6.6.2",
     "lucide-react": "^0.562.0",
     "node-pty": "^1.1.0",
     "react": "^19.2.3",
@@ -78,6 +80,7 @@
     },
     "linux": {
       "target": [
+        "AppImage",
         "tar.gz"
       ],
       "icon": "public/icon.png",
@@ -86,6 +89,7 @@
     },
     "mac": {
       "target": [
+        "dmg",
         "zip"
       ],
       "icon": "public/icon.png",
@@ -106,6 +110,13 @@
       "dist-electron/**/*",
       "dist/**/*",
       "package.json"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "FDgajju",
+        "repo": "zync"
+      }
     ]
   }
 }

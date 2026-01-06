@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useSettings } from '../../context/SettingsContext';
 import { X, Type, Monitor, FileText, Keyboard } from 'lucide-react';
@@ -11,8 +11,17 @@ interface SettingsModalProps {
 type Tab = 'terminal' | 'appearance' | 'fileManager' | 'shortcuts';
 
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
-    const { settings, updateSettings, updateTerminalSettings, updateFileManagerSettings } = useSettings();
+    const { settings, updateSettings, updateTerminalSettings, updateFileManagerSettings, updateLocalTermSettings } = useSettings();
     const [activeTab, setActiveTab] = useState<Tab>('terminal');
+    const [wslDistros, setWslDistros] = useState<string[]>([]);
+
+    useEffect(() => {
+        if (isOpen && window.navigator.userAgent.indexOf('Windows') !== -1) {
+            window.ipcRenderer.invoke('shell:getWslDistros').then((distros: string[]) => {
+                setWslDistros(distros);
+            }).catch(err => console.error('Failed to fetch WSL distros', err));
+        }
+    }, [isOpen]);
 
     if (!isOpen) return null;
 
@@ -100,6 +109,29 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                                 value={settings.terminal.padding || 12}
                                                 onChange={(e) => updateTerminalSettings({ padding: parseInt(e.target.value) })}
                                             />
+                                        </div>
+                                    </div>
+                                </Section>
+
+                                <Section title="Local Terminal (Windows)">
+                                    <div className="space-y-3">
+                                        <label className="text-sm font-medium text-[var(--color-app-text)] opacity-80">Default Shell</label>
+                                        <select
+                                            className="w-full bg-[var(--color-app-bg)] border border-[var(--color-app-border)] rounded-lg p-2.5 text-[var(--color-app-text)] focus:ring-2 focus:ring-[var(--color-app-accent)] focus:border-transparent outline-none"
+                                            value={settings.localTerm?.windowsShell || 'default'}
+                                            onChange={(e) => updateLocalTermSettings({ windowsShell: e.target.value })}
+                                        >
+                                            <option value="default">Default (System Decision)</option>
+                                            <option value="powershell">PowerShell</option>
+                                            <option value="cmd">Command Prompt</option>
+                                            <option value="gitbash">Git Bash</option>
+                                            <option value="wsl">WSL (Default Distro)</option>
+                                            {wslDistros.map(distro => (
+                                                <option key={distro} value={`wsl:${distro}`}>WSL: {distro}</option>
+                                            ))}
+                                        </select>
+                                        <div className="text-xs text-[var(--color-app-muted)]">
+                                            Note: Changes take effect on new split panes or tabs.
                                         </div>
                                     </div>
                                 </Section>

@@ -39,68 +39,164 @@ export function Dashboard({ connectionId }: { connectionId?: string }) {
   const fetchMetrics = async () => {
     if (!activeConnectionId) return;
     try {
-      // Fetch CPU/Load
-      const loadOut = await window.ipcRenderer.invoke('ssh:exec', {
-        id: activeConnectionId,
-        command: "cat /proc/loadavg | awk '{print $1}'",
-      });
-      // Mock CPU % from load avg (Load * 10 is rough approx for visual movement) - Cap at 100
-      const cpuLoad = Math.min(parseFloat(loadOut) * 10, 100);
+      // Detect if we are on Windows Local
+      const isWindowsLocal = activeConnectionId === 'local' && navigator.userAgent.indexOf('Windows') !== -1;
 
-      // Fetch Memory
-      const memOut = await window.ipcRenderer.invoke('ssh:exec', {
-        id: activeConnectionId,
-        command: "free -m | grep Mem | awk '{print $2,$3}'",
-      });
-      const [totalMem, usedMem] = memOut.trim().split(/\s+/).map(Number); // Note: free output order is total, used, free... usually.
-      // But awking $2 $3 usually gives 'used' 'free' ? No wait. 
-      // free -m:              total        used        free      shared  buff/cache   available
-      // Mem:           15867        4523        2345         456        9000       11000
-      // awk '{print $2, $3}' on Mem line -> total, used.
+      let cpuLoad = 0;
+      let totalMem = 0;
+      let usedMem = 0;
+      let diskTotal = '0';
+      let diskUsed = '0';
+      let diskPercent = 0;
+      let uptimeStr = '';
+      let procCount = 0;
+
+      if (isWindowsLocal) {
+        // --- Windows (Local) Metrics via PowerShell ---
+        
+        try {
+          const psCommand = (cmd: string) => `powershell -NoProfile -Command "${cmd}"`;
+
+          // CPU
+          const cpuOut = await window.ipcRenderer.invoke('ssh:exec', {
+            id: activeConnectionId,
+            command: psCommand('Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average | Select -ExpandProperty Average'),
+          });
+          cpuLoad = parseFloat(cpuOut.trim()) || 0;
+
+          // Memory
+          // Returns: TotalKB FreeKB
+          const memOut = await window.ipcRenderer.invoke('ssh:exec', {
+            id: activeConnectionId,
+            command: psCommand('Get-CimInstance Win32_OperatingSystem | ForEach-Object { \\"$($_.TotalVisibleMemorySize) $($_.FreePhysicalMemory)\\" }'),
+          });
+           // Output: "33333333 11111111"
+          const [totalKB, freeKB] = memOut.trim().split(/\s+/).map(Number);
+          totalMem = Math.round(totalKB / 1024); // to MB
+          const freeMem = Math.round(freeKB / 1024); // to MB
+          usedMem = totalMem - freeMem;
+
+          // Uptime
+          // Returns: d.hh:mm:ss.ms approx
+          const uptimeOut = await window.ipcRenderer.invoke('ssh:exec', {
+            id: activeConnectionId,
+            command: psCommand('((Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime).ToString()'),
+          });
+          uptimeStr = uptimeOut.trim().split('.')[0]; // Remove milliseconds
+
+          // Processes
+          const procOut = await window.ipcRenderer.invoke('ssh:exec', {
+            id: activeConnectionId,
+            command: psCommand('(Get-Process).Count'),
+          });
+          procCount = parseInt(procOut.trim(), 10) || 0;
+
+          // Disk (C:)
+          // Returns: SizeBytes FreeBytes
+          const diskOut = await window.ipcRenderer.invoke('ssh:exec', {
+             id: activeConnectionId,
+             command: psCommand('Get-CimInstance Win32_LogicalDisk -Filter \\"DeviceID=\'C:\'\\" | ForEach-Object { \\"$($_.Size) $($_.FreeSpace)\\" }'),
+          });
+          const [diskSizeBytes, diskFreeBytes] = diskOut.trim().split(/\s+/).map(Number);
+          const diskTotalGB = (diskSizeBytes / (1024*1024*1024));
+          const diskFreeGB = (diskFreeBytes / (1024*1024*1024));
+          const diskUsedGB = diskTotalGB - diskFreeGB;
+          
+          diskTotal = diskTotalGB.toFixed(0) + 'G';
+          diskUsed = diskUsedGB.toFixed(0) + 'G';
+          diskPercent = Math.round((diskUsedGB / diskTotalGB) * 100);
+
+        } catch (err) {
+           console.error('Windows metrics failed', err);
+        }
+
+      } else {
+        // --- Linux / Standard SSH Metrics ---
+
+        // Fetch CPU/Load
+        const loadOut = await window.ipcRenderer.invoke('ssh:exec', {
+          id: activeConnectionId,
+          command: "cat /proc/loadavg | awk '{print $1}'",
+        });
+        // Mock CPU % from load avg (Load * 10 is rough approx for visual movement) - Cap at 100
+        cpuLoad = Math.min(parseFloat(loadOut) * 10, 100);
+
+        // Fetch Memory
+        const memOut = await window.ipcRenderer.invoke('ssh:exec', {
+          id: activeConnectionId,
+          command: "free -m | grep Mem | awk '{print $2,$3}'",
+        });
+        const [tMem, uMem] = memOut.trim().split(/\s+/).map(Number); 
+        totalMem = tMem;
+        usedMem = uMem;
+
+        // Fetch Uptime
+        const uptimeOut = await window.ipcRenderer.invoke('ssh:exec', {
+          id: activeConnectionId,
+          command: "uptime -p | sed 's/up //'",
+        });
+        uptimeStr = uptimeOut.trim();
+
+        // Fetch Process Count
+        const procOut = await window.ipcRenderer.invoke('ssh:exec', {
+          id: activeConnectionId,
+          command: 'ps aux | wc -l',
+        });
+        procCount = parseInt(procOut.trim(), 10) || 0;
+
+        // Fetch Disk
+        const diskOut = await window.ipcRenderer.invoke('ssh:exec', {
+          id: activeConnectionId,
+          command: "df -h / --output=size,used,pcent | tail -1 | awk '{print $1,$2,$3}'",
+        });
+        // df output with specified columns: 476G 80G 18%
+        const [dTotal, dUsed, dPcentStr] = diskOut.trim().split(/\s+/);
+        diskTotal = dTotal;
+        diskUsed = dUsed;
+        diskPercent = parseInt((dPcentStr || '0').replace('%', ''), 10);
+      }
+
       const memPercent = totalMem ? (usedMem / totalMem) * 100 : 0;
 
-      // Fetch Uptime
-      const uptimeOut = await window.ipcRenderer.invoke('ssh:exec', {
-        id: activeConnectionId,
-        command: "uptime -p | sed 's/up //'",
-      });
-
-      // Fetch Process Count
-      const procOut = await window.ipcRenderer.invoke('ssh:exec', {
-        id: activeConnectionId,
-        command: 'ps aux | wc -l',
-      });
-
-      // Fetch Disk
-      const diskOut = await window.ipcRenderer.invoke('ssh:exec', {
-        id: activeConnectionId,
-        command: "df -h / --output=size,used,pcent | tail -1 | awk '{print $1,$2,$3}'",
-      });
-      // df output with specified columns: 476G 80G 18%
-      const [diskTotal, diskUsed, diskPcentStr] = diskOut.trim().split(/\s+/);
-      const diskPercent = parseInt((diskPcentStr || '0').replace('%', ''), 10);
 
 
       // Fetch Info
       let info = metrics.info;
       if (info.os === 'Loading...') {
-        const osOut = await window.ipcRenderer.invoke('ssh:exec', {
-          id: activeConnectionId,
-          command: "grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '\"' || uname -s",
-        });
-        const kernelOut = await window.ipcRenderer.invoke('ssh:exec', {
-          id: activeConnectionId,
-          command: 'uname -r',
-        });
-        const archOut = await window.ipcRenderer.invoke('ssh:exec', {
-          id: activeConnectionId,
-          command: 'uname -m',
-        });
-        info = {
-          os: osOut.trim() || 'Linux',
-          kernel: kernelOut.trim(),
-          arch: archOut.trim(),
-        };
+        if (isWindowsLocal) {
+             const psCommand = (cmd: string) => `powershell -NoProfile -Command "${cmd}"`;
+             try {
+                const osName = await window.ipcRenderer.invoke('ssh:exec', { id: activeConnectionId, command: psCommand('Get-CimInstance Win32_OperatingSystem | Select -ExpandProperty Caption') });
+                const osArch = await window.ipcRenderer.invoke('ssh:exec', { id: activeConnectionId, command: psCommand('Get-CimInstance Win32_OperatingSystem | Select -ExpandProperty OSArchitecture') });
+                const kernelVer = await window.ipcRenderer.invoke('ssh:exec', { id: activeConnectionId, command: psCommand('Get-CimInstance Win32_OperatingSystem | Select -ExpandProperty Version') });
+                
+                info = {
+                    os: osName.trim(),
+                    kernel: kernelVer.trim(),
+                    arch: osArch.trim()
+                };
+             } catch (e) {
+                 info = { os: 'Windows (Local)', kernel: 'Unknown', arch: 'Unknown' };
+             }
+        } else {
+            const osOut = await window.ipcRenderer.invoke('ssh:exec', {
+            id: activeConnectionId,
+            command: "grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '\"' || uname -s",
+            });
+            const kernelOut = await window.ipcRenderer.invoke('ssh:exec', {
+            id: activeConnectionId,
+            command: 'uname -r',
+            });
+            const archOut = await window.ipcRenderer.invoke('ssh:exec', {
+            id: activeConnectionId,
+            command: 'uname -m',
+            });
+            info = {
+            os: osOut.trim() || 'Linux',
+            kernel: kernelOut.trim(),
+            arch: archOut.trim(),
+            };
+        }
       }
 
       // Update State
@@ -116,8 +212,8 @@ export function Dashboard({ connectionId }: { connectionId?: string }) {
         ram: { used: usedMem || 0, total: totalMem || 1, percent: memPercent || 0 },
         disk: { used: diskUsed || '0', total: diskTotal || '0', percent: diskPercent || 0 },
         info,
-        uptime: uptimeOut.trim(),
-        processes: parseInt(procOut.trim(), 10) || 0,
+        uptime: uptimeStr,
+        processes: procCount || 0,
       });
 
       setHistory((prev) => ({
