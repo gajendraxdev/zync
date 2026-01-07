@@ -25,9 +25,27 @@ class AppConfigManager {
         return this.store.store;
     }
 
-    setConfig(config: Partial<AppConfigSchema>) {
-        // Safe update for partial config (electron-store merges top-level keys)
-        this.store.set(config as any);
+    setConfig(config: Partial<AppConfigSchema> & { dataPath?: string | null, logPath?: string | null }) {
+        // Handle Data Path
+        if (config.dataPath === null) {
+            this.store.delete('dataPath');
+            delete config.dataPath;
+        } else if (typeof config.dataPath === 'string') {
+            config.dataPath = path.normalize(config.dataPath).replace(/\\/g, '/');
+        }
+
+        // Handle Log Path
+        if (config.logPath === null) {
+            this.store.delete('logPath');
+            delete config.logPath;
+        } else if (typeof config.logPath === 'string') {
+            config.logPath = path.normalize(config.logPath).replace(/\\/g, '/');
+        }
+
+        // Save remaining config
+        if (Object.keys(config).length > 0) {
+            this.store.set(config as any);
+        }
     }
 
     // Get the effective data path (custom or default)
