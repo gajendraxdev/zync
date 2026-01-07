@@ -45,8 +45,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     const handleFinish = async () => {
         // Save config
         await ipc.invoke('config:set', {
-            dataPath: isDefaultPath ? undefined : dataPath,
-            logPath: isDefaultLogPath ? undefined : logPath,
+            dataPath: isDefaultPath ? null : dataPath, // Send null to reset/use default
+            logPath: isDefaultLogPath ? null : logPath, // Send null to reset/use default
             isConfigured: true,
             theme: 'dark'
         });

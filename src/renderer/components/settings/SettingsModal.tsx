@@ -124,7 +124,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     };
 
     const handleResetLocation = async () => {
-        await window.ipcRenderer.invoke('config:set', { dataPath: undefined });
+        await window.ipcRenderer.invoke('config:set', { dataPath: null }); // Explicitly reset via null
         setCurrentDataPath('');
         setIsDefaultDataPath(true);
     };
@@ -139,7 +139,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     };
 
     const handleResetLogLocation = async () => {
-        await window.ipcRenderer.invoke('config:set', { logPath: undefined });
+        await window.ipcRenderer.invoke('config:set', { logPath: null }); // Explicitly reset via null
         setCurrentLogPath('');
         setIsDefaultLogPath(true);
     };
