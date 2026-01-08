@@ -10,7 +10,7 @@ import { Search, ArrowUp, ArrowDown, X, Copy, Clipboard as ClipboardIcon, Trash2
 import { cn } from '../lib/utils';
 import { ContextMenu } from './ui/ContextMenu';
 
-export function TerminalComponent({ connectionId, termId }: { connectionId?: string; termId?: string }) {
+export function TerminalComponent({ connectionId, termId, isVisible }: { connectionId?: string; termId?: string; isVisible?: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -68,6 +68,29 @@ export function TerminalComponent({ connectionId, termId }: { connectionId?: str
       }
     }
   }, [settings.terminal]);
+
+  // Force fit when visibility changes (e.g. switching tabs)
+  useEffect(() => {
+    if (isVisible && fitAddonRef.current && termRef.current) {
+      // Small delay to allow layout transitions to complete
+      const timer = setTimeout(() => {
+        try {
+          fitAddonRef.current?.fit();
+          // Also sync with backend
+          if (termRef.current) {
+            window.ipcRenderer.send('terminal:resize', {
+              termId: sessionId,
+              rows: termRef.current.rows,
+              cols: termRef.current.cols,
+            });
+          }
+        } catch (e) { console.warn('Fit failed on visibility change', e); }
+      }, 50); // 50ms matches usually enough for display:block to settle, MainLayout has 300ms transition but content appears instantly?
+      // Actually MainLayout has duration-300. But width should be available immediately on display:block.
+      // Let's keep a small safety delay.
+      return () => clearTimeout(timer);
+    }
+  }, [isVisible, sessionId]);
 
   useEffect(() => {
     if (!containerRef.current || !activeConnectionId || !sessionId || !isConnected) return;
@@ -230,7 +253,13 @@ export function TerminalComponent({ connectionId, termId }: { connectionId?: str
     const resizeObserver = new ResizeObserver(() => {
       try {
         requestAnimationFrame(() => {
-          if (!term.element) return;
+          if (!term.element || !containerRef.current) return;
+
+          // CRITICAL FIX: Prevent resizing if dimensions are invalid/hidden (0x0).
+          // This happens when tabs are switched (display: none).
+          // If we allow fit() here, cols/rows become 1 or 2, causing massive wrapping issues.
+          if (containerRef.current.clientWidth === 0 || containerRef.current.clientHeight === 0) return;
+
           fitAddon.fit();
           window.ipcRenderer.send('terminal:resize', {
             termId: sessionId,
@@ -328,8 +357,13 @@ export function TerminalComponent({ connectionId, termId }: { connectionId?: str
 
   return (
     <div
-      className="h-full w-full bg-app-bg p-2 relative group"
+      className="h-full w-full bg-app-bg p-2 relative group focus:outline-none"
       ref={containerRef}
+      onClick={() => {
+        if (termRef.current) {
+          termRef.current.focus();
+        }
+      }}
       onContextMenu={(e) => {
         e.preventDefault();
         setContextMenu({ x: e.clientX, y: e.clientY });

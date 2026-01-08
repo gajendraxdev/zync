@@ -3,23 +3,17 @@ import { useConnections } from '../../context/ConnectionContext';
 import { useSettings } from '../../context/SettingsContext';
 
 export function ShortcutManager() {
-    const { openTab, activeTabId, closeTab, openAddConnectionModal } = useConnections();
+    const { openTab, activeTabId, closeTab, openAddConnectionModal, activeConnectionId } = useConnections();
     const { openSettings, isSettingsOpen, closeSettings, updateSettings, settings } = useSettings();
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             // Ignore if input is focused (unless it's a command key that generally works)
             if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-                // Allow some shortcuts even in input? Maybe later.
-                // For now, let's block mostly to prevent typing issues.
-                // BUT, Ctrl+W or Ctrl+N should probably still work? 
-                // Let's allow Mod+ modifiers.
-                // Actually, if in terminal, it might capture keys.
-                // We depend on the terminal component's focus handling too.
+                // Allow some shortcuts
             }
 
             // Check for Modifier (Ctrl on Windows/Linux, Cmd on Mac)
-            // But usually e.ctrlKey or e.metaKey
             const isMod = e.ctrlKey || e.metaKey;
 
             if (!isMod) return;
@@ -35,7 +29,18 @@ export function ShortcutManager() {
                     break;
                 case 't':
                     e.preventDefault();
-                    openTab('local');
+                    if (e.shiftKey) {
+                        // Shift+Mod+T: New Terminal in CURRENT active host
+                        if (activeConnectionId) {
+                            const event = new CustomEvent('ssh-ui:new-terminal-tab', {
+                                detail: { connectionId: activeConnectionId }
+                            });
+                            window.dispatchEvent(event);
+                        }
+                    } else {
+                        // Mod+T: Local Terminal
+                        openTab('local');
+                    }
                     break;
                 case ',':
                     e.preventDefault();
@@ -50,14 +55,13 @@ export function ShortcutManager() {
                     break;
                 case 'tab':
                     // Switch tabs
-                    // Logic for next/prev can be added here
                     break;
             }
         };
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [openTab, closeTab, activeTabId, isSettingsOpen, openSettings, closeSettings, openAddConnectionModal]);
+    }, [openTab, closeTab, activeTabId, activeConnectionId, isSettingsOpen, openSettings, closeSettings, openAddConnectionModal]);
 
     return null;
 }

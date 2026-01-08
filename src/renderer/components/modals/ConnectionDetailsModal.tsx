@@ -86,6 +86,18 @@ export function ConnectionDetailsModal({ connection, isOpen, onClose }: Connecti
                             <span className="opacity-50 select-none">CREATED:</span>
                             <span className="text-app-text/70">{new Date(connection.createdAt || Date.now()).toLocaleString()}</span>
                         </div>
+                        {connection.tags && connection.tags.length > 0 && (
+                            <div className="flex gap-2 pt-1 border-t border-app-border/50 mt-2">
+                                <span className="opacity-50 select-none pt-0.5">TAGS:</span>
+                                <div className="flex flex-wrap gap-1.5">
+                                    {connection.tags.map(tag => (
+                                        <span key={tag} className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-app-surface border border-app-border text-app-text/80">
+                                            {tag}
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>

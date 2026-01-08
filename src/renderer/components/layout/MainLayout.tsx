@@ -53,6 +53,33 @@ function TabContent({ tab, isActive }: {
                     {/* Tab Toolbar (View Switcher) */}
                     <div className="h-10 shrink-0 border-b border-app-border flex items-center px-4 bg-app-panel gap-4">
                         <button
+                            onClick={() => setTabView(tab.id, 'terminal')}
+                            className={cn(
+                                "flex items-center gap-2 text-sm px-2 py-1 rounded transition-colors",
+                                tab.view === 'terminal' ? "bg-app-accent/10 text-app-accent" : "text-app-muted hover:text-app-text"
+                            )}
+                        >
+                            <TerminalIcon size={14} /> Terminal
+                        </button>
+                        <button
+                            onClick={() => setTabView(tab.id, 'snippets')}
+                            className={cn(
+                                "flex items-center gap-2 text-sm px-2 py-1 rounded transition-colors",
+                                tab.view === 'snippets' ? "bg-app-accent/10 text-app-accent" : "text-app-muted hover:text-app-text"
+                            )}
+                        >
+                            <Code size={14} /> Snippets
+                        </button>
+                        <button
+                            onClick={() => setTabView(tab.id, 'tunnels')}
+                            className={cn(
+                                "flex items-center gap-2 text-sm px-2 py-1 rounded transition-colors",
+                                tab.view === 'tunnels' ? "bg-app-accent/10 text-app-accent" : "text-app-muted hover:text-app-text"
+                            )}
+                        >
+                            <Network size={14} /> Tunnels
+                        </button>
+                        <button
                             onClick={() => setTabView(tab.id, 'files')}
                             className={cn(
                                 "flex items-center gap-2 text-sm px-2 py-1 rounded transition-colors",
@@ -69,33 +96,6 @@ function TabContent({ tab, isActive }: {
                             )}
                         >
                             <LayoutDashboard size={14} /> Dashboard
-                        </button>
-                        <button
-                            onClick={() => setTabView(tab.id, 'tunnels')}
-                            className={cn(
-                                "flex items-center gap-2 text-sm px-2 py-1 rounded transition-colors",
-                                tab.view === 'tunnels' ? "bg-app-accent/10 text-app-accent" : "text-app-muted hover:text-app-text"
-                            )}
-                        >
-                            <Network size={14} /> Tunnels
-                        </button>
-                        <button
-                            onClick={() => setTabView(tab.id, 'snippets')}
-                            className={cn(
-                                "flex items-center gap-2 text-sm px-2 py-1 rounded transition-colors",
-                                tab.view === 'snippets' ? "bg-app-accent/10 text-app-accent" : "text-app-muted hover:text-app-text"
-                            )}
-                        >
-                            <Code size={14} /> Snippets
-                        </button>
-                        <button
-                            onClick={() => setTabView(tab.id, 'terminal')}
-                            className={cn(
-                                "flex items-center gap-2 text-sm px-2 py-1 rounded transition-colors",
-                                tab.view === 'terminal' ? "bg-app-accent/10 text-app-accent" : "text-app-muted hover:text-app-text"
-                            )}
-                        >
-                            <TerminalIcon size={14} /> Terminal
                         </button>
                     </div>
 
@@ -124,7 +124,10 @@ function TabContent({ tab, isActive }: {
                             We render it always but control visibility.
                         */}
                         <div className={cn("absolute inset-0 z-10 bg-app-bg", tab.view === 'terminal' ? "block" : "hidden")}>
-                            <TerminalManager connectionId={tab.connectionId} />
+                            <TerminalManager
+                                connectionId={tab.connectionId}
+                                isVisible={isActive && tab.view === 'terminal'}
+                            />
                         </div>
                     </div>
                 </>
