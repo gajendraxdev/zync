@@ -72,14 +72,15 @@ chmod +x "$APP_DIR/Zync.AppImage"
 # Symlink
 ln -sf "$APP_DIR/Zync.AppImage" "$BIN_DIR/zync"
 
+# Copy Icon
+if [ -f "public/icon.png" ]; then
+    cp "public/icon.png" "$APP_DIR/icon.png"
+fi
+
 # 4. Desktop Entry
 # Try to find icon
-ICON_PATH="public/icon.png"
-if [ ! -f "$ICON_PATH" ]; then
-    ICON_PATH="$APP_DIR/icon.png" # Fallback if copied previously or unavailable locally
-fi
-# Resolve absolute path for desktop file
-ICON_ABS_PATH=$(realpath "$ICON_PATH")
+# Point to the installed icon
+ICON_ABS_PATH="$APP_DIR/icon.png"
 
 cat > "$DESKTOP_DIR/$APP_NAME.desktop" <<EOF
 [Desktop Entry]
