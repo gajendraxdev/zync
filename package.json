@@ -88,10 +88,7 @@
       "icon": "public/icon.png",
       "category": "Development",
       "executableName": "zync",
-      "maintainer": "Gajendra <gajendravmy22@gmail.com>",
-      "desktop": {
-        "StartupWMClass": "zync"
-      }
+      "maintainer": "Gajendra <gajendravmy22@gmail.com>"
     },
     "mac": {
       "target": [

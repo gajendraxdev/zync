@@ -24,7 +24,7 @@ export function OSIcon({ icon, className }: OSIconProps) {
     if (availableIcons.includes(iconName)) {
         return (
             <img
-                src={`/os-icons/${iconName}.png`}
+                src={`./os-icons/${iconName}.png`}
                 alt={iconName}
                 className={className}
                 onError={(e) => {
