@@ -9,6 +9,8 @@ import { useSettings } from '../context/SettingsContext';
 import { Search, ArrowUp, ArrowDown, X, Copy, Clipboard as ClipboardIcon, Trash2, Scissors } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ContextMenu } from './ui/ContextMenu';
+import { Button } from './ui/Button';
+import { Terminal } from 'lucide-react';
 
 export function TerminalComponent({ connectionId, termId, isVisible }: { connectionId?: string; termId?: string; isVisible?: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -39,9 +41,9 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
     termRef.current?.focus();
   }, []);
 
-  const { activeConnectionId: globalId, connections } = useConnections();
+  const { activeConnectionId: globalActiveId, connections, connect } = useConnections();
   const { settings, updateTerminalSettings } = useSettings();
-  const activeConnectionId = connectionId || globalId;
+  const activeConnectionId = connectionId || globalActiveId;
 
   // Find connection status
   const isLocal = activeConnectionId === 'local';
@@ -146,47 +148,13 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
 
     term.open(containerRef.current);
 
-    // Clipboard handlers
-    const handleCopy = async () => {
-      const selection = term.getSelection();
-      if (selection) {
-        await navigator.clipboard.writeText(selection);
-      }
-    };
-
-    const handlePaste = async () => {
-      try {
-        const text = await navigator.clipboard.readText();
-        if (text) {
-          term.paste(text);
-        }
-      } catch (err) {
-        console.error('Failed to paste:', err);
-      }
-    };
+    // Clipboard handlers removed (now handled globally or inline in context menu)
 
     // Custom Key Handler
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown') {
-        // Search: Ctrl+F
-        if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
-          e.preventDefault();
-          setIsSearchOpen(true);
-          setTimeout(() => searchInputRef.current?.focus(), 50);
-          return false;
-        }
-        // Copy: Ctrl+Shift+C
-        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'C') {
-          e.preventDefault();
-          handleCopy();
-          return false;
-        }
-        // Paste: Ctrl+Shift+V
-        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'V') {
-          e.preventDefault();
-          handlePaste();
-          return false;
-        }
+        // Handlers removed: Search (Ctrl+F), Copy/Paste (Ctrl+Shift+C/V)
+        // These are now handled globally by ShortcutManager -> Event Dispatch
 
         // Zoom In: Ctrl + = or Ctrl + +
         if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
@@ -295,6 +263,48 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
     // settings.theme is handled by the dedicated theme effect to avoid re-creation
   ]);
 
+  // Handle Global Shortcuts (Copy, Paste, Find)
+  useEffect(() => {
+    const handleGlobalCopy = () => {
+      // Only trigger if this terminal is the active one (or part of active view)
+      // For simplicity, we check if this component's ID matches the global active one
+      // If we implement split views later, we'll need a different check (e.g. tracking focus)
+      if (activeConnectionId === globalActiveId && termRef.current?.hasSelection()) {
+        const selection = termRef.current.getSelection();
+        if (selection) navigator.clipboard.writeText(selection);
+      }
+    };
+
+    const handleGlobalPaste = async () => {
+      if (activeConnectionId === globalActiveId) {
+        try {
+          const text = await navigator.clipboard.readText();
+          if (text && termRef.current) termRef.current.paste(text);
+        } catch (e) {
+          console.error('Paste failed:', e);
+        }
+      }
+    };
+
+    const handleGlobalFind = () => {
+      if (activeConnectionId === globalActiveId) {
+        setIsSearchOpen(true);
+        // Small delay to ensure render
+        setTimeout(() => searchInputRef.current?.focus(), 50);
+      }
+    };
+
+    window.addEventListener('ssh-ui:term-copy', handleGlobalCopy);
+    window.addEventListener('ssh-ui:term-paste', handleGlobalPaste);
+    window.addEventListener('ssh-ui:term-find', handleGlobalFind);
+
+    return () => {
+      window.removeEventListener('ssh-ui:term-copy', handleGlobalCopy);
+      window.removeEventListener('ssh-ui:term-paste', handleGlobalPaste);
+      window.removeEventListener('ssh-ui:term-find', handleGlobalFind);
+    };
+  }, [activeConnectionId, globalActiveId]);
+
   // Define Presets
   const THEME_PRESETS: Record<string, any> = {
     'red': { background: '#1a0b0b', cursor: '#ef4444', selectionBackground: 'rgba(239, 68, 68, 0.3)' },
@@ -347,13 +357,33 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
   }, [settings.theme, connection?.theme, activeConnectionId]);
 
   if (!activeConnectionId) return <div className="p-8 text-gray-400">Please connect to a server first.</div>;
-  if (!isConnected)
+
+  if (!isConnected) {
+    const isConnecting = connection?.status === 'connecting';
     return (
-      <div className="p-8 text-gray-400 flex items-center gap-2">
-        <div className="animate-spin rounded-full h-4 w-4 border-2 border-app-accent border-t-transparent"></div>{' '}
-        Connecting to terminal...
+      <div className="flex flex-col h-full items-center justify-center p-8 text-app-muted gap-4">
+        {isConnecting ? (
+          <>
+            <div className="animate-spin rounded-full h-5 w-5 border-2 border-app-accent border-t-transparent"></div>
+            <span>Connecting to terminal...</span>
+          </>
+        ) : (
+          <div className="h-full flex flex-col items-center justify-center text-app-muted gap-4">
+            <div className="h-12 w-12 rounded-full bg-app-surface border border-app-border flex items-center justify-center text-app-muted/50">
+              <Terminal size={24} />
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-medium text-app-text mb-1">Disconnected</p>
+              <p className="text-xs text-app-muted mb-4 opacity-70">The connection to this terminal was closed.</p>
+              <Button onClick={() => activeConnectionId && connect(activeConnectionId)}>
+                Reconnect
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     );
+  }
 
   return (
     <div

@@ -50,6 +50,19 @@ class TunnelManager extends EventEmitter {
   // ... Persistence Methods (getTunnelsForConnection, saveTunnel, getTunnelConfig, deleteTunnel) ...
   // (Assuming saveTunnel handles the new 'type' field automatically since it stores the whole object)
 
+  getAllTunnels(): TunnelConfig[] {
+    const allTunnels = this.store.get('tunnels');
+    return allTunnels.map((cfg) => {
+      const active = this.activeTunnels.get(cfg.id);
+      return {
+        ...cfg,
+        type: cfg.type || 'local',
+        status: active ? (active.error ? 'error' : 'active') : 'stopped',
+        error: active?.error,
+      };
+    });
+  }
+
   getTunnelsForConnection(connectionId: string): TunnelConfig[] {
     const allTunnels = this.store.get('tunnels');
     const configs = allTunnels.filter((t) => t.connectionId === connectionId);

@@ -12,12 +12,26 @@ import { TabBar } from './TabBar';
 import { TerminalManager } from '../terminal/TerminalManager';
 import { ShortcutManager } from '../managers/ShortcutManager';
 import { CommandPalette } from './CommandPalette';
+import { GlobalTunnelList } from '../tunnel/GlobalTunnelList';
 
 function TabContent({ tab, isActive }: {
     tab: Tab;
     isActive: boolean;
 }) {
     const { setTabView, connections, connect } = useConnections();
+    // Global Tunnels Tab
+    if (tab.type === 'tunnels') {
+        return (
+            <div className={cn(
+                "absolute inset-0 z-10 bg-app-bg",
+                !isActive && "hidden",
+                isActive && "animate-in fade-in zoom-in-95 duration-200"
+            )}>
+                <GlobalTunnelList />
+            </div>
+        );
+    }
+
     const connection = connections.find(c => c.id === tab.connectionId);
     const isConnecting = connection?.status === 'connecting';
     const isError = connection?.status === 'error';

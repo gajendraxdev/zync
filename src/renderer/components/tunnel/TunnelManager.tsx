@@ -54,6 +54,16 @@ export function TunnelManager({ connectionId }: { connectionId?: string }) {
   useEffect(() => {
     if (activeConnectionId) {
       loadTunnels();
+
+      const handleStatusChange = (_: any, { id, status, error }: any) => {
+        setTunnels(prev => prev.map(t => t.id === id ? { ...t, status, error } : t));
+      };
+
+      window.ipcRenderer.on('tunnel:status-change', handleStatusChange);
+
+      return () => {
+        window.ipcRenderer.off('tunnel:status-change', handleStatusChange);
+      };
     }
   }, [activeConnectionId]);
 

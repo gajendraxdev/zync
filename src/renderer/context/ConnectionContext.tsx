@@ -27,19 +27,21 @@ export interface Folder {
     tags?: string[];
 }
 
+// ... existing imports
+
 export interface Tab {
     id: string;
-    type: 'connection' | 'settings';
+    type: 'connection' | 'settings' | 'tunnels'; // Added tunnels
     title: string;
     connectionId?: string;
-    view: 'dashboard' | 'files' | 'tunnels' | 'snippets' | 'terminal'; // Per-tab view state
+    view: 'dashboard' | 'files' | 'tunnels' | 'snippets' | 'terminal';
 }
 
 interface ConnectionContextType {
     connections: Connection[];
     tabs: Tab[];
     activeTabId: string | null;
-    activeConnectionId: string | null; // Derived helper
+    activeConnectionId: string | null;
 
     addConnection: (conn: Connection) => void;
     editConnection: (conn: Connection) => void;
@@ -49,6 +51,7 @@ interface ConnectionContextType {
 
     // Tab Actions
     openTab: (connectionId: string) => void;
+    openTunnelsTab: () => void;
     closeTab: (tabId: string) => void;
     activateTab: (tabId: string) => void;
     setTabView: (tabId: string, view: 'dashboard' | 'files' | 'tunnels' | 'snippets' | 'terminal') => void;
@@ -384,7 +387,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
     // --- Tab Management ---
 
     const openTab = (connectionId: string) => {
-        // Handle Local Terminal Special Case
+        // ... (existing implementation)
         if (connectionId === 'local') {
             const newTab: Tab = {
                 id: crypto.randomUUID(),
@@ -416,6 +419,22 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
         if (conn.status === 'disconnected') {
             connect(conn.id);
         }
+    };
+
+    const openTunnelsTab = () => {
+        const existing = tabs.find(t => t.type === 'tunnels');
+        if (existing) {
+            setActiveTabId(existing.id);
+            return;
+        }
+        const newTab: Tab = {
+            id: crypto.randomUUID(),
+            type: 'tunnels',
+            title: 'Global Tunnels',
+            view: 'tunnels'
+        };
+        setTabs(prev => [...prev, newTab]);
+        setActiveTabId(newTab.id);
     };
 
     const closeTab = (tabId: string) => {
@@ -520,6 +539,7 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
             editConnection,
             deleteConnection,
             openTab,
+            openTunnelsTab,
             closeTab,
             activateTab,
             setTabView,
