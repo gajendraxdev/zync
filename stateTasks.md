@@ -36,10 +36,10 @@ Transform components that fetch and hold global/shared data in local state to us
 Refactor complex local state that acts like a "mini-store" into proper Zustand slices.
 
 ### Terminal Types
-- [ ] **Create `terminalSlice.ts`**:
+- [x] **Create `terminalSlice.ts`**:
     - **State**: `terminals: Record<connectionId, TerminalTab[]>`
     - **Actions**: `createTerminal(connId)`, `closeTerminal(termId)`.
-- [ ] **Refactor `TerminalManager.tsx`**:
+- [x] **Refactor `TerminalManager.tsx`**:
     - Move `tabs` and `activeTabId` logic to store.
     - **Target**: `src/renderer/components/terminal/TerminalManager.tsx`
 
@@ -54,6 +54,6 @@ Refactor complex local state that acts like a "mini-store" into proper Zustand s
 ## 4. UI Preferences
 
 ### Sidebar State
-- [ ] **Update `settingsSlice.ts`**:
+- [x] **Update `settingsSlice.ts`**:
     - Add `expandedFolders: string[]` to `settings` (or separate UI slice usage if not saved to `config.json`).
     - **Target**: `src/renderer/components/layout/Sidebar.tsx`
