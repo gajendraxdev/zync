@@ -6,6 +6,7 @@ import { ToastSlice, createToastSlice } from './toastSlice';
 import { SnippetsSlice, createSnippetsSlice } from './snippetsSlice';
 import { TunnelSlice, createTunnelSlice } from './tunnelSlice';
 import { TerminalSlice, createTerminalSlice } from './terminalSlice';
+import { FileSystemSlice, createFileSystemSlice } from './fileSystemSlice';
 
 // Re-export types for convenience
 export type { Connection, Folder, Tab } from './connectionSlice';
@@ -16,7 +17,7 @@ export type { Snippet } from './snippetsSlice';
 export type { TunnelConfig } from './tunnelSlice';
 export type { TerminalTab } from './terminalSlice';
 
-export type AppStore = ConnectionSlice & SettingsSlice & TransferSlice & ToastSlice & SnippetsSlice & TunnelSlice & TerminalSlice;
+export type AppStore = ConnectionSlice & SettingsSlice & TransferSlice & ToastSlice & SnippetsSlice & TunnelSlice & TerminalSlice & FileSystemSlice;
 
 export const useAppStore = create<AppStore>()((...a) => ({
     ...createConnectionSlice(...a),
@@ -26,4 +27,5 @@ export const useAppStore = create<AppStore>()((...a) => ({
     ...createSnippetsSlice(...a),
     ...createTunnelSlice(...a),
     ...createTerminalSlice(...a),
+    ...createFileSystemSlice(...a),
 }));

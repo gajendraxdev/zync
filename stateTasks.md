@@ -44,10 +44,10 @@ Refactor complex local state that acts like a "mini-store" into proper Zustand s
     - **Target**: `src/renderer/components/terminal/TerminalManager.tsx`
 
 ### File System State
-- [ ] **Create `fileSystemSlice.ts`**:
+- [x] **Create `fileSystemSlice.ts`**:
     - **State**: `fileCache: Record<connectionId, { path: string, files: FileEntry[] }>`
     - **Actions**: `loadDirectory(connId, path)`, `setFiles(connId, files)`.
-- [ ] **Refactor `FileManager.tsx`**:
+- [x] **Refactor `FileManager.tsx`**:
     - Move `currentPath`, `files`, `viewMode` to store.
     - **Target**: `src/renderer/components/FileManager.tsx`
 
