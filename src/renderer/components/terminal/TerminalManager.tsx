@@ -58,7 +58,7 @@ export function TerminalManager({ connectionId, isVisible }: { connectionId?: st
         const handleTriggerCloseTab = (e: any) => {
             const { connectionId: targetConnId } = e.detail;
             if (targetConnId === activeConnectionId && activeTabId) {
-                closeTerminal(activeConnectionId, activeTabId);
+                closeTerminal(activeConnectionId!, activeTabId as string);
             }
         };
 
