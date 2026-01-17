@@ -11,6 +11,30 @@ import { ContextMenu } from './ui/ContextMenu';
 import { Button } from './ui/Button';
 import { Terminal } from 'lucide-react';
 
+// Module-level cache to preserve xterm instances across component remounts
+// This ensures terminal history is maintained during tab reordering
+interface TerminalCache {
+  term: XTerm;
+  fitAddon: FitAddon;
+  searchAddon: SearchAddon;
+  spawned: boolean;
+  dataHandler?: (event: any, payload: { termId: string; data: string }) => void;
+}
+const terminalCache = new Map<string, TerminalCache>();
+
+// Export for cleanup from terminalSlice when terminal is explicitly closed
+export function destroyTerminalInstance(termId: string) {
+  const cached = terminalCache.get(termId);
+  if (cached) {
+    // Remove the IPC listener if it exists
+    if (cached.dataHandler) {
+      window.ipcRenderer.off('terminal:data', cached.dataHandler);
+    }
+    cached.term.dispose();
+    terminalCache.delete(termId);
+  }
+}
+
 export function TerminalComponent({ connectionId, termId, isVisible }: { connectionId?: string; termId?: string; isVisible?: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
@@ -21,7 +45,6 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchText, setSearchText] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const initializedRef = useRef(false);
 
   // Context Menu State
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -106,100 +129,121 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
   useEffect(() => {
     if (!containerRef.current || !activeConnectionId || !sessionId || !isConnected) return;
 
-    // Initialize Xterm with settings
-    const computedStyle = getComputedStyle(document.body);
-    const appBg = computedStyle.getPropertyValue('--color-app-bg').trim();
-    const appText = computedStyle.getPropertyValue('--color-app-text').trim();
-    const appAccent = computedStyle.getPropertyValue('--color-app-accent').trim();
+    let term: XTerm;
+    let fitAddon: FitAddon;
+    let searchAddon: SearchAddon;
+    let isNewTerminal = false;
 
-    const term = new XTerm({
-      cursorBlink: true,
-      fontSize: settings.terminal.fontSize,
-      fontFamily: settings.terminal.fontFamily,
-      cursorStyle: settings.terminal.cursorStyle,
-      lineHeight: settings.terminal.lineHeight,
-      allowProposedApi: true,
-      theme: {
-        background: appBg || '#0f111a',
-        foreground: appText || '#e2e8f0',
-        cursor: appAccent || '#6366f1',
-        selectionBackground: appAccent ? `${appAccent}33` : 'rgba(99, 102, 241, 0.3)',
-        black: '#000000',
-        red: '#ef4444',
-        green: '#10b981',
-        yellow: '#f59e0b',
-        blue: '#3b82f6',
-        magenta: '#d946ef',
-        cyan: '#06b6d4',
-        white: '#ffffff',
-        brightBlack: '#64748b',
-        brightRed: '#fca5a5',
-        brightGreen: '#86efac',
-        brightYellow: '#fcd34d',
-        brightBlue: '#93c5fd',
-        brightMagenta: '#f0abfc',
-        brightCyan: '#67e8f9',
-        brightWhite: '#f8fafc',
-      },
-    });
+    // Check if we have a cached terminal instance
+    const cached = terminalCache.get(sessionId);
+    if (cached) {
+      // Reuse existing terminal - preserves history!
+      term = cached.term;
+      fitAddon = cached.fitAddon;
+      searchAddon = cached.searchAddon;
 
-    // Initialize Addons
-    const fitAddon = new FitAddon();
-    const webLinksAddon = new WebLinksAddon();
-    const searchAddon = new SearchAddon();
+      // Re-open in new container (reattaches to DOM)
+      if (containerRef.current && term.element && !containerRef.current.contains(term.element)) {
+        term.open(containerRef.current);
+      }
+    } else {
+      // Create new terminal instance
+      isNewTerminal = true;
 
-    term.loadAddon(fitAddon);
-    term.loadAddon(webLinksAddon);
-    term.loadAddon(searchAddon);
+      const computedStyle = getComputedStyle(document.body);
+      const appBg = computedStyle.getPropertyValue('--color-app-bg').trim();
+      const appText = computedStyle.getPropertyValue('--color-app-text').trim();
+      const appAccent = computedStyle.getPropertyValue('--color-app-accent').trim();
+
+      term = new XTerm({
+        cursorBlink: true,
+        fontSize: settings.terminal.fontSize,
+        fontFamily: settings.terminal.fontFamily,
+        cursorStyle: settings.terminal.cursorStyle,
+        lineHeight: settings.terminal.lineHeight,
+        allowProposedApi: true,
+        theme: {
+          background: appBg || '#0f111a',
+          foreground: appText || '#e2e8f0',
+          cursor: appAccent || '#6366f1',
+          selectionBackground: appAccent ? `${appAccent}33` : 'rgba(99, 102, 241, 0.3)',
+          black: '#000000',
+          red: '#ef4444',
+          green: '#10b981',
+          yellow: '#f59e0b',
+          blue: '#3b82f6',
+          magenta: '#d946ef',
+          cyan: '#06b6d4',
+          white: '#ffffff',
+          brightBlack: '#64748b',
+          brightRed: '#fca5a5',
+          brightGreen: '#86efac',
+          brightYellow: '#fcd34d',
+          brightBlue: '#93c5fd',
+          brightMagenta: '#f0abfc',
+          brightCyan: '#67e8f9',
+          brightWhite: '#f8fafc',
+        },
+      });
+
+      // Initialize Addons
+      fitAddon = new FitAddon();
+      const webLinksAddon = new WebLinksAddon();
+      searchAddon = new SearchAddon();
+
+      term.loadAddon(fitAddon);
+      term.loadAddon(webLinksAddon);
+      term.loadAddon(searchAddon);
+
+      term.open(containerRef.current);
+
+      // Custom Key Handler
+      term.attachCustomKeyEventHandler((e) => {
+        if (e.type === 'keydown') {
+          // Smart Copy: Ctrl+C
+          if (e.key.toLowerCase() === 'c' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+            if (term.hasSelection()) {
+              const selection = term.getSelection();
+              navigator.clipboard.writeText(selection);
+              term.clearSelection();
+              return false;
+            }
+          }
+
+          // Zoom In: Ctrl + = or Ctrl + +
+          if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
+            e.preventDefault();
+            const currentSize = settings.terminal.fontSize;
+            updateTerminalSettings({ fontSize: Math.min(currentSize + 1, 32) });
+            return false;
+          }
+
+          // Zoom Out: Ctrl + -
+          if ((e.ctrlKey || e.metaKey) && e.key === '-') {
+            e.preventDefault();
+            const currentSize = settings.terminal.fontSize;
+            updateTerminalSettings({ fontSize: Math.max(currentSize - 1, 8) });
+            return false;
+          }
+
+          if (e.key === 'Escape') {
+            if (isSearchOpen) {
+              setIsSearchOpen(false);
+              term.focus();
+              return false;
+            }
+          }
+        }
+        return true;
+      });
+
+      // Store in cache
+      terminalCache.set(sessionId, { term, fitAddon, searchAddon, spawned: false });
+    }
 
     fitAddonRef.current = fitAddon;
     searchAddonRef.current = searchAddon;
-
-    term.open(containerRef.current);
-
-    // Clipboard handlers removed (now handled globally or inline in context menu)
-
-    // Custom Key Handler
-    term.attachCustomKeyEventHandler((e) => {
-      if (e.type === 'keydown') {
-        // Smart Copy: Ctrl+C
-        // If text is selected, copy it. Otherwise, allow it to pass (sending SIGINT).
-        if (e.key.toLowerCase() === 'c' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
-          if (term.hasSelection()) {
-            const selection = term.getSelection();
-            navigator.clipboard.writeText(selection);
-            term.clearSelection();
-            return false; // Handled, do not send ^C
-          }
-          // If no selection, return true to let xterm handle it (sends \x03)
-        }
-
-        // Zoom In: Ctrl + = or Ctrl + +
-        if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
-          e.preventDefault();
-          const currentSize = settings.terminal.fontSize;
-          updateTerminalSettings({ fontSize: Math.min(currentSize + 1, 32) });
-          return false;
-        }
-
-        // Zoom Out: Ctrl + -
-        if ((e.ctrlKey || e.metaKey) && e.key === '-') {
-          e.preventDefault();
-          const currentSize = settings.terminal.fontSize;
-          updateTerminalSettings({ fontSize: Math.max(currentSize - 1, 8) });
-          return false;
-        }
-
-        if (e.key === 'Escape') {
-          if (isSearchOpen) {
-            setIsSearchOpen(false);
-            term.focus();
-            return false;
-          }
-        }
-      }
-      return true;
-    });
+    termRef.current = term;
 
     try {
       fitAddon.fit();
@@ -207,12 +251,10 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
       console.warn('Failed to fit terminal', e);
     }
 
-    termRef.current = term;
-
-    // Spawn shell via IPC
-    // Guard against double spawning in Strict Mode
-    if (!initializedRef.current) {
-      initializedRef.current = true;
+    // Spawn shell via IPC - only for new terminals that haven't been spawned yet
+    const cachedEntry = terminalCache.get(sessionId);
+    if (cachedEntry && !cachedEntry.spawned) {
+      cachedEntry.spawned = true;
       window.ipcRenderer
         .invoke('terminal:spawn', {
           connectionId: activeConnectionId,
@@ -226,28 +268,32 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
         });
     }
 
-    // Handle data
-    term.onData((data) => {
-      window.ipcRenderer.send('terminal:write', { termId: sessionId, data });
-    });
+    // Handle data from user input - only set up for new terminals
+    if (isNewTerminal) {
+      term.onData((data) => {
+        window.ipcRenderer.send('terminal:write', { termId: sessionId, data });
+      });
+    }
 
-    // Define the listener
-    const handleTerminalData = (_: any, { termId: incomingTermId, data }: { termId: string; data: string }) => {
-      if (incomingTermId === sessionId) {
-        term.write(data);
-      }
-    };
-
-    window.ipcRenderer.on('terminal:data', handleTerminalData);
+    // Set up IPC listener for incoming terminal data - only once per terminal
+    const cachedForListener = terminalCache.get(sessionId);
+    if (cachedForListener && !cachedForListener.dataHandler) {
+      // Create and store the handler so we only have one per terminal
+      const handleTerminalData = (_: any, { termId: incomingTermId, data }: { termId: string; data: string }) => {
+        if (incomingTermId === sessionId) {
+          term.write(data);
+        }
+      };
+      cachedForListener.dataHandler = handleTerminalData;
+      window.ipcRenderer.on('terminal:data', handleTerminalData);
+    }
 
     const resizeObserver = new ResizeObserver(() => {
       try {
         requestAnimationFrame(() => {
           if (!term.element || !containerRef.current) return;
 
-          // CRITICAL FIX: Prevent resizing if dimensions are invalid/hidden (0x0).
-          // This happens when tabs are switched (display: none).
-          // If we allow fit() here, cols/rows become 1 or 2, causing massive wrapping issues.
+          // Prevent resizing if dimensions are invalid/hidden (0x0)
           if (containerRef.current.clientWidth === 0 || containerRef.current.clientHeight === 0) return;
 
           fitAddon.fit();
@@ -267,14 +313,16 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
     }
 
     return () => {
-      window.ipcRenderer.off('terminal:data', handleTerminalData);
-
-      // CRITICAL FIX: Kill backend process on unmount to prevent channel leaks
-      // This was causing 2x channel usage in Strict Mode and leaks on settings changes
-      window.ipcRenderer.send('terminal:kill', { termId: sessionId });
-
+      // NOTE: We do NOT remove the IPC listener here - it's stored in the cache
+      // and will be cleaned up when destroyTerminalInstance() is called.
+      // This prevents duplicate listeners when the component remounts.
       resizeObserver.disconnect();
-      term.dispose();
+
+      // NOTE: We do NOT dispose the terminal here!
+      // The terminal instance stays in cache to preserve history.
+      // It will only be disposed when destroyTerminalInstance() is called
+      // from terminalSlice.closeTerminal()
+
       termRef.current = null;
       fitAddonRef.current = null;
       searchAddonRef.current = null;
@@ -283,8 +331,7 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
     activeConnectionId,
     sessionId,
     isConnected,
-    // Settings dependecies removed to prevent re-spawning on theme/font changes.
-    // Use the separate useEffect above for updates.
+    // Settings dependencies removed to prevent re-spawning on theme/font changes.
   ]);
 
   // Handle Global Shortcuts (Copy, Paste, Find)
