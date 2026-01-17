@@ -1,5 +1,6 @@
 import { StateCreator } from 'zustand';
 import type { AppStore } from './useAppStore';
+import { destroyTerminalInstance } from '../components/Terminal';
 
 export interface TerminalTab {
     id: string;
@@ -59,6 +60,9 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
         // Kill backend process first
         ipc.send('terminal:kill', { termId });
 
+        // Destroy the xterm instance from cache (frees memory, clears history)
+        destroyTerminalInstance(termId);
+
         set(state => {
             const currentTabs = state.terminals[connectionId] || [];
             const newTabs = currentTabs.filter(t => t.id !== termId);
@@ -93,11 +97,12 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
 
     clearTerminals: (connectionId) => {
         set(state => {
-            // Kill all known terminals for this connection
-            // Note: Ideally we track all open termIds and kill them.
-            // Using the current state to find IDs:
+            // Kill all known terminals for this connection and destroy cached instances
             const tabs = state.terminals[connectionId] || [];
-            tabs.forEach(t => ipc.send('terminal:kill', { termId: t.id }));
+            tabs.forEach(t => {
+                ipc.send('terminal:kill', { termId: t.id });
+                destroyTerminalInstance(t.id);
+            });
 
             const newTerminals = { ...state.terminals };
             delete newTerminals[connectionId];
