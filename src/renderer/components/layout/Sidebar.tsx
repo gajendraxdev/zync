@@ -327,32 +327,38 @@ export function Sidebar() {
     }, [connections, searchTerm]);
 
     // Build Recursive Tree
+    // Build Recursive Tree
     const treeRoot = useMemo(() => buildTree(treeConnections, folders, searchTerm), [treeConnections, folders, searchTerm]);
 
-    const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+    const toggleExpandedFolder = useAppStore(state => state.toggleExpandedFolder);
+
+    // Calculate all paths in the current filtered tree for search expansion
+    const searchExpandedFolders = useMemo(() => {
+        if (!searchTerm) return null;
+        const paths = new Set<string>();
+        const traverse = (node: TreeNode) => {
+            if (node.path) paths.add(node.path);
+            Object.values(node.children).forEach(traverse);
+        };
+        traverse(treeRoot);
+        return paths;
+    }, [treeRoot, searchTerm]);
+
+    // Use search expansion if searching, otherwise use persisted settings
+    const expandedFolders = searchTerm && searchExpandedFolders
+        ? searchExpandedFolders
+        : new Set(settings.expandedFolders);
 
     const toggleFolder = (folderPath: string) => {
-        const newSet = new Set(expandedFolders);
-        if (newSet.has(folderPath)) {
-            newSet.delete(folderPath);
-        } else {
-            newSet.add(folderPath);
-        }
-        setExpandedFolders(newSet);
+        // Prevent toggling persistence during search to avoid conflicts
+        if (searchTerm) return;
+        toggleExpandedFolder(folderPath);
     };
 
     const handleRenameFolder = (path: string) => {
         setFolderToRename(path);
         setIsRenameFolderModalOpen(true);
     };
-
-    // Auto-expand folder if search term is active
-    useEffect(() => {
-        if (searchTerm) {
-            // Expand all folders that have matches
-            setExpandedFolders(new Set(folders.map((f: Folder) => f.name)));
-        }
-    }, [searchTerm, folders]);
 
     return (
         <div

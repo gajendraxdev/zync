@@ -9,19 +9,15 @@ import { matchShortcut } from '../managers/ShortcutManager';
 import {
     DndContext,
     closestCenter,
-    KeyboardSensor,
     PointerSensor,
     useSensor,
     useSensors,
     DragOverlay,
-    defaultDropAnimationSideEffects,
     DragStartEvent,
     DragEndEvent
 } from '@dnd-kit/core';
 import {
-    arrayMove,
     SortableContext,
-    sortableKeyboardCoordinates,
     useSortable,
     horizontalListSortingStrategy,
 } from '@dnd-kit/sortable';
@@ -169,10 +165,9 @@ export function TabBar() {
             activationConstraint: {
                 distance: 8,
             },
-        }),
-        useSensor(KeyboardSensor, {
-            coordinateGetter: sortableKeyboardCoordinates,
         })
+        // NOTE: KeyboardSensor removed - it was capturing space key and other inputs,
+        // causing issues with terminal and form inputs. PointerSensor is sufficient.
     );
 
     const handleDragStart = (event: DragStartEvent) => {
