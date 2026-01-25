@@ -53,6 +53,7 @@ export interface AppSettings {
         switchTab8: string;
         switchTab9: string;
     };
+    expandedFolders: string[];
 }
 
 const defaultSettings: AppSettings = {
@@ -63,6 +64,7 @@ const defaultSettings: AppSettings = {
     compactMode: true,
     sidebarWidth: 288,
     sidebarCollapsed: false,
+    expandedFolders: [],
     terminal: {
         fontSize: 14,
         fontFamily: "'Fira Code', monospace",
@@ -120,6 +122,7 @@ export interface SettingsSlice {
     updateLocalTermSettings: (updates: Partial<AppSettings['localTerm']>) => Promise<void>;
     updateFileManagerSettings: (updates: Partial<AppSettings['fileManager']>) => Promise<void>;
     updateKeybindings: (updates: Partial<AppSettings['keybindings']>) => Promise<void>;
+    toggleExpandedFolder: (folderPath: string) => Promise<void>;
 
     openSettings: () => void;
     closeSettings: () => void;
@@ -143,7 +146,8 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
                 terminal: { ...defaultSettings.terminal, ...(loaded?.terminal || {}) },
                 fileManager: { ...defaultSettings.fileManager, ...(loaded?.fileManager || {}) },
                 localTerm: { ...defaultSettings.localTerm, ...(loaded?.localTerm || {}) },
-                keybindings: { ...defaultSettings.keybindings, ...(loaded?.keybindings || {}) }
+                keybindings: { ...defaultSettings.keybindings, ...(loaded?.keybindings || {}) },
+                expandedFolders: loaded?.expandedFolders || []
             };
             set({ settings: merged, isLoadingSettings: false });
         } catch (error) {
@@ -214,6 +218,20 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
             await ipc.invoke('settings:set', { keybindings: { ...get().settings.keybindings, ...updates } });
         } catch (error) {
             console.error('Failed to save keybindings:', error);
+        }
+    },
+
+    toggleExpandedFolder: async (folderPath) => {
+        const current = get().settings.expandedFolders || [];
+        const newFolders = current.includes(folderPath)
+            ? current.filter(f => f !== folderPath)
+            : [...current, folderPath];
+
+        set(state => ({ settings: { ...state.settings, expandedFolders: newFolders } }));
+        try {
+            await ipc.invoke('settings:set', { expandedFolders: newFolders });
+        } catch (error) {
+            console.error('Failed to save expanded folders:', error);
         }
     },
 
