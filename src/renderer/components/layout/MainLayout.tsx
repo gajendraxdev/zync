@@ -1,12 +1,12 @@
-import { ReactNode, lazy, Suspense } from 'react';
+import { ReactNode, lazy, Suspense, useState, useEffect } from 'react';
 import { Sidebar } from './Sidebar';
 import { useAppStore, Tab } from '../../store/useAppStore';
 import { cn } from '../../lib/utils';
-import { Terminal as TerminalIcon, LayoutDashboard, Files, Network, Code } from 'lucide-react';
 import { StatusBar } from './StatusBar';
 import { TabBar } from './TabBar';
 import { ShortcutManager } from '../managers/ShortcutManager';
 import { CommandPalette } from './CommandPalette';
+import { CombinedTabBar } from './CombinedTabBar';
 
 // Lazy Load Heavy Components
 const FileManager = lazy(() => import('../FileManager').then(module => ({ default: module.FileManager })));
@@ -39,9 +39,20 @@ function TabContent({ tab, isActive }: {
     tab: Tab;
     isActive: boolean;
 }) {
-    const setTabView = useAppStore(state => state.setTabView); // Updated Hook
-    const connections = useAppStore(state => state.connections); // Updated Hook
-    const connect = useAppStore(state => state.connect); // Updated Hook
+    const setTabView = useAppStore(state => state.setTabView);
+    const connections = useAppStore(state => state.connections);
+    const connect = useAppStore(state => state.connect);
+
+    // Terminal Store
+    const activeTerminalIds = useAppStore(state => state.activeTerminalIds);
+    const createTerminal = useAppStore(state => state.createTerminal);
+    const closeTerminal = useAppStore(state => state.closeTerminal);
+    const setActiveTerminal = useAppStore(state => state.setActiveTerminal);
+
+    // Local state for open feature tabs
+    // Default open features? None, or maybe just what user opens.
+    const [openFeatures, setOpenFeatures] = useState<string[]>([]);
+
     // Global Tunnels Tab
     if (tab.type === 'tunnels') {
         return (
@@ -60,6 +71,67 @@ function TabContent({ tab, isActive }: {
     const connection = connections.find((c: any) => c.id === tab.connectionId);
     const isConnecting = connection?.status === 'connecting';
     const isError = connection?.status === 'error';
+    const activeTermId = tab.connectionId ? (activeTerminalIds[tab.connectionId] || null) : null;
+
+    // Feature Pinning
+    const toggleConnectionFeature = useAppStore(state => state.toggleConnectionFeature);
+    const pinnedFeatures = connection?.pinnedFeatures || [];
+
+    // Handle Tab Selection
+    const handleTabSelect = (view: any, termId?: string) => {
+        setTabView(tab.id, view);
+        if (view === 'terminal' && termId && tab.connectionId) {
+            setActiveTerminal(tab.connectionId, termId);
+        }
+    };
+
+    const handleFeatureClose = (feature: string) => {
+        setOpenFeatures(prev => prev.filter(f => f !== feature));
+        // If we closed the active view, switch back to terminal
+        if (tab.view === feature) {
+            setTabView(tab.id, 'terminal');
+        }
+    };
+
+    const handleOpenFeature = (feature: string) => {
+        if (!openFeatures.includes(feature) && !pinnedFeatures.includes(feature)) {
+            setOpenFeatures(prev => [...prev, feature]);
+        }
+        setTabView(tab.id, feature as any);
+    };
+
+    const handleTogglePin = (feature: string) => {
+        if (tab.connectionId) {
+            toggleConnectionFeature(tab.connectionId, feature);
+            // If we are unpinning, ensure it stays open in local state
+            if (pinnedFeatures.includes(feature)) {
+                if (!openFeatures.includes(feature)) {
+                    setOpenFeatures(prev => [...prev, feature]);
+                }
+            } else {
+                // Pinning: remove from openFeatures since it's now in pinnedFeatures
+                setOpenFeatures(prev => prev.filter(f => f !== feature));
+            }
+        }
+    };
+
+    const handleTerminalClose = (termId: string) => {
+        if (tab.connectionId) {
+            closeTerminal(tab.connectionId, termId);
+            // If we closed the last terminal, maybe we should create a new one automatically?
+            // Store handles active ID update, but empty state is handled by TerminalManager
+        }
+    };
+
+    const handleNewTerminal = () => {
+        if (tab.connectionId) {
+            createTerminal(tab.connectionId);
+            setTabView(tab.id, 'terminal');
+        }
+    };
+
+    // Ensure we start with at least 'terminal' available conceptually, 
+    // though combined bar renders terminals from store.
 
     // Each tab content is rendered but hidden if not active
     return (
@@ -89,58 +161,20 @@ function TabContent({ tab, isActive }: {
                 </div>
             ) : (
                 <>
-                    {/* Slim Tab Toolbar (View Switcher) */}
-                    <div className="h-8 shrink-0 border-b border-app-border flex items-center px-2 bg-app-panel gap-2 select-none overflow-x-auto scrollbar-hide">
-                        <button
-                            onClick={() => setTabView(tab.id, 'terminal')}
-                            className={cn(
-                                "flex items-center gap-1.5 text-xs px-2 py-0.5 rounded transition-colors h-6 shrink-0 whitespace-nowrap",
-                                tab.view === 'terminal' ? "bg-app-accent/10 text-app-accent font-medium" : "text-app-muted hover:text-app-text hover:bg-app-surface"
-                            )}
-                        >
-                            <TerminalIcon size={12} /> Terminal
-                        </button>
-                        <button
-                            onClick={() => setTabView(tab.id, 'files')}
-                            className={cn(
-                                "flex items-center gap-1.5 text-xs px-2 py-0.5 rounded transition-colors h-6 shrink-0 whitespace-nowrap",
-                                tab.view === 'files' ? "bg-app-accent/10 text-app-accent font-medium" : "text-app-muted hover:text-app-text hover:bg-app-surface"
-                            )}
-                        >
-                            <Files size={12} /> Files
-                        </button>
-                        <button
-                            onClick={() => setTabView(tab.id, 'tunnels')}
-                            className={cn(
-                                "flex items-center gap-1.5 text-xs px-2 py-0.5 rounded transition-colors h-6 shrink-0 whitespace-nowrap",
-                                tab.view === 'tunnels' ? "bg-app-accent/10 text-app-accent font-medium" : "text-app-muted hover:text-app-text hover:bg-app-surface"
-                            )}
-                        >
-                            <Network size={12} /> Tunnels
-                        </button>
-                        <button
-                            onClick={() => setTabView(tab.id, 'snippets')}
-                            className={cn(
-                                "flex items-center gap-1.5 text-xs px-2 py-0.5 rounded transition-colors h-6 shrink-0 whitespace-nowrap",
-                                tab.view === 'snippets' ? "bg-app-accent/10 text-app-accent font-medium" : "text-app-muted hover:text-app-text hover:bg-app-surface"
-                            )}
-                        >
-                            <Code size={12} /> Snippets
-                        </button>
-
-                        {/* Spacer - collapses on small screens */}
-                        <div className="flex-1 min-w-[20px]" />
-
-                        <button
-                            onClick={() => setTabView(tab.id, 'dashboard')}
-                            className={cn(
-                                "flex items-center gap-1.5 text-xs px-2 py-0.5 rounded transition-colors h-6 shrink-0 whitespace-nowrap",
-                                tab.view === 'dashboard' ? "bg-app-accent/10 text-app-accent font-medium" : "text-app-muted hover:text-app-text hover:bg-app-surface"
-                            )}
-                        >
-                            <LayoutDashboard size={12} /> Dashboard
-                        </button>
-                    </div>
+                    {/* Unified Tab Bar */}
+                    <CombinedTabBar
+                        connectionId={tab.connectionId!}
+                        activeView={tab.view}
+                        activeTerminalId={activeTermId}
+                        openFeatures={openFeatures}
+                        pinnedFeatures={pinnedFeatures}
+                        onTabSelect={handleTabSelect}
+                        onFeatureClose={handleFeatureClose}
+                        onTerminalClose={handleTerminalClose}
+                        onNewTerminal={handleNewTerminal}
+                        onOpenFeature={handleOpenFeature}
+                        onTogglePin={handleTogglePin}
+                    />
 
                     {/* Content Area */}
                     <div className="flex-1 overflow-hidden relative flex flex-col">
@@ -164,13 +198,14 @@ function TabContent({ tab, isActive }: {
                             )}
 
                             {/* 
-                            Terminal View: MUST be kept alive (hidden, not unmounted) to preserve Xterm state/buffer. 
-                            We render it always but control visibility.
-                        */}
+                                Terminal View
+                                Pass hideTabs={true} to disable its internal tab bar
+                            */}
                             <div className={cn("absolute inset-0 z-10 bg-app-bg", tab.view === 'terminal' ? "block" : "hidden")}>
                                 <TerminalManager
                                     connectionId={tab.connectionId}
                                     isVisible={isActive && tab.view === 'terminal'}
+                                    hideTabs={true}
                                 />
                             </div>
                         </Suspense>
@@ -182,7 +217,6 @@ function TabContent({ tab, isActive }: {
 }
 
 
-import { useState, useEffect } from 'react';
 import { SetupWizard } from '../onboarding/SetupWizard';
 // @ts-ignore
 const ipc = window.ipcRenderer;
