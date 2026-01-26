@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useAppStore } from '../../store/useAppStore';
+import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../../lib/utils';
-
 import { Terminal as TerminalIcon, Files, Network, Code, LayoutDashboard, Plus, ChevronDown, X } from 'lucide-react';
 import { ContextMenu } from '../ui/ContextMenu';
 
@@ -32,8 +32,7 @@ export function CombinedTabBar({
     onOpenFeature,
     onTogglePin
 }: CombinedTabBarProps) {
-    const terminalsMap = useAppStore(state => state.terminals);
-    const terminals = terminalsMap[connectionId] || [];
+    const terminals = useAppStore(useShallow(state => state.terminals[connectionId] || []));
 
     // Dropdown State
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);

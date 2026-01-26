@@ -1,6 +1,7 @@
-import { ReactNode, lazy, Suspense, useState, useEffect } from 'react';
+import { ReactNode, lazy, Suspense, useState, useEffect, memo } from 'react';
 import { Sidebar } from './Sidebar';
 import { useAppStore, Tab } from '../../store/useAppStore';
+import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../../lib/utils';
 import { StatusBar } from './StatusBar';
 import { TabBar } from './TabBar';
@@ -35,16 +36,18 @@ const SplashScreen = () => (
     </div>
 );
 
-function TabContent({ tab, isActive }: {
+const TabContent = memo(function TabContent({ tab, isActive }: {
     tab: Tab;
     isActive: boolean;
 }) {
     const setTabView = useAppStore(state => state.setTabView);
-    const connections = useAppStore(state => state.connections);
     const connect = useAppStore(state => state.connect);
 
-    // Terminal Store
-    const activeTerminalIds = useAppStore(state => state.activeTerminalIds);
+    // Connection Selectors - Optimized
+    const connection = useAppStore(useShallow(state => state.connections.find(c => c.id === tab.connectionId)));
+
+    // Terminal Store Selectors - Optimized
+    const activeTermId = useAppStore(state => tab.connectionId ? (state.activeTerminalIds[tab.connectionId] || null) : null);
     const createTerminal = useAppStore(state => state.createTerminal);
     const closeTerminal = useAppStore(state => state.closeTerminal);
     const setActiveTerminal = useAppStore(state => state.setActiveTerminal);
@@ -68,10 +71,8 @@ function TabContent({ tab, isActive }: {
         );
     }
 
-    const connection = connections.find((c: any) => c.id === tab.connectionId);
     const isConnecting = connection?.status === 'connecting';
     const isError = connection?.status === 'error';
-    const activeTermId = tab.connectionId ? (activeTerminalIds[tab.connectionId] || null) : null;
 
     // Feature Pinning
     const toggleConnectionFeature = useAppStore(state => state.toggleConnectionFeature);
@@ -214,7 +215,7 @@ function TabContent({ tab, isActive }: {
             )}
         </div>
     );
-}
+});
 
 
 import { SetupWizard } from '../onboarding/SetupWizard';

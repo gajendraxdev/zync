@@ -1,8 +1,10 @@
+
 import { useEffect } from 'react';
 import { TerminalComponent } from '../Terminal';
-import { Plus, X, Terminal as TerminalIcon } from 'lucide-react';
+import { useAppStore } from '../../store/useAppStore';
+import { useShallow } from 'zustand/react/shallow';
+import { Terminal as TerminalIcon, Plus, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { useAppStore } from '../../store/useAppStore'; // Updated Import
 
 // TerminalTab interface is now in store/terminalSlice
 // export interface TerminalTab ... removed
@@ -11,18 +13,18 @@ export function TerminalManager({ connectionId, isVisible, hideTabs = false }: {
     const globalActiveId = useAppStore(state => state.activeConnectionId);
     const activeConnectionId = connectionId || globalActiveId;
 
-    // Zustand Store Hooks
-    const terminalsMap = useAppStore(state => state.terminals);
-    const activeTerminalIdsMap = useAppStore(state => state.activeTerminalIds);
+    // Zustand Store Hooks - Optimized
+    const tabs = useAppStore(useShallow(state => activeConnectionId ? (state.terminals[activeConnectionId] || []) : []));
+    const activeTabId = useAppStore(state => activeConnectionId ? (state.activeTerminalIds[activeConnectionId] || null) : null);
+
+    // Actions (stable)
     const createTerminal = useAppStore(state => state.createTerminal);
     const ensureTerminal = useAppStore(state => state.ensureTerminal);
     const closeTerminal = useAppStore(state => state.closeTerminal);
     const setActiveTerminal = useAppStore(state => state.setActiveTerminal);
 
 
-    // Derived State
-    const tabs = activeConnectionId ? (terminalsMap[activeConnectionId] || []) : [];
-    const activeTabId = activeConnectionId ? (activeTerminalIdsMap[activeConnectionId] || null) : null;
+    // Derived State - Removed (now selected directly)
 
 
     // Initialize/Reset when connection changes

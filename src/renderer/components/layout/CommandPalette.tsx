@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useShallow } from 'zustand/react/shallow';
 import { Command } from "cmdk";
 import {
     Settings,
@@ -20,7 +21,9 @@ import { OSIcon } from "../icons/OSIcon";
 
 export function CommandPalette() {
     const [open, setOpen] = useState(false);
-    const connections = useAppStore(state => state.connections);
+
+    // Optimize selectors
+    const connections = useAppStore(useShallow(state => state.connections));
     const openTab = useAppStore(state => state.openTab);
     const setAddConnectionModalOpen = useAppStore(state => state.setAddConnectionModalOpen);
     const openSettings = useAppStore(state => state.openSettings);
@@ -45,7 +48,10 @@ export function CommandPalette() {
 
     const runCommand = (command: () => void) => {
         setOpen(false);
-        command();
+        // Defer execution to allow UI to close smoothly first
+        requestAnimationFrame(() => {
+            command();
+        });
     };
 
     if (!open) return null;
@@ -62,7 +68,7 @@ export function CommandPalette() {
                 <Command
                     className={clsx(
                         "flex flex-col w-full max-h-[60vh] overflow-hidden rounded-xl border shadow-2xl animate-in fade-in zoom-in-95 duration-200",
-                        "bg-app-panel/95 backdrop-blur-xl border-app-border text-app-text"
+                        "bg-app-panel/95 backdrop-blur-lg border-app-border text-app-text"
                     )}
                     loop
                 >
@@ -77,7 +83,7 @@ export function CommandPalette() {
                         />
                     </div>
 
-                    <Command.List className="overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-track-transparent scrollbar-thumb-app-border/50 p-1.5">
+                    <Command.List className="overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-track-transparent scrollbar-thumb-app-border/50 p-1.5 results-container">
                         <Command.Empty className="py-6 text-center text-sm text-app-muted">
                             No results found.
                         </Command.Empty>
@@ -154,24 +160,11 @@ export function CommandPalette() {
 
                         <Command.Group heading="Connections" className="text-[10px] font-semibold text-app-muted uppercase tracking-wider mb-1 px-2 mt-2">
                             {connections.map((conn: Connection) => (
-                                <Command.Item
+                                <ConnectionItem
                                     key={conn.id}
-                                    onSelect={() => runCommand(() => {
-                                        openTab(conn.id);
-                                    })}
-                                    className="relative flex cursor-pointer select-none items-center rounded-lg px-2 py-1.5 text-sm outline-none data-[selected=true]:bg-app-accent/20 data-[selected=true]:text-app-accent text-app-text transition-colors group mb-0.5"
-                                >
-                                    <div className="flex h-6 w-6 items-center justify-center rounded-md bg-app-surface border border-app-border mr-2 group-data-[selected=true]:border-app-accent/50 group-data-[selected=true]:bg-app-accent/10">
-                                        <OSIcon icon={conn.icon || 'Server'} className="w-3.5 h-3.5" />
-                                    </div>
-                                    <div className="flex flex-col">
-                                        <span className="font-medium">{conn.name || conn.host}</span>
-                                        <span className="text-[10px] text-app-muted/70">{conn.username}@{conn.host}</span>
-                                    </div>
-                                    {conn.status === 'connected' && (
-                                        <span className="ml-auto text-[10px] bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded animate-pulse">Connected</span>
-                                    )}
-                                </Command.Item>
+                                    conn={conn}
+                                    onSelect={() => runCommand(() => openTab(conn.id))}
+                                />
                             ))}
                         </Command.Group>
                     </Command.List>
@@ -187,3 +180,26 @@ export function CommandPalette() {
         </div>
     );
 }
+
+import { memo } from 'react';
+
+const ConnectionItem = memo(function ConnectionItem({ conn, onSelect }: { conn: Connection; onSelect: () => void }) {
+    return (
+        <Command.Item
+            value={`${conn.name} ${conn.username} ${conn.host}`} // Explicit search value
+            onSelect={onSelect}
+            className="relative flex cursor-pointer select-none items-center rounded-lg px-2 py-1.5 text-sm outline-none data-[selected=true]:bg-app-accent/20 data-[selected=true]:text-app-accent text-app-text transition-colors group mb-0.5"
+        >
+            <div className="flex h-6 w-6 items-center justify-center rounded-md bg-app-surface border border-app-border mr-2 group-data-[selected=true]:border-app-accent/50 group-data-[selected=true]:bg-app-accent/10">
+                <OSIcon icon={conn.icon || 'Server'} className="w-3.5 h-3.5" />
+            </div>
+            <div className="flex flex-col">
+                <span className="font-medium">{conn.name || conn.host}</span>
+                <span className="text-[10px] text-app-muted/70">{conn.username}@{conn.host}</span>
+            </div>
+            {conn.status === 'connected' && (
+                <span className="ml-auto text-[10px] bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded animate-pulse">Connected</span>
+            )}
+        </Command.Item>
+    );
+});
