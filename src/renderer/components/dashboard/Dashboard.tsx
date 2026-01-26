@@ -226,12 +226,13 @@ export function Dashboard({ connectionId }: { connectionId?: string }) {
 
       // Success - Clear saturation flag
       setIsSaturationDetected(false);
+      return true; // Continue polling
 
     } catch (error: any) {
       if (error.message && error.message.includes('Connection not found')) {
-        console.warn('Backend lost connection, disconnecting frontend:', activeConnectionId);
+        console.warn('Backend lost connection, stopping dashboard polling:', activeConnectionId);
         useAppStore.getState().disconnect(activeConnectionId);
-        return; // Do not schedule next fetch? Or allow effect to teardown?
+        return false; // Stop polling
       }
 
       // Handle Channel Open Failure - likely saturation
@@ -239,8 +240,10 @@ export function Dashboard({ connectionId }: { connectionId?: string }) {
         console.warn('SSH Channel saturation, skipping update and backing off');
         setIsSaturationDetected(true);
         // Do not disconnect, just skip this update cycle
+        return true;
       } else {
         console.warn('Metrics polling failed:', error);
+        return true; // Continue trying?
       }
     } finally {
       isFetching.current = false;
@@ -255,18 +258,25 @@ export function Dashboard({ connectionId }: { connectionId?: string }) {
 
     // Variable polling interval based on saturation status
     let timeoutId: NodeJS.Timeout;
+    let isActive = true; // Mounted flag
 
     const scheduleNext = () => {
       const delay = isSaturationDetected ? 15000 : 3000; // 15s backoff if saturated, else 3s
       timeoutId = setTimeout(async () => {
-        await fetchMetrics();
-        scheduleNext(); // Recursive schedule
+        if (!isActive) return;
+        const shouldContinue = await fetchMetrics();
+        if (shouldContinue && isActive) {
+          scheduleNext(); // Recursive schedule
+        }
       }, delay);
     };
 
     scheduleNext();
 
-    return () => clearTimeout(timeoutId);
+    return () => {
+      isActive = false;
+      clearTimeout(timeoutId);
+    };
   }, [activeConnectionId, isConnected, isSaturationDetected]); // Re-run if saturation status changes to adjust delay immediately? 
   // Ideally, if saturationDetected changes to true inside fetchMetrics, the NEXT schedule will see it.
   // But since scheduleNext reads state... Wait, scheduleNext uses closure?

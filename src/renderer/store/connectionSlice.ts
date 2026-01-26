@@ -18,6 +18,7 @@ export interface Connection {
     tags?: string[];
     createdAt?: number;
     isFavorite?: boolean;
+    pinnedFeatures?: string[];
 }
 
 export interface Folder {
@@ -71,6 +72,9 @@ export interface ConnectionSlice {
 
     // Favorite Actions
     toggleFavorite: (connectionId: string) => void;
+
+    // Feature Pinning
+    toggleConnectionFeature: (connectionId: string, feature: string) => void;
 
     // Tab Reordering
     reorderTabs: (oldIndex: number, newIndex: number) => void;
@@ -426,6 +430,21 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
             const newConns = state.connections.map(c =>
                 c.id === connectionId ? { ...c, isFavorite: !c.isFavorite } : c
             );
+            saveToMain(newConns, state.folders);
+            return { connections: newConns };
+        });
+    },
+
+    toggleConnectionFeature: (connectionId, feature) => {
+        set(state => {
+            const newConns = state.connections.map(c => {
+                if (c.id !== connectionId) return c;
+                const current = c.pinnedFeatures || [];
+                const updated = current.includes(feature)
+                    ? current.filter(f => f !== feature)
+                    : [...current, feature];
+                return { ...c, pinnedFeatures: updated };
+            });
             saveToMain(newConns, state.folders);
             return { connections: newConns };
         });
