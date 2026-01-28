@@ -174,13 +174,14 @@ if (!gotTheLock) {
     // Auto Updater Logic
     if (app.isPackaged) {
       autoUpdater.logger = log;
+      autoUpdater.autoDownload = false; // Disable auto download
       // @ts-ignore
       autoUpdater.logger.transports.file.level = 'info';
 
       // Check for updates after a short delay to ensure window is ready
       setTimeout(() => {
         log.info('Checking for updates...');
-        autoUpdater.checkForUpdatesAndNotify();
+        autoUpdater.checkForUpdates(); // Just check, don't notify/download yet
       }, 3000);
     }
   });

@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useAppStore } from '../../store/useAppStore'; // Updated Import
-import { X, Type, Monitor, FileText, Keyboard, Info, Check, RefreshCw, AlertTriangle, Download, Folder, Settings as SettingsIcon } from 'lucide-react';
+import { X, Type, Monitor, FileText, Keyboard, Info, Check, RefreshCw, AlertTriangle, Download, Folder, Settings as SettingsIcon, Star, Gift, ChevronRight } from 'lucide-react';
+import { ToastContainer } from '../ui/Toast';
+
 
 interface SettingsModalProps {
     isOpen: boolean;
@@ -18,6 +20,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     const updateLocalTermSettings = useAppStore(state => state.updateLocalTermSettings);
     const updateKeybindings = useAppStore(state => state.updateKeybindings);
     const [activeTab, setActiveTab] = useState<Tab>('terminal');
+    const [isTransitioning, setIsTransitioning] = useState(false);
     const [wslDistros, setWslDistros] = useState<string[]>([]);
 
     // About / Update State
@@ -25,6 +28,64 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'available' | 'not-available' | 'error' | 'downloading'>('idle');
     const [updateInfo, setUpdateInfo] = useState<any>(null);
     const [isAppImage, setIsAppImage] = useState(false);
+    const [contributors, setContributors] = useState<any[]>([]);
+    const [stars, setStars] = useState<number | null>(null);
+    const [showReleaseNotes, setShowReleaseNotes] = useState(false);
+    const [releaseNotes, setReleaseNotes] = useState('');
+
+    // 3D Tilt State Removed - Moved to TiltLogo component
+
+    useEffect(() => {
+        if (isOpen && activeTab === 'about') {
+            // Contributors & Stars Cache
+            const cachedParams = localStorage.getItem('zync-about-data');
+            const now = Date.now();
+
+            if (cachedParams) {
+                try {
+                    const { contributors, stars, timestamp } = JSON.parse(cachedParams);
+                    if (now - timestamp < 3600000) { // 1 hour
+                        setContributors(contributors);
+                        setStars(stars);
+                        return; // Skip fetch
+                    }
+                } catch { /* ignore */ }
+            }
+
+            Promise.all([
+                fetch('https://api.github.com/repos/FDgajju/zync/contributors'),
+                fetch('https://api.github.com/repos/FDgajju/zync')
+            ])
+                .then(async ([contribRes, repoRes]) => {
+                    const contribData = await contribRes.json();
+                    const repoData = await repoRes.json();
+
+                    if (Array.isArray(contribData)) {
+                        setContributors(contribData);
+                    }
+                    if (repoData.stargazers_count) {
+                        setStars(repoData.stargazers_count);
+                    }
+
+                    localStorage.setItem('zync-about-data', JSON.stringify({
+                        contributors: Array.isArray(contribData) ? contribData : [],
+                        stars: repoData.stargazers_count,
+                        timestamp: now
+                    }));
+                })
+                .catch(console.error);
+
+            // Fetch Release Notes if needed
+            if (!releaseNotes) {
+                fetch('https://api.github.com/repos/FDgajju/zync/releases/latest')
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.body) setReleaseNotes(data.body);
+                    })
+                    .catch(() => setReleaseNotes('Could not load release notes.'));
+            }
+        }
+    }, [isOpen, activeTab]);
 
     useEffect(() => {
         if (isOpen) {
@@ -67,6 +128,52 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             window.ipcRenderer.off('update:error', onUpdateError);
         };
     }, []);
+
+    // Keyboard Navigation
+    useEffect(() => {
+        if (!isOpen) return;
+
+        const handleKeyDown = (e: KeyboardEvent) => {
+            // Escape to close
+            if (e.key === 'Escape') {
+                onClose();
+                return;
+            }
+
+            // Arrow keys for tab navigation
+            if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+                e.preventDefault();
+                const tabs: Tab[] = ['general', 'terminal', 'appearance', 'fileManager', 'shortcuts', 'about'];
+                const currentIndex = tabs.indexOf(activeTab);
+                let nextIndex: number;
+
+                if (e.key === 'ArrowRight') {
+                    nextIndex = (currentIndex + 1) % tabs.length;
+                } else {
+                    nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+                }
+
+                handleTabChange(tabs[nextIndex]);
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isOpen, activeTab, onClose]);
+
+    // Smooth Tab Transition Handler
+    const handleTabChange = (newTab: Tab) => {
+        if (newTab === activeTab) return;
+        setIsTransitioning(true);
+        setTimeout(() => {
+            setActiveTab(newTab);
+            setIsTransitioning(false);
+        }, 150);
+    };
+
+
+
+
 
     const checkForUpdates = async () => {
         setUpdateStatus('checking');
@@ -152,62 +259,40 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     if (!isOpen) return null;
 
     return createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="w-[800px] h-[600px] bg-[var(--color-app-panel)] rounded-xl border border-[var(--color-app-border)] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="w-[700px] h-[500px] bg-[var(--color-app-bg)] rounded-xl border border-[var(--color-app-border)] shadow-2xl flex overflow-hidden animate-in zoom-in-95 duration-200 ring-1 ring-white/5">
 
-                {/* Header */}
-                <div className="flex items-center justify-between p-6 border-b border-[var(--color-app-border)] bg-[var(--color-app-bg)]/50">
-                    <h2 className="text-xl font-semibold text-[var(--color-app-text)]">Settings</h2>
-                    <button onClick={onClose} className="p-2 hover:bg-[var(--color-app-surface)] rounded-lg transition-colors text-[var(--color-app-muted)] hover:text-[var(--color-app-text)]">
-                        <X size={20} />
-                    </button>
-                </div>
-
-                <div className="flex flex-1 overflow-hidden">
-                    {/* Sidebar Tabs */}
-                    <div className="w-56 bg-[var(--color-app-bg)]/30 p-4 space-y-2 border-r border-[var(--color-app-border)] shrink-0">
-                        <TabButton
-                            active={activeTab === 'general'}
-                            onClick={() => setActiveTab('general')}
-                            icon={<SettingsIcon size={18} />}
-                            label="General"
-                        />
-                        <TabButton
-                            active={activeTab === 'terminal'}
-                            onClick={() => setActiveTab('terminal')}
-                            icon={<Type size={18} />}
-                            label="Terminal"
-                        />
-                        <TabButton
-                            active={activeTab === 'appearance'}
-                            onClick={() => setActiveTab('appearance')}
-                            icon={<Monitor size={18} />}
-                            label="Appearance"
-                        />
-                        <TabButton
-                            active={activeTab === 'fileManager'}
-                            onClick={() => setActiveTab('fileManager')}
-                            icon={<FileText size={18} />}
-                            label="File Manager"
-                        />
-                        <TabButton
-                            active={activeTab === 'shortcuts'}
-                            onClick={() => setActiveTab('shortcuts')}
-                            icon={<Keyboard size={18} />}
-                            label="Shortcuts"
-                        />
-                        <div className="pt-4 mt-4 border-t border-[var(--color-app-border)]">
-                            <TabButton
-                                active={activeTab === 'about'}
-                                onClick={() => setActiveTab('about')}
-                                icon={<Info size={18} />}
-                                label="About"
-                            />
-                        </div>
+                {/* Sidebar */}
+                <div className="w-[180px] flex flex-col border-r border-[var(--color-app-border)]/40 bg-[var(--color-app-surface)]/20 p-2 space-y-0.5">
+                    <div className="px-3 py-4 mb-1">
+                        <span className="text-xs font-bold text-[var(--color-app-muted)] uppercase tracking-wider opacity-70">Settings</span>
                     </div>
 
-                    {/* Content Area */}
-                    <div className="flex-1 p-8 overflow-y-auto bg-[var(--color-app-panel)]">
+                    <TabButton active={activeTab === 'general'} onClick={() => handleTabChange('general')} icon={<SettingsIcon size={15} />} label="General" />
+                    <TabButton active={activeTab === 'terminal'} onClick={() => handleTabChange('terminal')} icon={<Type size={15} />} label="Terminal" />
+                    <TabButton active={activeTab === 'appearance'} onClick={() => handleTabChange('appearance')} icon={<Monitor size={15} />} label="Appearance" />
+                    <TabButton active={activeTab === 'fileManager'} onClick={() => handleTabChange('fileManager')} icon={<FileText size={15} />} label="File Manager" />
+                    <TabButton active={activeTab === 'shortcuts'} onClick={() => handleTabChange('shortcuts')} icon={<Keyboard size={15} />} label="Shortcuts" />
+
+                    <div className="mt-auto pt-2 border-t border-[var(--color-app-border)]/30">
+                        <TabButton active={activeTab === 'about'} onClick={() => handleTabChange('about')} icon={<Info size={15} />} label="About" />
+                    </div>
+                </div>
+
+                {/* Content Area */}
+                <div className="flex-1 flex flex-col min-w-0 bg-[var(--color-app-bg)]">
+                    {/* Header */}
+                    <div className="h-14 flex items-center justify-between px-6 border-b border-[var(--color-app-border)]/30 shrink-0">
+                        <h2 className="font-medium text-[var(--color-app-text)] text-sm tracking-tight">
+                            {activeTab === 'fileManager' ? 'File Manager' : activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}
+                        </h2>
+                        <button onClick={onClose} className="p-1.5 rounded-md text-[var(--color-app-muted)] hover:text-[var(--color-app-text)] hover:bg-[var(--color-app-surface)] transition-colors">
+                            <X size={16} />
+                        </button>
+                    </div>
+
+                    {/* Scrollable Content */}
+                    <div className={`flex-1 overflow-y-auto p-6 space-y-8 transition-opacity duration-150 ${isTransitioning ? 'opacity-0' : 'opacity-100'}`}>
 
                         {activeTab === 'general' && (
                             <div className="space-y-8 animate-in fade-in duration-300">
@@ -253,6 +338,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                         </div>
                                     </div>
                                 </Section>
+
+                                <div className="h-px bg-[var(--color-app-border)]/20 my-2" />
 
                                 <Section title="Log Storage">
                                     <div className="space-y-4">
@@ -300,13 +387,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         )}
 
                         {activeTab === 'terminal' && (
-                            <div className="space-y-8">
+                            <div className="space-y-6">
                                 <Section title="Typography">
                                     <div className="grid grid-cols-2 gap-6">
                                         <div className="space-y-3">
                                             <label className="text-sm font-medium text-[var(--color-app-text)] opacity-80">Font Family</label>
                                             <select
-                                                className="w-full bg-[var(--color-app-bg)] border border-[var(--color-app-border)] rounded-lg p-2.5 text-[var(--color-app-text)] focus:ring-2 focus:ring-[var(--color-app-accent)] focus:border-transparent outline-none"
+                                                className="w-full bg-[var(--color-app-bg)] border border-[var(--color-app-border)] rounded-lg p-2.5 text-[var(--color-app-text)] focus:ring-2 focus:ring-[var(--color-app-accent)]/50 focus:border-[var(--color-app-accent)] outline-none transition-all hover:border-[var(--color-app-border)]/80"
                                                 value={settings.terminal.fontFamily}
                                                 onChange={(e) => updateTerminalSettings({ fontFamily: e.target.value })}
                                             >
@@ -343,12 +430,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                     </div>
                                 </Section>
 
+                                <div className="h-px bg-[var(--color-app-border)]/20 my-2" />
+
                                 {window.navigator.userAgent.indexOf('Windows') !== -1 && (
                                     <Section title="Local Terminal (Windows)">
                                         <div className="space-y-3">
                                             <label className="text-sm font-medium text-[var(--color-app-text)] opacity-80">Default Shell</label>
                                             <select
-                                                className="w-full bg-[var(--color-app-bg)] border border-[var(--color-app-border)] rounded-lg p-2.5 text-[var(--color-app-text)] focus:ring-2 focus:ring-[var(--color-app-accent)] focus:border-transparent outline-none"
+                                                className="w-full bg-[var(--color-app-bg)] border border-[var(--color-app-border)] rounded-lg p-2.5 text-[var(--color-app-text)] focus:ring-2 focus:ring-[var(--color-app-accent)]/50 focus:border-[var(--color-app-accent)] outline-none transition-all hover:border-[var(--color-app-border)]/80"
                                                 value={settings.localTerm?.windowsShell || 'default'}
                                                 onChange={(e) => updateLocalTermSettings({ windowsShell: e.target.value })}
                                             >
@@ -367,6 +456,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                         </div>
                                     </Section>
                                 )}
+
+                                <div className="h-px bg-[var(--color-app-border)]/20 my-2" />
 
                                 <Section title="Cursor">
                                     <div className="grid grid-cols-3 gap-4">
@@ -438,6 +529,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                     </div>
                                 </Section>
 
+                                <div className="h-px bg-[var(--color-app-border)]/20 my-2" />
+
                                 <Section title="Customization">
                                     <div className="space-y-4">
                                         <div className="space-y-2">
@@ -480,6 +573,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                         </div>
                                     </div>
                                 </Section>
+
+                                <div className="h-px bg-[var(--color-app-border)]/20 my-2" />
 
                                 <Section title="Interface">
                                     <div className="space-y-4">
@@ -644,163 +739,154 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         )}
 
                         {activeTab === 'about' && (
-                            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                                {/* Hero Card */}
-                                <div className="relative overflow-hidden rounded-2xl border border-[var(--color-app-border)] bg-[var(--color-app-panel)] shadow-lg group">
-                                    {/* Decorative Gradient Blob */}
-                                    <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" />
-                                    <div className="absolute bottom-0 left-0 w-64 h-64 bg-purple-500/10 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2" />
+                            <div className="flex flex-col items-center justify-start min-h-full pt-16 pb-8 space-y-6 animate-in fade-in duration-300">
+                                {/* Logo & Title (Interactive) */}
+                                <TiltLogo />
 
-                                    <div className="relative z-10 flex flex-col items-center justify-center py-12 text-center">
-                                        {/* Animated Logo */}
-                                        <div className="relative mb-6">
-                                            <div className="w-24 h-24 flex items-center justify-center relative transform transition-transform duration-500 hover:scale-110 hover:rotate-3 mx-auto">
-                                                <img
-                                                    src="icon.png"
-                                                    alt="Zync"
-                                                    className="w-full h-full object-contain select-none drop-shadow-2xl"
-                                                />
+                                {/* Version Badge */}
+                                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[var(--color-app-surface)] border border-[var(--color-app-border)] text-xs font-mono text-[var(--color-app-muted)]">
+                                    <span>v{appVersion}</span>
+                                    <span className="w-1 h-1 rounded-full bg-[var(--color-app-muted)]/50" />
+                                    <span>{isAppImage ? 'AppImage' : isWindows ? 'Windows' : 'Linux'}</span>
+                                </div>
+
+                                {/* Update Action */}
+                                <div className="flex flex-col items-center gap-3 min-w-[200px] w-full max-w-[240px]">
+                                    <button
+                                        onClick={handleUpdateAction}
+                                        disabled={updateStatus === 'checking' || (canAutoUpdate && updateStatus === 'downloading')}
+                                        className={`
+                                            flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all w-full
+                                            ${updateStatus === 'available'
+                                                ? 'bg-[var(--color-app-accent)] text-white hover:opacity-90 shadow-md shadow-[var(--color-app-accent)]/20'
+                                                : 'bg-[var(--color-app-surface)] text-[var(--color-app-text)] hover:bg-[var(--color-app-border)]/50 border border-[var(--color-app-border)]'
+                                            }
+                                            disabled:opacity-50 disabled:cursor-not-allowed
+                                        `}
+                                    >
+                                        <div className={`${updateStatus === 'checking' ? 'animate-spin' : ''}`}>
+                                            {updateStatus === 'checking' && <RefreshCw size={14} />}
+                                            {updateStatus === 'idle' && <RefreshCw size={14} />}
+                                            {updateStatus === 'available' && <Download size={14} />}
+                                            {updateStatus === 'not-available' && <Check size={14} />}
+                                            {updateStatus === 'error' && <AlertTriangle size={14} />}
+                                        </div>
+                                        <span>
+                                            {updateStatus === 'idle' && 'Check for Updates'}
+                                            {updateStatus === 'checking' && 'Checking...'}
+                                            {updateStatus === 'available' && (canAutoUpdate ? 'Install Update' : 'Download Update')}
+                                            {updateStatus === 'not-available' && 'Up to date'}
+                                            {updateStatus === 'error' && 'Check Failed'}
+                                        </span>
+                                    </button>
+
+                                    {/* What's New Button (Release Notes) */}
+                                    <button
+                                        onClick={() => setShowReleaseNotes(!showReleaseNotes)}
+                                        className="text-xs text-[var(--color-app-muted)] hover:text-[var(--color-app-accent)] flex items-center gap-1 transition-colors"
+                                    >
+                                        <Gift size={12} />
+                                        <span>What's New in v{appVersion}?</span>
+                                        <ChevronRight size={12} className={`transition-transform duration-200 ${showReleaseNotes ? 'rotate-90' : ''}`} />
+                                    </button>
+
+                                    {/* Release Notes Expandable */}
+                                    {showReleaseNotes && (
+                                        <div className="w-full bg-[var(--color-app-surface)]/30 border border-[var(--color-app-border)] rounded-lg p-3 text-xs text-left max-h-40 overflow-y-auto animate-in fade-in slide-in-from-top-2">
+                                            <div className="prose prose-invert prose-xs max-w-none text-[var(--color-app-text)] whitespace-pre-wrap font-mono opacity-80">
+                                                {releaseNotes || 'Loading release notes...'}
                                             </div>
                                         </div>
+                                    )}
 
-                                        {/* Title & Version */}
-                                        <h3 className="text-4xl font-black text-[var(--color-app-text)] mb-2 tracking-tight">
-                                            <span className="bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 animate-gradient-x">
-                                                Zync
-                                            </span>
-                                        </h3>
-
-                                        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--color-app-surface)] border border-[var(--color-app-border)] text-[var(--color-app-muted)] text-xs font-mono mb-8 hover:border-[var(--color-app-accent)] transition-colors cursor-default">
-                                            <span className="font-semibold text-[var(--color-app-text)]">v{appVersion}</span>
-                                            <span className="w-1 h-1 rounded-full bg-[var(--color-app-border)]" />
-                                            <span>{isAppImage ? 'AppImage' : isWindows ? 'Windows' : 'Linux'}</span>
-                                            <span className="w-1 h-1 rounded-full bg-[var(--color-app-border)]" />
-                                            <span>Release</span>
-                                        </div>
-
-                                        {/* Update Button */}
-                                        <div className="w-full max-w-xs px-4">
-                                            <button
-                                                onClick={handleUpdateAction}
-                                                disabled={updateStatus === 'checking' || (canAutoUpdate && updateStatus === 'downloading')}
-                                                className={`
-                                                    group relative flex items-center justify-center gap-3 px-6 py-3.5 rounded-xl border font-semibold transition-all w-full overflow-hidden
-                                                    ${updateStatus === 'available'
-                                                        ? 'bg-gradient-to-r from-green-500/10 to-emerald-600/10 border-green-500/50 text-green-500 hover:from-green-500/20 hover:to-emerald-600/20 shadow-[0_0_20px_-5px_rgba(34,197,94,0.3)]'
-                                                        : 'bg-[var(--color-app-surface)] border-[var(--color-app-border)] text-[var(--color-app-text)] hover:bg-[var(--color-app-surface)]/80 hover:border-[var(--color-app-accent)] hover:shadow-[0_0_15px_-5px_var(--color-app-accent)]'
-                                                    }
-                                                    disabled:opacity-50 disabled:cursor-not-allowed
-                                                `}
-                                            >
-                                                <div className={`transition-transform duration-700 ${updateStatus === 'checking' ? 'animate-spin' : 'group-hover:scale-110'}`}>
-                                                    {updateStatus === 'checking' && <RefreshCw size={18} />}
-                                                    {updateStatus === 'idle' && <RefreshCw size={18} />}
-                                                    {updateStatus === 'available' && <Download size={18} />}
-                                                    {updateStatus === 'not-available' && <Check size={18} />}
-                                                    {updateStatus === 'error' && <AlertTriangle size={18} />}
-                                                </div>
-
-                                                <span className="relative z-10">
-                                                    {updateStatus === 'idle' && 'Check for Updates'}
-                                                    {updateStatus === 'checking' && 'Checking...'}
-                                                    {updateStatus === 'available' && (canAutoUpdate ? 'Install & Restart' : 'Download Update')}
-                                                    {updateStatus === 'not-available' && 'Up to Date'}
-                                                    {updateStatus === 'error' && 'Check Failed'}
-                                                </span>
-                                            </button>
-
-                                            {/* Status Messages */}
-                                            {updateStatus === 'not-available' && (
-                                                <p className="text-xs text-[var(--color-app-muted)] mt-3 animate-in fade-in slide-in-from-top-1">
-                                                    You are running the latest version.
-                                                </p>
-                                            )}
-
-                                            {updateStatus === 'available' && updateInfo && (
-                                                <div className="w-full bg-[var(--color-app-bg)]/50 p-3 rounded-lg border border-[var(--color-app-border)] text-left text-xs mt-3 animate-in zoom-in-95">
-                                                    <div className="font-semibold text-[var(--color-app-text)] mb-1 flex justify-between">
-                                                        <span>v{updateInfo.version} available</span>
-                                                        <span className="text-[var(--color-app-accent)]">New</span>
-                                                    </div>
-                                                    <div className="text-[var(--color-app-muted)]">
-                                                        {canAutoUpdate
-                                                            ? "Update will be installed automatically."
-                                                            : "Please download the update from GitHub."}
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
+                                    {updateStatus === 'available' && updateInfo && (
+                                        <span className="text-xs text-[var(--color-app-accent)] font-medium">
+                                            v{updateInfo.version} is available
+                                        </span>
+                                    )}
                                 </div>
 
-                                {/* Links Grid */}
-                                <div className="grid grid-cols-2 gap-4">
+                                {/* Links */}
+                                <div className="flex items-center gap-4 pt-4 border-t border-[var(--color-app-border)]/50 w-full max-w-xs justify-center">
                                     <button
                                         onClick={() => window.ipcRenderer.invoke('shell:open', 'https://github.com/FDgajju/zync')}
-                                        className="flex items-center gap-4 p-4 rounded-xl border border-[var(--color-app-border)] bg-[var(--color-app-surface)]/30 hover:bg-[var(--color-app-surface)] hover:border-[var(--color-app-accent)]/50 transition-all group text-left"
+                                        className="text-xs text-[var(--color-app-muted)] hover:text-[var(--color-app-text)] transition-colors flex items-center gap-1.5"
                                     >
-                                        <div className="p-3 rounded-lg bg-[var(--color-app-bg)] group-hover:bg-[var(--color-app-text)] group-hover:text-[var(--color-app-bg)] transition-colors border border-[var(--color-app-border)]">
-                                            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>
-                                        </div>
-                                        <div>
-                                            <div className="font-semibold text-[var(--color-app-text)] group-hover:text-[var(--color-app-accent)] transition-colors">GitHub</div>
-                                            <div className="text-xs text-[var(--color-app-muted)]">Source Code & Issues</div>
-                                        </div>
+                                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>
+                                        GitHub
+                                        {stars !== null && (
+                                            <span className="flex items-center gap-0.5 bg-[var(--color-app-surface)] text-[var(--color-app-text)] px-1.5 py-0.5 rounded-full border border-[var(--color-app-border)] text-[10px]">
+                                                <Star size={8} fill="currentColor" className="text-yellow-500" />
+                                                {stars > 1000 ? `${(stars / 1000).toFixed(1)}k` : stars}
+                                            </span>
+                                        )}
                                     </button>
-
+                                    <span className="text-[var(--color-app-border)]">|</span>
                                     <button
                                         onClick={() => window.ipcRenderer.invoke('shell:open', 'https://zync.thesudoer.in')}
-                                        className="flex items-center gap-4 p-4 rounded-xl border border-[var(--color-app-border)] bg-[var(--color-app-surface)]/30 hover:bg-[var(--color-app-surface)] hover:border-[var(--color-app-accent)]/50 transition-all group text-left"
+                                        className="text-xs text-[var(--color-app-muted)] hover:text-[var(--color-app-text)] transition-colors flex items-center gap-1.5"
                                     >
-                                        <div className="p-3 rounded-lg bg-[var(--color-app-bg)] group-hover:bg-[var(--color-app-text)] group-hover:text-[var(--color-app-bg)] transition-colors border border-[var(--color-app-border)]">
-                                            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M2 12h20" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></svg>
-                                        </div>
-                                        <div>
-                                            <div className="font-semibold text-[var(--color-app-text)] group-hover:text-[var(--color-app-accent)] transition-colors">Website</div>
-                                            <div className="text-xs text-[var(--color-app-muted)]">Documentation & Guides</div>
-                                        </div>
+                                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M2 12h20" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></svg>
+                                        Website
                                     </button>
                                 </div>
 
-                                {/* Footer */}
-                                <div className="text-center pt-8 pb-4">
-                                    <div className="flex items-center justify-center gap-1.5 text-sm text-[var(--color-app-muted)]">
-                                        <span>Made with</span>
-                                        <span className="text-red-500 animate-pulse text-lg leading-none">❤️</span>
-                                        <span>by Gajendra</span>
+                                {/* Contributors */}
+                                <div className="mt-auto pt-8 text-center w-full">
+                                    <div className="text-[10px] uppercase tracking-wider text-[var(--color-app-muted)] mb-3 font-semibold">
+                                        Contributors
                                     </div>
-                                    <p className="text-xs text-[var(--color-app-muted)]/50 mt-2 font-mono">© 2026 Zync SSH Client. All rights reserved.</p>
+                                    <div className="flex flex-wrap justify-center gap-2 max-w-[280px] mx-auto">
+                                        {contributors.map((c: any) => (
+                                            <a
+                                                key={c.id}
+                                                href={c.html_url}
+                                                onClick={(e) => { e.preventDefault(); window.ipcRenderer.invoke('shell:open', c.html_url); }}
+                                                className="relative group block"
+                                                title={c.login}
+                                            >
+                                                <img
+                                                    src={c.avatar_url}
+                                                    alt={c.login}
+                                                    className="w-8 h-8 rounded-full border border-[var(--color-app-border)] bg-[var(--color-app-surface)] grayscale group-hover:grayscale-0 transition-all group-hover:scale-110 group-hover:border-[var(--color-app-accent)]"
+                                                />
+                                            </a>
+                                        ))}
+                                    </div>
+                                    <p className="text-[10px] text-[var(--color-app-muted)]/40 font-mono mt-4">© 2026 Zync</p>
                                 </div>
                             </div>
                         )}
                     </div>
                 </div>
             </div>
+            <ToastContainer />
         </div>,
         document.body
     );
 }
 
-function TabButton({ active, onClick, icon, label }: { active: boolean, onClick: () => void, icon: React.ReactNode, label: string }) {
+function TabButton({ active, onClick, icon, label, dimmed = false }: { active: boolean, onClick: () => void, icon: React.ReactNode, label: string, dimmed?: boolean }) {
     return (
         <button
             onClick={onClick}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors ${active
-                ? 'bg-[var(--color-app-accent)] text-[var(--color-app-bg)]' // Accent bg + dark text implies accent is bright. Standard 'text-white' might be safer if accent is dark. 
-                : 'text-[var(--color-app-muted)] hover:bg-[var(--color-app-surface)] hover:text-[var(--color-app-text)]'
-                } ${active ? 'text-white' : ''}`} // Override text color for active state to white/light for readability on accent
+            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-all ${dimmed ? 'opacity-30 cursor-default' :
+                active
+                    ? 'bg-[var(--color-app-surface)] text-[var(--color-app-text)] font-medium shadow-sm'
+                    : 'text-[var(--color-app-muted)] hover:text-[var(--color-app-text)] hover:bg-[var(--color-app-surface)]/50'
+                }`}
+            disabled={dimmed}
         >
-            {/* Fix: explicit white text on accent, assuming accents are dark/vibrant enough */}
-            <span className={active ? 'text-white' : ''}>{icon}</span>
-            <span className={active ? 'text-white' : ''}>{label}</span>
+            {icon}
+            <span>{label}</span>
         </button>
     );
 }
 
 function Section({ title, children }: { title: string, children: React.ReactNode }) {
     return (
-        <div className="space-y-4">
-            <h3 className="text-sm font-bold text-[var(--color-app-muted)] uppercase tracking-wider">{title}</h3>
+        <div className="space-y-3">
+            <h3 className="text-xs font-semibold text-[var(--color-app-muted)] uppercase tracking-wider opacity-70">{title}</h3>
             {children}
         </div>
     );
@@ -808,16 +894,16 @@ function Section({ title, children }: { title: string, children: React.ReactNode
 
 function Toggle({ label, description, checked, onChange }: { label: string, description: string, checked: boolean, onChange: (v: boolean) => void }) {
     return (
-        <div className="flex items-center justify-between p-4 bg-[var(--color-app-bg)]/50 rounded-lg border border-[var(--color-app-border)]">
-            <div>
-                <div className="font-medium text-[var(--color-app-text)]">{label}</div>
-                <div className="text-sm text-[var(--color-app-muted)]">{description}</div>
+        <div className="flex items-center justify-between py-3 px-4 rounded-lg hover:bg-[var(--color-app-surface)]/30 transition-colors group">
+            <div className="flex-1">
+                <div className="text-sm font-medium text-[var(--color-app-text)]">{label}</div>
+                <div className="text-xs text-[var(--color-app-muted)] mt-0.5">{description}</div>
             </div>
             <button
                 onClick={() => onChange(!checked)}
-                className={`w-12 h-6 rounded-full transition-colors relative ${checked ? 'bg-[var(--color-app-accent)]' : 'bg-[var(--color-app-surface)]'}`}
+                className={`w-11 h-6 rounded-full transition-all relative ${checked ? 'bg-[var(--color-app-accent)]' : 'bg-[var(--color-app-surface)] border border-[var(--color-app-border)]'}`}
             >
-                <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${checked ? 'translate-x-6' : 'translate-x-0'}`} />
+                <div className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${checked ? 'translate-x-5' : 'translate-x-0'}`} />
             </button>
         </div>
     );
@@ -882,6 +968,51 @@ function KeybindingRow({ label, binding, onChange }: { label: string, binding: s
                     </span>
                 ))}
             </button>
+        </div>
+    );
+}
+
+
+function TiltLogo() {
+    const [tilt, setTilt] = useState({ x: 0, y: 0 });
+
+    const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+        const { left, top, width, height } = e.currentTarget.getBoundingClientRect();
+        const x = (e.clientX - left - width / 2) / 20; // Increased sensitivity slightly
+        const y = (e.clientY - top - height / 2) / 20;
+
+        // React state updates here are isolated to this component now.
+        setTilt({ x: -y, y: x });
+    };
+
+    const handleMouseLeave = () => {
+        setTilt({ x: 0, y: 0 });
+    };
+
+    return (
+        <div
+            className="flex flex-col items-center space-y-4"
+            onMouseMove={handleMouseMove}
+            onMouseLeave={handleMouseLeave}
+            style={{ perspective: 1000 }}
+        >
+            <div
+                className="w-24 h-24 bg-[var(--color-app-surface)]/50 rounded-2xl flex items-center justify-center shadow-sm border border-[var(--color-app-border)] transition-transform duration-75 ease-out will-change-transform"
+                style={{
+                    transform: `rotateX(${tilt.x}deg) rotateY(${tilt.y}deg) scale3d(1.05, 1.05, 1.05)`,
+                    boxShadow: `${-tilt.y * 2}px ${tilt.x * 2}px 20px rgba(0,0,0,0.1)`
+                }}
+            >
+                <img
+                    src="icon.png"
+                    alt="Zync"
+                    className="w-16 h-16 object-contain select-none pointer-events-none"
+                />
+            </div>
+            <div className="text-center select-none">
+                <h3 className="text-2xl font-bold text-[var(--color-app-text)] tracking-tight">Zync</h3>
+                <p className="text-sm text-[var(--color-app-muted)]">The minimal SSH client</p>
+            </div>
         </div>
     );
 }

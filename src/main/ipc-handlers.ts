@@ -368,6 +368,21 @@ export function setupIPC() {
     return win?.isMaximized();
   });
   // Auto Update handlers
+  ipcMain.handle('update:download', async (_, { url }: { url?: string } = {}) => {
+    const { autoUpdater } = require('electron-updater');
+    const { shell } = require('electron');
+
+    if (process.platform === 'darwin') {
+      const targetUrl = url || 'https://github.com/FDgajju/zync/releases/latest';
+      await shell.openExternal(targetUrl);
+      return { action: 'browser' };
+    } else {
+      // For Windows/Linux, triggers the 'download-progress' events
+      autoUpdater.downloadUpdate();
+      return { action: 'downloading' };
+    }
+  });
+
   ipcMain.handle('update:install', () => {
     const { autoUpdater } = require('electron-updater');
     autoUpdater.quitAndInstall();

@@ -620,20 +620,20 @@ export function Sidebar() {
                 </div>
 
                 {/* Footer / User */}
-                <div className={cn("p-4 border-t border-app-border/30 backdrop-blur-md bg-app-panel")}>
+                <div className={cn("p-3 border-t border-app-border/20 backdrop-blur-md bg-app-bg/50")}>
                     <button
                         onClick={openSettings}
                         className={cn(
-                            "flex items-center gap-3 w-full p-2 rounded-xl transition-all duration-200 group",
-                            "hover:bg-app-surface/80 border border-transparent hover:border-app-border/30",
+                            "flex items-center gap-2.5 w-full px-3 py-2 rounded-lg transition-all duration-150 group",
+                            "hover:bg-app-surface/50 border border-transparent hover:border-app-border/20",
                         )}
                     >
-                        <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shrink-0 shadow-lg shadow-indigo-500/20 group-hover:scale-105 transition-transform">
-                            <Settings className="text-white w-5 h-5" />
+                        <div className="h-8 w-8 rounded-lg bg-app-surface border border-app-border/40 flex items-center justify-center shrink-0 group-hover:border-app-border/60 transition-all">
+                            <Settings className="text-app-muted group-hover:text-app-text w-4 h-4 transition-colors" />
                         </div>
                         <div className="flex-1 text-left overflow-hidden">
-                            <div className="text-sm font-semibold text-app-text group-hover:text-[var(--color-app-text)] transition-colors">Settings</div>
-                            <div className="text-[9px] text-app-muted uppercase tracking-wider font-medium">Preferences</div>
+                            <div className="text-sm font-medium text-app-text">Settings</div>
+                            <div className="text-[10px] text-app-muted/60 tracking-wide">Preferences</div>
                         </div>
                     </button>
                 </div>
