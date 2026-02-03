@@ -56,7 +56,9 @@
       "deb",
       "appimage",
       "rpm",
-      "nsis"
+      "nsis",
+      "app",
+      "dmg"
     ]
   },
   "plugins": {
