@@ -1,0 +1,331 @@
+use anyhow::{anyhow, Result};
+use portable_pty::{native_pty_system, CommandBuilder, PtySize, MasterPty};
+use russh::{Channel, ChannelMsg};
+use russh::client::Msg;
+use std::collections::HashMap;
+use std::io::{Read, Write};
+use std::sync::Arc;
+use tauri::{AppHandle, Emitter};
+use tokio::sync::{Mutex, mpsc};
+
+// Enum to handle both local PTY and remote SSH channels
+pub enum TerminalHandle {
+    Local {
+        writer: Arc<Mutex<Box<dyn Write + Send>>>,
+        reader_handle: Option<tokio::task::JoinHandle<()>>,
+        master: Box<dyn MasterPty + Send>,
+    },
+    Remote {
+        tx: mpsc::Sender<Vec<u8>>, // Send input data to the channel task
+        resize_tx: mpsc::Sender<(u16, u16)>, // Send resize events
+        task_handle: Option<tokio::task::JoinHandle<()>>,
+    },
+}
+
+pub struct PtySession {
+    #[allow(dead_code)]
+    pub term_id: String,
+    pub connection_id: String,
+    pub handle: TerminalHandle,
+}
+
+pub struct PtyManager {
+    sessions: Arc<Mutex<HashMap<String, PtySession>>>,
+}
+
+impl PtyManager {
+    pub fn new() -> Self {
+        Self {
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    // Create a local PTY session
+    pub async fn create_local_session(
+        &self,
+        term_id: String,
+        connection_id: String,
+        cols: u16,
+        rows: u16,
+        app_handle: AppHandle,
+    ) -> Result<()> {
+        println!("[PTY-DEBUG] create_local_session called for {}", term_id);
+        let pty_system = native_pty_system();
+
+        let pair = pty_system
+            .openpty(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| anyhow!("Failed to open PTY: {}", e))?;
+
+        // Determine shell to use
+        let shell = if cfg!(target_os = "windows") {
+            "powershell.exe".to_string()
+        } else {
+            std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
+        };
+        println!("[PTY-DEBUG] Using shell: {}", shell);
+
+        let mut cmd = CommandBuilder::new(shell);
+        cmd.env("TERM", "xterm-256color");
+
+        let _child = pair
+            .slave
+            .spawn_command(cmd)
+            .map_err(|e| anyhow!("Failed to spawn shell: {}", e))?;
+        println!("[PTY-DEBUG] Shell spawned");
+
+        let mut reader = pair.master.try_clone_reader().map_err(|e| anyhow!("Failed to clone reader: {}", e))?;
+        let writer = pair.master.take_writer().map_err(|e| anyhow!("Failed to take writer: {}", e))?;
+
+        // Spawn a task to read from PTY and emit events
+        let term_id_clone = term_id.clone();
+        let reader_handle = tokio::task::spawn_blocking(move || {
+            println!("[PTY-DEBUG] Reader loop starting for {}", term_id_clone);
+            let mut buf = [0u8; 8192];
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) => {
+                        println!("[PTY-DEBUG] EOF read for {}", term_id_clone);
+                        break; 
+                    }, // EOF
+                    Ok(n) => {
+                        let data = String::from_utf8_lossy(&buf[..n]).to_string();
+                        // println!("[PTY-DEBUG] Read {} bytes: {:?}", n, data);
+                        if let Err(e) = app_handle.emit(&format!("terminal-output-{}", term_id_clone), data) {
+                            eprintln!("Failed to emit terminal output: {}", e);
+                        } else {
+                            // println!("[PTY-DEBUG] Emitted terminal-output-{}", term_id_clone);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error reading from PTY: {}", e);
+                        break;
+                    }
+                }
+            }
+        });
+
+        let session = PtySession {
+            term_id: term_id.clone(),
+            connection_id,
+            handle: TerminalHandle::Local {
+                writer: Arc::new(Mutex::new(writer)),
+                reader_handle: Some(reader_handle),
+                master: pair.master,
+            },
+        };
+
+        let mut sessions = self.sessions.lock().await;
+        sessions.insert(term_id, session);
+        println!("[PTY-DEBUG] Session inserted");
+
+        Ok(())
+    }
+
+    // Create a remote SSH session
+    pub async fn create_remote_session(
+        &self,
+        term_id: String,
+        connection_id: String,
+        mut channel: Channel<Msg>,
+        cols: u16,
+        rows: u16,
+        app_handle: AppHandle,
+    ) -> Result<()> {
+        println!("[PTY] Creating remote session for {}", term_id);
+
+        // Request PTY on the channel
+        channel.request_pty(
+            false,
+            "xterm-256color",
+            cols as u32,
+            rows as u32,
+            0,
+            0,
+            &[], // No modes for now
+        ).await.map_err(|e| anyhow!("Failed to request PTY: {}", e))?;
+
+        // Request shell
+        channel.request_shell(false).await.map_err(|e| anyhow!("Failed to request shell: {}", e))?;
+
+        // Create channels for communication
+        let (tx, mut rx) = mpsc::channel::<Vec<u8>>(32);
+        let (resize_tx, mut resize_rx) = mpsc::channel::<(u16, u16)>(4);
+        
+        let term_id_clone = term_id.clone();
+
+        // Spawn a single task to manage the SSH channel (Reader + Writer + Resize)
+        let task_handle = tokio::task::spawn(async move {
+            println!("[PTY] Starting manager task for {}", term_id_clone);
+            
+            loop {
+                tokio::select! {
+                    // 1. Handle incoming SSH data (Output from server)
+                    msg = channel.wait() => {
+                        match msg {
+                            Some(ChannelMsg::Data { ref data }) => {
+                                let output = String::from_utf8_lossy(data).to_string();
+                                if let Err(e) = app_handle.emit(&format!("terminal-output-{}", term_id_clone), output) {
+                                    eprintln!("[PTY] Failed to emit output: {}", e);
+                                }
+                            }
+                            Some(ChannelMsg::ExitStatus { exit_status }) => {
+                                println!("[PTY] Remote shell exited with status: {}", exit_status);
+                                break;
+                            }
+                            Some(ChannelMsg::Eof) => {
+                                println!("[PTY] Remote channel EOF");
+                                break;
+                            }
+                            None => {
+                                println!("[PTY] Channel closed");
+                                break;
+                            }
+                            _ => {} // Ignore other messages for now
+                        }
+                    }
+                    
+                    // 2. Handle outgoing user input (Input to server)
+                    Some(input) = rx.recv() => {
+                        if let Err(e) = channel.data(&input[..]).await {
+                             eprintln!("[PTY] Failed to send data to channel: {}", e);
+                             break;
+                        }
+                    }
+                    
+                    // 3. Handle resize events
+                    Some((c, r)) = resize_rx.recv() => {
+                        if let Err(e) = channel.window_change(c as u32, r as u32, 0, 0).await {
+                            eprintln!("[PTY] Failed to resize channel: {}", e);
+                        }
+                    }
+                }
+            }
+            
+            // Cleanup on exit
+            let _ = channel.close().await;
+            println!("[PTY] Remote session task ended");
+        });
+
+        let session = PtySession {
+            term_id: term_id.clone(),
+            connection_id,
+            handle: TerminalHandle::Remote {
+                tx,
+                resize_tx,
+                task_handle: Some(task_handle),
+            },
+        };
+
+        let mut sessions = self.sessions.lock().await;
+        sessions.insert(term_id, session);
+        println!("[PTY] Remote session created successfully");
+
+        Ok(())
+    }
+
+    pub async fn write(&self, term_id: &str, data: &str) -> Result<()> {
+        let sessions = self.sessions.lock().await;
+        let session = sessions
+            .get(term_id)
+            .ok_or_else(|| anyhow!("Session not found: {}", term_id))?;
+
+        match &session.handle {
+            TerminalHandle::Local { writer, .. } => {
+                let mut writer = writer.lock().await;
+                writer
+                    .write_all(data.as_bytes())
+                    .map_err(|e| anyhow!("Failed to write to PTY: {}", e))?;
+                writer.flush().map_err(|e| anyhow!("Failed to flush PTY: {}", e))?;
+            }
+            TerminalHandle::Remote { tx, .. } => {
+                // Send data to the manager task
+                tx.send(data.as_bytes().to_vec()).await
+                    .map_err(|e| anyhow!("Failed to send input to SSH task: {}", e))?;
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn resize(&self, term_id: &str, cols: u16, rows: u16) -> Result<()> {
+        let mut sessions = self.sessions.lock().await;
+        let session = sessions
+            .get_mut(term_id)
+            .ok_or_else(|| anyhow!("Session not found: {}", term_id))?;
+
+        match &mut session.handle {
+            TerminalHandle::Local { master, .. } => {
+                master
+                    .resize(PtySize {
+                        rows,
+                        cols,
+                        pixel_width: 0,
+                        pixel_height: 0,
+                    })
+                    .map_err(|e| anyhow!("Failed to resize PTY: {}", e))?;
+            }
+            TerminalHandle::Remote { resize_tx, .. } => {
+                resize_tx.send((cols, rows)).await
+                    .map_err(|e| anyhow!("Failed to send resize to SSH task: {}", e))?;
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn close(&self, term_id: &str) -> Result<()> {
+        let mut sessions = self.sessions.lock().await;
+        if let Some(mut session) = sessions.remove(term_id) {
+            match &mut session.handle {
+                TerminalHandle::Local { reader_handle, .. } => {
+                    if let Some(handle) = reader_handle.take() {
+                        handle.abort();
+                    }
+                }
+                TerminalHandle::Remote { task_handle, .. } => {
+                    if let Some(handle) = task_handle.take() {
+                        handle.abort();
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn close_by_connection(&self, connection_id: &str) -> Result<()> {
+        let mut sessions = self.sessions.lock().await;
+        let mut ids_to_remove = Vec::new();
+
+        for (id, session) in sessions.iter() {
+            if session.connection_id == connection_id {
+                ids_to_remove.push(id.clone());
+            }
+        }
+
+        println!("[PTY] Closing {} sessions for connection {}", ids_to_remove.len(), connection_id);
+
+        for id in ids_to_remove {
+            if let Some(mut session) = sessions.remove(&id) {
+                match &mut session.handle {
+                    TerminalHandle::Local { reader_handle, .. } => {
+                        if let Some(handle) = reader_handle.take() {
+                            handle.abort();
+                        }
+                    }
+                    TerminalHandle::Remote { task_handle, .. } => {
+                        if let Some(handle) = task_handle.take() {
+                            handle.abort();
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+}

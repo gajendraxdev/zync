@@ -1,0 +1,299 @@
+import { useEffect, useState } from 'react';
+import { useAppStore } from '../../store/useAppStore';
+import { Button } from '../ui/Button';
+import { cn } from '../../lib/utils';
+import { ExternalLink, ArrowRight, Plus, Network, Trash2 } from 'lucide-react';
+import { AddTunnelModal } from '../modals/AddTunnelModal';
+
+// Re-using interface to ensure type safety, though it's in store usually
+interface TunnelConfig {
+  id: string;
+  connectionId: string;
+  name: string;
+  type: 'local' | 'remote';
+  localPort: number;
+  remoteHost: string;
+  remotePort: number;
+  bindToAny?: boolean;
+  status: 'active' | 'error' | 'stopped';
+  autoStart?: boolean;
+  error?: string;
+}
+
+export function TunnelManager({ connectionId }: { connectionId?: string }) {
+  const globalId = useAppStore(state => state.activeConnectionId);
+  const activeConnectionId = connectionId || globalId;
+
+  // Store Hooks
+
+  const showToast = useAppStore((state) => state.showToast);
+
+  // Local state for this view
+  const [tunnels, setTunnels] = useState<TunnelConfig[]>([]);
+  const [, setLoading] = useState(false);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [editingTunnel, setEditingTunnel] = useState<TunnelConfig | null>(null);
+
+  // Fetch ONLY tunnels for this connection (or all and filter if needed, but let's try specific fetch first to be efficient)
+  // Actually, to match Global List success, let's just fetch all and filter client-side for now to guarantee consistency 
+  // until we confirm tunnel:list endpoint behavior.
+  const loadTunnels = async () => {
+    if (!activeConnectionId) return;
+    setLoading(true);
+    try {
+      // We use tunnel:getAll and filter because we know it works for the Global view
+      const list: TunnelConfig[] = await window.ipcRenderer.invoke('tunnel:getAll');
+      const filtered = list.filter(t => t.connectionId === activeConnectionId);
+      setTunnels(filtered);
+    } catch (error) {
+      console.error('Failed to load tunnels', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadTunnels();
+
+    const handleStatusChange = (_: any, { id, status, error }: any) => {
+      setTunnels(prev => prev.map(t => t.id === id ? { ...t, status: status, error } : t));
+    };
+
+    window.ipcRenderer.on('tunnel:status-change', handleStatusChange);
+    const interval = setInterval(loadTunnels, 30000);
+
+    return () => {
+      clearInterval(interval);
+      window.ipcRenderer.off('tunnel:status-change', handleStatusChange);
+    };
+  }, [activeConnectionId]);
+
+
+  const handleToggleTunnel = async (tunnel: TunnelConfig) => {
+    try {
+      if (tunnel.status === 'active') {
+        await window.ipcRenderer.invoke('tunnel:stop', tunnel.id);
+        showToast('info', 'Forwarding stopped');
+      } else {
+        if (tunnel.type === 'remote') {
+          await window.ipcRenderer.invoke('tunnel:start_remote',
+            tunnel.connectionId,
+            tunnel.remotePort,
+            tunnel.remoteHost || '127.0.0.1',
+            tunnel.localPort
+          );
+        } else {
+          await window.ipcRenderer.invoke('tunnel:start_local',
+            tunnel.connectionId,
+            tunnel.localPort,
+            tunnel.remoteHost,
+            tunnel.remotePort
+          );
+        }
+        showToast('success', 'Forwarding started');
+      }
+      // Optimistic update or wait for event? Event will handle it.
+      loadTunnels(); // Refresh to be safe
+    } catch (error: any) {
+      showToast('error', `Action failed: ${error.message || error}`);
+    }
+  };
+
+  const handleOpenBrowser = async (port: number) => {
+    await window.ipcRenderer.invoke('shell:open', `http://localhost:${port}`);
+  };
+
+  const handleDeleteTunnel = async (id: string) => {
+    try {
+      await window.ipcRenderer.invoke('tunnel:delete', id);
+      showToast('success', 'Forward deleted');
+      loadTunnels();
+    } catch (error: any) {
+      showToast('error', `Failed to delete: ${error.message || error}`);
+    }
+  };
+
+  if (!activeConnectionId) return <div className="p-4 text-app-muted">No connection selected</div>;
+
+  return (
+    <div className="flex flex-col h-full bg-app-bg animate-in fade-in duration-300">
+      {/* Minimal Header for Tab View */}
+      <div className="py-2.5 px-4 bg-app-panel/40 border-b border-app-border/30 backdrop-blur-md sticky top-0 z-20 flex justify-between items-center">
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-bold tracking-tight text-app-text">Port Forwarding</h2>
+          {tunnels.length > 0 && (
+            <span className="text-[10px] text-app-muted/60 font-medium px-1.5 py-0.5 rounded-md bg-app-surface/50 border border-app-border/30">
+              {tunnels.filter(t => t.status === 'active').length} Active
+            </span>
+          )}
+        </div>
+        <Button
+          onClick={() => {
+            setEditingTunnel(null);
+            setIsAddModalOpen(true);
+          }}
+          className="h-7 px-2.5 bg-app-accent text-white hover:bg-app-accent/90 text-[10px] font-bold whitespace-nowrap"
+        >
+          <Plus size={12} className="mr-1" /> New Forward
+        </Button>
+      </div>
+
+      <div className="flex-1 overflow-auto p-4">
+        {tunnels.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center -mt-20">
+            <div className="w-20 h-20 rounded-3xl bg-app-surface/50 border border-app-border/40 flex items-center justify-center mb-6 shadow-sm">
+              <Network className="text-app-muted/40 w-10 h-10" />
+            </div>
+            <h3 className="text-xl font-semibold text-app-text">No Port Forwards</h3>
+            <p className="text-sm text-app-muted mt-2 max-w-xs text-center opacity-70">
+              Bridge your local environment with remote servers securely.
+            </p>
+
+            <Button
+              variant="ghost"
+              className="mt-6 text-app-accent hover:bg-app-accent/5"
+              onClick={() => {
+                setEditingTunnel(null);
+                setIsAddModalOpen(true);
+              }}
+            >
+              Create your first forward
+            </Button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
+            {tunnels.map(port => {
+              const isActive = port.status === 'active';
+              return (
+                <div
+                  key={port.id}
+                  className={cn(
+                    "group flex flex-col p-2.5 rounded-xl bg-app-panel/50 border transition-all duration-200 hover:shadow-lg hover:bg-app-panel",
+                    isActive ? "border-app-accent/40 bg-app-accent/[0.03]" : "border-app-border/40 hover:border-app-border/80"
+                  )}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2 overflow-hidden">
+                      <div className={cn(
+                        "w-1.5 h-1.5 shrink-0 rounded-full",
+                        isActive ? "bg-app-success shadow-[0_0_6px_rgba(var(--color-app-success),0.4)]" : "bg-app-muted/30"
+                      )} />
+                      <span className="font-bold text-[11px] text-app-text truncate">{port.name}</span>
+                    </div>
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {port.type === 'local' && (
+                        <button
+                          onClick={() => handleOpenBrowser(port.localPort)}
+                          className="p-1 rounded hover:bg-app-surface text-app-muted hover:text-blue-400 transition-colors"
+                          title="Open Browser"
+                        >
+                          <ExternalLink size={11} />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => {
+                          setEditingTunnel(port);
+                          setIsAddModalOpen(true);
+                        }}
+                        className="p-1 rounded hover:bg-app-surface text-app-muted hover:text-app-text transition-colors"
+                        title="Forward Settings"
+                      >
+                        <div className="flex gap-0.5">
+                          <div className="w-0.5 h-0.5 rounded-full bg-current" />
+                          <div className="w-0.5 h-0.5 rounded-full bg-current" />
+                          <div className="w-0.5 h-0.5 rounded-full bg-current" />
+                        </div>
+                      </button>
+                      <button
+                        onClick={() => handleDeleteTunnel(port.id)}
+                        className="p-1 rounded hover:bg-red-500/10 text-app-muted hover:text-red-500 transition-colors"
+                        title="Delete Forward"
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Middle Section: Details */}
+                  <div className="flex flex-col gap-1.5 py-2 text-[11px]">
+                    <div className="flex items-center gap-1.5 text-app-muted/80">
+                      <span className="font-semibold text-app-text/60 text-[10px] uppercase tracking-wider">Target</span>
+                      <span className="font-mono font-medium text-app-text/90">{port.remoteHost}:{port.type === 'local' ? port.remotePort : port.localPort}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {port.bindToAny !== undefined && (
+                        <span className={cn(
+                          "text-[9px] px-2 py-1 rounded-md font-bold uppercase tracking-wider",
+                          port.bindToAny
+                            ? "bg-orange-500/10 text-orange-400/90 border border-orange-500/20"
+                            : "bg-green-500/10 text-green-400/90 border border-green-500/20"
+                        )}>
+                          {port.bindToAny ? "Public" : "Localhost"}
+                        </span>
+                      )}
+                      {port.autoStart && (
+                        <span className="text-[9px] px-2 py-1 rounded-md bg-blue-500/10 text-blue-400/90 font-bold uppercase tracking-wider border border-blue-500/20">
+                          Auto-Start
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 border-t border-app-border/10 pt-2 mt-auto">
+                    <div className="flex items-center gap-1.5 font-mono text-[9px] text-app-muted/60">
+                      <span className="text-app-text/80 font-bold">{port.type === 'local' ? port.localPort : port.remotePort}</span>
+                      <ArrowRight size={10} className="shrink-0 opacity-30" />
+                      <span className="text-app-text/80 font-bold">{port.type === 'local' ? port.remotePort : port.localPort}</span>
+                      <span className={cn(
+                        "ml-1 text-[8px] px-1 rounded uppercase font-extrabold tracking-tighter shrink-0",
+                        port.type === 'remote' ? "bg-purple-500/10 text-purple-400/80" : "bg-blue-500/10 text-blue-400/80"
+                      )}>
+                        {port.type === 'remote' ? 'REM' : 'LOC'}
+                      </span>
+                    </div>
+
+                    <Button
+                      size="sm"
+                      onClick={() => handleToggleTunnel(port)}
+                      className={cn(
+                        "h-6 px-2 min-w-[50px] rounded text-[9px] font-bold uppercase tracking-tight",
+                        isActive
+                          ? "bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white"
+                          : "bg-app-surface border border-app-border/60 hover:border-app-accent hover:text-app-accent"
+                      )}
+                    >
+                      {isActive ? 'Stop' : 'Start'}
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Add Forward Card */}
+            <button
+              onClick={() => {
+                setEditingTunnel(null);
+                setIsAddModalOpen(true);
+              }}
+              className="group flex flex-col items-center justify-center min-h-[110px] p-4 rounded-xl border border-dashed border-app-border/40 hover:border-app-accent/50 bg-app-panel/20 hover:bg-app-accent/[0.02] transition-all duration-300"
+            >
+              <Plus size={24} className="mb-2 text-app-muted/40 group-hover:text-app-accent/80 group-hover:scale-110 transition-all duration-300" />
+              <span className="text-[10px] font-medium text-app-muted/50 group-hover:text-app-accent/80 transition-colors">Add Forward</span>
+            </button>
+          </div>
+        )}
+      </div>
+
+      <AddTunnelModal
+        isOpen={isAddModalOpen}
+        editingTunnel={editingTunnel}
+        initialConnectionId={activeConnectionId}
+        onClose={() => {
+          setIsAddModalOpen(false);
+          setEditingTunnel(null);
+          loadTunnels();
+        }}
+      />
+    </div>
+  );
+}
