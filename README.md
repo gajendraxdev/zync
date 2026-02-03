@@ -64,3 +64,7 @@ Get the latest release for your platform from our [Releases Page](https://github
 ## 📄 License
 
 MIT © [Zync](https://github.com/FDgajju/zync)
+
+---
+
+**Happy Zyncking! 🚀**
