@@ -1,0 +1,104 @@
+import { StateCreator } from 'zustand';
+import type { AppStore } from './useAppStore';
+
+export interface Transfer {
+    id: string;
+    sourceConnectionId: string;
+    sourcePath: string;
+    destinationConnectionId: string;
+    destinationPath: string;
+    status: 'pending' | 'transferring' | 'completed' | 'failed' | 'cancelled';
+    progress: {
+        transferred: number;
+        total: number;
+        percentage: number;
+    };
+    error?: string;
+    startTime: number;
+    lastUpdated: number;
+    speed: number; // bytes per second
+}
+
+export interface TransferSlice {
+    transfers: Transfer[];
+    addTransfer: (transfer: Omit<Transfer, 'id' | 'status' | 'progress' | 'startTime' | 'lastUpdated' | 'speed'>) => string;
+    updateTransferProgress: (id: string, progress: Transfer['progress']) => void;
+    completeTransfer: (id: string) => void;
+    failTransfer: (id: string, error: string) => void;
+    cancelTransfer: (id: string) => void;
+    removeTransfer: (id: string) => void;
+}
+
+export const createTransferSlice: StateCreator<AppStore, [], [], TransferSlice> = (set) => ({
+    transfers: [],
+
+    addTransfer: (transfer: Omit<Transfer, 'id' | 'status' | 'progress' | 'startTime' | 'lastUpdated' | 'speed'>) => {
+        const id = Math.random().toString(36).substr(2, 9);
+        const newTransfer: Transfer = {
+            ...transfer,
+            id,
+            status: 'pending',
+            progress: { transferred: 0, total: 0, percentage: 0 },
+            startTime: Date.now(),
+            lastUpdated: Date.now(),
+            speed: 0,
+        };
+        set((state: AppStore) => ({ transfers: [...state.transfers, newTransfer] }));
+        return id;
+    },
+
+    updateTransferProgress: (id: string, progress: Transfer['progress']) => {
+        const now = Date.now();
+        set((state: AppStore) => ({
+            transfers: state.transfers.map((t: Transfer) => {
+                if (t.id !== id) return t;
+
+                // Calculate Speed
+                const timeDiff = (now - t.lastUpdated) / 1000; // seconds
+                let newSpeed = t.speed;
+
+                if (timeDiff >= 0.5) { // Update speed every 0.5s to avoid jitter
+                    const bytesDiff = progress.transferred - t.progress.transferred;
+                    const currentSpeed = bytesDiff / timeDiff;
+
+                    // Weighted Average (Erasure factor 0.3 -> 30% new, 70% old) for smoothness
+                    if (t.speed === 0) {
+                        newSpeed = currentSpeed;
+                    } else {
+                        newSpeed = (t.speed * 0.7) + (currentSpeed * 0.3);
+                    }
+
+                    // Reset time window only when updating speed
+                    return { ...t, status: 'transferring', progress, speed: newSpeed, lastUpdated: now };
+                }
+
+                // Just update progress if speed window hasn't passed
+                return { ...t, status: 'transferring', progress };
+            })
+        }));
+    },
+
+    completeTransfer: (id: string) => {
+        set((state: AppStore) => ({
+            transfers: state.transfers.map((t: Transfer) => t.id === id ? { ...t, status: 'completed' } : t)
+        }));
+    },
+
+    failTransfer: (id: string, error: string) => {
+        set((state: AppStore) => ({
+            transfers: state.transfers.map((t: Transfer) => t.id === id ? { ...t, status: 'failed', error } : t)
+        }));
+    },
+
+    cancelTransfer: (id: string) => {
+        set((state: AppStore) => ({
+            transfers: state.transfers.map((t: Transfer) => t.id === id ? { ...t, status: 'cancelled' } : t)
+        }));
+    },
+
+    removeTransfer: (id: string) => {
+        set((state: AppStore) => ({
+            transfers: state.transfers.filter((t: Transfer) => t.id !== id)
+        }));
+    }
+});

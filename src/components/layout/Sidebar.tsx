@@ -1,0 +1,1285 @@
+import { useState, useCallback, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
+import { useAppStore, Connection, Folder } from '../../store/useAppStore'; // Updated Import
+import { getCurrentDragSource } from '../../lib/dragDrop';
+import { Pencil, ChevronRight, Folder as FolderIcon, ChevronDown, FolderPlus, Settings, Plus, Laptop, Network, PanelLeftOpen, PanelLeftClose, Search, TerminalIcon, Trash2, FolderOpen } from 'lucide-react';
+import { OSIcon } from '../icons/OSIcon';
+import { cn } from '../../lib/utils';
+import { Button } from '../ui/Button';
+import { Modal } from '../ui/Modal';
+import { Input } from '../ui/Input';
+import { ContextMenu } from '../ui/ContextMenu';
+import { WindowControls } from './WindowControls';
+
+// Lazy Load Modals
+const SettingsModal = lazy(() => import('../settings/SettingsModal').then(show => ({ default: show.SettingsModal })));
+const AddTunnelModal = lazy(() => import('../modals/AddTunnelModal').then(show => ({ default: show.AddTunnelModal })));
+const ConnectionDetailsModal = lazy(() => import('../modals/ConnectionDetailsModal').then(show => ({ default: show.ConnectionDetailsModal })));
+const AddConnectionModal = lazy(() => import('../modals/AddConnectionModal').then(mod => ({ default: mod.AddConnectionModal })));
+
+interface TreeNode {
+    name: string;
+    path: string;
+    children: { [key: string]: TreeNode };
+    connections: Connection[];
+    folderTags?: string[]; // Add tags metadata
+}
+
+function SidebarSection({
+    title,
+    count,
+    children,
+    defaultExpanded = true,
+    compactMode = false,
+    onDrop
+}: {
+    title: string;
+    count?: number;
+    children: React.ReactNode;
+    defaultExpanded?: boolean;
+    compactMode?: boolean;
+    onDrop?: (e: React.DragEvent) => void;
+}) {
+    const [isExpanded, setIsExpanded] = useState(defaultExpanded);
+
+    return (
+        <div
+            className="mb-2"
+            onDragOver={onDrop ? (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            } : undefined}
+            onDrop={onDrop}
+        >
+            <button
+                onClick={() => setIsExpanded(!isExpanded)}
+                className={cn(
+                    "w-full flex items-center gap-1 group select-none mb-1",
+                    compactMode ? "px-2" : "px-4"
+                )}
+            >
+                {isExpanded ? (
+                    <ChevronDown size={12} className="text-app-muted group-hover:text-app-text transition-colors" />
+                ) : (
+                    <ChevronRight size={12} className="text-app-muted group-hover:text-app-text transition-colors" />
+                )}
+                <span className="text-xs font-bold text-app-muted group-hover:text-app-text transition-colors uppercase tracking-wider">
+                    {title}
+                </span>
+                {count !== undefined && count > 0 && (
+                    <span className="ml-auto text-[10px] font-medium text-app-accent bg-app-accent/10 px-1.5 rounded-full">
+                        {count}
+                    </span>
+                )}
+            </button>
+
+            {isExpanded && (
+                <div className="animate-in fade-in slide-in-from-top-1 duration-200">
+                    {children}
+                </div>
+            )}
+        </div>
+    );
+}
+
+function buildTree(conns: Connection[], allFolders: Folder[], searchTerm: string): TreeNode {
+    const root: TreeNode = { name: 'root', path: '', children: {}, connections: [] };
+    const folderMap = new Map(allFolders.map(f => [f.name, f]));
+    const normalizedSearch = searchTerm.toLowerCase();
+
+    // Helper to get/create node
+    const getNode = (path: string) => {
+        const parts = path.split('/').filter(Boolean);
+        let current = root;
+        let currentPath = '';
+        parts.forEach((part) => {
+            currentPath = currentPath ? `${currentPath}/${part}` : part;
+            if (!current.children[part]) {
+                const folderMeta = folderMap.get(currentPath);
+                current.children[part] = {
+                    name: part,
+                    path: currentPath,
+                    children: {},
+                    connections: [],
+                    folderTags: folderMeta?.tags
+                };
+            }
+            current = current.children[part];
+        });
+        return current;
+    };
+
+    // 1. Ensure matching folders exist (Explicit ones)
+    // If search is active, only show folders that match OR contain matching connections
+    // If no search, show all explicitly created folders
+    if (!searchTerm) {
+        allFolders.forEach(f => getNode(f.name));
+    } else {
+        allFolders.filter((f: Folder) =>
+            f.name.toLowerCase().includes(normalizedSearch) ||
+            (f.tags && f.tags.some((t: string) => t.toLowerCase().includes(normalizedSearch)))
+        ).forEach((f: Folder) => getNode(f.name));
+    }
+
+    // 2. Populate Connections
+    conns.forEach((conn: Connection) => {
+        // Search Filter: Check Name, Host, and Tags
+        const matchesSearch = !searchTerm ||
+            (conn.name || conn.host).toLowerCase().includes(normalizedSearch) ||
+            (conn.tags && conn.tags.some((t: string) => t.toLowerCase().includes(normalizedSearch)));
+
+        if (matchesSearch) {
+            if (conn.folder) {
+                // If the connection matches, ensure its folder exists even if the folder name doesn't match
+                getNode(conn.folder).connections.push(conn);
+            } else {
+                root.connections.push(conn);
+            }
+        }
+    });
+
+    return root;
+}
+
+export function Sidebar() {
+    const [viewingDetailsId, setViewingDetailsId] = useState<string | null>(null);
+
+    // Connection Store Hooks
+    const connections = useAppStore(state => state.connections);
+    const activeConnectionId = useAppStore(state => state.activeConnectionId);
+    // const addConnection = useAppStore(state => state.addConnection); // Removed - used in modal
+    // const editConnection = useAppStore(state => state.editConnection); // Removed - used in modal
+    // const importConnections = useAppStore(state => state.importConnections); // Removed - used in modal
+    const openTab = useAppStore(state => state.openTab);
+    const openPortForwardingTab = useAppStore(state => state.openPortForwardingTab);
+    const folders = useAppStore(state => state.folders);
+    const addFolder = useAppStore(state => state.addFolder);
+    const updateConnectionFolder = useAppStore(state => state.updateConnectionFolder);
+    const deleteFolder = useAppStore(state => state.deleteFolder);
+    const renameFolder = useAppStore(state => state.renameFolder);
+    const isAddConnectionModalOpen = useAppStore(state => state.isAddConnectionModalOpen);
+    const openAddConnectionModal = () => useAppStore.getState().setAddConnectionModalOpen(true);
+    const closeAddConnectionModal = () => useAppStore.getState().setAddConnectionModalOpen(false);
+
+    // Settings Store Hooks
+    const settings = useAppStore(state => state.settings);
+    const updateSettings = useAppStore(state => state.updateSettings);
+    const isSettingsOpen = useAppStore(state => state.isSettingsOpen);
+    const openSettings = useAppStore(state => state.openSettings);
+    const closeSettings = useAppStore(state => state.closeSettings);
+    const updateStatus = useAppStore(state => state.updateStatus);
+
+    const compactMode = settings.compactMode;
+    // const [isAddModalOpen, setIsAddModalOpen] = useState(false); // Moved to context
+    const [isFolderModalOpen, setIsFolderModalOpen] = useState(false); // State for Create Folder Modal
+
+    const [searchTerm, setSearchTerm] = useState('');
+    const [isRenameFolderModalOpen, setIsRenameFolderModalOpen] = useState(false);
+    const [folderToRename, setFolderToRename] = useState<string | null>(null);
+    const [folderContextMenu, setFolderContextMenu] = useState<{ x: number; y: number; folderName: string } | null>(null);
+    // const [isCollapsed, setIsCollapsed] = useState(false); // Moved to Settings
+    const isCollapsed = settings.sidebarCollapsed;
+
+    // Add Menu State
+    const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
+    const [isAddTunnelModalOpen, setIsAddTunnelModalOpen] = useState(false);
+
+    const addMenuRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (addMenuRef.current && !addMenuRef.current.contains(event.target as Node)) {
+                setIsAddMenuOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    // const canAddTunnel = activeConnectionId && activeConnectionId !== 'local' && activeConnectionId !== 'port-forwarding';
+
+    // Resize Logic
+
+    // Resize Logic
+    const [width, setWidth] = useState(settings.sidebarWidth || 288);
+    const [isResizing, setIsResizing] = useState(false);
+    const platform = window.electronUtils?.platform || 'linux';
+    const isMac = platform === 'darwin';
+    const sidebarRef = useRef<HTMLDivElement>(null);
+
+    // Sync width if settings change externally (e.g. via reset)
+    useEffect(() => {
+        if (settings.sidebarWidth && !isResizing) {
+            setWidth(settings.sidebarWidth);
+        }
+    }, [settings.sidebarWidth, isResizing]);
+
+    const startResizing = useCallback((e: React.MouseEvent) => {
+        setIsResizing(true);
+        e.preventDefault();
+        document.body.style.cursor = 'col-resize';
+    }, []);
+
+    useEffect(() => {
+        if (!isResizing) return;
+
+        const resize = (e: MouseEvent) => {
+            const newWidth = Math.max(200, Math.min(e.clientX, 600)); // Clamp between 200px and 600px
+            setWidth(newWidth);
+        };
+
+        const stopResizing = () => {
+            setIsResizing(false);
+            document.body.style.cursor = '';
+            // Save final width
+            updateSettings({ sidebarWidth: width });
+        };
+
+        window.addEventListener('mousemove', resize);
+        window.addEventListener('mouseup', stopResizing);
+
+        return () => {
+            window.removeEventListener('mousemove', resize);
+            window.removeEventListener('mouseup', stopResizing);
+        };
+    }, [isResizing, width, updateSettings]);
+
+    // Compute Active Connections
+    // Compute Active Connections
+    const activeConnections = useMemo(() => {
+        return connections.filter((c: Connection) => c.status === 'connected');
+    }, [connections]);
+
+
+    // ... (previous code)
+
+    // Form State - REMOVED (Moved to AddConnectionModal)
+    // const [formData, setFormData] = useState<Partial<Connection>>({...});
+    // const [authMethod, setAuthMethod] = useState<'password' | 'key'>('password');
+    const [editingConnectionId, setEditingConnectionId] = useState<string | null>(null);
+
+    // Reset when modal closes
+    useEffect(() => {
+        if (!isAddConnectionModalOpen) {
+            setEditingConnectionId(null);
+            // formData reset removed as it's now handled in modal
+        }
+    }, [isAddConnectionModalOpen]);
+
+    // handleSave REMOVED
+
+    const openEditConnection = (conn: Connection) => {
+        setEditingConnectionId(conn.id);
+        openAddConnectionModal();
+    };
+
+    // ... (rest of component logic)
+
+
+
+    // Helper components (FolderModal, RenameFolderModal) need to be preserved if they were inline or imported.
+    // Checking Sidebar.tsx again - I don't see FolderModal or RenameFolderModal inline definitions in the previous viewView (lines 1-800).
+    // Wait, I only viewed lines 1-800 of Sidebar.tsx!
+    // I need to be careful not to delete FolderModal if it's defined at the bottom.
+    // I will check lines 800+ of Sidebar.tsx before replacing.
+
+    // Listen for global events (Command Palette)
+    useEffect(() => {
+        const handleOpenFolder = () => setIsFolderModalOpen(true);
+        const handleOpenTunnel = () => setIsAddTunnelModalOpen(true);
+
+        window.addEventListener('ssh-ui:open-folder-modal', handleOpenFolder);
+        window.addEventListener('ssh-ui:open-new-tunnel', handleOpenTunnel);
+
+        return () => {
+            window.removeEventListener('ssh-ui:open-folder-modal', handleOpenFolder);
+            window.removeEventListener('ssh-ui:open-new-tunnel', handleOpenTunnel);
+        };
+    }, []);
+
+    // Filter out active connections for the main tree if NO search term is active
+    // If searching, we want to search everything
+    // Filter out active connections for the main tree if NO search term is active
+    // If searching, we want to search everything
+    const treeConnections = useMemo(() => {
+        if (searchTerm) return connections;
+        return connections.filter((c: Connection) => c.status !== 'connected');
+    }, [connections, searchTerm]);
+
+    // Build Recursive Tree
+    // Build Recursive Tree
+    const treeRoot = useMemo(() => buildTree(treeConnections, folders, searchTerm), [treeConnections, folders, searchTerm]);
+
+    const toggleExpandedFolder = useAppStore(state => state.toggleExpandedFolder);
+
+    // Calculate all paths in the current filtered tree for search expansion
+    const searchExpandedFolders = useMemo(() => {
+        if (!searchTerm) return null;
+        const paths = new Set<string>();
+        const traverse = (node: TreeNode) => {
+            if (node.path) paths.add(node.path);
+            Object.values(node.children).forEach(traverse);
+        };
+        traverse(treeRoot);
+        return paths;
+    }, [treeRoot, searchTerm]);
+
+    // Use search expansion if searching, otherwise use persisted settings
+    const expandedFolders = searchTerm && searchExpandedFolders
+        ? searchExpandedFolders
+        : new Set(settings.expandedFolders);
+
+    const toggleFolder = (folderPath: string) => {
+        // Prevent toggling persistence during search to avoid conflicts
+        if (searchTerm) return;
+        toggleExpandedFolder(folderPath);
+    };
+
+    const handleRenameFolder = (path: string) => {
+        setFolderToRename(path);
+        setIsRenameFolderModalOpen(true);
+    };
+
+    return (
+        <div
+            ref={sidebarRef}
+            className={cn(
+                "bg-app-panel/95 backdrop-blur-xl border-r border-app-border/50 flex flex-col h-full shrink-0 relative z-50",
+                // Smooth GPU-accelerated transition for transform, but we also want to animate margin for the sibling
+                // Using a custom cubic-bezier for a more "premium" feel (easeOutQuart-ish)
+                !isResizing ? "transition-all duration-400 ease-[cubic-bezier(0.2,0,0,1)]" : ""
+            )}
+            style={{
+                width: width,
+                transform: isCollapsed ? `translateX(-${width}px)` : 'translateX(0)',
+                marginRight: isCollapsed ? `-${width}px` : '0px', // Prevent layout shift
+                willChange: isResizing ? 'auto' : 'transform, margin-right, width'
+            }}
+        >
+            {/* Resize Handle */}
+            {!isCollapsed && width >= 40 && (
+                <div
+                    className="absolute right-0 top-0 bottom-0 w-1 hover:w-1.5 cursor-col-resize hover:bg-app-accent/50 transition-all z-[100] group"
+                    onMouseDown={startResizing}
+                >
+                    <div className="absolute inset-y-0 right-0 w-4 -z-10" /> {/* Larger hit area */}
+                </div>
+            )}
+
+            {/* Content Wrapper */}
+            <div
+                style={{ width: width, minWidth: width }}
+                className="flex flex-col h-full"
+            >
+                {/* Header */}
+                <div
+                    className={cn(
+                        "flex items-center justify-between shrink-0 select-none",
+                        compactMode ? "p-4 pb-2" : "p-5 pb-4",
+                        isMac && "pt-8" // Add space for traffic lights on Mac
+                    )}
+                    data-tauri-drag-region
+                >
+                    {isMac && (
+                        <div className="absolute top-4 left-4 drag-none">
+                            <WindowControls />
+                        </div>
+                    )}
+                    <div className="flex items-center gap-3 overflow-hidden">
+                        <svg width={compactMode ? "24" : "32"} height={compactMode ? "24" : "32"} viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0">
+                            <rect width="512" height="512" rx="128" className="fill-app-accent/10" />
+                            <path d="M128 170.667L213.333 256L128 341.333" className="stroke-app-accent" strokeWidth="64" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M256 341.333H384" className="stroke-app-text" strokeWidth="64" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                        <div className="flex flex-col whitespace-nowrap">
+                            <span className="font-bold text-sm tracking-tight text-app-text leading-none">Hosts</span>
+                            <span className="text-[10px] font-bold text-app-muted/60 tracking-widest uppercase mt-0.5">Explorer</span>
+                        </div>
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                        <div className="relative" ref={addMenuRef}>
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => setIsAddMenuOpen(!isAddMenuOpen)}
+                                className={cn(
+                                    "h-7 w-7 transition-colors rounded-lg",
+                                    isAddMenuOpen ? "text-app-text bg-app-surface" : "text-app-muted hover:text-[var(--color-app-text)] hover:bg-app-surface/50"
+                                )}
+                                title="Add New..."
+                            >
+                                <Plus className="h-4 w-4" />
+                            </Button>
+
+                            {/* Add Dropdown */}
+                            {isAddMenuOpen && (
+                                <div className="absolute top-full right-0 mt-2 w-48 bg-app-panel border border-app-border rounded-xl shadow-xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-200 p-1">
+                                    <button
+                                        onClick={() => { openAddConnectionModal(); setIsAddMenuOpen(false); }}
+                                        className="w-full text-left px-3 py-2 text-sm text-app-text hover:bg-app-surface rounded-lg flex items-center gap-2 transition-colors"
+                                    >
+                                        <Laptop size={14} className="text-app-muted" />
+                                        <span>New Host</span>
+                                    </button>
+                                    <button
+                                        onClick={() => { setIsFolderModalOpen(true); setIsAddMenuOpen(false); }}
+                                        className="w-full text-left px-3 py-2 text-sm text-app-text hover:bg-app-surface rounded-lg flex items-center gap-2 transition-colors"
+                                    >
+                                        <FolderPlus size={14} className="text-app-muted" />
+                                        <span>New Folder</span>
+                                    </button>
+
+                                    <div className="h-px bg-app-border/50 my-1 mx-2" />
+
+                                    <button
+                                        onClick={() => {
+                                            setIsAddTunnelModalOpen(true);
+                                            setIsAddMenuOpen(false);
+                                        }}
+                                        className="w-full text-left px-3 py-2 text-sm text-app-text hover:bg-app-surface rounded-lg flex items-center gap-2 transition-colors"
+                                        title="Create a new tunnel"
+                                    >
+                                        <Network size={14} className="text-app-muted" />
+                                        <span>New Tunnel</span>
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => updateSettings({ sidebarCollapsed: !isCollapsed })}
+                            className="h-7 w-7 text-app-muted hover:text-[var(--color-app-text)] hover:bg-app-surface/50 rounded-lg transition-colors"
+                        >
+                            {isCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+                        </Button>
+                    </div>
+                </div>
+
+                {/* Search */}
+                <div className={compactMode ? "px-3 mb-2" : "px-4 mb-4"}>
+                    <div className="relative group">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <Search className="h-3.5 w-3.5 text-app-muted group-focus-within:text-app-text transition-colors" />
+                        </div>
+                        <input
+                            className={cn(
+                                "w-full bg-app-surface/50 hover:bg-app-surface border border-transparent focus:border-app-border/50 rounded-lg text-app-text focus:outline-none placeholder:text-app-muted/40 transition-all font-medium",
+                                compactMode ? "px-3 py-2 pl-9 text-xs" : "px-3 py-2.5 pl-9 text-sm"
+                            )}
+                            placeholder="Search..."
+                            value={searchTerm}
+                            onChange={e => setSearchTerm(e.target.value)}
+                        />
+                    </div>
+                </div>
+
+                {/* System Actions Column */}
+                <div className={cn(compactMode ? "px-3 mb-2" : "px-4 mb-2")}>
+                    <div className="flex flex-col gap-1.5 w-full">
+                        <button
+                            className={cn(
+                                "group relative flex items-center transition-all cursor-pointer select-none outline-none w-full py-2 px-3 rounded-lg border border-transparent",
+                                "bg-app-surface/30 hover:bg-app-surface hover:border-app-border/30 text-app-muted hover:text-app-text"
+                            )}
+                            onClick={() => openTab('local')}
+                        >
+                            <TerminalIcon size={13} className="opacity-70 group-hover:opacity-100" />
+                            <span className="ml-3 font-medium text-[10px] uppercase tracking-wider opacity-80 group-hover:opacity-100">New Terminal</span>
+                        </button>
+
+                        <button
+                            className={cn(
+                                "group relative flex items-center transition-all cursor-pointer select-none outline-none w-full py-2 px-3 rounded-lg border border-transparent",
+                                "bg-app-surface/30 hover:bg-app-surface hover:border-app-border/30 text-app-muted hover:text-app-text"
+                            )}
+                            onClick={() => openPortForwardingTab()}
+                        >
+                            <Network size={13} className="opacity-70 group-hover:opacity-100" />
+                            <span className="ml-3 font-medium text-[10px] uppercase tracking-wider opacity-80 group-hover:opacity-100">Port Forwarding</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div className="h-px bg-app-border/20 mb-2 mx-4" />
+
+                {/* List */}
+                <div className={cn(
+                    "flex-1 overflow-y-auto pb-4 scrollbar-hide",
+                    compactMode ? "px-2 space-y-0.5" : "px-3 space-y-2"
+                )}>
+                    {/* VISUAL SECTIONS LOGIC */}
+                    {!searchTerm && activeConnections.length > 0 ? (
+                        <>
+                            <SidebarSection title="Active" count={activeConnections.length} compactMode={compactMode}>
+                                <div className={cn("space-y-1 mb-2 pl-1", compactMode && "space-y-0.5")}>
+                                    {activeConnections.map((conn: Connection) => (
+                                        <ConnectionItem
+                                            key={`active-${conn.id}`}
+                                            conn={conn}
+                                            isCollapsed={false} // Always render as if expanded inside the wrapper
+                                            onEdit={openEditConnection}
+                                            onViewDetails={(c: Connection) => setViewingDetailsId(c.id)}
+                                        />
+                                    ))}
+                                </div>
+                            </SidebarSection>
+
+                            <SidebarSection
+                                title="All Hosts"
+                                compactMode={compactMode}
+                                onDrop={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    const connId = e.dataTransfer.getData('connection-id');
+                                    const folderPath = e.dataTransfer.getData('folder-path');
+
+                                    if (connId) {
+                                        updateConnectionFolder(connId, '');
+                                    } else if (folderPath) {
+                                        // Move folder to root -> Rename to just its basename
+                                        const baseName = folderPath.split('/').pop();
+                                        if (baseName && baseName !== folderPath) {
+                                            renameFolder(folderPath, baseName);
+                                        }
+                                    }
+                                }}
+                            >
+                                <div className="pl-1">
+                                    {/* Render Recursive Tree (Filtered to exclude active if not searching) */}
+                                    {Object.keys(treeRoot.children).sort().map(key => (
+                                        <FolderItem
+                                            key={key}
+                                            node={treeRoot.children[key]}
+                                            isCollapsed={false}
+                                            compactMode={compactMode}
+                                            expandedFolders={expandedFolders}
+                                            toggleFolder={toggleFolder}
+                                            updateConnectionFolder={updateConnectionFolder}
+                                            deleteFolder={deleteFolder}
+                                            onRenameFolder={handleRenameFolder}
+                                            renameFolder={renameFolder}
+                                            connectionItemProps={{ onEdit: openEditConnection, onViewDetails: (c: Connection) => setViewingDetailsId(c.id) }}
+                                        />
+                                    ))}
+                                    {treeRoot.connections.map(conn => (
+                                        <ConnectionItem
+                                            key={conn.id}
+                                            conn={conn}
+                                            isCollapsed={false}
+                                            onEdit={openEditConnection}
+                                            onViewDetails={c => setViewingDetailsId(c.id)}
+                                        />
+                                    ))}
+                                </div>
+                            </SidebarSection>
+                        </>
+                    ) : (
+                        /* Default / Search View: No sections, just the tree */
+                        <>
+                            {Object.keys(treeRoot.children).sort().map(key => (
+                                <FolderItem
+                                    key={key}
+                                    node={treeRoot.children[key]}
+                                    isCollapsed={false}
+                                    compactMode={compactMode}
+                                    expandedFolders={expandedFolders}
+                                    toggleFolder={toggleFolder}
+                                    updateConnectionFolder={updateConnectionFolder}
+                                    deleteFolder={deleteFolder}
+                                    onRenameFolder={handleRenameFolder}
+                                    renameFolder={renameFolder}
+                                    connectionItemProps={{ onEdit: openEditConnection, onViewDetails: (c: Connection) => setViewingDetailsId(c.id) }}
+                                />
+                            ))}
+                            {treeRoot.connections.map(conn => (
+                                <ConnectionItem
+                                    key={conn.id}
+                                    conn={conn}
+                                    isCollapsed={false}
+                                    onEdit={openEditConnection}
+                                    onViewDetails={c => setViewingDetailsId(c.id)}
+                                />
+                            ))}
+                        </>
+                    )}
+                </div>
+
+                {/* Footer / User */}
+                <div className={cn("p-3 border-t border-app-border/20 backdrop-blur-md bg-app-bg/50")}>
+                    <button
+                        onClick={openSettings}
+                        className={cn(
+                            "flex items-center gap-2.5 w-full px-3 py-2 rounded-lg transition-all duration-150 group relative",
+                            "hover:bg-app-surface/50 border border-transparent hover:border-app-border/20",
+                        )}
+                    >
+                        <div className="h-8 w-8 rounded-lg bg-app-surface border border-app-border/40 flex items-center justify-center shrink-0 group-hover:border-app-border/60 transition-all">
+                            <Settings className="text-app-muted group-hover:text-app-text w-4 h-4 transition-colors" />
+                        </div>
+                        <div className="flex-1 text-left overflow-hidden">
+                            <div className="text-sm font-medium text-app-text">Settings</div>
+                            <div className="text-[10px] text-app-muted/60 tracking-wide">Preferences</div>
+                        </div>
+                        {(updateStatus === 'available' || updateStatus === 'downloading' || updateStatus === 'ready') && (
+                            <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-app-accent animate-pulse shadow-[0_0_8px_var(--color-app-accent)]" />
+                        )}
+                    </button>
+                </div>
+            </div>
+
+            {/* Modals */}
+            <Suspense fallback={null}>
+                {isAddConnectionModalOpen && (
+                    <AddConnectionModal
+                        isOpen={isAddConnectionModalOpen}
+                        onClose={closeAddConnectionModal}
+                        editingConnectionId={editingConnectionId}
+                    />
+                )}
+            </Suspense>
+
+            {/* Create Folder Modal */}
+            <CreateFolderModal
+                isOpen={isFolderModalOpen}
+                onClose={() => setIsFolderModalOpen(false)}
+                onCreate={(name, tags) => {
+                    addFolder(name, tags);
+                    setIsFolderModalOpen(false);
+                }}
+            />
+
+            {/* Modals */}
+            <Suspense fallback={null}>
+                <AddTunnelModal
+                    isOpen={isAddTunnelModalOpen}
+                    onClose={() => setIsAddTunnelModalOpen(false)}
+                    initialConnectionId={activeConnectionId && activeConnectionId !== 'local' && activeConnectionId !== 'port-forwarding' ? activeConnectionId : undefined}
+                />
+
+                <ConnectionDetailsModal
+                    isOpen={!!viewingDetailsId}
+                    onClose={() => setViewingDetailsId(null)}
+                    connection={connections.find((c: Connection) => c.id === viewingDetailsId) || null}
+                />
+
+                <SettingsModal isOpen={isSettingsOpen} onClose={closeSettings} />
+            </Suspense>
+
+            {/* Folder Context Menu */}
+            {
+                folderContextMenu && (
+                    <ContextMenu
+                        x={folderContextMenu.x}
+                        y={folderContextMenu.y}
+                        onClose={() => setFolderContextMenu(null)}
+                        items={[
+                            {
+                                label: 'Rename Folder',
+                                icon: <Pencil size={14} />,
+                                action: () => {
+                                    setFolderToRename(folderContextMenu.folderName);
+                                    setIsRenameFolderModalOpen(true);
+                                    setFolderContextMenu(null);
+                                }
+                            },
+                            {
+                                label: 'Delete Folder',
+                                icon: <Trash2 size={14} />,
+                                variant: 'danger',
+                                action: () => {
+                                    if (confirm(`Delete folder "${folderContextMenu.folderName}"? Connections will be ungrouped.`)) {
+                                        deleteFolder(folderContextMenu.folderName);
+                                    }
+                                    setFolderContextMenu(null);
+                                }
+                            }
+                        ]}
+                    />
+                )
+            }
+
+            <RenameFolderModal
+                isOpen={isRenameFolderModalOpen}
+                onClose={() => setIsRenameFolderModalOpen(false)}
+                currentName={folderToRename || ''}
+                currentTags={folders.find((f: Folder) => f.name === folderToRename)?.tags || []}
+                onRename={(newName, newTags) => {
+                    // We need a renameFolder that accepts tags, or updateFolder?
+                    // renameFolder logic in context primarily handles name, but checking if it can update tags too
+                    // Actually, renameFolder implementation only takes (oldName, newName).
+                    // I need to update renameFolder in Context to accept tags or create 'updateFolder'
+                    // For now, let's assume I will update Context next.
+                    // But wait, renameFolder modifies the folder object.
+                    // Let's modify renameFolder signature in Sidebar usage to match what we will change in Context.
+                    if (folderToRename) {
+                        // We need to call a function that updates both. 
+                        // I'll update renameFolder in context to accept tags (optional 3rd arg)
+                        // @ts-ignore
+                        renameFolder(folderToRename, newName, newTags);
+                    }
+                    setIsRenameFolderModalOpen(false);
+                }}
+            />
+        </div >
+    );
+}
+
+function CreateFolderModal({ isOpen, onClose, onCreate }: { isOpen: boolean; onClose: () => void; onCreate: (name: string, tags: string[]) => void }) {
+    const [name, setName] = useState('');
+    const [tags, setTags] = useState<string[]>([]);
+
+    useEffect(() => {
+        if (isOpen) {
+            setName('');
+            setTags([]);
+        }
+    }, [isOpen]);
+
+    return (
+        <Modal isOpen={isOpen} onClose={onClose} title="">
+            <div className="flex flex-col items-center pt-2 pb-4 px-2">
+                {/* Icon Header */}
+                <div className="mb-6 relative">
+                    <div className="absolute inset-0 bg-app-accent/20 blur-xl rounded-full" />
+                    <div className="relative bg-app-bg border border-app-border p-4 rounded-2xl shadow-xl">
+                        <FolderPlus className="h-8 w-8 text-app-accent" />
+                    </div>
+                </div>
+
+                <div className="text-center mb-6">
+                    <h3 className="text-lg font-bold text-app-text mb-1">New Folder</h3>
+                    <p className="text-xs text-app-muted">Organize your connections by grouping them together.</p>
+                </div>
+
+                <div className="w-full space-y-4">
+                    <Input
+                        label=""
+                        placeholder="Folder Name (e.g. Production)"
+                        value={name}
+                        onChange={e => setName(e.target.value)}
+                        autoFocus
+                        className="py-2.5 text-center font-medium bg-app-surface/50 border-app-border focus:bg-app-bg transition-all"
+                        onKeyDown={e => {
+                            if (e.key === 'Enter' && name) onCreate(name, tags);
+                        }}
+                    />
+
+                    {/* Tags Input */}
+                    <div className="space-y-2">
+                        <div className="flex gap-2">
+                            <Input
+                                placeholder="Add a tag..."
+                                className="flex-1 text-xs"
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                        const val = e.currentTarget.value.trim();
+                                        if (val && !tags.includes(val)) {
+                                            setTags([...tags, val]);
+                                            e.currentTarget.value = '';
+                                        }
+                                    }
+                                }}
+                            />
+                        </div>
+                        <div className="flex flex-wrap gap-2 min-h-[24px]">
+                            {tags.map(tag => (
+                                <span key={tag} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-app-surface border border-app-border text-xs font-medium text-app-text">
+                                    {tag}
+                                    <button
+                                        onClick={() => setTags(tags.filter(t => t !== tag))}
+                                        className="hover:text-red-400 transition-colors"
+                                    >
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                                    </button>
+                                </span>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 pt-2">
+                        <Button
+                            variant="ghost"
+                            onClick={onClose}
+                            className="w-full hover:bg-app-surface text-app-muted hover:text-app-text"
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            onClick={() => name && onCreate(name, tags)}
+                            disabled={!name}
+                            className="w-full bg-app-accent hover:bg-app-accent/90 text-white shadow-lg shadow-app-accent/20"
+                        >
+                            Create Folder
+                        </Button>
+                    </div>
+                </div>
+            </div>
+        </Modal>
+    );
+}
+
+// Helper Component for Connection Items
+function ConnectionItem({ conn, isCollapsed, onEdit, onViewDetails }: { conn: Connection; isCollapsed: boolean; onEdit: (c: Connection) => void; onViewDetails: (c: Connection) => void }) {
+    // Zustand Hooks
+    const activeConnectionId = useAppStore(state => state.activeConnectionId);
+    const openTab = useAppStore(state => state.openTab);
+    const connect = useAppStore(state => state.connect);
+    const disconnect = useAppStore(state => state.disconnect);
+    const deleteConnection = useAppStore(state => state.deleteConnection);
+    const tabs = useAppStore(state => state.tabs);
+
+    const hasTab = useMemo(() => tabs.some((t: any) => t.connectionId === conn.id), [tabs, conn.id]);
+
+    const showToast = useAppStore((state) => state.showToast);
+    const addTransfer = useAppStore(state => state.addTransfer);
+    const [contextMenu, setContextMenu] = useState<{ x: number; y: number; connectionId: string } | null>(null);
+    const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+    const settings = useAppStore(state => state.settings);
+    const compactMode = settings.compactMode;
+
+    return (
+        <>
+            <div
+                className={cn(
+                    "group relative flex items-center transition-all cursor-pointer border select-none",
+                    // Layout & Spacing
+                    isCollapsed
+                        ? "justify-center p-2 rounded-xl mx-auto w-12 h-12"
+                        : compactMode
+                            ? "gap-2 p-1.5 rounded-lg mx-1"
+                            : "gap-3 p-3 rounded-xl mx-2",
+                    // Default State
+                    "border-transparent hover:bg-app-surface/50",
+                    // Active State (Minimal)
+                    activeConnectionId === conn.id
+                        ? "bg-app-accent/5"
+                        : "text-app-muted hover:text-[var(--color-app-text)]",
+                    dropTargetId === conn.id && "bg-app-accent/20 border-app-accent ring-2 ring-app-accent/30"
+                )}
+                onClick={(e) => {
+                    // Single Click: Selection only (if we implemented it) or Nothing as requested
+                    e.preventDefault();
+                    // Do nothing for now
+                }}
+                onContextMenu={(e) => {
+                    // Right Click: Context Menu
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setContextMenu({ x: e.clientX, y: e.clientY, connectionId: conn.id });
+                }}
+                onDoubleClick={() => openTab(conn.id)}
+                draggable
+                onDragStart={(e) => {
+                    e.dataTransfer.setData('connection-id', conn.id);
+                    e.dataTransfer.effectAllowed = 'move';
+                    // Optional: set custom drag image
+                }}
+                onDragOver={(e) => {
+                    const dragSource = getCurrentDragSource();
+                    if (dragSource && dragSource.connectionId !== conn.id && conn.status === 'connected') {
+                        e.preventDefault();
+                        setDropTargetId(conn.id);
+                    }
+                }}
+                onDragLeave={() => setDropTargetId(null)}
+                onDrop={async (e) => {
+                    e.preventDefault();
+                    setDropTargetId(null);
+                    try {
+                        const jsonData = e.dataTransfer.getData('application/json');
+                        if (jsonData) {
+                            const dragData = JSON.parse(jsonData);
+                            if (dragData.type === 'server-file' && dragData.connectionId !== conn.id) {
+                                // Get home directory first
+                                let destPath: string;
+                                try {
+                                    const homeDir = await window.ipcRenderer.invoke('sftp:cwd', { id: conn.id });
+                                    const fileName = dragData.name;
+                                    destPath = homeDir === '/' ? `/${fileName}` : `${homeDir}/${fileName}`;
+                                } catch (err) {
+                                    showToast('error', 'Failed to get home directory');
+                                    return;
+                                }
+
+                                const transferId = addTransfer({
+                                    sourceConnectionId: dragData.connectionId,
+                                    sourcePath: dragData.path,
+                                    destinationConnectionId: conn.id,
+                                    destinationPath: destPath
+                                });
+
+                                showToast('info', `Copying to ${conn.name || conn.host}...`);
+
+                                (async () => {
+                                    try {
+                                        await window.ipcRenderer.invoke('sftp:copyToServer', {
+                                            sourceConnectionId: dragData.connectionId,
+                                            sourcePath: dragData.path,
+                                            destinationConnectionId: conn.id,
+                                            destinationPath: destPath,
+                                            transferId
+                                        });
+                                    } catch (error: any) {
+                                        if (error.message && !error.message.includes('destroy')) {
+                                            showToast('error', `Transfer failed: ${error.message}`);
+                                        }
+                                    }
+                                })();
+                            }
+                        }
+                    } catch (err) { }
+                }}
+            >
+
+                {/* Active Marker Line (Left) */}
+                {activeConnectionId === conn.id && (
+                    <div className="absolute left-0 top-1/2 -translate-y-1/2 h-6 w-1 bg-app-accent shadow-[0_0_12px_rgba(var(--color-app-accent),0.6)] rounded-r-full" />
+                )}
+
+                {/* Icon */}
+                <div className={cn(
+                    "relative shrink-0 flex items-center justify-center transition-all duration-300",
+                    compactMode ? "h-7 w-7" : "h-9 w-9", // Slightly smaller
+                    // Clean look: No background box
+                    "bg-transparent"
+                )}>
+                    <OSIcon
+                        icon={conn.icon || 'Server'}
+                        className={cn(
+                            "transition-transform duration-500",
+                            compactMode ? "w-4 h-4" : "w-[18px] h-[18px]",
+                            activeConnectionId === conn.id ? "text-app-accent" : "text-app-muted group-hover:text-[var(--color-app-text)] group-hover:scale-110"
+                        )}
+                    />
+
+                    {/* Status Dot */}
+                    {conn.status === 'connected' && (
+                        <div className={cn(
+                            "absolute -bottom-1 -right-1 h-3 w-3 rounded-full shadow-sm",
+                            hasTab
+                                ? "bg-app-success border-2 border-app-panel animate-pulse-slow" // Active Session
+                                : "bg-transparent border-2 border-app-accent/60" // Background/Tunnel Only (Hollow)
+                        )} title={hasTab ? "Connected" : "Tunnel/Background Active"} />
+                    )}
+                </div>
+
+                {!isCollapsed && (
+                    <div className="flex flex-col overflow-hidden min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                            <span className={cn(
+                                "truncate font-medium leading-tight transition-colors",
+                                compactMode ? "text-sm" : "text-[14px]",
+                                activeConnectionId === conn.id ? "text-app-text font-semibold" : "text-app-text/80 group-hover:text-app-text"
+                            )}>
+                                {conn.name || conn.host}
+                            </span>
+
+                            {/* Hover Actions */}
+                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button
+                                    className="p-1 rounded hover:bg-app-surface hover:text-app-text text-app-muted transition-colors"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        onEdit(conn);
+                                    }}
+                                    title="Edit Connection"
+                                >
+                                    <Settings size={10} />
+                                </button>
+                            </div>
+                        </div>
+                        <span className={cn(
+                            "truncate leading-tight",
+                            compactMode ? "text-[10px] mt-0.5" : "text-xs mt-0.5",
+                            "text-app-muted/50 font-mono group-hover:text-app-muted/70 transition-colors"
+                        )}>
+                            {conn.username}@{conn.host}
+                        </span>
+
+                    </div>
+                )}
+            </div>
+
+            {/* Context Menu */}
+            {
+                contextMenu && (
+                    <ContextMenu
+                        x={contextMenu.x}
+                        y={contextMenu.y}
+                        items={[
+                            {
+                                label: conn.status === 'connected' ? "Disconnect" : "Connect",
+                                action: () => {
+                                    if (conn.status === 'connected') {
+                                        disconnect(conn.id);
+                                    } else {
+                                        connect(conn.id);
+                                        openTab(conn.id);
+                                    }
+                                }
+                            },
+                            {
+                                label: "Details",
+                                action: () => onViewDetails(conn)
+                            },
+                            {
+                                label: "Edit",
+                                action: () => onEdit(conn)
+                            },
+                            {
+                                label: "Delete",
+                                variant: "danger",
+                                action: () => {
+                                    if (confirm('Are you sure you want to delete this connection?')) {
+                                        deleteConnection(conn.id);
+                                    }
+                                }
+                            }
+                        ]}
+                        onClose={() => setContextMenu(null)}
+                    />
+                )
+            }
+        </>
+    );
+}
+
+function RenameFolderModal({ isOpen, onClose, currentName, currentTags, onRename }: { isOpen: boolean; onClose: () => void; currentName: string; currentTags: string[]; onRename: (name: string, tags: string[]) => void }) {
+    const [name, setName] = useState(currentName);
+    const [tags, setTags] = useState<string[]>([]);
+
+    useEffect(() => {
+        setName(currentName);
+        setTags(currentTags || []);
+    }, [currentName, currentTags, isOpen]);
+
+    return (
+        <Modal isOpen={isOpen} onClose={onClose} title="Rename Folder">
+            <div className="flex flex-col items-center pt-2 pb-4 px-2">
+                <div className="mb-6 relative">
+                    <div className="absolute inset-0 bg-app-accent/20 blur-xl rounded-full" />
+                    <div className="relative bg-app-bg border border-app-border p-4 rounded-2xl shadow-xl">
+                        <Pencil className="h-8 w-8 text-app-accent" />
+                    </div>
+                </div>
+                <div className="w-full space-y-4">
+                    <Input
+                        label="Folder Name"
+                        value={name}
+                        onChange={e => setName(e.target.value)}
+                        autoFocus
+                        className="py-2.5 text-center font-medium bg-app-surface/50 border-app-border focus:bg-app-bg transition-all"
+                        onKeyDown={e => e.key === 'Enter' && onRename(name, tags)}
+                    />
+
+                    {/* Tags Input */}
+                    <div className="space-y-2">
+                        <label className="text-xs font-semibold text-app-muted uppercase tracking-wider block">Tags</label>
+                        <div className="flex gap-2">
+                            <Input
+                                placeholder="Add a tag..."
+                                className="flex-1 text-xs"
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                        const val = e.currentTarget.value.trim();
+                                        if (val && !tags.includes(val)) {
+                                            setTags([...tags, val]);
+                                            e.currentTarget.value = '';
+                                        }
+                                    }
+                                }}
+                            />
+                        </div>
+                        <div className="flex flex-wrap gap-2 min-h-[24px]">
+                            {tags.map(tag => (
+                                <span key={tag} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-app-surface border border-app-border text-xs font-medium text-app-text">
+                                    {tag}
+                                    <button
+                                        onClick={() => setTags(tags.filter(t => t !== tag))}
+                                        className="hover:text-red-400 transition-colors"
+                                    >
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                                    </button>
+                                </span>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 pt-2">
+                        <Button variant="ghost" onClick={onClose} className="w-full hover:bg-app-surface text-app-muted hover:text-app-text">Cancel</Button>
+                        <Button onClick={() => onRename(name, tags)} className="w-full bg-app-accent hover:bg-app-accent/90 text-white shadow-lg shadow-app-accent/20">Save Changes</Button>
+                    </div>
+                </div>
+            </div>
+        </Modal>
+    );
+}
+
+function FolderItem({
+    node,
+    isCollapsed,
+    compactMode,
+    expandedFolders,
+    toggleFolder,
+    updateConnectionFolder,
+    deleteFolder,
+    onRenameFolder,
+    renameFolder, // Direct context action for DnD
+    connectionItemProps
+}: {
+    node: TreeNode;
+    isCollapsed: boolean;
+    compactMode: boolean;
+    expandedFolders: Set<string>;
+    toggleFolder: (p: string) => void;
+    updateConnectionFolder: (id: string, f: string) => void;
+    deleteFolder: (f: string) => void;
+    onRenameFolder: (f: string) => void;
+    renameFolder: (oldName: string, newName: string) => void;
+    connectionItemProps: { onEdit: any; onViewDetails: any }
+}) {
+    const isExpanded = expandedFolders.has(node.path);
+
+
+    return (
+        <div className={cn("select-none transition-all duration-200", isExpanded && isCollapsed && "bg-app-surface/30 rounded-2xl pb-1 mb-2 border border-app-border/20")}>
+            <div
+                className={cn(
+                    "flex items-center group cursor-pointer transition-colors mb-1 rounded-lg relative select-none",
+                    isCollapsed
+                        ? "justify-center mx-auto w-10 h-10 hover:bg-app-surface/50 my-1"
+                        : cn(compactMode ? "px-2 py-1 text-xs gap-2" : "px-4 py-1.5 text-sm gap-2", "text-app-muted hover:text-app-text hover:bg-app-surface/30")
+                )}
+                onClick={() => toggleFolder(node.path)}
+                draggable
+                onDragStart={(e) => {
+                    e.dataTransfer.setData('folder-path', node.path);
+                    e.dataTransfer.effectAllowed = 'move';
+                }}
+                onDragOver={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    // Prevent dropping parent into child or self
+                    // We need to know what we are dragging. If it's a folder, check for cycles.
+                    // This is hard to check in dragOver without storing "draggingFolder" in state.
+                    // For now, just allow drop visual, and validate in onDrop.
+                    e.currentTarget.classList.add('bg-app-accent/10');
+                }}
+                onDragLeave={(e) => {
+                    e.currentTarget.classList.remove('bg-app-accent/10');
+                }}
+                onDrop={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.currentTarget.classList.remove('bg-app-accent/10');
+
+                    const connId = e.dataTransfer.getData('connection-id');
+                    const srcFolderPath = e.dataTransfer.getData('folder-path');
+
+                    if (connId) {
+                        // Connection Drop -> Move Connection to this Folder
+                        updateConnectionFolder(connId, node.path);
+                    } else if (srcFolderPath) {
+                        // Folder Drop -> Nest Folder
+                        // Validate:
+                        // 1. Not self
+                        if (srcFolderPath === node.path) return;
+                        // 2. Not dropping Parent into Child (Target starts with Source/)
+                        if (node.path.startsWith(srcFolderPath + '/')) return;
+                        // 3. Not dropping into immediate Parent (Target is same as Source's parent)
+                        // Actually, renaming 'A' to 'Target/A' handles this (it just becomes same path).
+
+                        const newName = `${node.path}/${srcFolderPath.split('/').pop()}`;
+                        renameFolder(srcFolderPath, newName);
+                    }
+                }}
+            >
+                {isCollapsed ? (
+                    <div className={cn(
+                        "flex items-center justify-center w-8 h-8 rounded-lg border text-app-muted font-bold shadow-sm transition-all",
+                        isExpanded
+                            ? "bg-app-accent/20 border-app-accent/50 text-app-accent shadow-md"
+                            : "bg-app-surface/50 border-app-border/30 group-hover:border-app-accent/30 group-hover:text-app-text"
+                    )} title={node.name}>
+                        {node.name.charAt(0).toUpperCase()}
+                    </div>
+                ) : (
+                    <>
+                        <div className={cn("transition-transform duration-200", isExpanded ? "rotate-90" : "")}>
+                            <ChevronRight size={compactMode ? 12 : 14} />
+                        </div>
+                        {isExpanded ? <FolderOpen size={compactMode ? 14 : 16} className="text-app-accent/80" /> : <FolderIcon size={compactMode ? 14 : 16} />}
+                        <span className="font-semibold truncate flex-1 flex items-center gap-2">
+                            {node.name}
+                        </span>
+                        <span className="ml-auto text-[10px] opacity-0 group-hover:opacity-60 mr-2">{node.connections.length}</span>
+
+                        <div className="flex opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-5 w-5 hover:text-app-text"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onRenameFolder(node.path);
+                                }}
+                            >
+                                <Pencil className="h-3 w-3" />
+                            </Button>
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-5 w-5 hover:text-red-400"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (confirm(`Delete folder "${node.name}"?`)) {
+                                        deleteFolder(node.path);
+                                    }
+                                }}
+                            >
+                                <Trash2 className="h-3 w-3" />
+                            </Button>
+                        </div>
+                    </>
+                )}
+            </div>
+
+            {
+                isExpanded && (
+                    <div className={cn(
+                        "space-y-1",
+                        !isCollapsed && "border-l border-app-border/30 ml-4 pl-1",
+                        compactMode ? "mb-1" : "mb-2",
+                        isCollapsed && "flex flex-col items-center gap-1"
+                    )}>
+                        {Object.keys(node.children).sort().map(key => (
+                            <FolderItem
+                                key={key}
+                                node={node.children[key]}
+                                isCollapsed={isCollapsed}
+                                compactMode={compactMode}
+                                expandedFolders={expandedFolders}
+                                toggleFolder={toggleFolder}
+                                updateConnectionFolder={updateConnectionFolder}
+                                deleteFolder={deleteFolder}
+                                onRenameFolder={onRenameFolder}
+                                renameFolder={renameFolder}
+                                connectionItemProps={connectionItemProps}
+                            />
+                        ))}
+                        {node.connections.map((conn: Connection) => (
+                            <ConnectionItem
+                                key={conn.id}
+                                conn={conn}
+                                isCollapsed={isCollapsed}
+                                onEdit={connectionItemProps.onEdit}
+                                onViewDetails={connectionItemProps.onViewDetails}
+                            />
+                        ))}
+                    </div>
+                )
+            }
+        </div >
+    );
+}

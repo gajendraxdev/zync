@@ -1,0 +1,247 @@
+import { invoke } from '@tauri-apps/api/core';
+import { listen, UnlistenFn } from '@tauri-apps/api/event';
+
+// Map to track active listeners for cleanup
+const eventListeners = new Map<string, Map<Function, UnlistenFn>>();
+
+// Tauri IPC wrapper to replace Electron's ipcRenderer
+const ipcRenderer = {
+  send(channel: string, ...args: any[]): void {
+    // In Tauri, send() is replaced with invoke() since there's no fire-and-forget
+    // We'll call invoke but not wait for the result
+    const channelMap: Record<string, string> = {
+      'terminal:write': 'terminal_write',
+      'terminal:resize': 'terminal_resize',
+      'terminal:kill': 'terminal_close',
+    };
+
+    const tauriCommand = channelMap[channel] || channel.replace(':', '_');
+    const payload = args.length === 1 ? args[0] : { args };
+
+    invoke(tauriCommand, payload).catch((error) => {
+      console.error(`Tauri send() failed for ${channel} (${tauriCommand}):`, error);
+    });
+  },
+
+  on(channel: string, listener: (event: any, ...args: any[]) => void): () => void {
+    // Tauri uses events instead of IPC channels
+    const unsubscribe = async () => {
+      const unlisten = await listen(channel, (event) => {
+        // Map Tauri event { event: string, windowLabel: string, payload: T } 
+        // to Electron-like style (event wrapper, payload)
+        listener({ sender: null }, event.payload);
+      });
+
+      if (!eventListeners.has(channel)) {
+        eventListeners.set(channel, new Map());
+      }
+      eventListeners.get(channel)!.set(listener, unlisten);
+
+      return unlisten;
+    };
+
+    const unlistenPromise = unsubscribe();
+
+    // Return a function that can be called to unsubscribe
+    return () => {
+      unlistenPromise.then(unlisten => {
+        unlisten();
+        eventListeners.get(channel)?.delete(listener);
+      });
+    };
+  },
+
+  off(channel: string, listener: (event: any, ...args: any[]) => void): void {
+    const channelListeners = eventListeners.get(channel);
+    if (channelListeners && channelListeners.has(listener)) {
+      const unlisten = channelListeners.get(listener);
+      if (unlisten) {
+        unlisten();
+        channelListeners.delete(listener);
+      }
+    }
+  },
+
+  async invoke(channel: string, ...args: any[]): Promise<any> {
+    // Map Electron IPC channels to Tauri commands
+    const channelMap: Record<string, string> = {
+      'ssh:connect': 'ssh_connect',
+      'ssh:disconnect': 'ssh_disconnect',
+      'terminal:write': 'terminal_write',
+      'terminal:resize': 'terminal_resize',
+      'terminal:create': 'terminal_create',
+      'terminal:close': 'terminal_close',
+      'connections:get': 'connections_get',
+      'connections:save': 'connections_save',
+      'fs_list': 'fs_list',
+      'fs_read_file': 'fs_read_file',
+      'fs_write_file': 'fs_write_file',
+      'fs_cwd': 'fs_cwd',
+      'fs_mkdir': 'fs_mkdir',
+      'fs_rename': 'fs_rename',
+      'fs_delete': 'fs_delete',
+      'fs_copy': 'fs_copy',
+      'fs_exists': 'fs_exists',
+      'tunnel:getAll': 'tunnel_get_all',
+      'tunnel:startLocal': 'tunnel_start_local',
+      'tunnel:startRemote': 'tunnel_start_remote',
+      'tunnel:stop': 'tunnel_stop',
+      'ssh:exec': 'ssh_exec',
+      'ssh:test': 'ssh_test_connection',
+      'ssh:extract-pem': 'ssh_extract_pem',
+      'ssh:migrate-all-keys': 'ssh_migrate_all_keys',
+      'ssh:importConfig': 'ssh_import_config',
+      'ssh:readConfig': 'ssh_import_config',
+      'sftp:put': 'sftp_put',
+      'tunnel:list': 'tunnel_list',
+      'tunnel:save': 'tunnel_save',
+      'tunnel:delete': 'tunnel_delete',
+      'window:is-maximized': 'window_is_maximized',
+      // Dialog commands handled specially below
+      'dialog:openFile': 'dialog_open_file',
+      'dialog:openDirectory': 'dialog_open_directory',
+      'shell:open': 'shell_open',
+    };
+
+    const tauriCommand = channelMap[channel] || channel.replace(':', '_');
+
+    try {
+      // Handle Dialog commands locally via plugin
+      if (channel === 'dialog:openFile') {
+        const { open } = await import('@tauri-apps/plugin-dialog');
+        const result = await open({
+          multiple: true,
+          directory: false,
+        });
+        // Electron expects { filePaths: string[], canceled: boolean }
+        if (result === null) return { filePaths: [], canceled: true };
+        const paths = Array.isArray(result) ? result : [result];
+        return { filePaths: paths, canceled: false };
+      }
+
+      if (channel === 'dialog:openDirectory') {
+        const { open } = await import('@tauri-apps/plugin-dialog');
+        const result = await open({
+          multiple: false,
+          directory: true,
+        });
+        if (result === null) return { filePaths: [], canceled: true };
+        const paths = Array.isArray(result) ? result : [result];
+        return { filePaths: paths, canceled: false };
+      }
+
+      // Tauri invoke expects a single object as the argument with named keys
+      let payload = args.length === 1 && typeof args[0] === 'object' ? args[0] : { args };
+
+      // Manual argument mapping for mismatched commands
+      if (tauriCommand === 'ssh_connect' || tauriCommand === 'ssh_test_connection') {
+        payload = { config: args[0] };
+      } else if (tauriCommand === 'ssh_disconnect') {
+        payload = { id: args[0] };
+      } else if (tauriCommand === 'ssh_exec') {
+        // Handle both object style {connectionId, command} and positional args
+        if (args.length === 1 && typeof args[0] === 'object' && 'connectionId' in args[0]) {
+          payload = { connectionId: args[0].connectionId, command: args[0].command };
+        } else {
+          payload = { connectionId: args[0], command: args[1] };
+        }
+      } else if (tauriCommand === 'fs_list' || tauriCommand === 'fs_read_file' || tauriCommand === 'fs_mkdir' || tauriCommand === 'fs_delete' || tauriCommand === 'fs_exists') {
+        if (args.length === 1 && typeof args[0] === 'object' && 'connectionId' in args[0]) {
+          payload = { connection_id: args[0].connectionId, path: args[0].path };
+        } else {
+          payload = { connection_id: args[0], path: args[1] };
+        }
+      } else if (tauriCommand === 'fs_write_file') {
+        if (args.length === 1 && typeof args[0] === 'object' && 'connectionId' in args[0]) {
+          payload = args[0];
+        } else {
+          payload = { connection_id: args[0], path: args[1], content: args[2] };
+        }
+      } else if (tauriCommand === 'fs_rename') {
+        if (args.length === 1 && typeof args[0] === 'object' && 'connectionId' in args[0]) {
+          payload = { connection_id: args[0].connectionId, old_path: args[0].oldPath, new_path: args[0].newPath };
+        } else {
+          payload = { connection_id: args[0], old_path: args[1], new_path: args[2] };
+        }
+      } else if (tauriCommand === 'fs_copy') {
+        if (args.length === 1 && typeof args[0] === 'object' && 'connectionId' in args[0]) {
+          payload = { connection_id: args[0].connectionId, from: args[0].from, to: args[0].to };
+        } else {
+          payload = { connection_id: args[0], from: args[1], to: args[2] };
+        }
+      } else if (tauriCommand === 'tunnel_list') {
+        if (args.length === 1 && typeof args[0] === 'string') {
+          payload = { connection_id: args[0] };
+        } else if (args.length === 1 && typeof args[0] === 'object' && 'connectionId' in args[0]) {
+          // Handle object if passed as { connectionId: ... }
+          payload = { connection_id: args[0].connectionId };
+        }
+      } else if (tauriCommand === 'tunnel_save') {
+        payload = { tunnel: args[0] };
+      } else if (tauriCommand === 'tunnel_delete') {
+        if (args.length === 1 && typeof args[0] === 'string') {
+          payload = { id: args[0] };
+        } else if (args.length === 2) {
+          // tunnelSlice calls deleteTunnel(id, connectionId) -> ipc.invoke('tunnel:delete', id)
+          // args[0] is id.
+          payload = { id: args[0] };
+        }
+      } else if (tauriCommand === 'tunnel_start') {
+        // args[0] is id
+        payload = { id: args[0] };
+      } else if (tauriCommand === 'tunnel_stop') {
+        payload = { id: args[0] };
+      } else if (tauriCommand === 'fs_cwd') {
+        if (args.length === 1 && typeof args[0] === 'object' && 'connectionId' in args[0]) {
+          payload = { connection_id: args[0].connectionId };
+        } else {
+          payload = { connection_id: args[0] };
+        }
+      } else if (tauriCommand === 'ssh_extract_pem') {
+        payload = { path: args[0] };
+      } else if (tauriCommand === 'shell_open') {
+        payload = { path: args[0] };
+      }
+
+      if (tauriCommand === 'ssh_migrate_all_keys') {
+        payload = {};
+      }
+
+      return await invoke(tauriCommand, payload);
+    } catch (error) {
+      console.error(`Tauri invoke failed for ${channel} (${tauriCommand}):`, error);
+      throw error;
+    }
+  },
+
+};
+
+// Platform detection
+const platform = typeof navigator !== 'undefined'
+  ? (navigator.platform.toLowerCase().includes('mac') ? 'darwin' :
+    navigator.platform.toLowerCase().includes('win') ? 'win32' : 'linux')
+  : 'linux';
+
+const electronUtils = {
+  getPathForFile(file: File): string {
+    // In Tauri, we'll handle file paths differently
+    // For now, return a placeholder
+    return (file as any).path || '';
+  },
+  platform,
+};
+
+// Extend window object
+declare global {
+  interface Window {
+    ipcRenderer: typeof ipcRenderer;
+    electronUtils: typeof electronUtils;
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.ipcRenderer = ipcRenderer;
+  window.electronUtils = electronUtils;
+}
+
+export { ipcRenderer, electronUtils };
