@@ -27,6 +27,40 @@ Get the latest release for your platform from our [Releases Page](https://github
 *   [React](https://reactjs.org/) + [TypeScript](https://www.typescriptlang.org/) - For the dynamic and responsive frontend.
 *   [Vite](https://vitejs.dev/) - Next generation frontend tooling.
 
+## 🏗️ Development
+
+### Prerequisites
+
+*   [Node.js](https://nodejs.org/) (LTS)
+*   [Rust](https://www.rust-lang.org/tools/install) (latest stable)
+*   **Linux Dependencies** (Ubuntu/Debian):
+    ```bash
+    sudo apt-get install libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+    ```
+
+### Build from Source
+
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/FDgajju/zync.git
+    cd zync
+    ```
+
+2.  **Install dependencies:**
+    ```bash
+    npm install
+    ```
+
+3.  **Run in development mode:**
+    ```bash
+    npm run tauri dev
+    ```
+
+4.  **Build for production:**
+    ```bash
+    npm run tauri build
+    ```
+
 ## 📄 License
 
 MIT © [Zync](https://github.com/FDgajju/zync)
