@@ -47,6 +47,17 @@ jobs:
         run: |
           node -e 'const fs=require("fs"); let c=JSON.parse(fs.readFileSync("src-tauri/tauri.conf.json")); c.identifier="com.zync.desktop"; fs.writeFileSync("src-tauri/tauri.conf.json", JSON.stringify(c, null, 2));'
 
+      - name: Debug - Check Secret Presence
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "Error: TAURI_SIGNING_PRIVATE_KEY is empty or not set!"
+            exit 1
+          else
+            echo "Success: TAURI_SIGNING_PRIVATE_KEY is found (length: ${#TAURI_SIGNING_PRIVATE_KEY})."
+          fi
+
       - name: Build the app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -59,3 +70,8 @@ jobs:
           releaseBody: "See the assets to download this version and install."
           releaseDraft: true
           prerelease: false
+
+      - name: Debug - List Build Artifacts
+        run: |
+          echo "Listing artifacts in target/release/bundle:"
+          find src-tauri/target/release/bundle -maxdepth 3 -ls || echo "Directory not found"
