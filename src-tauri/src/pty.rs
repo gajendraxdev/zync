@@ -72,6 +72,15 @@ impl PtyManager {
         let mut cmd = CommandBuilder::new(shell);
         cmd.env("TERM", "xterm-256color");
 
+        // Fix for AppImage: Unset LD_LIBRARY_PATH and other vars to prevent
+        // bundled libraries from interfering with system binaries (like git).
+        if cfg!(target_os = "linux") {
+            cmd.env_remove("LD_LIBRARY_PATH");
+            cmd.env_remove("APPIMAGE");
+            cmd.env_remove("APPDIR");
+            cmd.env_remove("OWD");
+        }
+
         let _child = pair
             .slave
             .spawn_command(cmd)
