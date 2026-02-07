@@ -420,6 +420,14 @@ export function MainLayout({ children }: { children: ReactNode }) {
 
     const checkConfig = async () => {
         try {
+            // On Windows, skip wizard entirely (backend auto-configures, and in browser dev mode we don't need wizard)
+            const isWindows = navigator.userAgent.includes('Windows');
+            if (isWindows) {
+                setIsLoading(false);
+                return;
+            }
+
+            // Mac/Linux: Check config and show wizard if needed
             const config = await ipc.invoke('config:get');
             if (!config || !config.isConfigured) {
                 setShowWizard(true);
