@@ -344,6 +344,9 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
         } catch (error) {
             console.error('Failed to disconnect backend:', error);
         } finally {
+            // Clear terminals for this connection to ensure fresh terminals on reconnect
+            get().clearTerminals(id);
+
             // Always update state to disconnected to ensure UI reflects closure
             set(state => ({
                 connections: state.connections.map(c => c.id === id ? { ...c, status: 'disconnected' } : c)
@@ -446,6 +449,11 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                 // Original context asked for confirmation then disconnected.
                 get().disconnect(conn.id);
             }
+        }
+
+        // Also clear terminals for local connection when closing local tab
+        if (tab && tab.connectionId === 'local') {
+            get().clearTerminals('local');
         }
 
         set(state => {
