@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
-import { useAppStore, Connection } from '../../store/useAppStore';
-import { Laptop, Search, CheckCircle2, AlertCircle, Loader2, FolderOpen } from 'lucide-react';
+// import { useAppStore, Connection } from '../../store/useAppStore';
+import { CheckCircle2, AlertCircle, Loader2, FolderOpen } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { OSIcon } from '../icons/OSIcon';
 
@@ -82,6 +82,7 @@ export function ImportSshModal({ isOpen, onClose, onImport }: ImportSshModalProp
                 internalizedCount = internalizeResult.filter((c, i) =>
                     c.privateKeyPath && c.privateKeyPath !== selected[i].privateKeyPath
                 ).length;
+                console.log(`[Import] Internalized keys for ${internalizedCount} connections.`);
 
                 onImport(internalizeResult);
             } else {
