@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { Modal } from '../ui/Modal';
 import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';
@@ -8,6 +8,9 @@ import { useAppStore, Connection } from '../../store/useAppStore';
 import { open } from '@tauri-apps/plugin-dialog';
 import { cn } from '../../lib/utils';
 import { Laptop, Key, Settings as SettingsIcon, ShieldCheck, CheckCircle2, AlertCircle, Loader2, FileText } from 'lucide-react';
+import { showToast } from '../ui/Toast';
+
+const ImportSshModal = lazy(() => import('./ImportSshModal').then(mod => ({ default: mod.ImportSshModal })));
 
 interface AddConnectionModalProps {
     isOpen: boolean;
@@ -73,6 +76,9 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
             }
         }
     }, [isOpen, editingConnectionId, connections]);
+
+    const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+
 
     const handleSave = () => {
         if (!formData.host || !formData.username) return;
@@ -426,23 +432,7 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
 
                     <div className="flex items-center justify-between gap-4">
                         {!editingConnectionId && (
-                            <Button variant="ghost" size="sm" onClick={async () => {
-                                if (confirm('Import connections from ~/.ssh/config? This will skip duplicates.')) {
-                                    try {
-                                        const configs = await window.ipcRenderer.invoke('ssh:importConfig');
-                                        if (configs && configs.length > 0) {
-                                            importConnections(configs);
-                                            alert(`Imported ${configs.length} connections.`);
-                                            onClose();
-                                        } else {
-                                            alert('No connections found in config file.');
-                                        }
-                                    } catch (e: any) {
-                                        console.error(e);
-                                        alert('Failed to import: ' + (e.message || e));
-                                    }
-                                }
-                            }}>
+                            <Button variant="ghost" size="sm" onClick={() => setIsImportModalOpen(true)}>
                                 <FileText className="w-4 h-4 mr-2" />
                                 Import Config
                             </Button>
@@ -477,6 +467,22 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
                     </div>
                 </div>
             </div>
-        </Modal>
+
+
+            {/* Import Modal */}
+            <Suspense fallback={null}>
+                {isImportModalOpen && (
+                    <ImportSshModal
+                        isOpen={isImportModalOpen}
+                        onClose={() => setIsImportModalOpen(false)}
+                        onImport={(configs) => {
+                            importConnections(configs);
+                            showToast(`Imported ${configs.length} connections.`, 'success');
+                            onClose(); // Close parent modal too
+                        }}
+                    />
+                )}
+            </Suspense>
+        </Modal >
     );
 }

@@ -12,6 +12,34 @@ use tokio::sync::Mutex;
 use crate::tunnel::TunnelManager;
 use serde::Serialize;
 
+/// Helper function to get the data directory.
+/// Reads the configured `dataPath` from settings.json if available,
+/// otherwise falls back to the default app_data_dir.
+/// This ensures user-selected paths from the setup wizard are respected on all platforms.
+pub fn get_data_dir(app: &AppHandle) -> std::path::PathBuf {
+    let default_dir = app.path().app_data_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let settings_path = default_dir.join("settings.json");
+    
+    if settings_path.exists() {
+        if let Ok(data) = std::fs::read_to_string(&settings_path) {
+            if let Ok(settings) = serde_json::from_str::<serde_json::Value>(&data) {
+                if let Some(data_path) = settings.get("dataPath").and_then(|v| v.as_str()) {
+                    if !data_path.is_empty() {
+                        let custom_dir = std::path::PathBuf::from(data_path);
+                        // Ensure the directory exists
+                        if !custom_dir.exists() {
+                            let _ = std::fs::create_dir_all(&custom_dir);
+                        }
+                        return custom_dir;
+                    }
+                }
+            }
+        }
+    }
+    
+    default_dir
+}
+
 #[derive(Debug, Serialize, Clone)]
 pub struct TunnelStatusChange {
     pub id: String,
@@ -207,8 +235,7 @@ pub async fn ssh_extract_pem(
     app_handle: tauri::AppHandle,
     path: String,
 ) -> Result<String, String> {
-    use tauri::Manager;
-    let data_dir = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    let data_dir = get_data_dir(&app_handle);
     let keys_dir = data_dir.join("keys");
     
     if !keys_dir.exists() {
@@ -247,8 +274,7 @@ pub async fn ssh_extract_pem(
 
 #[tauri::command]
 pub async fn ssh_migrate_all_keys(app_handle: tauri::AppHandle) -> Result<usize, String> {
-    use tauri::Manager;
-    let data_dir = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    let data_dir = get_data_dir(&app_handle);
     let connections_path = data_dir.join("connections.json");
 
     if !connections_path.exists() {
@@ -273,9 +299,18 @@ pub async fn ssh_migrate_all_keys(app_handle: tauri::AppHandle) -> Result<usize,
 
             let src_path = std::path::Path::new(path);
             
+            // Canonicalize paths to ensure robust comparison (handles symlinks, etc.)
+            let data_dir_canonical = data_dir.canonicalize().unwrap_or_else(|_| data_dir.clone());
+            // Note: If src_path doesn't exist, canonicalize might fail or behave oddly. 
+            // If it doesn't exist, we can't migrate it anyway.
+            let src_path_canonical = src_path.canonicalize().unwrap_or_else(|_| src_path.to_path_buf());
+
             // If the path is already inside the app data directory, skip it
-            if src_path.starts_with(&data_dir) {
+            if src_path_canonical.starts_with(&data_dir_canonical) {
                 continue;
+            } else {
+                 #[cfg(debug_assertions)]
+                 println!("[SSH Migration] Path {:?} (canonical: {:?}) does not start with data_dir {:?} (canonical: {:?}). Triggering migration check.", src_path, src_path_canonical, data_dir, data_dir_canonical);
             }
 
             if src_path.exists() && src_path.is_file() {
@@ -297,6 +332,8 @@ pub async fn ssh_migrate_all_keys(app_handle: tauri::AppHandle) -> Result<usize,
                     // Update the path even if we don't copy (in case it was partially migrated or already there)
                     conn.private_key_path = Some(dest_path.to_string_lossy().to_string());
                     changed = true;
+                    #[cfg(debug_assertions)]
+                    println!("[SSH Migration] Key already exists at dest, updating config path only: {:?}", dest_path);
                     continue;
                 }
 
@@ -326,7 +363,23 @@ pub async fn ssh_migrate_all_keys(app_handle: tauri::AppHandle) -> Result<usize,
 
     if changed {
         let json = serde_json::to_string_pretty(&saved_data).map_err(|e| e.to_string())?;
-        std::fs::write(connections_path, json).map_err(|e| e.to_string())?;
+        
+        // Use OpenOptions to truncate and write, then sync_all to ensure durability
+        use std::fs::OpenOptions;
+        use std::io::Write;
+        
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&connections_path)
+            .map_err(|e| e.to_string())?;
+            
+        file.write_all(json.as_bytes()).map_err(|e| e.to_string())?;
+        file.sync_all().map_err(|e| e.to_string())?;
+
+        #[cfg(debug_assertions)]
+        println!("[SSH Migration] Successfully saved and synced updated connections.json to {:?}", connections_path);
     }
 
     Ok(migrated_count)
@@ -379,7 +432,7 @@ pub async fn terminal_resize(
 
 #[tauri::command]
 pub async fn connections_get(app: AppHandle) -> Result<SavedData, String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let data_dir = get_data_dir(&app);
     let file_path = data_dir.join("connections.json");
 
     if !file_path.exists() {
@@ -400,7 +453,7 @@ pub async fn connections_save(
 ) -> Result<(), String> {
     let data = SavedData { connections, folders };
     
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let data_dir = get_data_dir(&app);
     if !data_dir.exists() {
         std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
     }
@@ -419,16 +472,17 @@ pub async fn terminal_create(
     connection_id: String,
     cols: u16,
     rows: u16,
+    shell: Option<String>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    println!("[TERM] Creating terminal for connection {} with ID {}", connection_id, term_id);
+    println!("[TERM] Creating terminal for connection {} with ID {}, shell: {:?}", connection_id, term_id, shell);
     
     // Check if this is a local or remote connection
     if connection_id == "local" {
         println!("[TERM] Creating local PTY session");
         // Use term_id (UUID) for the session, not connection_id
-        state.pty_manager.create_local_session(term_id.clone(), connection_id, cols, rows, app).await
+        state.pty_manager.create_local_session(term_id.clone(), connection_id, cols, rows, app, shell).await
             .map_err(|e| e.to_string())?;
         Ok(term_id)
     } else {
@@ -774,7 +828,7 @@ pub async fn tunnel_stop(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     // 1. Load tunnel config to reconstruct ID
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let data_dir = get_data_dir(&app);
     let file_path = data_dir.join("tunnels.json");
     if !file_path.exists() {
         return Ok(()); // Nothing to stop
@@ -855,7 +909,7 @@ pub async fn window_close(app: AppHandle) {
 #[tauri::command]
 pub async fn tunnel_list(app: AppHandle, state: State<'_, AppState>, connection_id: String) -> Result<Vec<SavedTunnel>, String> {
     // let connection_id = connectionId; // Resolved: using snake_case directly
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let data_dir = get_data_dir(&app);
     let file_path = data_dir.join("tunnels.json");
 
     if !file_path.exists() {
@@ -895,7 +949,7 @@ pub async fn tunnel_list(app: AppHandle, state: State<'_, AppState>, connection_
 
 #[tauri::command]
 pub async fn tunnel_save(app: AppHandle, tunnel: SavedTunnel) -> Result<(), String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let data_dir = get_data_dir(&app);
     if !data_dir.exists() {
         std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
     }
@@ -923,7 +977,7 @@ pub async fn tunnel_save(app: AppHandle, tunnel: SavedTunnel) -> Result<(), Stri
 
 #[tauri::command]
 pub async fn tunnel_delete(app: AppHandle, id: String) -> Result<(), String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let data_dir = get_data_dir(&app);
     let file_path = data_dir.join("tunnels.json");
 
     if !file_path.exists() {
@@ -948,7 +1002,7 @@ pub async fn tunnel_start(
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     // 1. Load tunnel config
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let data_dir = get_data_dir(&app);
     let file_path = data_dir.join("tunnels.json");
     if !file_path.exists() {
         return Err("Tunnels file not found".to_string());
@@ -1006,7 +1060,7 @@ pub async fn tunnel_start(
 
 #[tauri::command]
 pub async fn tunnel_get_all(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<SavedTunnel>, String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let data_dir = get_data_dir(&app);
     let file_path = data_dir.join("tunnels.json");
 
     if !file_path.exists() {
@@ -1111,9 +1165,94 @@ pub async fn ssh_import_config(app: AppHandle) -> Result<Vec<crate::ssh_config::
     let home = app.path().home_dir().map_err(|e| e.to_string())?;
     let config_path = home.join(".ssh/config");
     
-    println!("[SSH] Importing config from: {:?}", config_path);
+    // println!("[SSH] Importing config from: {:?}", config_path);
     
     crate::ssh_config::parse_config(&config_path).map_err(|e| e.to_string())
+}
+
+/// Helper to internalize a single key file
+fn internalize_key(path: &str, data_dir: &std::path::Path) -> Option<String> {
+    if path.is_empty() {
+        return None;
+    }
+
+    let src_path = std::path::Path::new(path);
+    
+    // Canonicalize paths to ensure robust comparison
+    let data_dir_canonical = data_dir.canonicalize().unwrap_or_else(|_| data_dir.to_path_buf());
+    let src_path_canonical = src_path.canonicalize().unwrap_or_else(|_| src_path.to_path_buf());
+
+    // If already in data dir, return as is (but maybe canonicalized)
+    if src_path_canonical.starts_with(&data_dir_canonical) {
+        return None;
+    }
+
+    if !src_path.exists() || !src_path.is_file() {
+        // If we can't find it, we can't copy it.
+        return None; 
+    }
+
+    let keys_dir = data_dir.join("keys");
+    if !keys_dir.exists() {
+        let _ = std::fs::create_dir_all(&keys_dir);
+    }
+
+    let filename = src_path.file_name().unwrap_or_default().to_string_lossy();
+    
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    path.hash(&mut hasher);
+    let hash = hasher.finish();
+    let dest_filename = format!("{:x}_{}", hash, filename);
+    let dest_path = keys_dir.join(dest_filename);
+
+    if dest_path.exists() {
+        // Already exists? Use it.
+        return Some(dest_path.to_string_lossy().to_string());
+    }
+
+    match std::fs::copy(src_path, &dest_path) {
+        Ok(_) => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if let Ok(metadata) = std::fs::metadata(&dest_path) {
+                    let mut perms = metadata.permissions();
+                    perms.set_mode(0o600);
+                    let _ = std::fs::set_permissions(&dest_path, perms);
+                }
+            }
+            Some(dest_path.to_string_lossy().to_string())
+        }
+        Err(e) => {
+            eprintln!("[SSH Internalize] Failed to copy key from {:?} to {:?}: {}", src_path, dest_path, e);
+            None
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn ssh_internalize_connections(
+    app: AppHandle,
+    connections: Vec<crate::ssh_config::ParsedSshConnection>
+) -> Result<Vec<crate::ssh_config::ParsedSshConnection>, String> {
+    let data_dir = get_data_dir(&app);
+    let mut updated_connections = connections.clone();
+    let mut internalized_count = 0;
+
+    for conn in &mut updated_connections {
+        if let Some(path) = &conn.private_key_path {
+            if let Some(new_path) = internalize_key(path, &data_dir) {
+                conn.private_key_path = Some(new_path);
+                internalized_count += 1;
+            }
+        }
+    }
+    
+    #[cfg(debug_assertions)]
+    println!("[SSH Internalize] Internalized keys for {} connections", internalized_count);
+    Ok(updated_connections)
 }
 
 // Snippets Commands
@@ -1162,15 +1301,29 @@ pub async fn settings_set(
     app: AppHandle,
     settings: serde_json::Value,
 ) -> Result<(), String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    if !data_dir.exists() {
-        std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+    // Always write to the default app_data_dir for bootstrap purposes
+    let default_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    if !default_dir.exists() {
+        std::fs::create_dir_all(&default_dir).map_err(|e| e.to_string())?;
     }
 
-    let file_path = data_dir.join("settings.json");
     let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
     
-    std::fs::write(file_path, json).map_err(|e| e.to_string())?;
+    // Write to bootstrap location (app_data_dir)
+    let bootstrap_path = default_dir.join("settings.json");
+    std::fs::write(&bootstrap_path, &json).map_err(|e| e.to_string())?;
+    
+    // Also write to the configured dataPath if it's set
+    if let Some(data_path) = settings.get("dataPath").and_then(|v| v.as_str()) {
+        if !data_path.is_empty() {
+            let custom_dir = std::path::PathBuf::from(data_path);
+            if !custom_dir.exists() {
+                std::fs::create_dir_all(&custom_dir).map_err(|e| e.to_string())?;
+            }
+            let custom_settings_path = custom_dir.join("settings.json");
+            std::fs::write(custom_settings_path, &json).map_err(|e| e.to_string())?;
+        }
+    }
     
     Ok(())
 }
@@ -1366,6 +1519,13 @@ pub async fn shell_open(app: tauri::AppHandle, path: String) -> Result<(), Strin
 }
 
 #[tauri::command]
+pub async fn app_get_exe_dir() -> Result<String, String> {
+    let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
+    let exe_dir = exe_path.parent().ok_or("Could not get executable directory")?;
+    Ok(exe_dir.to_string_lossy().to_string())
+}
+
+#[tauri::command]
 pub async fn app_exit(app: tauri::AppHandle) {
     app.exit(0);
 }
@@ -1461,3 +1621,40 @@ pub async fn plugin_window_create(
 }
 
 
+#[tauri::command]
+pub async fn config_select_folder(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let path = app.dialog().file().blocking_pick_folder();
+    Ok(path.map(|p| p.to_string()))
+}
+
+#[tauri::command]
+pub async fn system_install_cli(app: AppHandle) -> Result<String, String> {
+    #[cfg(target_os = "windows")]
+    {
+         return Ok("Windows: Please add installation folder to PATH manually.".into());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        use tauri::Manager;
+        let home = app.path().home_dir().map_err(|e| e.to_string())?;
+        let local_bin = home.join(".local/bin");
+        
+        if !local_bin.exists() {
+             std::fs::create_dir_all(&local_bin).map_err(|e| e.to_string())?;
+        }
+
+        let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
+        let target_path = local_bin.join("zync");
+        
+        // Remove existing if any
+        if target_path.exists() {
+            std::fs::remove_file(&target_path).map_err(|e| e.to_string())?;
+        }
+
+        std::os::unix::fs::symlink(exe_path, &target_path).map_err(|e| e.to_string())?;
+        
+        Ok(format!("Installed zync to {:?}", target_path))
+    }
+}

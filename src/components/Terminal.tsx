@@ -106,16 +106,16 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
     }
   }, [settings.terminal]);
 
-  // Force fit and focus when visibility changes (e.g. switching tabs)
+  // Force fit and focus when visibility changes (e.g. switching tabs) or connection becomes active
   useEffect(() => {
-    if (isVisible && fitAddonRef.current && termRef.current) {
+    if (isVisible && isConnected && fitAddonRef.current && termRef.current) {
       // Small delay using requestAnimationFrame + setTimeout for layout stability
       const frameId = requestAnimationFrame(() => {
         const timer = setTimeout(() => {
           try {
             if (fitAddonRef.current) fitAddonRef.current.fit();
 
-            // Focus the terminal aggressively when it becomes visible
+            // Focus the terminal aggressively when it becomes visible or connected
             if (termRef.current) {
               termRef.current.focus();
 
@@ -132,7 +132,7 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
       });
       return () => cancelAnimationFrame(frameId);
     }
-  }, [isVisible, sessionId]);
+  }, [isVisible, sessionId, isConnected]);
 
   useEffect(() => {
     if (!containerRef.current || !activeConnectionId || !sessionId || !isConnected) return;
@@ -272,12 +272,24 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
     const cachedEntry = terminalCache.get(sessionId);
     if (cachedEntry && !cachedEntry.spawned) {
       cachedEntry.spawned = true;
+
+      // Get shell preference for local terminals on Windows
+      const isLocalTerminal = (connectionId || 'local') === 'local';
+      const shellSetting = isLocalTerminal ? settings.localTerm?.windowsShell : undefined;
+
+      // Clear any existing content from a previous session (fresh start)
+      if (!isNewTerminal) {
+        term.clear();
+        term.reset();
+      }
+
       window.ipcRenderer
         .invoke('terminal:create', {
           termId: sessionId,
           connectionId: connectionId || 'local',
           rows: term.rows,
           cols: term.cols,
+          shell: shellSetting,
         })
         .catch((err) => {
           console.error('Failed to create terminal:', err);
@@ -288,6 +300,38 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
     // Handle data from user input - only set up for new terminals
     if (isNewTerminal) {
       term.onData((data) => {
+        const cached = terminalCache.get(sessionId);
+
+        // Check if the PTY session has ended and needs restart
+        if (cached && !cached.spawned) {
+          console.log('[Terminal] Session ended, restarting on user input');
+          cached.spawned = true;
+
+          // Clear terminal for fresh start
+          term.clear();
+          term.reset();
+
+          // Get shell preference for local terminals on Windows
+          const isLocalTerminal = (connectionId || 'local') === 'local';
+          const shellSetting = isLocalTerminal ? settings.localTerm?.windowsShell : undefined;
+
+          // Respawn the terminal session
+          window.ipcRenderer
+            .invoke('terminal:create', {
+              termId: sessionId,
+              connectionId: connectionId || 'local',
+              rows: term.rows,
+              cols: term.cols,
+              shell: shellSetting,
+            })
+            .catch((err) => {
+              console.error('Failed to restart terminal:', err);
+              term.write(`\r\n\x1b[31mFailed to restart terminal session: ${err}\x1b[0m\r\n`);
+              cached.spawned = false;
+            });
+          return; // Don't send the input that triggered restart
+        }
+
         window.ipcRenderer.send('terminal:write', { termId: sessionId, data });
       });
     }
@@ -304,6 +348,18 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
         // Store the unlisten function
         if (terminalCache.has(sessionId)) {
           terminalCache.get(sessionId)!.unlisten = unlistenFn;
+        }
+      });
+
+      // Listen for terminal exit event to reset the spawned flag
+      listen<void>(`terminal-exit-${sessionId}`, () => {
+        console.log(`[Terminal] Session ${sessionId} exited`);
+        const cached = terminalCache.get(sessionId);
+        if (cached) {
+          // Reset spawned flag so terminal can be restarted
+          cached.spawned = false;
+          // Clear the terminal buffer and show exit message
+          term.write('\r\n\x1b[33m[Terminal session ended. Press Enter to restart.]\x1b[0m\r\n');
         }
       });
     }
