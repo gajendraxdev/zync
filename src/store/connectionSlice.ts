@@ -451,6 +451,11 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
             }
         }
 
+        // Also clear terminals for local connection when closing local tab
+        if (tab && tab.connectionId === 'local') {
+            get().clearTerminals('local');
+        }
+
         set(state => {
             const newTabs = state.tabs.filter(t => t.id !== tabId);
             let newActive = state.activeTabId;

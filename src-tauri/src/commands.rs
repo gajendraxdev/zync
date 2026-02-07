@@ -445,16 +445,17 @@ pub async fn terminal_create(
     connection_id: String,
     cols: u16,
     rows: u16,
+    shell: Option<String>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    println!("[TERM] Creating terminal for connection {} with ID {}", connection_id, term_id);
+    println!("[TERM] Creating terminal for connection {} with ID {}, shell: {:?}", connection_id, term_id, shell);
     
     // Check if this is a local or remote connection
     if connection_id == "local" {
         println!("[TERM] Creating local PTY session");
         // Use term_id (UUID) for the session, not connection_id
-        state.pty_manager.create_local_session(term_id.clone(), connection_id, cols, rows, app).await
+        state.pty_manager.create_local_session(term_id.clone(), connection_id, cols, rows, app, shell).await
             .map_err(|e| e.to_string())?;
         Ok(term_id)
     } else {

@@ -48,8 +48,9 @@ impl PtyManager {
         cols: u16,
         rows: u16,
         app_handle: AppHandle,
+        shell_override: Option<String>,
     ) -> Result<()> {
-        println!("[PTY-DEBUG] create_local_session called for {}", term_id);
+        println!("[PTY-DEBUG] create_local_session called for {} with shell override: {:?}", term_id, shell_override);
         
         // Check if session already exists to prevent duplicate spawns
         {
@@ -71,15 +72,43 @@ impl PtyManager {
             })
             .map_err(|e| anyhow!("Failed to open PTY: {}", e))?;
 
-        // Determine shell to use
-        let shell = if cfg!(target_os = "windows") {
-            "powershell.exe".to_string()
+        // Determine shell to use based on platform and user preference
+        let (shell, args): (String, Vec<String>) = if cfg!(target_os = "windows") {
+            match shell_override.as_deref() {
+                Some("cmd") => ("cmd.exe".to_string(), vec![]),
+                Some("gitbash") => {
+                    // Try common Git Bash locations
+                    let git_bash_paths = [
+                        "C:\\Program Files\\Git\\bin\\bash.exe",
+                        "C:\\Program Files (x86)\\Git\\bin\\bash.exe",
+                    ];
+                    let bash_path = git_bash_paths
+                        .iter()
+                        .find(|p| std::path::Path::new(p).exists())
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| "bash.exe".to_string());
+                    (bash_path, vec!["--login".to_string(), "-i".to_string()])
+                }
+                Some("wsl") => ("wsl.exe".to_string(), vec![]),
+                Some(wsl_distro) if wsl_distro.starts_with("wsl:") => {
+                    let distro = wsl_distro.strip_prefix("wsl:").unwrap_or("").to_string();
+                    ("wsl.exe".to_string(), vec!["-d".to_string(), distro])
+                }
+                Some("powershell") | Some("default") | None => ("powershell.exe".to_string(), vec![]),
+                Some(other) => {
+                    // Try to use it as a direct path or command
+                    (other.to_string(), vec![])
+                }
+            }
         } else {
-            std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
+            (std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string()), vec![])
         };
-        println!("[PTY-DEBUG] Using shell: {}", shell);
+        println!("[PTY-DEBUG] Using shell: {} with args: {:?}", shell, args);
 
-        let mut cmd = CommandBuilder::new(shell);
+        let mut cmd = CommandBuilder::new(&shell);
+        for arg in &args {
+            cmd.arg(arg);
+        }
         cmd.env("TERM", "xterm-256color");
 
         // Fix for AppImage: Unset LD_LIBRARY_PATH and other vars to prevent
@@ -102,6 +131,7 @@ impl PtyManager {
 
         // Spawn a task to read from PTY and emit events
         let term_id_clone = term_id.clone();
+        let app_handle_clone = app_handle.clone();
         let reader_handle = tokio::task::spawn_blocking(move || {
             println!("[PTY-DEBUG] Reader loop starting for {}", term_id_clone);
             let mut buf = [0u8; 8192];
@@ -109,6 +139,8 @@ impl PtyManager {
                 match reader.read(&mut buf) {
                     Ok(0) => {
                         println!("[PTY-DEBUG] EOF read for {}", term_id_clone);
+                        // Notify frontend that terminal exited
+                        let _ = app_handle_clone.emit(&format!("terminal-exit-{}", term_id_clone), ());
                         break; 
                     }, // EOF
                     Ok(n) => {
@@ -122,6 +154,8 @@ impl PtyManager {
                     }
                     Err(e) => {
                         eprintln!("Error reading from PTY: {}", e);
+                        // Notify frontend that terminal exited due to error
+                        let _ = app_handle_clone.emit(&format!("terminal-exit-{}", term_id_clone), ());
                         break;
                     }
                 }
