@@ -98,10 +98,12 @@ const ipcRenderer = {
       'tunnel:stop': 'tunnel_stop',
       'ssh:exec': 'ssh_exec',
       'ssh:test': 'ssh_test_connection',
+
       'ssh:extract-pem': 'ssh_extract_pem',
       'ssh:migrate-all-keys': 'ssh_migrate_all_keys',
       'ssh:importConfig': 'ssh_import_config',
       'ssh:readConfig': 'ssh_import_config',
+      'ssh:internalize-connections': 'ssh_internalize_connections',
       'sftp:put': 'sftp_put',
       'tunnel:list': 'tunnel_list',
       'tunnel:save': 'tunnel_save',
@@ -112,6 +114,7 @@ const ipcRenderer = {
       'dialog:openDirectory': 'dialog_open_directory',
       'config:set': 'settings_set',
       'shell:open': 'shell_open',
+      'plugins:load': 'plugins_load',
       'app:getExeDir': 'app_get_exe_dir',
     };
 

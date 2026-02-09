@@ -97,11 +97,11 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
 
     loadConnections: async () => {
         try {
-            console.error('[RENDERER] Migrating keys if needed...');
-            const migratedCount = await window.ipcRenderer.invoke('ssh:migrate-all-keys');
-            if (migratedCount > 0) {
-                console.log(`[RENDERER] Migrated ${migratedCount} connection keys`);
-            }
+            // console.error('[RENDERER] Migrating keys if needed...');
+            // const migratedCount = await window.ipcRenderer.invoke('ssh:migrate-all-keys');
+            // if (migratedCount > 0) {
+            //     console.log(`[RENDERER] Migrated ${migratedCount} connection keys`);
+            // }
 
             console.error('[RENDERER] Loading connections...');
             // @ts-ignore
