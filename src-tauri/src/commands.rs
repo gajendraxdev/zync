@@ -299,9 +299,18 @@ pub async fn ssh_migrate_all_keys(app_handle: tauri::AppHandle) -> Result<usize,
 
             let src_path = std::path::Path::new(path);
             
+            // Canonicalize paths to ensure robust comparison (handles symlinks, etc.)
+            let data_dir_canonical = data_dir.canonicalize().unwrap_or_else(|_| data_dir.clone());
+            // Note: If src_path doesn't exist, canonicalize might fail or behave oddly. 
+            // If it doesn't exist, we can't migrate it anyway.
+            let src_path_canonical = src_path.canonicalize().unwrap_or_else(|_| src_path.to_path_buf());
+
             // If the path is already inside the app data directory, skip it
-            if src_path.starts_with(&data_dir) {
+            if src_path_canonical.starts_with(&data_dir_canonical) {
                 continue;
+            } else {
+                 #[cfg(debug_assertions)]
+                 println!("[SSH Migration] Path {:?} (canonical: {:?}) does not start with data_dir {:?} (canonical: {:?}). Triggering migration check.", src_path, src_path_canonical, data_dir, data_dir_canonical);
             }
 
             if src_path.exists() && src_path.is_file() {
@@ -323,6 +332,8 @@ pub async fn ssh_migrate_all_keys(app_handle: tauri::AppHandle) -> Result<usize,
                     // Update the path even if we don't copy (in case it was partially migrated or already there)
                     conn.private_key_path = Some(dest_path.to_string_lossy().to_string());
                     changed = true;
+                    #[cfg(debug_assertions)]
+                    println!("[SSH Migration] Key already exists at dest, updating config path only: {:?}", dest_path);
                     continue;
                 }
 
@@ -352,7 +363,23 @@ pub async fn ssh_migrate_all_keys(app_handle: tauri::AppHandle) -> Result<usize,
 
     if changed {
         let json = serde_json::to_string_pretty(&saved_data).map_err(|e| e.to_string())?;
-        std::fs::write(connections_path, json).map_err(|e| e.to_string())?;
+        
+        // Use OpenOptions to truncate and write, then sync_all to ensure durability
+        use std::fs::OpenOptions;
+        use std::io::Write;
+        
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&connections_path)
+            .map_err(|e| e.to_string())?;
+            
+        file.write_all(json.as_bytes()).map_err(|e| e.to_string())?;
+        file.sync_all().map_err(|e| e.to_string())?;
+
+        #[cfg(debug_assertions)]
+        println!("[SSH Migration] Successfully saved and synced updated connections.json to {:?}", connections_path);
     }
 
     Ok(migrated_count)
@@ -1138,9 +1165,94 @@ pub async fn ssh_import_config(app: AppHandle) -> Result<Vec<crate::ssh_config::
     let home = app.path().home_dir().map_err(|e| e.to_string())?;
     let config_path = home.join(".ssh/config");
     
-    println!("[SSH] Importing config from: {:?}", config_path);
+    // println!("[SSH] Importing config from: {:?}", config_path);
     
     crate::ssh_config::parse_config(&config_path).map_err(|e| e.to_string())
+}
+
+/// Helper to internalize a single key file
+fn internalize_key(path: &str, data_dir: &std::path::Path) -> Option<String> {
+    if path.is_empty() {
+        return None;
+    }
+
+    let src_path = std::path::Path::new(path);
+    
+    // Canonicalize paths to ensure robust comparison
+    let data_dir_canonical = data_dir.canonicalize().unwrap_or_else(|_| data_dir.to_path_buf());
+    let src_path_canonical = src_path.canonicalize().unwrap_or_else(|_| src_path.to_path_buf());
+
+    // If already in data dir, return as is (but maybe canonicalized)
+    if src_path_canonical.starts_with(&data_dir_canonical) {
+        return None;
+    }
+
+    if !src_path.exists() || !src_path.is_file() {
+        // If we can't find it, we can't copy it.
+        return None; 
+    }
+
+    let keys_dir = data_dir.join("keys");
+    if !keys_dir.exists() {
+        let _ = std::fs::create_dir_all(&keys_dir);
+    }
+
+    let filename = src_path.file_name().unwrap_or_default().to_string_lossy();
+    
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    path.hash(&mut hasher);
+    let hash = hasher.finish();
+    let dest_filename = format!("{:x}_{}", hash, filename);
+    let dest_path = keys_dir.join(dest_filename);
+
+    if dest_path.exists() {
+        // Already exists? Use it.
+        return Some(dest_path.to_string_lossy().to_string());
+    }
+
+    match std::fs::copy(src_path, &dest_path) {
+        Ok(_) => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if let Ok(metadata) = std::fs::metadata(&dest_path) {
+                    let mut perms = metadata.permissions();
+                    perms.set_mode(0o600);
+                    let _ = std::fs::set_permissions(&dest_path, perms);
+                }
+            }
+            Some(dest_path.to_string_lossy().to_string())
+        }
+        Err(e) => {
+            eprintln!("[SSH Internalize] Failed to copy key from {:?} to {:?}: {}", src_path, dest_path, e);
+            None
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn ssh_internalize_connections(
+    app: AppHandle,
+    connections: Vec<crate::ssh_config::ParsedSshConnection>
+) -> Result<Vec<crate::ssh_config::ParsedSshConnection>, String> {
+    let data_dir = get_data_dir(&app);
+    let mut updated_connections = connections.clone();
+    let mut internalized_count = 0;
+
+    for conn in &mut updated_connections {
+        if let Some(path) = &conn.private_key_path {
+            if let Some(new_path) = internalize_key(path, &data_dir) {
+                conn.private_key_path = Some(new_path);
+                internalized_count += 1;
+            }
+        }
+    }
+    
+    #[cfg(debug_assertions)]
+    println!("[SSH Internalize] Internalized keys for {} connections", internalized_count);
+    Ok(updated_connections)
 }
 
 // Snippets Commands
@@ -1416,4 +1528,133 @@ pub async fn app_get_exe_dir() -> Result<String, String> {
 #[tauri::command]
 pub async fn app_exit(app: tauri::AppHandle) {
     app.exit(0);
+}
+#[tauri::command]
+pub async fn plugins_load(
+    app: AppHandle,
+) -> Result<Vec<crate::plugins::Plugin>, String> {
+    crate::plugins::PluginScanner::scan(&app).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn plugins_toggle(
+    app: AppHandle,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    crate::plugins::PluginScanner::save_state(&app, id, enabled).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn plugin_fs_read(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    state.file_system.read_file("local", &path).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn plugin_fs_write(
+    path: String,
+    content: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state.file_system.write_file("local", &path, &content).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn plugin_fs_list(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<FileEntry>, String> {
+    state.file_system.list_local(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn plugin_fs_exists(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    state.file_system.exists("local", &path).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn plugin_fs_create_dir(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state.file_system.create_dir("local", &path).await.map_err(|e| e.to_string())
+}
+
+
+#[tauri::command]
+pub async fn plugin_window_create(
+    app: AppHandle,
+    url: Option<String>,
+    html: Option<String>,
+    title: Option<String>,
+    width: Option<f64>,
+    height: Option<f64>,
+) -> Result<(), String> {
+   use tauri::WebviewWindowBuilder;
+   use base64::Engine;
+   let label = format!("plugin-window-{}", uuid::Uuid::new_v4());
+   let mut builder = WebviewWindowBuilder::new(
+       &app,
+       &label,
+       if let Some(u) = url {
+           tauri::WebviewUrl::External(u.parse().map_err(|e: url::ParseError| e.to_string())?) 
+       } else if let Some(h) = html {
+           // For HTML content, we use a data URL for simplicity in MVP
+           let data_url = format!("data:text/html;base64,{}", base64::engine::general_purpose::STANDARD.encode(h));
+           tauri::WebviewUrl::External(data_url.parse().map_err(|e: url::ParseError| e.to_string())?)
+       } else {
+           return Err("Must provide url or html".into());
+       }
+   );
+   
+   if let Some(t) = title { builder = builder.title(t); }
+   if let Some(w) = width { builder = builder.inner_size(w, height.unwrap_or(600.0)); }
+   
+   builder.build().map_err(|e| e.to_string())?;
+   Ok(())
+}
+
+
+#[tauri::command]
+pub async fn config_select_folder(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let path = app.dialog().file().blocking_pick_folder();
+    Ok(path.map(|p| p.to_string()))
+}
+
+#[tauri::command]
+pub async fn system_install_cli(app: AppHandle) -> Result<String, String> {
+    #[cfg(target_os = "windows")]
+    {
+         return Ok("Windows: Please add installation folder to PATH manually.".into());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        use tauri::Manager;
+        let home = app.path().home_dir().map_err(|e| e.to_string())?;
+        let local_bin = home.join(".local/bin");
+        
+        if !local_bin.exists() {
+             std::fs::create_dir_all(&local_bin).map_err(|e| e.to_string())?;
+        }
+
+        let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
+        let target_path = local_bin.join("zync");
+        
+        // Remove existing if any
+        if target_path.exists() {
+            std::fs::remove_file(&target_path).map_err(|e| e.to_string())?;
+        }
+
+        std::os::unix::fs::symlink(exe_path, &target_path).map_err(|e| e.to_string())?;
+        
+        Ok(format!("Installed zync to {:?}", target_path))
+    }
 }
