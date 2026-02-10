@@ -4,6 +4,7 @@ import { Button } from '../ui/Button';
 import { cn } from '../../lib/utils';
 import { ExternalLink, ArrowRight, Plus, Network, Trash2 } from 'lucide-react';
 import { AddTunnelModal } from '../modals/AddTunnelModal';
+import { Modal } from '../ui/Modal';
 
 // Re-using interface to ensure type safety, though it's in store usually
 interface TunnelConfig {
@@ -18,6 +19,7 @@ interface TunnelConfig {
   status: 'active' | 'error' | 'stopped';
   autoStart?: boolean;
   error?: string;
+  originalPort?: number; // Tracks original port when auto-switched
 }
 
 export function TunnelManager({ connectionId }: { connectionId?: string }) {
@@ -33,6 +35,14 @@ export function TunnelManager({ connectionId }: { connectionId?: string }) {
   const [, setLoading] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingTunnel, setEditingTunnel] = useState<TunnelConfig | null>(null);
+
+  // Port suggestion dialog state
+  const [portSuggestion, setPortSuggestion] = useState<{
+    tunnel: TunnelConfig;
+    currentPort: number;
+    suggestedPort: number;
+  } | null>(null);
+  const [customPort, setCustomPort] = useState<string>(''); // For custom port input
 
   // Fetch ONLY tunnels for this connection (or all and filter if needed, but let's try specific fetch first to be efficient)
   // Actually, to match Global List success, let's just fetch all and filter client-side for now to guarantee consistency 
@@ -69,11 +79,25 @@ export function TunnelManager({ connectionId }: { connectionId?: string }) {
   }, [activeConnectionId]);
 
 
+
+
   const handleToggleTunnel = async (tunnel: TunnelConfig) => {
     try {
       if (tunnel.status === 'active') {
+        // Stop the tunnel
         await window.ipcRenderer.invoke('tunnel:stop', tunnel.id);
         showToast('info', 'Forwarding stopped');
+
+        // Auto-revert if it was using a suggested port
+        if (tunnel.originalPort) {
+          const revertedTunnel = {
+            ...tunnel,
+            [tunnel.type === 'local' ? 'localPort' : 'remotePort']: tunnel.originalPort,
+            originalPort: undefined,
+          };
+          await window.ipcRenderer.invoke('tunnel:save', revertedTunnel);
+          showToast('success', `Port reverted to ${tunnel.originalPort}`);
+        }
       } else {
         if (tunnel.type === 'remote') {
           await window.ipcRenderer.invoke('tunnel:start_remote',
@@ -95,7 +119,70 @@ export function TunnelManager({ connectionId }: { connectionId?: string }) {
       // Optimistic update or wait for event? Event will handle it.
       loadTunnels(); // Refresh to be safe
     } catch (error: any) {
-      showToast('error', `Action failed: ${error.message || error}`);
+      const errorMsg = error.message || error.toString();
+
+      // Parse error for suggested port: "Port X is already in use... Port Y is available."
+      const suggestedPortMatch = errorMsg.match(/Port (\d+) is available/);
+
+      if (suggestedPortMatch) {
+        const suggestedPort = parseInt(suggestedPortMatch[1], 10);
+        const currentPort = tunnel.type === 'local' ? tunnel.localPort : tunnel.remotePort;
+
+        // Show custom dialog instead of native confirm
+        setPortSuggestion({
+          tunnel,
+          currentPort,
+          suggestedPort,
+        });
+        return;
+      }
+
+      showToast('error', `Action failed: ${errorMsg}`);
+    }
+  };
+
+  // Handle accepting the suggested port
+  const handleAcceptSuggestedPort = async (port: number) => {
+    if (!portSuggestion) return;
+    const { tunnel } = portSuggestion;
+    setPortSuggestion(null); // Close dialog
+    setCustomPort(''); // Reset custom port input
+
+    try {
+      const currentPort = tunnel.type === 'local' ? tunnel.localPort : tunnel.remotePort;
+      const updatedTunnel = {
+        ...tunnel,
+        [tunnel.type === 'local' ? 'localPort' : 'remotePort']: port,
+        originalPort: tunnel.originalPort || currentPort, // Store original if not already stored
+      };
+
+      // Save the updated config
+      await window.ipcRenderer.invoke('tunnel:save', updatedTunnel);
+
+      // Then start tunnel with port
+      if (tunnel.type === 'remote') {
+        await window.ipcRenderer.invoke('tunnel:start_remote',
+          tunnel.connectionId,
+          port,
+          tunnel.remoteHost || '127.0.0.1',
+          tunnel.localPort
+        );
+      } else {
+        await window.ipcRenderer.invoke('tunnel:start_local',
+          tunnel.connectionId,
+          port,
+          tunnel.remoteHost,
+          tunnel.remotePort
+        );
+      }
+      showToast('success', `Switched to port ${port}`);
+
+      // Force reload to show the new tunnel - use multiple attempts
+      setTimeout(() => loadTunnels(), 100);
+      setTimeout(() => loadTunnels(), 500);
+      setTimeout(() => loadTunnels(), 1000);
+    } catch (error: any) {
+      showToast('error', `Failed to start on port ${port}: ${error.message || error}`);
     }
   };
 
@@ -239,7 +326,7 @@ export function TunnelManager({ connectionId }: { connectionId?: string }) {
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between gap-2 border-t border-app-border/10 pt-2 mt-auto">
+                  <div className="flex items-center justify-between mt-2 pt-2 border-t border-app-border/30">
                     <div className="flex items-center gap-1.5 font-mono text-[9px] text-app-muted/60">
                       <span className="text-app-text/80 font-bold">{port.type === 'local' ? port.localPort : port.remotePort}</span>
                       <ArrowRight size={10} className="shrink-0 opacity-30" />
@@ -283,6 +370,73 @@ export function TunnelManager({ connectionId }: { connectionId?: string }) {
           </div>
         )}
       </div>
+
+      {/* Port Suggestion Modal */}
+      {portSuggestion && (
+        <Modal
+          isOpen={true}
+          onClose={() => {
+            setPortSuggestion(null);
+            setCustomPort('');
+          }}
+          title="Port Conflict"
+          width="max-w-sm"
+        >
+          <div className="space-y-3">
+            <p className="text-xs text-app-muted">
+              Port <span className="font-mono font-semibold text-app-accent">{portSuggestion.currentPort}</span> is busy.
+            </p>
+
+            {/* Quick suggestion */}
+            <button
+              onClick={() => handleAcceptSuggestedPort(portSuggestion.suggestedPort)}
+              className="w-full px-3 py-2 text-xs font-medium text-left bg-app-accent/10 hover:bg-app-accent/20 border border-app-accent/30 hover:border-app-accent/50 rounded-lg transition-all flex items-center justify-between group"
+            >
+              <span className="text-app-text">Use port <span className="font-mono font-semibold text-app-accent">{portSuggestion.suggestedPort}</span></span>
+              <ArrowRight size={14} className="text-app-accent opacity-50 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
+            </button>
+
+            {/* Custom port input */}
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  value={customPort}
+                  onChange={(e) => {
+                    // Only allow digits, no decimals or negatives
+                    const value = e.target.value.replace(/[^0-9]/g, '');
+                    setCustomPort(value);
+                  }}
+                  placeholder="Or enter custom port..."
+                  className="flex-1 px-3 py-2 text-xs bg-app-surface border border-app-border/40 rounded-lg focus:outline-none focus:border-app-accent/50 font-mono"
+                  min="1"
+                  max="65535"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && customPort) {
+                      const port = parseInt(customPort);
+                      if (port > 0 && port < 65536) {
+                        handleAcceptSuggestedPort(port);
+                      }
+                    }
+                  }}
+                />
+                <Button
+                  onClick={() => {
+                    const port = parseInt(customPort);
+                    if (port && port > 0 && port < 65536) {
+                      handleAcceptSuggestedPort(port);
+                    }
+                  }}
+                  disabled={!customPort || parseInt(customPort) <= 0 || parseInt(customPort) > 65535}
+                  className="px-3 text-xs bg-app-accent hover:bg-app-accent/90 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Use
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       <AddTunnelModal
         isOpen={isAddModalOpen}
