@@ -107,7 +107,7 @@ export function AddTunnelModal({ isOpen, onClose, initialConnectionId, editingTu
         }));
 
     return (
-        <Modal isOpen={isOpen} onClose={onClose} title="Create Port Forward">
+        <Modal isOpen={isOpen} onClose={onClose} title={editingTunnel ? "Update Port Forward" : "Create Port Forward"}>
             <div className="p-4 space-y-4">
                 {/* Host Selection */}
                 <Select
@@ -287,7 +287,7 @@ export function AddTunnelModal({ isOpen, onClose, initialConnectionId, editingTu
                         onClick={handleSave}
                         className="bg-app-accent text-white hover:bg-app-accent/90"
                     >
-                        Create Forward
+                        {editingTunnel ? 'Update Forward' : 'Create Forward'}
                     </Button>
                 </div>
             </div>
