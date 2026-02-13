@@ -2,26 +2,13 @@ import { useEffect, useState, useRef } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import { Button } from '../ui/Button';
 import { cn } from '../../lib/utils';
-import { ExternalLink, ArrowRight, Plus, Network, Trash2, ChevronDown } from 'lucide-react';
+import { Plus, Network, ChevronDown, FileText, Play, Square, Folder, FolderOpen, ArrowRight } from 'lucide-react';
 import { TUNNEL_PRESETS, TunnelPreset } from '../../lib/tunnelPresets';
 import { AddTunnelModal } from '../modals/AddTunnelModal';
+import { ImportSSHCommandModal } from '../modals/ImportSSHCommandModal';
 import { Modal } from '../ui/Modal';
+import { TunnelCard, TunnelConfig } from './TunnelCard';
 
-// Re-using interface to ensure type safety, though it's in store usually
-interface TunnelConfig {
-  id: string;
-  connectionId: string;
-  name: string;
-  type: 'local' | 'remote';
-  localPort: number;
-  remoteHost: string;
-  remotePort: number;
-  bindToAny?: boolean;
-  status: 'active' | 'error' | 'stopped';
-  autoStart?: boolean;
-  error?: string;
-  originalPort?: number; // Tracks original port when auto-switched
-}
 
 export function TunnelManager({ connectionId }: { connectionId?: string }) {
   const globalId = useAppStore(state => state.activeConnectionId);
@@ -29,6 +16,8 @@ export function TunnelManager({ connectionId }: { connectionId?: string }) {
 
   // Store Hooks
 
+  const connections = useAppStore(state => state.connections);
+  const conn = connections.find(c => c.id === activeConnectionId);
   const showToast = useAppStore((state) => state.showToast);
 
   // Local state for this view
@@ -37,6 +26,7 @@ export function TunnelManager({ connectionId }: { connectionId?: string }) {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingTunnel, setEditingTunnel] = useState<TunnelConfig | null>(null);
   const [showPresetDropdown, setShowPresetDropdown] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Port suggestion dialog state
@@ -241,6 +231,68 @@ export function TunnelManager({ connectionId }: { connectionId?: string }) {
       showToast('error', `Failed to delete: ${error.message || error}`);
     }
   };
+  // Handle starting all tunnels in a group
+  const handleStartGroup = async (groupName: string, groupTunnels: TunnelConfig[]) => {
+    let successCount = 0;
+    let failCount = 0;
+
+    showToast('info', `Starting ${groupName === 'Ungrouped' ? 'ungrouped' : groupName} forwards...`);
+
+    // Sequential start to avoid race conditions and potential UI freezing
+    for (const tunnel of groupTunnels) {
+      if (tunnel.status !== 'active') {
+        try {
+          if (tunnel.type === 'remote') {
+            await window.ipcRenderer.invoke('tunnel:start_remote',
+              tunnel.connectionId,
+              tunnel.remotePort,
+              tunnel.remoteHost || '127.0.0.1',
+              tunnel.localPort
+            );
+          } else {
+            await window.ipcRenderer.invoke('tunnel:start_local',
+              tunnel.connectionId,
+              tunnel.localPort,
+              tunnel.remoteHost,
+              tunnel.remotePort
+            );
+          }
+          successCount++;
+        } catch (err) {
+          console.error(`Failed to start tunnel ${tunnel.name}:`, err);
+          failCount++;
+        }
+      }
+    }
+
+    loadTunnels();
+
+    if (failCount > 0) {
+      showToast('error', `Started ${successCount} tunnels, failed ${failCount}`);
+    } else if (successCount > 0) {
+      showToast('success', `Started ${successCount} forwards`);
+    }
+  };
+
+  // Handle stopping all tunnels in a group
+  const handleStopGroup = async (groupName: string, groupTunnels: TunnelConfig[]) => {
+    let count = 0;
+
+    // Sequential stop
+    for (const tunnel of groupTunnels) {
+      if (tunnel.status === 'active') {
+        try {
+          await window.ipcRenderer.invoke('tunnel:stop', tunnel.id);
+          count++;
+        } catch (err) {
+          console.error(`Failed to stop tunnel ${tunnel.name}:`, err);
+        }
+      }
+    }
+
+    loadTunnels();
+    if (count > 0) showToast('info', `Stopped ${count} forwards in ${groupName === 'Ungrouped' ? 'ungrouped' : groupName}`);
+  };
 
   if (!activeConnectionId) return <div className="p-4 text-app-muted">No connection selected</div>;
 
@@ -256,48 +308,58 @@ export function TunnelManager({ connectionId }: { connectionId?: string }) {
             </span>
           )}
         </div>
-        <div className="relative" ref={dropdownRef}>
-          <div className="flex">
-            <Button
-              onClick={() => {
-                setEditingTunnel(null);
-                setIsAddModalOpen(true);
-              }}
-              className="h-7 px-2.5 bg-app-accent text-white hover:bg-app-accent/90 text-[10px] font-bold whitespace-nowrap rounded-r-none border-r border-white/20"
-            >
-              <Plus size={12} className="mr-1" /> New Forward
-            </Button>
-            <Button
-              onClick={() => setShowPresetDropdown(!showPresetDropdown)}
-              className="h-7 px-1.5 bg-app-accent text-white hover:bg-app-accent/90 rounded-l-none"
-              title="Quick Tunnels"
-            >
-              <ChevronDown size={12} />
-            </Button>
-          </div>
-
-          {/* Preset Dropdown */}
-          {showPresetDropdown && (
-            <div className="absolute right-0 mt-1 w-56 bg-app-panel border border-app-border rounded-lg shadow-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
-              {TUNNEL_PRESETS.map((preset) => (
-                <button
-                  key={preset.id}
-                  onClick={() => handlePresetSelect(preset)}
-                  className="w-full px-3 py-2.5 text-left hover:bg-app-surface transition-colors border-b border-app-border/30 last:border-b-0 group"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <div className="font-semibold text-xs text-app-text group-hover:text-app-accent transition-colors">{preset.name}</div>
-                      <div className="text-[10px] text-app-muted mt-0.5">{preset.description}</div>
-                    </div>
-                    <div className="text-[9px] font-mono text-app-muted/60 bg-app-surface/50 px-1.5 py-0.5 rounded">
-                      {preset.localPort}
-                    </div>
-                  </div>
-                </button>
-              ))}
+        <div className="flex gap-1.5">
+          <Button
+            variant="ghost"
+            onClick={() => setShowImportModal(true)}
+            className="h-7 px-2 text-[10px] text-app-muted hover:text-app-text"
+            title="Import from SSH Command"
+          >
+            <FileText size={12} className="mr-1" /> Import
+          </Button>
+          <div className="relative" ref={dropdownRef}>
+            <div className="flex">
+              <Button
+                onClick={() => {
+                  setEditingTunnel(null);
+                  setIsAddModalOpen(true);
+                }}
+                className="h-7 px-2.5 bg-app-accent text-white hover:bg-app-accent/90 text-[10px] font-bold whitespace-nowrap rounded-r-none border-r border-white/20"
+              >
+                <Plus size={12} className="mr-1" /> New Forward
+              </Button>
+              <Button
+                onClick={() => setShowPresetDropdown(!showPresetDropdown)}
+                className="h-7 px-1.5 bg-app-accent text-white hover:bg-app-accent/90 rounded-l-none"
+                title="Quick Tunnels"
+              >
+                <ChevronDown size={12} />
+              </Button>
             </div>
-          )}
+
+            {/* Preset Dropdown */}
+            {showPresetDropdown && (
+              <div className="absolute right-0 mt-1 w-56 bg-app-panel border border-app-border rounded-lg shadow-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                {TUNNEL_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    onClick={() => handlePresetSelect(preset)}
+                    className="w-full px-3 py-2.5 text-left hover:bg-app-surface transition-colors border-b border-app-border/30 last:border-b-0 group"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="font-semibold text-xs text-app-text group-hover:text-app-accent transition-colors">{preset.name}</div>
+                        <div className="text-[10px] text-app-muted mt-0.5">{preset.description}</div>
+                      </div>
+                      <div className="text-[9px] font-mono text-app-muted/60 bg-app-surface/50 px-1.5 py-0.5 rounded">
+                        {preset.localPort}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -324,125 +386,116 @@ export function TunnelManager({ connectionId }: { connectionId?: string }) {
             </Button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
-            {tunnels.map(port => {
-              const isActive = port.status === 'active';
-              return (
-                <div
-                  key={port.id}
-                  className={cn(
-                    "group flex flex-col p-2.5 rounded-xl bg-app-panel/50 border transition-all duration-200 hover:shadow-lg hover:bg-app-panel",
-                    isActive ? "border-app-accent/40 bg-app-accent/[0.03]" : "border-app-border/40 hover:border-app-border/80"
-                  )}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2 overflow-hidden">
-                      <div className={cn(
-                        "w-1.5 h-1.5 shrink-0 rounded-full",
-                        isActive ? "bg-app-success shadow-[0_0_6px_rgba(var(--color-app-success),0.4)]" : "bg-app-muted/30"
-                      )} />
-                      <span className="font-bold text-[11px] text-app-text truncate">{port.name}</span>
-                    </div>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      {port.type === 'local' && (
-                        <button
-                          onClick={() => handleOpenBrowser(port.localPort)}
-                          className="p-1 rounded hover:bg-app-surface text-app-muted hover:text-blue-400 transition-colors"
-                          title="Open Browser"
+          <div className="space-y-8">
+            {(() => {
+              // Group tunnels
+              const groups: Record<string, TunnelConfig[]> = {};
+              tunnels.forEach(t => {
+                const g = t.group || 'Ungrouped';
+                if (!groups[g]) groups[g] = [];
+                groups[g].push(t);
+              });
+
+              // Sort groups: named groups alphabetical, then Ungrouped
+              const sortedGroupNames = Object.keys(groups).sort((a, b) => {
+                if (a === 'Ungrouped') return 1;
+                if (b === 'Ungrouped') return -1;
+                return a.localeCompare(b);
+              });
+
+              return sortedGroupNames.map(groupName => {
+                const groupTunnels = groups[groupName];
+                const activeCount = groupTunnels.filter(t => t.status === 'active').length;
+
+                return (
+                  <div key={groupName} className="space-y-3">
+                    {/* Group Header */}
+                    <div className="flex items-center justify-between pl-1 pb-1 border-b border-app-border/30">
+                      <div className="flex items-center gap-2">
+                        {groupName === 'Ungrouped' ? (
+                          <FolderOpen size={16} className="text-app-muted/60" />
+                        ) : (
+                          <Folder size={16} className="text-app-accent/80" />
+                        )}
+                        <h3 className={cn(
+                          "text-sm font-semibold tracking-tight",
+                          groupName === 'Ungrouped' ? "text-app-muted italic" : "text-app-text"
+                        )}>
+                          {groupName}
+                        </h3>
+                        <span className="text-[10px] text-app-muted/50 bg-app-surface/50 px-1.5 py-0.5 rounded-full ml-1 font-mono">
+                          {groupTunnels.length}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        {activeCount > 0 && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleStopGroup(groupName, groupTunnels)}
+                            className="h-6 px-2 text-[10px] text-app-muted hover:text-red-400 hover:bg-red-400/10 gap-1"
+                            title="Stop All"
+                          >
+                            <Square size={10} className="fill-current" /> Stop All
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => handleStartGroup(groupName, groupTunnels)}
+                          className="h-6 px-2 text-[10px] text-app-muted hover:text-green-400 hover:bg-green-400/10 gap-1"
+                          title="Start All"
                         >
-                          <ExternalLink size={11} />
+                          <Play size={10} className="fill-current" /> Start All
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* Group Tunnels Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
+                      {groupTunnels.map(port => (
+                        <TunnelCard
+                          key={port.id}
+                          tunnel={port}
+                          connectionIcon={conn?.icon}
+                          connectionName={conn?.name}
+                          viewMode="grid"
+                          onToggle={handleToggleTunnel}
+                          onEdit={(t) => {
+                            setEditingTunnel(t);
+                            setIsAddModalOpen(true);
+                          }}
+                          onDelete={handleDeleteTunnel}
+                          onOpenBrowser={handleOpenBrowser}
+                          onCopy={(text) => {
+                            navigator.clipboard.writeText(text);
+                            showToast('success', 'Copied');
+                          }}
+                        />
+                      ))}
+                      {/* Only show Add button in Ungrouped section if needed, or maybe global floating button? 
+                            Actually, putting Add button in Ungrouped section or as a separate card at the very end is tricky with grouping.
+                            Let's add it to the Ungrouped section or create a dedicated 'New' button in header instead.
+                            For now, let's keep it in the Ungrouped section or append it if it's the last group.
+                        */}
+                      {groupName === 'Ungrouped' && (
+                        <button
+                          onClick={() => {
+                            setEditingTunnel(null);
+                            setIsAddModalOpen(true);
+                          }}
+                          className="group flex flex-col items-center justify-center min-h-[110px] p-4 rounded-xl border border-dashed border-app-border/40 hover:border-app-accent/50 bg-app-panel/20 hover:bg-app-accent/[0.02] transition-all duration-300"
+                        >
+                          <Plus size={24} className="mb-2 text-app-muted/40 group-hover:text-app-accent/80 group-hover:scale-110 transition-all duration-300" />
+                          <span className="text-[10px] font-medium text-app-muted/50 group-hover:text-app-accent/80 transition-colors">Add Forward</span>
                         </button>
                       )}
-                      <button
-                        onClick={() => {
-                          setEditingTunnel(port);
-                          setIsAddModalOpen(true);
-                        }}
-                        className="p-1 rounded hover:bg-app-surface text-app-muted hover:text-app-text transition-colors"
-                        title="Forward Settings"
-                      >
-                        <div className="flex gap-0.5">
-                          <div className="w-0.5 h-0.5 rounded-full bg-current" />
-                          <div className="w-0.5 h-0.5 rounded-full bg-current" />
-                          <div className="w-0.5 h-0.5 rounded-full bg-current" />
-                        </div>
-                      </button>
-                      <button
-                        onClick={() => handleDeleteTunnel(port.id)}
-                        className="p-1 rounded hover:bg-red-500/10 text-app-muted hover:text-red-500 transition-colors"
-                        title="Delete Forward"
-                      >
-                        <Trash2 size={11} />
-                      </button>
                     </div>
                   </div>
-
-                  {/* Middle Section: Details */}
-                  <div className="flex flex-col gap-1.5 py-2 text-[11px]">
-                    <div className="flex items-center gap-1.5 text-app-muted/80">
-                      <span className="font-semibold text-app-text/60 text-[10px] uppercase tracking-wider">Target</span>
-                      <span className="font-mono font-medium text-app-text/90">{port.remoteHost}:{port.type === 'local' ? port.remotePort : port.localPort}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {port.bindToAny !== undefined && (
-                        <span className={cn(
-                          "text-[9px] px-2 py-1 rounded-md font-bold uppercase tracking-wider",
-                          port.bindToAny
-                            ? "bg-orange-500/10 text-orange-400/90 border border-orange-500/20"
-                            : "bg-green-500/10 text-green-400/90 border border-green-500/20"
-                        )}>
-                          {port.bindToAny ? "Public" : "Localhost"}
-                        </span>
-                      )}
-                      {port.autoStart && (
-                        <span className="text-[9px] px-2 py-1 rounded-md bg-blue-500/10 text-blue-400/90 font-bold uppercase tracking-wider border border-blue-500/20">
-                          Auto-Start
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between mt-2 pt-2 border-t border-app-border/30">
-                    <div className="flex items-center gap-1.5 font-mono text-[9px] text-app-muted/60">
-                      <span className="text-app-text/80 font-bold">{port.type === 'local' ? port.localPort : port.remotePort}</span>
-                      <ArrowRight size={10} className="shrink-0 opacity-30" />
-                      <span className="text-app-text/80 font-bold">{port.type === 'local' ? port.remotePort : port.localPort}</span>
-                      <span className={cn(
-                        "ml-1 text-[8px] px-1 rounded uppercase font-extrabold tracking-tighter shrink-0",
-                        port.type === 'remote' ? "bg-purple-500/10 text-purple-400/80" : "bg-blue-500/10 text-blue-400/80"
-                      )}>
-                        {port.type === 'remote' ? 'REM' : 'LOC'}
-                      </span>
-                    </div>
-
-                    <Button
-                      size="sm"
-                      onClick={() => handleToggleTunnel(port)}
-                      className={cn(
-                        "h-6 px-2 min-w-[50px] rounded text-[9px] font-bold uppercase tracking-tight",
-                        isActive
-                          ? "bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white"
-                          : "bg-app-surface border border-app-border/60 hover:border-app-accent hover:text-app-accent"
-                      )}
-                    >
-                      {isActive ? 'Stop' : 'Start'}
-                    </Button>
-                  </div>
-                </div>
-              );
-            })}
-
-            {/* Add Forward Card */}
-            <button
-              onClick={() => {
-                setEditingTunnel(null);
-                setIsAddModalOpen(true);
-              }}
-              className="group flex flex-col items-center justify-center min-h-[110px] p-4 rounded-xl border border-dashed border-app-border/40 hover:border-app-accent/50 bg-app-panel/20 hover:bg-app-accent/[0.02] transition-all duration-300"
-            >
-              <Plus size={24} className="mb-2 text-app-muted/40 group-hover:text-app-accent/80 group-hover:scale-110 transition-all duration-300" />
-              <span className="text-[10px] font-medium text-app-muted/50 group-hover:text-app-accent/80 transition-colors">Add Forward</span>
-            </button>
+                );
+              });
+            })()}
           </div>
         )}
       </div>
@@ -522,6 +575,16 @@ export function TunnelManager({ connectionId }: { connectionId?: string }) {
           setIsAddModalOpen(false);
           setEditingTunnel(null);
           loadTunnels();
+        }}
+      />
+
+      <ImportSSHCommandModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        connectionId={activeConnectionId} // Pass the active connection ID
+        onImport={() => {
+          // Refresh list after import
+          setTimeout(() => loadTunnels(), 500);
         }}
       />
     </div>

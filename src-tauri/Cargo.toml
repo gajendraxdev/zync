@@ -37,4 +37,6 @@ tauri-plugin-dialog = "2.6.0"
 tauri-plugin-updater = "2"
 base64 = "0.21"
 url = "2.5"
+regex = "1.12.3"
+tauri-plugin-clipboard-manager = "2.3.2"
 
