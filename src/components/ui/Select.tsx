@@ -19,9 +19,13 @@ interface SelectProps {
     disabled?: boolean;
     className?: string;
     label?: string;
+    showSearch?: boolean;
+    triggerClassName?: string;
+    showCheck?: boolean;
+    itemClassName?: string;
 }
 
-export function Select({ value, onChange, options, placeholder = "Select...", disabled, className, label }: SelectProps) {
+export function Select({ value, onChange, options, placeholder = "Select...", disabled, className, label, showSearch = true, triggerClassName, showCheck = true, itemClassName }: SelectProps) {
     const [isOpen, setIsOpen] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
 
@@ -57,11 +61,12 @@ export function Select({ value, onChange, options, placeholder = "Select...", di
                     "w-full flex items-center justify-between px-3 py-2.5 rounded-xl border text-sm transition-all duration-200 outline-none",
                     "bg-app-surface/40 text-app-text",
                     isOpen ? "border-app-accent ring-2 ring-app-accent/20 bg-app-surface/60" : "border-app-border/50 hover:border-app-muted hover:bg-app-surface/50",
-                    disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
+                    disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer",
+                    triggerClassName
                 )}
                 disabled={disabled}
             >
-                <div className="flex items-center gap-2.5 overflow-hidden">
+                <div className="flex-1 flex items-center gap-2 overflow-hidden text-left min-w-0">
                     {selectedOption?.icon && (
                         <div className="flex-none opacity-80">{selectedOption.icon}</div>
                     )}
@@ -87,14 +92,16 @@ export function Select({ value, onChange, options, placeholder = "Select...", di
                         className="absolute z-[100] w-full mt-2 bg-app-panel border border-app-border shadow-2xl rounded-xl overflow-hidden backdrop-blur-2xl ring-1 ring-white/5"
                     >
                         <Command className="flex flex-col">
-                            <div className="flex items-center border-b border-app-border/50 px-3" cmdk-input-wrapper="">
-                                <Search className="w-4 h-4 text-app-muted/60" />
-                                <Command.Input
-                                    autoFocus
-                                    placeholder="Search..."
-                                    className="w-full h-10 bg-transparent text-sm outline-none px-2 placeholder:text-app-muted/40"
-                                />
-                            </div>
+                            {showSearch && (
+                                <div className="flex items-center border-b border-app-border/50 px-3" cmdk-input-wrapper="">
+                                    <Search className="w-4 h-4 text-app-muted/60" />
+                                    <Command.Input
+                                        autoFocus
+                                        placeholder="Search..."
+                                        className="w-full h-10 bg-transparent text-sm outline-none px-2 placeholder:text-app-muted/40"
+                                    />
+                                </div>
+                            )}
                             <Command.List className="max-h-60 overflow-y-auto custom-scrollbar p-1.5 scroll-smooth">
                                 <Command.Empty className="py-6 text-center text-xs text-app-muted italic">
                                     No matches found.
@@ -110,10 +117,12 @@ export function Select({ value, onChange, options, placeholder = "Select...", di
                                         }}
                                         className={cn(
                                             "flex items-center gap-3 px-2.5 py-2 rounded-lg text-sm transition-all cursor-pointer select-none",
+                                            showCheck ? "pl-2 pr-2" : "px-2",
                                             "aria-selected:bg-app-accent/15 aria-selected:text-app-accent",
-                                            option.value === value
+                                            value === option.value
                                                 ? "bg-app-accent/5 text-app-accent font-medium"
-                                                : "text-app-text/90 hover:bg-app-surface"
+                                                : "text-app-text/90 hover:bg-app-surface",
+                                            itemClassName
                                         )}
                                     >
                                         {option.icon && (
@@ -127,7 +136,7 @@ export function Select({ value, onChange, options, placeholder = "Select...", di
                                                 <div className="text-[10px] opacity-60 truncate mt-0.5">{option.description}</div>
                                             )}
                                         </div>
-                                        {option.value === value && (
+                                        {showCheck && option.value === value && (
                                             <motion.div layoutId="check">
                                                 <Check className="w-3.5 h-3.5 flex-none" />
                                             </motion.div>

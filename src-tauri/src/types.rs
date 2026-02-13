@@ -78,6 +78,8 @@ pub struct SavedTunnel {
     pub status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub original_port: Option<u16>, // Tracks original port when auto-switched
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

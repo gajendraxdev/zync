@@ -7,6 +7,7 @@ mod ssh_config;
 pub mod tunnel;
 mod snippets;
 pub mod plugins;
+mod ssh_parser;
 
 use commands::AppState;
 use tauri::{Manager, Emitter};
@@ -17,6 +18,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let default_dir = app.path().app_data_dir().unwrap();
@@ -160,6 +162,7 @@ pub fn run() {
             commands::plugin_window_create,
             commands::config_select_folder,
             commands::system_install_cli,
+            commands::ssh_parse_command,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

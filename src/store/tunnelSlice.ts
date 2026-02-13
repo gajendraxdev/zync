@@ -14,6 +14,7 @@ export interface TunnelConfig {
     status: 'active' | 'error' | 'stopped';
     autoStart?: boolean;
     error?: string;
+    group?: string;
 }
 
 export interface TunnelSlice {
@@ -22,6 +23,7 @@ export interface TunnelSlice {
 
     // Actions
     loadTunnels: (connectionId: string) => Promise<void>;
+    loadAllTunnels: () => Promise<void>;
     saveTunnel: (tunnel: TunnelConfig) => Promise<void>;
     deleteTunnel: (id: string, connectionId: string) => Promise<void>;
     startTunnel: (id: string, connectionId: string) => Promise<void>;
@@ -49,6 +51,35 @@ export const createTunnelSlice: StateCreator<AppStore, [], [], TunnelSlice> = (s
             }));
         } catch (error) {
             console.error('Failed to load tunnels:', error);
+            set({ isLoadingTunnels: false });
+        }
+    },
+
+    loadAllTunnels: async () => {
+        set({ isLoadingTunnels: true });
+        try {
+            const list: TunnelConfig[] = await ipc.invoke('tunnel:getAll');
+
+            // Group by connectionId
+            const tunnelsByConnection: Record<string, TunnelConfig[]> = {};
+
+            list.forEach(tunnel => {
+                if (!tunnel.connectionId) return;
+                if (!tunnelsByConnection[tunnel.connectionId]) {
+                    tunnelsByConnection[tunnel.connectionId] = [];
+                }
+                tunnelsByConnection[tunnel.connectionId].push(tunnel);
+            });
+
+            set(state => ({
+                tunnels: {
+                    ...state.tunnels,
+                    ...tunnelsByConnection
+                },
+                isLoadingTunnels: false
+            }));
+        } catch (error) {
+            console.error('Failed to load all tunnels:', error);
             set({ isLoadingTunnels: false });
         }
     },
