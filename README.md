@@ -18,7 +18,7 @@ Zync is a powerful, cross-platform SSH client built for speed and aesthetics. Re
 
 ## 📥 Download
 
-Get the latest release for your platform from our [Releases Page](https://github.com/FDgajju/zync/releases).
+Get the latest release for your platform from our [Releases Page](https://github.com/gajendraxdev/zync/releases).
 
 ## 🛠️ Built With
 
@@ -42,7 +42,7 @@ Get the latest release for your platform from our [Releases Page](https://github
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/FDgajju/zync.git
+    git clone https://github.com/gajendraxdev/zync.git
     cd zync
     ```
 
@@ -63,7 +63,7 @@ Get the latest release for your platform from our [Releases Page](https://github
 
 ## 📄 License
 
-MIT © [Zync](https://github.com/FDgajju/zync)
+MIT © [Zync](https://github.com/gajendraxdev/zync)
 
 ---
 

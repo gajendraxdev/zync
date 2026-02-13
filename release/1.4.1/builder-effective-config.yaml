@@ -35,6 +35,6 @@ files:
       - package.json
 publish:
   - provider: github
-    owner: FDgajju
+    owner: gajendraxdev
     repo: zync
 electronVersion: 39.2.7
