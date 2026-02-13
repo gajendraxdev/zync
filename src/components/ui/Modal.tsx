@@ -26,11 +26,12 @@ export function Modal({ isOpen, onClose, title, children, width = 'max-w-md', cl
   return createPortal(
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
             onClick={onClose}
             className="absolute inset-0 bg-black/60 backdrop-blur-md"
           />
@@ -38,7 +39,7 @@ export function Modal({ isOpen, onClose, title, children, width = 'max-w-md', cl
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            transition={{ type: 'spring', duration: 0.4, bounce: 0.3 }}
+            transition={{ type: 'spring', duration: 0.2, bounce: 0.2 }}
             className={cn(
               'relative w-full bg-app-panel/95 backdrop-blur-xl border border-app-border rounded-xl shadow-2xl flex flex-col max-h-[90vh] ring-1 ring-white/5 overflow-hidden',
               width,
