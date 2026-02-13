@@ -948,7 +948,8 @@ pub async fn tunnel_list(app: AppHandle, state: State<'_, AppState>, connection_
 }
 
 #[tauri::command]
-pub async fn tunnel_save(app: AppHandle, tunnel: SavedTunnel) -> Result<(), String> {
+pub async fn tunnel_save(app: AppHandle, tunnel_val: serde_json::Value) -> Result<(), String> {
+    let tunnel: SavedTunnel = serde_json::from_value(tunnel_val).map_err(|e| e.to_string())?;
     let data_dir = get_data_dir(&app);
     if !data_dir.exists() {
         std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
@@ -1657,4 +1658,9 @@ pub async fn system_install_cli(app: AppHandle) -> Result<String, String> {
         
         Ok(format!("Installed zync to {:?}", target_path))
     }
+}
+
+#[tauri::command]
+pub async fn ssh_parse_command(command: String) -> Result<crate::ssh_parser::ParseResult, String> {
+    Ok(crate::ssh_parser::parse_ssh_command(&command))
 }

@@ -92,8 +92,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             }
 
             Promise.all([
-                fetch('https://api.github.com/repos/FDgajju/zync/contributors'),
-                fetch('https://api.github.com/repos/FDgajju/zync')
+                fetch('https://api.github.com/repos/gajendraxdev/zync/contributors'),
+                fetch('https://api.github.com/repos/gajendraxdev/zync')
             ])
                 .then(async ([contribRes, repoRes]) => {
                     const contribData = await contribRes.json();
@@ -116,7 +116,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
             // Fetch Release Notes if needed
             if (!releaseNotes) {
-                fetch('https://api.github.com/repos/FDgajju/zync/releases/latest')
+                fetch('https://api.github.com/repos/gajendraxdev/zync/releases/latest')
                     .then(res => res.json())
                     .then(data => {
                         if (data.body) setReleaseNotes(data.body);
@@ -237,7 +237,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 setUpdateStatus('downloading');
             } else {
                 // Manual Download Fallback
-                window.ipcRenderer.invoke('shell:open', 'https://github.com/FDgajju/zync/releases/latest');
+                window.ipcRenderer.invoke('shell:open', 'https://github.com/gajendraxdev/zync/releases/latest');
             }
         } else if (updateStatus === 'ready') {
             // Install & Restart - Show Confirmation First
@@ -1082,7 +1082,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                 {/* Links */}
                                 <div className="flex items-center gap-4 pt-4 border-t border-[var(--color-app-border)]/50 w-full max-w-xs justify-center">
                                     <button
-                                        onClick={() => window.ipcRenderer.invoke('shell:open', 'https://github.com/FDgajju/zync')}
+                                        onClick={() => window.ipcRenderer.invoke('shell:open', 'https://github.com/gajendraxdev/zync')}
                                         className="text-xs text-[var(--color-app-muted)] hover:text-[var(--color-app-text)] transition-colors flex items-center gap-1.5"
                                     >
                                         <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>

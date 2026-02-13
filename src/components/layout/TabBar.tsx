@@ -5,7 +5,7 @@ import { cn } from '../../lib/utils';
 import { WindowControls } from './WindowControls';
 import { useState, useEffect, useRef } from 'react';
 import { Modal } from '../ui/Modal';
-import { matchShortcut } from '../managers/ShortcutManager';
+import { matchShortcut } from '../../lib/shortcuts';
 import { useWindowDrag } from '../../hooks/useWindowDrag';
 import {
     DndContext,

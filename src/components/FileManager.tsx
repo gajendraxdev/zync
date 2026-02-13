@@ -110,6 +110,7 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
   } | null>(null);
 
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isFileLoading, setIsFileLoading] = useState(false);
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
 
   const isSmallScreen = windowWidth < 640;
@@ -170,8 +171,11 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
 
       showToast('info', `Starting transfer of ${clipboard.files.length} items...`);
 
+      // Execute transfers sequentially to avoid overwhelming the backend/network
       for (const file of clipboard.files) {
         const destPath = currentPath === '/' ? `/${file.name}` : `${currentPath}/${file.name}`;
+
+        // Add transfer tracking to store
         const transferId = addTransfer({
           sourceConnectionId: clipboard.sourceConnectionId,
           sourcePath: file.path,
@@ -179,23 +183,22 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
           destinationPath: destPath,
         });
 
-        // execute in background
-        (async () => {
-          try {
-            await window.ipcRenderer.invoke('sftp:copyToServer', {
-              sourceConnectionId: clipboard.sourceConnectionId,
-              sourcePath: file.path,
-              destinationConnectionId: activeConnectionId,
-              destinationPath: destPath,
-              transferId,
-            });
-            // Refresh
-            loadFiles(activeConnectionId, currentPath);
-          } catch (e: any) {
-            showToast('error', `Transfer failed: ${e.message}`);
-          }
-        })();
+        // Await the transfer to ensure sequential execution
+        try {
+          await window.ipcRenderer.invoke('sftp:copyToServer', {
+            sourceConnectionId: clipboard.sourceConnectionId,
+            sourcePath: file.path,
+            destinationConnectionId: activeConnectionId,
+            destinationPath: destPath,
+            transferId,
+          });
+        } catch (e: any) {
+          showToast('error', `Transfer failed for ${file.name}: ${e.message}`);
+        }
       }
+
+      // Refresh once after all transfers
+      loadFiles(activeConnectionId, currentPath);
     }
   };
 
@@ -289,9 +292,8 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
   };
 
   const handleOpenFile = async (file: FileEntry) => {
-    // ... (existing logic) ...
     if (!activeConnectionId) return;
-    setIsProcessing(true);
+    setIsFileLoading(true);
     try {
       const fullPath = currentPath === '/' ? `/${file.name}` : `${currentPath}/${file.name}`;
       const content = await window.ipcRenderer.invoke('fs_read_file', {
@@ -303,7 +305,7 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
     } catch (error: any) {
       showToast('error', `Failed to open file: ${error.message}`);
     } finally {
-      setIsProcessing(false);
+      setIsFileLoading(false);
     }
   };
 
@@ -652,9 +654,19 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
   // Keyboard Navigation Handler
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't interfere with modals or inputs
-      if (isNewFolderModalOpen || isRenameModalOpen || editingFile) return;
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      // Don't interfere with modals, inputs, or when strict focus is needed
+      if (isNewFolderModalOpen || isRenameModalOpen || editingFile || isCopyModalOpen || isPropertiesOpen) return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        // Special case: Allow arrow keys and Enter to pass through if we are in the search input
+        // so that users can navigate results while typing.
+        const isSearchInput = e.target.placeholder?.includes('Search');
+        const isNavigationKey = ['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Enter'].includes(e.key);
+        if (isSearchInput && isNavigationKey) {
+          // Continue to global handler
+        } else {
+          return;
+        }
+      }
 
       const filteredFiles = files.filter((f) =>
         f.name.toLowerCase().includes(searchTerm.toLowerCase())
@@ -692,6 +704,7 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
       if (!e.ctrlKey && !e.altKey && !e.metaKey && e.key.length === 1 && /^[a-zA-Z0-9_\-]$/.test(e.key)) {
         // If not already focused on search, open it and let it handle further input
         if (!isSearchOpen) {
+          e.preventDefault(); // Prevent browser from typing the char into the newly focused input
           setIsSearchOpen(true);
           // We can't easily "forward" the key to the input immediately after state change in the same tick 
           // but if we set the searchTerm here, it will appear in the input when it renders.
@@ -1049,6 +1062,15 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
           onSave={handleSaveFile}
           onClose={() => setEditingFile(null)}
         />
+      )}
+
+      {isFileLoading && (
+        <div className="absolute inset-0 z-[60] bg-black/20 flex items-center justify-center backdrop-blur-[1px]">
+          <div className="bg-app-panel p-4 rounded-lg border border-app-border flex items-center gap-3 shadow-xl">
+            <RotateCw size={18} className="animate-spin text-app-accent" />
+            <span className="text-sm">Reading file...</span>
+          </div>
+        </div>
       )}
 
       <PropertiesPanel

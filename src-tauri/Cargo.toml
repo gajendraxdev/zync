@@ -1,6 +1,6 @@
 [package]
 name = "zync"
-version = "2.1.0"
+version = "2.2.0"
 description = "A modern SSH client"
 authors = ["Gajendra"]
 edition = "2021"
@@ -37,4 +37,6 @@ tauri-plugin-dialog = "2.6.0"
 tauri-plugin-updater = "2"
 base64 = "0.21"
 url = "2.5"
+regex = "1.12.3"
+tauri-plugin-clipboard-manager = "2.3.2"
 

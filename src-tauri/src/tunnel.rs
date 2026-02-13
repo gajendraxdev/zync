@@ -46,11 +46,24 @@ impl TunnelManager {
             Ok(listener) => listener,
             Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
                 let process_info = find_process_using_port(local_port).await;
-                return Err(anyhow!(
-                    "Port {} is already in use{}. Please stop this process or choose a different port.",
-                    local_port,
-                    process_info.map(|p| format!(" {}", p)).unwrap_or_default()
-                ));
+                let suggested_port = find_next_available_port(local_port, 10).await;
+                
+                let error_msg = if let Some(port) = suggested_port {
+                    format!(
+                        "Port {} is already in use{}. Port {} is available.",
+                        local_port,
+                        process_info.map(|p| format!(" {}", p)).unwrap_or_default(),
+                        port
+                    )
+                } else {
+                    format!(
+                        "Port {} is already in use{}. Please choose a different port.",
+                        local_port,
+                        process_info.map(|p| format!(" {}", p)).unwrap_or_default()
+                    )
+                };
+                
+                return Err(anyhow!(error_msg));
             }
             Err(e) => return Err(e.into()),
         };
@@ -284,3 +297,24 @@ async fn find_process_using_port(port: u16) -> Option<String> {
         None
     }
 }
+
+/// Try to find the next available port starting from the given port
+async fn find_next_available_port(start_port: u16, max_attempts: u8) -> Option<u16> {
+    for offset in 1..=max_attempts {
+        let candidate_port = start_port.saturating_add(offset.into());
+        if candidate_port == 0 || candidate_port == start_port {
+            continue; // Skip overflow or same port
+        }
+        
+        // Try to bind to the port to check availability
+        match TcpListener::bind(format!("127.0.0.1:{}", candidate_port)).await {
+            Ok(listener) => {
+                drop(listener); // Release immediately
+                return Some(candidate_port);
+            }
+            Err(_) => continue, // Port in use, try next
+        }
+    }
+    None
+}
+
