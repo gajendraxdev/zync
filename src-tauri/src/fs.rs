@@ -156,12 +156,9 @@ impl FileSystem {
         }
     }
 
-    pub async fn read_file(&self, connection_id: &str, path: &str) -> Result<String> {
-        if connection_id == "local" {
-            fs::read_to_string(path).map_err(|e| anyhow!("Failed to read file: {}", e))
-        } else {
-             Err(anyhow!("Remote connection not yet implemented"))
-        }
+    pub async fn read_file(&self, _connection_id: &str, path: &str) -> Result<String> {
+        let content = fs::read(path).map_err(|e| anyhow!("Failed to read file: {}", e))?;
+        Ok(String::from_utf8_lossy(&content).to_string())
     }
 
     pub async fn write_file(&self, connection_id: &str, path: &str, content: &str) -> Result<()> {
@@ -227,7 +224,7 @@ impl FileSystem {
 
     pub async fn read_remote(&self, sftp: &russh_sftp::client::SftpSession, path: &str) -> Result<String> {
         let content = sftp.read(path).await.map_err(|e| anyhow!("Failed to read remote file: {}", e))?;
-        String::from_utf8(content).map_err(|e| anyhow!("File content is not valid UTF-8: {}", e))
+        Ok(String::from_utf8_lossy(&content).to_string())
     }
 
     pub async fn write_remote(&self, sftp: &russh_sftp::client::SftpSession, path: &str, content: &[u8]) -> Result<()> {

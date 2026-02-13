@@ -21,6 +21,11 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
+            // Explicitly set a menu to override potential default conflicts
+            // We use the default menu structure but this ensures we have control
+            let menu = tauri::menu::Menu::default(app.handle())?;
+            app.set_menu(menu)?;
+
             let default_dir = app.path().app_data_dir().unwrap();
             let settings_path = default_dir.join("settings.json");
             
