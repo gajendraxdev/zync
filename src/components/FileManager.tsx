@@ -9,7 +9,7 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react';
-import { ask } from '@tauri-apps/plugin-dialog';
+import { ConfirmModal } from './ui/ConfirmModal';
 import { useCallback, useEffect, useState, useRef } from 'react';
 import { useAppStore, Connection } from '../store/useAppStore';
 import { isMatch } from '../lib/keyboard';
@@ -34,6 +34,7 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
   const connections = useAppStore(state => state.connections);
   const activeConnectionId = connectionId || globalActiveId;
   const addTransfer = useAppStore(state => state.addTransfer);
+  const failTransfer = useAppStore(state => state.failTransfer);
 
   // Find the actual connection object to check status
   const isLocal = activeConnectionId === 'local';
@@ -88,6 +89,8 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
 
   // Properties Panel State
   const [isPropertiesOpen, setIsPropertiesOpen] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Context Menu State
   const [contextMenu, setContextMenu] = useState<{
@@ -103,11 +106,13 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
 
   // Copy to Server State
   const [isCopyModalOpen, setIsCopyModalOpen] = useState(false);
-  const [fileToCopy, setFileToCopy] = useState<{
+  const [filesToCopy, setFilesToCopy] = useState<{
     connectionId: string;
     path: string;
     name: string;
-  } | null>(null);
+  }[]>([]);
+  const [initialDestConnectionId, setInitialDestConnectionId] = useState<string | undefined>();
+  const [initialDestPath, setInitialDestPath] = useState<string | undefined>();
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [isFileLoading, setIsFileLoading] = useState(false);
@@ -160,22 +165,14 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
       const sources = clipboard.files.map(f => f.path);
       await pasteEntries(activeConnectionId, sources, clipboard.op);
 
-      if (clipboard.op === 'cut') {
-        clearClipboard();
-      }
     } else {
-      // Cross connection: File Transfer
-      if (clipboard.op === 'cut') {
-        showToast('warning', 'Cross-server cut not supported yet, defaulting to copy');
-      }
+      showToast("info", `Starting transfer of ${clipboard.files.length} item(s)`);
 
-      showToast('info', `Starting transfer of ${clipboard.files.length} items...`);
-
-      // Execute transfers sequentially to avoid overwhelming the backend/network
+      // Loop through all the files and start background task
       for (const file of clipboard.files) {
         const destPath = currentPath === '/' ? `/${file.name}` : `${currentPath}/${file.name}`;
 
-        // Add transfer tracking to store
+        // Create transfer record in UI
         const transferId = addTransfer({
           sourceConnectionId: clipboard.sourceConnectionId,
           sourcePath: file.path,
@@ -183,22 +180,39 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
           destinationPath: destPath,
         });
 
-        // Await the transfer to ensure sequential execution
-        try {
-          await window.ipcRenderer.invoke('sftp:copyToServer', {
-            sourceConnectionId: clipboard.sourceConnectionId,
-            sourcePath: file.path,
-            destinationConnectionId: activeConnectionId,
-            destinationPath: destPath,
-            transferId,
-          });
-        } catch (e: any) {
-          showToast('error', `Transfer failed for ${file.name}: ${e.message}`);
-        }
-      }
+        let command = "sftp:copyToServer"
 
-      // Refresh once after all transfers
-      loadFiles(activeConnectionId, currentPath);
+        const args: any = {
+          sourcePath: file.path,
+          destinationPath: destPath,
+          transferId
+        }
+
+        if (clipboard.sourceConnectionId === "local") {
+          command = "sftp:put";
+          args.id = activeConnectionId;
+          args.localPath = file.path;
+          args.remotePath = destPath
+        } else if (activeConnectionId === "local") {
+          command = "sftp:get";
+          args.id = clipboard.sourceConnectionId;
+          args.remotePath = file.path;
+          args.localPath = destPath
+        } else {
+          args.sourceConnectionId = clipboard.sourceConnectionId;
+          args.destinationConnectionId = activeConnectionId;
+        }
+
+        // Start actual transfer file via IPC
+        window.ipcRenderer.invoke(command, args).catch(err => {
+          showToast("error", `Transfer failed: ${err.message}`);
+          failTransfer(transferId, err.message);
+        });
+      }
+    }
+
+    if (clipboard.op === 'cut') {
+      clearClipboard();
     }
   };
 
@@ -410,16 +424,32 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
       // We process download locally in component for now as it involves local FS dialog
       setIsProcessing(true);
       showToast('info', `Downloading ${selectedFiles.length} file(s)...`);
+
       for (const fileName of selectedFiles) {
         const remotePath = currentPath === '/' ? `/${fileName}` : `${currentPath}/${fileName}`;
         const localPath = targetDir.includes('\\') ? `${targetDir}\\${fileName}` : `${targetDir}/${fileName}`;
-        await window.ipcRenderer.invoke('sftp:get', {
+
+        // Add transfer to store for progress tracking
+        const transferId = addTransfer({
+          sourceConnectionId: activeConnectionId,
+          sourcePath: remotePath,
+          destinationConnectionId: 'local',
+          destinationPath: localPath,
+        });
+
+        // Fire and forget - tracking happens via events
+        window.ipcRenderer.invoke('sftp:get', {
           id: activeConnectionId,
           remotePath,
           localPath,
+          transferId,
+        }).catch(err => {
+          console.error('Download failed', err);
+          failTransfer(transferId, err.message);
+          showToast('error', `Download failed: ${err.message}`);
         });
       }
-      showToast('success', 'Download complete');
+      showToast('success', 'Download started');
       setIsProcessing(false);
     } catch (error: any) {
       showToast('error', `Download failed: ${error.message}`);
@@ -427,22 +457,31 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
     }
   };
 
-  const handleDelete = async () => {
+  const handleDelete = () => {
     if (selectedFiles.length === 0 || !activeConnectionId) return;
 
     if (settings.fileManager.confirmDelete) {
-      const yes = await ask(`Are you sure you want to delete ${selectedFiles.length} item(s)?`, {
-        title: 'Delete Confirmation',
-        kind: 'warning',
-        okLabel: 'Delete',
-        cancelLabel: 'Cancel'
-      });
-      if (!yes) return;
+      setIsDeleteModalOpen(true);
+    } else {
+      executeDelete();
     }
+  };
+
+  const executeDelete = async () => {
+    if (selectedFiles.length === 0 || !activeConnectionId) return;
 
     const paths = selectedFiles.map(name => currentPath === '/' ? `/${name}` : `${currentPath}/${name}`);
-    await deleteEntries(activeConnectionId, paths);
-    setSelectedFiles([]);
+
+    setIsDeleting(true);
+    try {
+      await deleteEntries(activeConnectionId, paths);
+      setSelectedFiles([]);
+      setIsDeleteModalOpen(false);
+    } catch (e: any) {
+      showToast('error', `Delete failed: ${e.message}`);
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   // Drag and Drop
@@ -482,16 +521,6 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
       const jsonData = e.dataTransfer.getData('application/json');
       if (jsonData) {
         const dragData = JSON.parse(jsonData);
-        setDragSourceConnectionId(dragData.connectionId);
-
-        console.log('[Drop] Check:', {
-          dragId: dragData.connectionId,
-          activeId: activeConnectionId,
-          dragType: typeof dragData.connectionId,
-          activeType: typeof activeConnectionId,
-          match: String(dragData.connectionId) === String(activeConnectionId)
-        });
-
         if (dragData.type === 'server-file' && activeConnectionId) {
           // Check for Same Server (Relaxed check)
           if (String(dragData.connectionId) === String(activeConnectionId)) {
@@ -583,13 +612,19 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
           icon: <Server size={14} />,
           action: () => {
             if (!contextMenu?.file || !activeConnectionId) return;
-            const fullPath =
-              currentPath === '/' ? `/${contextMenu.file.name}` : `${currentPath}/${contextMenu.file.name}`;
-            setFileToCopy({
+
+            // If the right-clicked file is part of a selection, copy all selected
+            const targetFiles = selectedFiles.includes(contextMenu.file.name)
+              ? selectedFiles
+              : [contextMenu.file.name];
+
+            const toCopy = targetFiles.map(name => ({
               connectionId: activeConnectionId,
-              path: fullPath,
-              name: contextMenu.file.name,
-            });
+              path: currentPath === '/' ? `/${name}` : `${currentPath}/${name}`,
+              name: name,
+            }));
+
+            setFilesToCopy(toCopy);
             setIsCopyModalOpen(true);
             setContextMenu(null);
           },
@@ -654,8 +689,8 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
   // Keyboard Navigation Handler
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't interfere with modals, inputs, or when strict focus is needed
-      if (isNewFolderModalOpen || isRenameModalOpen || editingFile || isCopyModalOpen || isPropertiesOpen) return;
+      // Don't interfere with background tabs, modals, inputs, or when strict focus is needed
+      if (!isVisible || isNewFolderModalOpen || isRenameModalOpen || editingFile || isCopyModalOpen || isPropertiesOpen) return;
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
         // Special case: Allow arrow keys and Enter to pass through if we are in the search input
         // so that users can navigate results while typing.
@@ -1049,9 +1084,13 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
         isOpen={isCopyModalOpen}
         onClose={() => {
           setIsCopyModalOpen(false);
-          setFileToCopy(null);
+          setFilesToCopy([]);
+          setInitialDestConnectionId(undefined);
+          setInitialDestPath(undefined);
         }}
-        sourceFile={fileToCopy}
+        sourceFiles={filesToCopy}
+        destinationConnectionId={initialDestConnectionId}
+        destinationPath={initialDestPath}
       />
 
       {/* File Editor Overlay */}
@@ -1072,6 +1111,17 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={isDeleteModalOpen}
+        onClose={() => setIsDeleteModalOpen(false)}
+        onConfirm={executeDelete}
+        title="Delete Confirmation"
+        message={`Are you sure you want to delete ${selectedFiles.length} item(s)? This action cannot be undone.`}
+        confirmLabel="Delete"
+        variant="danger"
+        isLoading={isDeleting}
+      />
 
       <PropertiesPanel
         isOpen={isPropertiesOpen}
