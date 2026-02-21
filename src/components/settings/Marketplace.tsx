@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, Download, Trash2, Loader2 } from 'lucide-react';
+import { Search, Download, Trash2, Loader2, Package, Plug, Activity, Cpu, Gauge, Layers, Globe, Zap, Shield, Lock, Monitor, FileText, Settings as SettingsIcon } from 'lucide-react';
 import { clsx } from 'clsx';
 import { usePlugins } from '../../context/PluginContext';
 import { ipcRenderer } from '../../lib/tauri-ipc';
@@ -13,14 +13,51 @@ interface RegistryPlugin {
     author: string;
     downloadUrl: string;
     thumbnailUrl?: string; // Optional
+    icon?: string; // Lucide icon name
     mode?: 'dark' | 'light';
     type?: 'theme' | 'tool';
+}
+
+interface MarketplaceProps {
+    onInstallSuccess?: () => void;
 }
 
 // Registry URL (Make this configurable later)
 const REGISTRY_URL = "https://raw.githubusercontent.com/gajendraxdev/zync-extensions/main/marketplace.json";
 
-export function Marketplace() {
+// Icon Resolver Helper
+const IconResolver = ({ name, size = 16, className = "" }: { name?: string, size?: number, className?: string }) => {
+    const icons: any = {
+        Activity, Cpu, Gauge, Layers, Globe, Zap, Shield, Lock, Package, Plug, Monitor, FileText, SettingsIcon
+    };
+
+    const Icon = (name && icons[name]) || (name && icons[name.charAt(0).toUpperCase() + name.slice(1)]) || Plug;
+    return <Icon size={size} className={className} />;
+};
+
+// Robust Image component with fallback to IconResolver
+const PluginImage = ({ url, icon, name, size = 20 }: { url?: string, icon?: string, name: string, size?: number }) => {
+    const [error, setError] = useState(false);
+
+    if (url && !error) {
+        return (
+            <img
+                src={url}
+                alt={name}
+                className="w-full h-full object-cover"
+                onError={() => setError(true)}
+            />
+        );
+    }
+
+    return (
+        <div className="w-full h-full flex items-center justify-center bg-[var(--color-app-bg)] text-[var(--color-app-accent)]">
+            <IconResolver name={icon} size={size} />
+        </div>
+    );
+};
+
+export function Marketplace({ onInstallSuccess }: MarketplaceProps) {
     const { plugins: installedPlugins } = usePlugins();
     const [registry, setRegistry] = useState<RegistryPlugin[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -67,9 +104,11 @@ export function Marketplace() {
 
             // 3. Notify
             // (Ideally reload happens automatically via event, but we can force it)
-            window.location.reload(); // Simple way to reload context for now, or assume PluginContext updates? 
-            // PluginContext listens to 'plugins:load' only on mount. We might need a 'refresh' method.
-            // For now, let's just reload the window or ask user to reload.
+            if (onInstallSuccess) {
+                onInstallSuccess();
+            } else {
+                window.location.reload(); // Fallback
+            }
         } catch (err: any) {
             console.error(err);
             alert(`Failed to install: ${err.message || err}`);
@@ -94,6 +133,11 @@ export function Marketplace() {
 
     const isInstalled = (id: string) => {
         return installedPlugins.some(p => p.manifest.id === id);
+    };
+
+    const getInstalledVersion = (id: string) => {
+        const p = installedPlugins.find(p => p.manifest.id === id);
+        return p?.manifest.version;
     };
 
     const filteredPlugins = registry.filter(p =>
@@ -127,54 +171,69 @@ export function Marketplace() {
                 ) : (
                     filteredPlugins.map(plugin => {
                         const installed = isInstalled(plugin.id);
+                        const localVersion = getInstalledVersion(plugin.id);
                         const processing = installingId === plugin.id;
 
                         return (
                             <div
                                 key={plugin.id}
                                 className={clsx(
-                                    "p-4 rounded-lg flex gap-4 border transition-colors",
+                                    "p-2.5 rounded-lg flex gap-3 border transition-colors",
                                     "border-[var(--color-app-border)] hover:bg-[var(--color-app-surface)]"
                                 )}
                             >
                                 {/* Thumbnail / Icon */}
-                                <div className="w-16 h-16 rounded bg-[var(--color-app-surface)] flex items-center justify-center shrink-0 border border-[var(--color-app-border)] overflow-hidden">
-                                    {plugin.thumbnailUrl ? (
-                                        <img src={plugin.thumbnailUrl} alt={plugin.name} className="w-full h-full object-cover" />
-                                    ) : (
-                                        <div className="text-[var(--color-app-muted)] text-xs font-mono">
-                                            {plugin.type === 'theme' ? 'THEME' : 'PLUGIN'}
-                                        </div>
-                                    )}
+                                <div className="w-10 h-10 rounded bg-[var(--color-app-surface)] flex items-center justify-center shrink-0 border border-[var(--color-app-border)] overflow-hidden">
+                                    <PluginImage url={plugin.thumbnailUrl} icon={plugin.icon} name={plugin.name} />
                                 </div>
 
                                 {/* Details */}
                                 <div className="flex-1 min-w-0">
                                     <div className="flex items-start justify-between">
                                         <div>
-                                            <h3 className="font-medium text-sm text-[var(--color-app-text)]">{plugin.name}</h3>
-                                            <p className="text-xs text-[var(--color-app-muted)] mt-0.5">v{plugin.version} • by {plugin.author}</p>
+                                            <h3 className="font-medium text-sm text-[var(--color-app-text)] leading-tight">{plugin.name}</h3>
+                                            <p className="text-[10px] text-[var(--color-app-muted)] mt-0.5">v{plugin.version} • by {plugin.author}</p>
                                         </div>
                                         {/* Action Button */}
                                         {installed ? (
-                                            <button
-                                                onClick={() => handleUninstall(plugin.id)}
-                                                disabled={processing}
-                                                className={clsx(
-                                                    "px-3 py-1.5 rounded text-xs font-medium flex items-center gap-1.5 transition-colors",
-                                                    "bg-[var(--color-app-surface)] hover:bg-red-500/10 hover:text-red-500 text-[var(--color-app-muted)]",
-                                                    processing && "opacity-50 cursor-not-allowed"
+                                            <div className="flex items-center gap-2">
+                                                {localVersion && plugin.version !== localVersion && (
+                                                    <button
+                                                        onClick={() => handleInstall(plugin)}
+                                                        disabled={processing}
+                                                        className={clsx(
+                                                            "px-2 py-1 rounded text-[10px] font-medium flex items-center gap-1.5 transition-colors",
+                                                            "bg-blue-500 text-white hover:opacity-90",
+                                                            processing && "opacity-50 cursor-not-allowed"
+                                                        )}
+                                                    >
+                                                        {processing && installingId === plugin.id ? (
+                                                            <Loader2 className="w-3 h-3 animate-spin" />
+                                                        ) : (
+                                                            <Download className="w-3 h-3" />
+                                                        )}
+                                                        Update
+                                                    </button>
                                                 )}
-                                            >
-                                                {processing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-                                                Uninstall
-                                            </button>
+                                                <button
+                                                    onClick={() => handleUninstall(plugin.id)}
+                                                    disabled={processing}
+                                                    className={clsx(
+                                                        "px-2 py-1 rounded text-[10px] font-medium flex items-center gap-1.5 transition-colors",
+                                                        "bg-[var(--color-app-surface)] hover:bg-red-500/10 hover:text-red-500 text-[var(--color-app-muted)]",
+                                                        processing && "opacity-50 cursor-not-allowed"
+                                                    )}
+                                                >
+                                                    {processing && !installingId ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                                                    Uninstall
+                                                </button>
+                                            </div>
                                         ) : (
                                             <button
                                                 onClick={() => handleInstall(plugin)}
                                                 disabled={processing}
                                                 className={clsx(
-                                                    "px-3 py-1.5 rounded text-xs font-medium flex items-center gap-1.5 transition-colors",
+                                                    "px-2.5 py-1.5 rounded text-[10px] font-medium flex items-center gap-1.5 transition-colors",
                                                     "bg-[var(--color-app-accent)] text-white hover:opacity-90",
                                                     processing && "opacity-50 cursor-not-allowed"
                                                 )}
@@ -184,7 +243,7 @@ export function Marketplace() {
                                             </button>
                                         )}
                                     </div>
-                                    <p className="text-xs text-[var(--color-app-muted)] mt-2 line-clamp-2">
+                                    <p className="text-[11px] text-[var(--color-app-muted)] mt-1 line-clamp-1 opacity-80">
                                         {plugin.description}
                                     </p>
                                 </div>
