@@ -403,11 +403,19 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
 
   // Handle Global Shortcuts (Copy, Paste, Find)
   useEffect(() => {
-    const handleGlobalCopy = () => {
+    const handleGlobalCopy = async () => {
       // Only trigger if this terminal is currently visible/active
       if (isVisible && termRef.current?.hasSelection()) {
         const selection = termRef.current.getSelection();
-        if (selection) navigator.clipboard.writeText(selection);
+        if (selection) {
+          try {
+            const { writeText } = await import('@tauri-apps/plugin-clipboard-manager');
+            await writeText(selection);
+          } catch (e) {
+            console.error('Tauri copy failed, falling back to navigator:', e);
+            navigator.clipboard.writeText(selection).catch(console.error);
+          }
+        }
       }
     };
 
