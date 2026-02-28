@@ -14,6 +14,17 @@ interface ModalProps {
   className?: string;
 }
 
+/**
+ * Render a centered modal dialog into document.body.
+ *
+ * @param isOpen - Whether the modal is visible.
+ * @param onClose - Callback invoked to close the modal (overlay click, Escape key, or close button).
+ * @param title - Header title text displayed at the top of the modal.
+ * @param children - Modal content.
+ * @param width - Tailwind width utility applied to the dialog container (default 'max-w-md').
+ * @param className - Additional classes merged into the dialog container.
+ * @returns The modal element mounted into document.body when `isOpen` is true, otherwise null.
+ */
 export function Modal({ isOpen, onClose, title, children, width = 'max-w-md', className }: ModalProps) {
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
@@ -33,7 +44,7 @@ export function Modal({ isOpen, onClose, title, children, width = 'max-w-md', cl
             exit={{ opacity: 0 }}
             transition={{ duration: 0.15 }}
             onClick={onClose}
-            className="absolute inset-0 bg-black/60 backdrop-blur-md"
+            className="absolute inset-0 bg-black/70 backdrop-blur-md"
           />
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
@@ -41,7 +52,7 @@ export function Modal({ isOpen, onClose, title, children, width = 'max-w-md', cl
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
             transition={{ type: 'spring', duration: 0.2, bounce: 0.2 }}
             className={cn(
-              'relative w-full bg-app-panel/95 backdrop-blur-xl border border-app-border rounded-xl shadow-2xl flex flex-col max-h-[90vh] ring-1 ring-black/5 dark:ring-white/5',
+              'relative w-full bg-app-panel backdrop-blur-xl border border-app-border rounded-xl shadow-2xl flex flex-col max-h-[90vh] ring-1 ring-black/5 dark:ring-white/5',
               width,
               className
             )}
