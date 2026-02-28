@@ -17,6 +17,21 @@ interface AddTunnelModalProps {
     editingTunnel?: TunnelConfig | null; // Pass existing tunnel to edit
 }
 
+/**
+ * Render a modal for creating or updating port forwarding configurations.
+ *
+ * The component provides single and bulk configuration modes, validates port inputs,
+ * persists new or updated TunnelConfig entries via the application's store, and
+ * displays success or error toasts. When `editingTunnel` is provided the form is
+ * pre-filled and editing is performed in single mode; when `initialConnectionId`
+ * is provided that connection is preselected for new forwards.
+ *
+ * @param isOpen - Whether the modal is visible
+ * @param onClose - Callback invoked to close the modal
+ * @param initialConnectionId - Optional connection id to preselect when creating a new forward
+ * @param editingTunnel - Optional existing tunnel to edit; its values prefill the form
+ * @returns The modal element for creating or editing port forwards
+ */
 export function AddTunnelModal({ isOpen, onClose, initialConnectionId, editingTunnel }: AddTunnelModalProps) {
     const connections = useAppStore(state => state.connections);
     const tunnels = useAppStore(state => state.tunnels);
@@ -86,6 +101,7 @@ export function AddTunnelModal({ isOpen, onClose, initialConnectionId, editingTu
     }, [isOpen, initialConnectionId, editingTunnel]);
 
     const handleSave = async () => {
+        console.log('[AddTunnel] handleSave called', { selectedConnectionId, mode, type, localPort, remotePort, remoteHost });
         if (!selectedConnectionId) {
             showToast('error', 'Please select a host');
             return;
@@ -95,7 +111,7 @@ export function AddTunnelModal({ isOpen, onClose, initialConnectionId, editingTu
             const lPort = parseInt(localPort);
             const rPort = parseInt(remotePort);
 
-            if (isNaN(lPort) || rPort < 1) {
+            if (isNaN(lPort) || isNaN(rPort) || lPort < 1 || rPort < 1) {
                 showToast('error', 'Ports must be valid numbers');
                 return;
             }
@@ -195,7 +211,7 @@ export function AddTunnelModal({ isOpen, onClose, initialConnectionId, editingTu
                 {!editingTunnel && (
                     <div className="relative overflow-hidden rounded-xl bg-app-surface border border-app-border p-5 backdrop-blur-xl group">
                         {/* Background Grid with Scanlines & Noise */}
-                        <div className="absolute inset-0 bg-[linear-gradient(currentColor_1px,transparent_1px),linear-gradient(90deg,currentColor_1px,transparent_1px)] bg-[size:16px_16px] [mask-image:radial-gradient(ellipse_at_center,black,transparent_80%)] text-app-border/20" />
+                        <div className="absolute inset-0 bg-[linear-gradient(currentColor_1px,transparent_1px),linear-gradient(90deg,currentColor_1px,transparent_1px)] bg-[size:16px_16px] [mask-image:radial-gradient(ellipse_at_center,black,transparent_80%)] text-app-border/20 pointer-events-none" />
                         <div className="absolute inset-0 bg-[linear-gradient(to_bottom,transparent_50%,rgba(0,0,0,0.1)_50%)] bg-[size:100%_4px] opacity-10 pointer-events-none" />
                         <div className="absolute inset-0 opacity-[0.03] pointer-events-none mix-blend-overlay" style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3F%3E%3Cfilter id='noiseFilter'%3F%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")` }} />
 
@@ -385,6 +401,7 @@ export function AddTunnelModal({ isOpen, onClose, initialConnectionId, editingTu
                             options={hostOptions}
                             disabled={!!initialConnectionId}
                             className="bg-app-surface border-app-border focus:border-app-accent/40"
+                            portal={true}
                         />
                         <GroupSelector
                             label="Group (Optional)"
@@ -671,12 +688,14 @@ export function AddTunnelModal({ isOpen, onClose, initialConnectionId, editingTu
 
                 <div className="flex items-center gap-3">
                     <button
+                        type="button"
                         onClick={onClose}
                         className="px-5 py-2 rounded-lg font-bold opacity-40 hover:opacity-100 hover:bg-app-surface transition-all text-[11px] uppercase tracking-wider"
                     >
                         Cancel
                     </button>
                     <Button
+                        type="button"
                         onClick={handleSave}
                         className={cn(
                             "group relative px-8 h-10 rounded-lg bg-gradient-to-br from-app-accent to-[#8a8cf2] shadow-md hover:shadow-app-accent/20 hover:-translate-y-0.5 active:translate-y-0 transition-all font-bold text-[11px] border-0"
