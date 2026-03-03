@@ -2190,7 +2190,8 @@ pub async fn config_select_folder(app: AppHandle) -> Result<Option<String>, Stri
 }
 
 #[tauri::command]
-pub async fn system_install_cli(_app: AppHandle) -> Result<String, String> {
+#[cfg_attr(target_os = "windows", allow(unused_variables))]
+pub async fn system_install_cli(app: AppHandle) -> Result<String, String> {
     #[cfg(target_os = "windows")]
     {
          return Ok("Windows: Please add installation folder to PATH manually.".into());
