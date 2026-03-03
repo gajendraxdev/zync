@@ -362,8 +362,8 @@ export function AiCommandBar({ connectionId, activeTermId }: AiCommandBarProps) 
         if (e.includes('rate limit') || e.includes('quota') || e.includes('too many')) return 'rate-limit';
         if (e.includes('invalid') && e.includes('key')) return 'invalid-key';
         if (e.includes('not configured')) return 'no-key';
+        if (e.includes('ai is disabled') || e.includes('disabled in settings') || (e.includes('disabled') && e.includes('ai'))) return 'disabled';
         if (e.includes('not running') || e.includes('econnrefused') || e.includes('connection')) return 'connection';
-        if (e.includes('ai is disabled') || e.includes('disabled in settings')) return 'disabled';
         return 'generic';
     };
 
