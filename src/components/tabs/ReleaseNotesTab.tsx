@@ -31,18 +31,27 @@ const SECTION_BADGES: Record<string, { label: string; color: string }> = {
     removed: { label: '✖ Removed', color: 'bg-red-700/15 text-red-500 border-red-700/30' },
 };
 
-function slugify(text: string) {
-    return text.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
+function slugify(text: string, usedSlugs?: Map<string, number>) {
+    const baseSlug = text.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
+    if (!usedSlugs) return baseSlug;
+    if (usedSlugs.has(baseSlug)) {
+        const count = usedSlugs.get(baseSlug)! + 1;
+        usedSlugs.set(baseSlug, count);
+        return `${baseSlug}-${count}`;
+    }
+    usedSlugs.set(baseSlug, 0);
+    return baseSlug;
 }
 
 function extractToc(markdown: string): TocEntry[] {
     const lines = markdown.split('\n');
     const entries: TocEntry[] = [];
+    const usedSlugs = new Map<string, number>();
     for (const line of lines) {
         const m = line.match(/^(#{1,3})\s+(.+)/);
         if (m) {
             const text = m[2].replace(/`[^`]*`/g, s => s.slice(1, -1));
-            entries.push({ level: m[1].length, text, id: slugify(text) });
+            entries.push({ level: m[1].length, text, id: slugify(text, usedSlugs) });
         }
     }
     return entries;
@@ -55,10 +64,23 @@ function formatDate(iso: string) {
 // ----- Code block with copy -----
 function CodeBlock({ language, children }: { language?: string; children: string }) {
     const [copied, setCopied] = useState(false);
-    const copy = () => {
-        navigator.clipboard.writeText(children);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
+    const timeoutRef = useRef<number | null>(null);
+
+    useEffect(() => {
+        return () => {
+            if (timeoutRef.current !== null) clearTimeout(timeoutRef.current);
+        };
+    }, []);
+
+    const copy = async () => {
+        try {
+            await navigator.clipboard.writeText(children);
+            setCopied(true);
+            if (timeoutRef.current !== null) clearTimeout(timeoutRef.current);
+            timeoutRef.current = window.setTimeout(() => setCopied(false), 2000);
+        } catch (err) {
+            console.error('Failed to copy code to clipboard:', err);
+        }
     };
 
     return (
@@ -91,12 +113,12 @@ function CodeBlock({ language, children }: { language?: string; children: string
 }
 
 // ----- Markdown heading with badge override -----
-function HeadingWithBadge({ level, children }: { level: number; children: React.ReactNode }) {
+function HeadingWithBadge({ level, children, slugMap }: { level: number; children: React.ReactNode; slugMap?: Map<string, number> }) {
     const text = (typeof children === 'string' ? children : '')
         || (Array.isArray(children) ? children.map(c => (typeof c === 'string' ? c : '')).join('') : '');
     const key = text.toLowerCase().replace(/[^a-z]/g, '');
     const badge = SECTION_BADGES[key];
-    const id = slugify(text);
+    const id = slugify(text, slugMap);
 
     const inner = (
         <span className="flex items-center gap-2.5 scroll-mt-6 group">
@@ -126,6 +148,17 @@ const ReleaseNotesTab: React.FC = () => {
     const [toc, setToc] = useState<TocEntry[]>([]);
     const [activeSection, setActiveSection] = useState('');
     const contentRef = useRef<HTMLDivElement>(null);
+    const dropdownRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+                setIsDropdownOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
 
     const closeTab = useAppStore(state => state.closeTab);
     const tabs = useAppStore(state => state.tabs);
@@ -133,29 +166,43 @@ const ReleaseNotesTab: React.FC = () => {
 
     // Fetch release list & current app version
     useEffect(() => {
+        const controller = new AbortController();
+        const signal = controller.signal;
+        let mounted = true;
+
         const run = async () => {
             setIsLoadingList(true);
             try {
                 const [ver, res] = await Promise.all([
                     window.ipcRenderer.invoke('app:getVersion'),
-                    fetch('https://api.github.com/repos/zync-sh/zync/releases?per_page=10')
+                    fetch('https://api.github.com/repos/zync-sh/zync/releases?per_page=10', { signal })
                 ]);
+                if (!mounted) return;
                 setAppVersion(ver);
                 if (!res.ok) throw new Error('GitHub API error');
                 const data: GithubRelease[] = await res.json();
+                if (!mounted) return;
                 setReleases(data);
 
                 // Auto-select current version if available, else latest
                 const match = data.find(r => r.tag_name === `v${ver}`) || data[0] || null;
                 setSelected(match);
                 if (match?.body) setToc(extractToc(match.body));
-            } catch {
-                setSelected({ tag_name: '', name: 'Offline', published_at: '', body: 'Could not load release notes. Please check your internet connection or visit the [Releases page](https://github.com/zync-sh/zync/releases) directly.', html_url: 'https://github.com/zync-sh/zync/releases' });
+            } catch (err: any) {
+                if (err.name === 'AbortError') return;
+                console.error('Failed to fetch releases:', err);
+                if (mounted) {
+                    setSelected({ tag_name: '', name: 'Offline', published_at: '', body: 'Could not load release notes. Please check your internet connection or visit the [Releases page](https://github.com/zync-sh/zync/releases) directly.', html_url: 'https://github.com/zync-sh/zync/releases' });
+                }
             } finally {
-                setIsLoadingList(false);
+                if (mounted) setIsLoadingList(false);
             }
         };
         run();
+        return () => {
+            mounted = false;
+            controller.abort();
+        };
     }, []);
 
     // Update TOC when release changes
@@ -187,6 +234,7 @@ const ReleaseNotesTab: React.FC = () => {
     }, []);
 
     const currentRelease = selected;
+    const headingSlugsMap = new Map<string, number>();
 
     return (
         <div className="flex flex-col h-full bg-[var(--color-app-bg)]">
@@ -206,7 +254,7 @@ const ReleaseNotesTab: React.FC = () => {
 
                 <div className="flex items-center gap-2">
                     {/* Version Dropdown */}
-                    <div className="relative">
+                    <div className="relative" ref={dropdownRef}>
                         <button
                             onClick={() => setIsDropdownOpen(v => !v)}
                             disabled={isLoadingList}
@@ -304,13 +352,13 @@ const ReleaseNotesTab: React.FC = () => {
                             <div className="text-sm leading-relaxed text-[var(--color-app-text)]/90">
                                 <ReactMarkdown
                                     components={{
-                                        h1: ({ children }) => <HeadingWithBadge level={1}>{children}</HeadingWithBadge>,
-                                        h2: ({ children }) => <HeadingWithBadge level={2}>{children}</HeadingWithBadge>,
-                                        h3: ({ children }) => <HeadingWithBadge level={3}>{children}</HeadingWithBadge>,
+                                        h1: ({ children }) => <HeadingWithBadge level={1} slugMap={headingSlugsMap}>{children}</HeadingWithBadge>,
+                                        h2: ({ children }) => <HeadingWithBadge level={2} slugMap={headingSlugsMap}>{children}</HeadingWithBadge>,
+                                        h3: ({ children }) => <HeadingWithBadge level={3} slugMap={headingSlugsMap}>{children}</HeadingWithBadge>,
                                         code({ node, className, children, ...props }) {
                                             const match = /language-(\w+)/.exec(className || '');
-                                            const isBlock = !!(node?.position && String(children).includes('\n'));
-                                            return isBlock || match ? (
+                                            const isParentPre = (node as any)?.parent?.type === 'element' && (node as any)?.parent?.tagName === 'pre';
+                                            return isParentPre || match ? (
                                                 <CodeBlock language={match?.[1]}>{String(children).replace(/\n$/, '')}</CodeBlock>
                                             ) : (
                                                 <code className="bg-[var(--color-app-surface)] border border-[var(--color-app-border)]/50 px-1.5 py-0.5 rounded text-[12px] font-mono text-[var(--color-app-accent)]" {...props}>{children}</code>
