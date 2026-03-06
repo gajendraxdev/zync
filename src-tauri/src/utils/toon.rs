@@ -107,7 +107,7 @@ pub fn parse_response(text: &str) -> AiTranslateResponse {
         let response_type = fields.get("type").map(|s| s.as_str()).unwrap_or("");
         
         // Priority 1: Check for explicit "answer" or "chat" type
-        if response_type == "chat" || fields.contains_key("answer") {
+        if response_type.eq_ignore_ascii_case("chat") || fields.contains_key("answer") {
             if let Some(answer) = fields.get("answer") {
                 if !answer.is_empty() {
                     return AiTranslateResponse {
@@ -152,7 +152,7 @@ pub fn parse_response(text: &str) -> AiTranslateResponse {
                 };
                 
                 // If it's explicitly a chat type in JSON
-                if val.get("type").and_then(|t| t.as_str()) == Some("chat") && resp.answer.is_none() {
+                if val.get("type").and_then(|t| t.as_str()).map(|s| s.eq_ignore_ascii_case("chat")).unwrap_or(false) && resp.answer.is_none() {
                     resp.answer = Some(resp.explanation.clone()); // models sometimes put the answer in explanation
                 }
 
