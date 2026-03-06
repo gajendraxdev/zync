@@ -43,12 +43,18 @@ pub fn encode_history_toon(history: &[ChatMessage]) -> Option<String> {
     let n = window.len();
     let mut block = format!("history[{}]{{role,content}}:\n", n);
     for msg in &window {
+        // Sanitize role to ensure valid encoding ("user" or "assistant")
+        let safe_role = match msg.role.to_lowercase().as_str() {
+            "user" => "user",
+            "assistant" => "assistant",
+            _ => "user", // fallback
+        };
         // Use proper escaping instead of destructive replacement
         let safe_content = msg.content
             .replace('\\', "\\\\")
             .replace('\n', "\\n")
             .replace(',', "\\,");
-        block.push_str(&format!("{},{}\n", msg.role, safe_content));
+        block.push_str(&format!("{},{}\n", safe_role, safe_content));
     }
     Some(block)
 }
@@ -133,10 +139,15 @@ pub fn parse_response(text: &str) -> AiTranslateResponse {
         if let Some(end) = text.rfind('}') {
             let json_str = &text[start..=end];
             if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) {
+                let safety = val.get("safety").and_then(|v| v.as_str()).unwrap_or("moderate").to_lowercase();
+                let safety = match safety.as_str() {
+                    "safe" | "moderate" | "dangerous" => safety,
+                    _ => "moderate".to_string(),
+                };
                 let mut resp = AiTranslateResponse {
                     command: val.get("command").and_then(|v| v.as_str()).unwrap_or("").to_string(),
                     explanation: val.get("explanation").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                    safety: val.get("safety").and_then(|v| v.as_str()).unwrap_or("moderate").to_string(),
+                    safety,
                     answer: val.get("answer").and_then(|v| v.as_str()).map(|s| s.to_string()),
                 };
                 
