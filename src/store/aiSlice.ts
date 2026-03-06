@@ -3,6 +3,9 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { AppStore } from './useAppStore';
 
+const HISTORY_TAIL_LENGTH = 100;
+const RETENTION_LIMIT = 100;
+
 export interface AiResult {
     command: string;
     explanation: string;
@@ -89,10 +92,11 @@ export const createAiSlice: StateCreator<AppStore, [], [], AiSlice> = (set, get)
 
     addToConversation: (termId, message) => set(state => {
         const existing = state.aiConversations[termId] || [];
+        const newArr = [...existing, message];
         return {
             aiConversations: {
                 ...state.aiConversations,
-                [termId]: [...existing, message],
+                [termId]: newArr.slice(-RETENTION_LIMIT),
             }
         };
     }),
@@ -105,10 +109,11 @@ export const createAiSlice: StateCreator<AppStore, [], [], AiSlice> = (set, get)
 
     addToDisplayHistory: (termId, entry) => set(state => {
         const existing = state.aiDisplayHistory[termId] || [];
+        const newArr = [...existing, entry];
         return {
             aiDisplayHistory: {
                 ...state.aiDisplayHistory,
-                [termId]: [...existing, entry],
+                [termId]: newArr.slice(-RETENTION_LIMIT),
             }
         };
     }),
@@ -136,8 +141,9 @@ export const createAiSlice: StateCreator<AppStore, [], [], AiSlice> = (set, get)
         const requestId = crypto.randomUUID();
         const cleanups: UnlistenFn[] = [];
 
-        // Snapshot current history for this tab (sent as TOON-encoded context)
-        const history: ChatMessage[] = termId ? (get().aiConversations[termId] || []) : [];
+        // Snapshot current history for this tab (sent as TOON-encoded context), capped to tail length
+        const currentHistory = termId ? (get().aiConversations[termId] || []) : [];
+        const history: ChatMessage[] = currentHistory.slice(-HISTORY_TAIL_LENGTH);
 
         // Shared resolve/reject refs so both chunk-error and done listeners can settle the promise
         let resolveDone: ((result: AiResult | null) => void) | null = null;
