@@ -203,6 +203,12 @@ export function Sidebar() {
     // Resize Logic
     const [width, setWidth] = useState(settings.sidebarWidth || 288);
     const [isResizing, setIsResizing] = useState(false);
+    const widthRef = useRef(width);
+
+    useEffect(() => {
+        widthRef.current = width;
+    }, [width]);
+
     const platform = window.electronUtils?.platform || 'linux';
     const isMac = platform === 'darwin';
     const sidebarRef = useRef<HTMLDivElement>(null);
@@ -232,7 +238,7 @@ export function Sidebar() {
             setIsResizing(false);
             document.body.style.cursor = '';
             // Save final width
-            updateSettings({ sidebarWidth: width });
+            updateSettings({ sidebarWidth: widthRef.current });
         };
 
         window.addEventListener('mousemove', resize);
@@ -242,7 +248,7 @@ export function Sidebar() {
             window.removeEventListener('mousemove', resize);
             window.removeEventListener('mouseup', stopResizing);
         };
-    }, [isResizing, width, updateSettings]);
+    }, [isResizing, updateSettings]);
 
     // Compute Active Connections
     // Compute Active Connections
@@ -349,7 +355,7 @@ export function Sidebar() {
         <div
             ref={sidebarRef}
             className={cn(
-                "bg-app-panel/95 backdrop-blur-xl border-r border-app-border/50 flex flex-col h-full shrink-0 relative z-50",
+                "bg-app-panel border-r border-app-border/50 flex flex-col h-full shrink-0 relative z-50",
                 // Smooth GPU-accelerated transition for transform, but we also want to animate margin for the sibling
                 // Using a custom cubic-bezier for a more "premium" feel (easeOutQuart-ish)
                 !isResizing ? "transition-all duration-400 ease-[cubic-bezier(0.2,0,0,1)]" : ""
@@ -958,7 +964,10 @@ function ConnectionItem({ conn, isCollapsed, onEdit, onViewDetails }: { conn: Co
                                 })();
                             }
                         }
-                    } catch (err) { }
+                    } catch (err) {
+                        console.error('Drop handling failed:', err);
+                        showToast('error', `Drag & drop failed: ${err instanceof Error ? err.message : String(err)}`);
+                    }
                 }}
             >
 
@@ -1029,7 +1038,7 @@ function ConnectionItem({ conn, isCollapsed, onEdit, onViewDetails }: { conn: Co
 
                     </div>
                 )}
-            </div>
+            </div >
 
             {/* Context Menu */}
             {
