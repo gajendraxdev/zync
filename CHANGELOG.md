@@ -2,49 +2,51 @@
 
 All notable changes to Zync are documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
 ## [2.5.4] - 2026-03-07
 
 ### Added
 
-- **Terminal Startup Handshake**: Implemented a deterministic signal (`terminal-ready`) between Rust and React to ensure initial commands sent to new tabs (like PM2 logs) wait precisely for the PTY to be ready.
-- **Handshake Safety Timeout**: Added a 5-second automatic fallback and full listener cleanup to the terminal handshake to prevent stalled connections from leaking memory.
-- **Portalled Tooltips**: Migrated the `Tooltip` component to use React Portals, resolving all clipping and z-index overlap issues project-wide.
-- **Sidebar Header Redesign**: Polished the sidebar header and "+" dropdown menu with better spacing and clipping fixes.
-- **Dynamic Theme Accent Synchronization**: Implemented intelligent accent color reset logic—choosing a new theme now automatically updates the app accent to match the theme's default.
-- **Stable Theme Default Swatch**: Added a dedicated "Theme Default" swatch in settings that accurately reflects the original theme color even when a custom accent is active, using plugin manifest metadata.
+- **Terminal Startup Handshake**: Implemented a deterministic signal (`terminal-ready`) between Rust and React to ensure initial commands sent to new tabs (like PM2 logs) wait precisely for the PTY to be ready. ([#38])
+- **Handshake Safety Timeout**: Added a 5-second automatic fallback and full listener cleanup to the terminal handshake to prevent stalled connections from leaking memory. ([#38])
+- **Portalled Tooltips**: Migrated the `Tooltip` component to use React Portals, resolving all clipping and z-index overlap issues project-wide. ([#38])
+- **Sidebar Header Redesign**: Polished the sidebar header and "+" dropdown menu with better spacing and clipping fixes. ([#38])
+- **Dynamic Theme Accent Synchronization**: Implemented intelligent accent color reset logic—choosing a new theme now automatically updates the app accent to match the theme's default. ([#38])
+- **Stable Theme Default Swatch**: Added a dedicated "Theme Default" swatch in settings that accurately reflects the original theme color even when a custom accent is active, using plugin manifest metadata. ([#38])
 
 ### Changed
 
-- **Terminal-Only Transparency Scope**: Kept the full app shell opaque and limited transparency effects to the terminal viewport path so sidebars, chrome, and feature tabs remain stable.
-- **Terminal Opacity UX**: Updated appearance behavior so the terminal opacity slider is continuously applied instead of behaving like a binary on/off toggle below 100%.
-- **Accent-Aware Terminal Branding**: ANSI Yellow and Bright Yellow colors in the terminal now dynamically map to the active application accent color for a unified brand experience.
+- **Terminal-Only Transparency Scope**: Kept the full app shell opaque and limited transparency effects to the terminal viewport path so sidebars, chrome, and feature tabs remain stable. ([#38])
+- **Terminal Opacity UX**: Updated appearance behavior so the terminal opacity slider is continuously applied instead of behaving like a binary on/off toggle below 100%. ([#38])
+- **Accent-Aware Terminal Branding**: ANSI Yellow and Bright Yellow colors in the terminal now dynamically map to the active application accent color for a unified brand experience. ([#38])
 
 ### Security
 
-- **Virtual Agent Key Registration**: Delayed SSH private key registration until after successful handshake to prevent pre-auth key leakage.
-- **OOM Protection**: Added a 256KB sanity cap to Virtual Agent packet frames to prevent malicious server-side memory exhaustion.
-- **Plugin ID Sanitization**: Implemented strict whitelist-based sanitization for plugin directory names to prevent directory traversal attacks.
+- **Virtual Agent Key Registration**: Delayed SSH private key registration until after successful handshake to prevent pre-auth key leakage. ([#38])
+- **OOM Protection**: Added a 256KB sanity cap to Virtual Agent packet frames to prevent malicious server-side memory exhaustion. ([#38])
+- **Plugin ID Sanitization**: Implemented strict whitelist-based sanitization for plugin directory names to prevent directory traversal attacks. ([#38])
 
 ### Fixed
 
-- **PTY Deadlock**: Fixed a critical backend deadlock in `pty.rs` where the global session mutex was being held across asynchronous I/O operations.
-- **Terminal Event Leak**: Resolved a memory leak in `Terminal.tsx` where Tauri event listeners were not being fully unregistered when closing tabs.
-- **Terminal Recreation**: Fixed logic errors that previously prevented terminal tabs from being "Restarted" after their backend session exited.
-- **Remote Exit Events**: Ensured SSH sessions correctly emit exit events so the frontend recognized remote channel terminations.
-- **Settings Toggle Accessibility**: Refactored the `Toggle` component to use semantic HTML specifically for keyboard and screen-reader compliance.
-- **Sidebar Resize Stale Closure**: Fixed a bug that caused outdated sidebar width values to be saved when resizing.
-- **Race Condition Safety**: Fixed potential double command execution if the terminal-ready signal and safety timeout collided.
-- **Terminal Interactivity Hot Path**: Reduced IPC/event burst pressure with short input and output batching so high-frequency typing and echo behavior feel smoother on remote sessions.
-- **Resize Event Noise**: Deduplicated repeated terminal resize sends when rows/cols are unchanged.
-- **Hidden Dashboard Polling**: Prevented background metric polling traffic while the dashboard tab is not visible.
-- **Window Edge Artifacts**: Removed bright edge bleed in dark themes after transparency path cleanup.
-- **Terminal Color Compatibility**: Replaced the CSS `color-mix()` function with a manual hex blending helper to ensure custom accent colors render correctly across all xterm.js renderers and Node.js environments.
-- **Transparency Over-Exposure**: Fixed a bug where terminal loading and error states inherited transparency; these states now maintain a solid background for readability until the session is active.
-- **spawn_blocking Handle Safety**: Fixed backend emit path to use the cloned app handle inside blocking closures.
-- **Tunnel State Synchronization**: Ensured remote tunnel entries are only removed if server-side cancellation succeeds, preventing stale "active" tunnels from polluting internal maps.
-- **Plugin State Robustness**: Implemented proper error propagation for plugin JSON loading to prevent silent state loss or over-writes during I/O failures.
-- **SSH Config Comment Parsing**: Added quote-aware and escape-aware inline comment stripping for `ssh_config` properties to prevent parsing errors on lines with trailing comments.
-- **Sidebar Resize Stale Context**: Synchronized `widthRef.current` updates to prevent stale sidebar settings during fast resizing or external sync events.
+- **PTY Deadlock**: Fixed a critical backend deadlock in `pty.rs` where the global session mutex was being held across asynchronous I/O operations. ([#38])
+- **Terminal Event Leak**: Resolved a memory leak in `Terminal.tsx` where Tauri event listeners were not being fully unregistered when closing tabs. ([#38])
+- **Terminal Recreation**: Fixed logic errors that previously prevented terminal tabs from being "Restarted" after their backend session exited. ([#38])
+- **Remote Exit Events**: Ensured SSH sessions correctly emit exit events so the frontend recognized remote channel terminations. ([#38])
+- **Settings Toggle Accessibility**: Refactored the `Toggle` component to use semantic HTML specifically for keyboard and screen-reader compliance. ([#38])
+- **Sidebar Resize Stale Closure**: Fixed a bug that caused outdated sidebar width values to be saved when resizing. ([#38])
+- **Race Condition Safety**: Fixed potential double command execution if the terminal-ready signal and safety timeout collided. ([#38])
+- **Terminal Interactivity Hot Path**: Reduced IPC/event burst pressure with short input and output batching so high-frequency typing and echo behavior feel smoother on remote sessions. ([#38])
+- **Resize Event Noise**: Deduplicated repeated terminal resize sends when rows/cols are unchanged. ([#38])
+- **Hidden Dashboard Polling**: Prevented background metric polling traffic while the dashboard tab is not visible. ([#38])
+- **Window Edge Artifacts**: Removed bright edge bleed in dark themes after transparency path cleanup. ([#38])
+- **Terminal Color Compatibility**: Replaced the CSS `color-mix()` function with a manual hex blending helper to ensure custom accent colors render correctly across all xterm.js renderers and Node.js environments. ([#38])
+- **Transparency Over-Exposure**: Fixed a bug where terminal loading and error states inherited transparency; these states now maintain a solid background for readability until the session is active. ([#38])
+- **spawn_blocking Handle Safety**: Fixed backend emit path to use the cloned app handle inside blocking closures. ([#38])
+- **Tunnel State Synchronization**: Ensured remote tunnel entries are only removed if server-side cancellation succeeds, preventing stale "active" tunnels from polluting internal maps. ([#38])
+- **Plugin State Robustness**: Implemented proper error propagation for plugin JSON loading to prevent silent state loss or over-writes during I/O failures. ([#38])
+- **SSH Config Comment Parsing**: Added quote-aware and escape-aware inline comment stripping for `ssh_config` properties to prevent parsing errors on lines with trailing comments. ([#38])
+- **Sidebar Resize Stale Context**: Synchronized `widthRef.current` updates to prevent stale sidebar settings during fast resizing or external sync events. ([#38])
 
 ## [2.5.3] - 2026-03-06
 
@@ -220,6 +222,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 [Unreleased]: https://github.com/zync-sh/zync/compare/v2.5.4...HEAD
 [2.5.4]: https://github.com/zync-sh/zync/compare/v2.5.3...v2.5.4
 [2.5.3]: https://github.com/zync-sh/zync/compare/v2.5.2...v2.5.3
+[#38]: https://github.com/zync-sh/zync/pull/38
 [2.5.2]: https://github.com/zync-sh/zync/compare/v2.5.1...v2.5.2
 [2.5.1]: https://github.com/zync-sh/zync/compare/v2.5.0...v2.5.1
 [2.5.0]: https://github.com/zync-sh/zync/compare/v2.4.1...v2.5.0
