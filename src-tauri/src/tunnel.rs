@@ -165,15 +165,18 @@ impl TunnelManager {
             );
         }
 
-        let mut session_handle = session.lock().await;
-        // Check docs: tcpip_forward returns impl Future<Output = Result<bool, Error>> usually?
-        // 0.46 might return u32 if allocating port 0.
-        // Assuming Result<bool> based on previous checks or similar.
-        // Actually, let's treat it as result.
-        let _ = session_handle
-            .tcpip_forward(bind_address.clone(), remote_port as u32)
-            .await
-            .map_err(|e| anyhow!("Remote forwarding error: {}", e))?;
+        let res = {
+            let mut session_handle = session.lock().await;
+            session_handle
+                .tcpip_forward(bind_address.clone(), remote_port as u32)
+                .await
+        };
+
+        if let Err(e) = res {
+            let mut map = self.remote_forwards.lock().await;
+            map.remove(&remote_port);
+            return Err(anyhow!("Remote forwarding error: {}", e));
+        }
 
         println!(
             "[TUNNEL] Remote forwarding enabled on remote port {} -> {}:{} (bound to {})",
