@@ -187,30 +187,23 @@ fn handle_agent_request(
             // SSH_AGENTC_REQUEST_IDENTITIES
             // Response: SSH_AGENT_IDENTITIES_ANSWER (12) + u32 count + (string blob + string comment) * count
             let keys = keys_mutex.lock().unwrap();
+            
+            // Single-pass optimization: reserve space for count, then iterate once
             let mut buf = vec![12];
-            buf.extend_from_slice(&(keys.len() as u32).to_be_bytes());
-
+            buf.extend_from_slice(&0u32.to_be_bytes()); // Placeholder for count
+            
+            let mut count = 0u32;
             for k in keys.iter() {
                 let blob = k.public_key_bytes();
-                // Temporary Fix: Filter out non-Ed25519 keys because russh ECDSA blobs seem malformed (4 parts instead of 3)
-                // causing "elliptic curve does not match" on the remote OpenSSH client.
-                if !blob.windows(11).any(|w| w == b"ssh-ed25519") {
-                    continue;
+                // Filter out non-Ed25519 keys because russh ECDSA blobs seem malformed (4 parts instead of 3)
+                if blob.windows(11).any(|w| w == b"ssh-ed25519") {
+                    write_string(&mut buf, &blob);
+                    write_string(&mut buf, b"virtual-agent");
+                    count += 1;
                 }
-
-                write_string(&mut buf, &blob);
-                write_string(&mut buf, b"virtual-agent");
             }
-            // Update the count at the beginning of the buffer
-            let count = keys
-                .iter()
-                .filter(|k| {
-                    k.public_key_bytes()
-                        .windows(11)
-                        .any(|w| w == b"ssh-ed25519")
-                })
-                .count();
-            buf[1..5].copy_from_slice(&(count as u32).to_be_bytes());
+            // Overwrite the reserved 4 bytes with the actual count
+            buf[1..5].copy_from_slice(&count.to_be_bytes());
             buf
         }
         13 => {
@@ -379,16 +372,19 @@ impl SshManager {
             let key_data = std::fs::read_to_string(&expanded_path)
                 .map_err(|e| anyhow!("Failed to read private key file: {}", e))?;
 
-            let key = Arc::new(key);
+            // Decode key with optional passphrase
+            let privkey = russh_keys::decode_secret_key(&key_data, passphrase.as_deref())
+                .map_err(|e| anyhow!("Failed to decode private key: {}", e))?;
+            let privkey = Arc::new(privkey);
+
             let auth_success = session
-                .authenticate_publickey(&config.username, key.clone())
+                .authenticate_publickey(&config.username, privkey.clone())
                 .await?;
 
             if auth_success {
-                // Add key to Global Virtual Agent only on SUCCESS
-                // This prevents leaking unauthorized keys to jump-host proxies
+                // Add the underlying key to Global Virtual Agent only on SUCCESS
                 let mut keys = self.agent_keys.lock().unwrap();
-                keys.push((*key).clone());
+                keys.push((*privkey).clone());
             }
             auth_success
         } else if let Some(pwd) = pwd {

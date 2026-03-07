@@ -11,9 +11,9 @@ import { ContextMenu } from '../ui/ContextMenu';
 import { WindowControls } from './WindowControls';
 
 // Lazy Load Modals
-import { SettingsModal } from '../settings/SettingsModal';
+const SettingsModal = lazy(() => import('../settings/SettingsModal').then(mod => ({ default: mod.SettingsModal })));
+const AddTunnelModal = lazy(() => import('../modals/AddTunnelModal').then(mod => ({ default: mod.AddTunnelModal })));
 import { Tooltip } from '../ui/Tooltip';
-import { AddTunnelModal } from '../modals/AddTunnelModal';
 const ConnectionDetailsModal = lazy(() => import('../modals/ConnectionDetailsModal').then(show => ({ default: show.ConnectionDetailsModal })));
 const AddConnectionModal = lazy(() => import('../modals/AddConnectionModal').then(mod => ({ default: mod.AddConnectionModal })));
 

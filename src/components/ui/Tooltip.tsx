@@ -51,6 +51,8 @@ export function Tooltip({ content, children, position = 'top', className }: Tool
       className={cn("relative inline-flex items-center justify-center", className)}
       onMouseEnter={() => setShow(true)}
       onMouseLeave={() => setShow(false)}
+      onFocus={() => setShow(true)}
+      onBlur={() => setShow(false)}
     >
       {children}
       {show && createPortal(

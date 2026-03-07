@@ -259,7 +259,7 @@ impl TunnelManager {
                             let _ = handle
                                 .cancel_tcpip_forward(bind_addr.clone(), remote_port as u32)
                                 .await;
-                            println!("[TUNNEL] Attempted to cancel unknown remote forwarding on port {} with bind_address {}", remote_port, bind_addr);
+                            log::warn!("[TUNNEL] Attempted to cancel unknown remote forwarding on port {} with bind_address {}", remote_port, bind_addr);
                         }
                     }
                 }

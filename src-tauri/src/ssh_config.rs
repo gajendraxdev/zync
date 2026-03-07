@@ -145,7 +145,7 @@ fn strip_inline_comments(line: &str) -> &str {
             escaped = true;
             continue;
         }
-        if (c == '"' || c == '\'') && !escaped {
+        if c == '"' || c == '\'' {
             if in_quotes {
                 if c == quote_char {
                     in_quotes = false;
@@ -155,7 +155,7 @@ fn strip_inline_comments(line: &str) -> &str {
                 quote_char = c;
             }
         }
-        if c == '#' && !in_quotes && !escaped {
+        if c == '#' && !in_quotes {
             return &line[..i];
         }
     }
