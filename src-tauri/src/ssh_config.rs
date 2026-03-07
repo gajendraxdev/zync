@@ -65,11 +65,13 @@ pub fn parse_config(path: &Path) -> Result<Vec<ParsedSshConnection>> {
                 }
             }
 
-            // Start new
+            // Start new - handle potential multiple aliases on Host line
+            let primary_alias = value_str.split_whitespace().next().unwrap_or(value_str);
+
             current_host = Some(ParsedSshConnection {
-                id: String::new(),           // Will be set on push
-                name: value_str.to_string(), // First alias
-                host: String::new(),
+                id: String::new(),               // Will be set on push
+                name: primary_alias.to_string(), // First alias
+                host: primary_alias.to_string(), // Default host to alias name
                 username: whoami::username(),
                 port: 22,
                 private_key_path: None,

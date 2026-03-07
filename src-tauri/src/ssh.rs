@@ -50,6 +50,8 @@ impl client::Handler for Client {
         tokio::spawn(async move {
             use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+            const MAX_FORWARDED_AGENT_PACKET_SIZE: usize = 256 * 1024; // 256KB cap
+
             loop {
                 // 1. Read Message Length (4 bytes BE)
                 let mut len_buf = [0u8; 4];
@@ -57,6 +59,15 @@ impl client::Handler for Client {
                     break;
                 }
                 let len = u32::from_be_bytes(len_buf) as usize;
+
+                // Sanity check length
+                if len == 0 || len > MAX_FORWARDED_AGENT_PACKET_SIZE {
+                    eprintln!(
+                        "[SSH] Invalid virtual agent packet size: {}. Closing channel.",
+                        len
+                    );
+                    break;
+                }
 
                 // 2. Read Payload
                 let mut payload = vec![0u8; len];
