@@ -19,6 +19,12 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Terminal Opacity UX**: Updated appearance behavior so the terminal opacity slider is continuously applied instead of behaving like a binary on/off toggle below 100%.
 - **Accent-Aware Terminal Branding**: ANSI Yellow and Bright Yellow colors in the terminal now dynamically map to the active application accent color for a unified brand experience.
 
+### Security
+
+- **Virtual Agent Key Registration**: Delayed SSH private key registration until after successful handshake to prevent pre-auth key leakage.
+- **OOM Protection**: Added a 256KB sanity cap to Virtual Agent packet frames to prevent malicious server-side memory exhaustion.
+- **Plugin ID Sanitization**: Implemented strict whitelist-based sanitization for plugin directory names to prevent directory traversal attacks.
+
 ### Fixed
 
 - **PTY Deadlock**: Fixed a critical backend deadlock in `pty.rs` where the global session mutex was being held across asynchronous I/O operations.
@@ -35,6 +41,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Terminal Color Compatibility**: Replaced the CSS `color-mix()` function with a manual hex blending helper to ensure custom accent colors render correctly across all xterm.js renderers and Node.js environments.
 - **Transparency Over-Exposure**: Fixed a bug where terminal loading and error states inherited transparency; these states now maintain a solid background for readability until the session is active.
 - **spawn_blocking Handle Safety**: Fixed backend emit path to use the cloned app handle inside blocking closures.
+- **Tunnel State Synchronization**: Ensured remote tunnel entries are only removed if server-side cancellation succeeds, preventing stale "active" tunnels from polluting internal maps.
+- **Plugin State Robustness**: Implemented proper error propagation for plugin JSON loading to prevent silent state loss or over-writes during I/O failures.
+- **SSH Config Comment Parsing**: Added quote-aware and escape-aware inline comment stripping for `ssh_config` properties to prevent parsing errors on lines with trailing comments.
+- **Sidebar Resize Stale Context**: Synchronized `widthRef.current` updates to prevent stale sidebar settings during fast resizing or external sync events.
 
 ## [2.5.3] - 2026-03-06
 
