@@ -71,6 +71,7 @@ export function TerminalManager({ connectionId, isVisible, hideTabs = false }: {
                             if (!obj || obj.sent) return;
 
                             obj.sent = true;
+                            obj.unlistenFn?.(); // Clean up listener on timeout
                             delete pendingReadyRef.current[newId];
 
                             console.warn(`[TerminalManager] terminal-ready-${newId} timed out, sending command anyway`);
@@ -138,14 +139,10 @@ export function TerminalManager({ connectionId, isVisible, hideTabs = false }: {
             window.removeEventListener('zync:terminal:send', handlePluginTerminalSend);
             window.removeEventListener('zync:ai-command-bar', handleAiCommandBar);
 
-            // Cleanup any pending terminal-ready listeners/timeouts
-            Object.values(pendingReadyRef.current).forEach(p => {
-                clearTimeout(p.timeoutId);
-                p.unlistenFn?.();
-            });
-            pendingReadyRef.current = {};
+            // Cleanup only if connection changed or unmounting
+            // We don't want to clear this when just switching tabs within same connection
         };
-    }, [activeConnectionId, activeTabId, openAiCommandBar]);
+    }, [activeConnectionId, openAiCommandBar]); // Remove activeTabId to prevent reset on tab switch
 
 
     const handleCloseTab = (id: string, e: React.MouseEvent) => {
@@ -158,7 +155,7 @@ export function TerminalManager({ connectionId, isVisible, hideTabs = false }: {
 
     if (!activeConnectionId) {
         return (
-            <div className="h-full flex items-center justify-center text-app-muted bg-app-bg">
+            <div className={cn("h-full flex items-center justify-center text-app-muted", terminalTransparencyEnabled ? "bg-transparent" : "bg-app-bg")}>
                 <p>Select a connection to view terminals</p>
             </div>
         );
@@ -208,7 +205,7 @@ export function TerminalManager({ connectionId, isVisible, hideTabs = false }: {
             <div ref={terminalContentRef} className={cn("flex-1 overflow-hidden relative", terminalTransparencyEnabled ? "bg-transparent" : "bg-app-bg")}>
                 <AiCommandBar connectionId={activeConnectionId} activeTermId={activeTabId} constraintRef={terminalContentRef} />
                 {tabs.length === 0 ? (
-                    <div className="h-full flex flex-col items-center justify-center text-app-muted bg-app-bg">
+                    <div className={cn("h-full flex flex-col items-center justify-center text-app-muted", terminalTransparencyEnabled ? "bg-transparent" : "bg-app-bg")}>
                         <TerminalIcon size={48} className="mb-4 opacity-20" />
                         <p>No active terminals</p>
                         <button onClick={handleNewTab} className="mt-4 text-app-accent hover:underline">Open New Terminal</button>

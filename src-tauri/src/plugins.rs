@@ -45,7 +45,7 @@ impl PluginScanner {
             .context("Failed to resolve app config directory")?;
 
         let plugins_dir = config_dir.join("plugins");
-        let state = Self::load_state(app).unwrap_or_default();
+        let state = Self::load_state(app)?;
 
         // Load User Plugins
         let mut plugins = Vec::new();
@@ -637,20 +637,34 @@ impl PluginScanner {
             fs::create_dir_all(&plugins_dir)?;
         }
 
-        // Use manifest ID or safe name for directory
-        // Sanitize ID for path
+        // Use collision-free on-disk name (Base64 of ID)
         let dir_name = sanitize_plugin_dir_name(&manifest.id)?;
         let target_dir = plugins_dir.join(&dir_name);
 
-        if target_dir.exists() {
-            // Check if we should overwrite? For now, yes, it's an update/reinstall
-            fs::remove_dir_all(&target_dir)?;
+        // Legacy Migration: If old sanitized name exists, we'll keep the new one but could rename
+        // However, a better approach is to check if the new target exists.
+        
+        let temp_dir_name = format!("tmp-{}", uuid::Uuid::new_v4());
+        let temp_dir = plugins_dir.join(&temp_dir_name);
+        fs::create_dir_all(&temp_dir)?;
+
+        println!("[Plugins] Extracting to temp: {:?}", temp_dir);
+        if let Err(e) = archive.extract(&temp_dir) {
+            let _ = fs::remove_dir_all(&temp_dir);
+            return Err(e.into());
         }
 
-        fs::create_dir_all(&target_dir)?;
+        // Validate extraction
+        if !temp_dir.join("manifest.json").exists() {
+            let _ = fs::remove_dir_all(&temp_dir);
+            return Err(anyhow::anyhow!("Extracted plugin is missing manifest.json"));
+        }
 
-        println!("[Plugins] Extracting to: {:?}", target_dir);
-        archive.extract(&target_dir)?;
+        // Atomic Swap
+        if target_dir.exists() {
+            fs::remove_dir_all(&target_dir)?;
+        }
+        fs::rename(&temp_dir, &target_dir)?;
 
         Ok(manifest.id)
     }
@@ -659,21 +673,22 @@ impl PluginScanner {
         let config_dir = app.path().app_config_dir()?;
         let plugins_dir = config_dir.join("plugins");
 
-        // Need to find the directory - scanning or guessing
-        // Since we name dirs by ID (sanitized), we can try that first
         let dir_name = sanitize_plugin_dir_name(plugin_id)?;
         let target_dir = plugins_dir.join(&dir_name);
 
+        // Legacy Check
+        let legacy_name = legacy_sanitize_id(plugin_id);
+        let legacy_dir = plugins_dir.join(&legacy_name);
+
         if target_dir.exists() {
             fs::remove_dir_all(target_dir)?;
+            if legacy_dir.exists() { let _ = fs::remove_dir_all(legacy_dir); }
+            Ok(())
+        } else if legacy_dir.exists() {
+            fs::remove_dir_all(legacy_dir)?;
             Ok(())
         } else {
-            // Fallback: scan to find directory with matching manifest ID?
-            // For now, assume consistent naming
-            Err(anyhow::anyhow!(
-                "Plugin directory not found for ID: {}",
-                plugin_id
-            ))
+            Err(anyhow::anyhow!("Plugin directory not found for ID: {}", plugin_id))
         }
     }
 
@@ -686,17 +701,34 @@ impl PluginScanner {
             serde_json::from_str(&manifest_content).context("Failed to parse manifest.json")?;
 
         // Load Main Script (worker.js or specified entry)
+        let canonical_root = fs::canonicalize(dir)?;
+
         let script = if let Some(main_file) = &manifest.main {
-            let script_path = dir.join(main_file);
+            let script_path = fs::canonicalize(dir.join(main_file))
+                .context("Failed to resolve manifest.main path")?;
+            
+            if !script_path.starts_with(&canonical_root) {
+                return Err(anyhow::anyhow!("Illegal manifest.main path: outside plugin root"));
+            }
             fs::read_to_string(script_path).ok()
         } else {
-            // Default to worker.js if not specified, or None
-            fs::read_to_string(dir.join("worker.js")).ok()
+            let default_script = dir.join("worker.js");
+            if default_script.exists() {
+                 let script_path = fs::canonicalize(default_script)?;
+                 if script_path.starts_with(&canonical_root) {
+                     fs::read_to_string(script_path).ok()
+                 } else { None }
+            } else { None }
         };
 
         // Load Styles (if any)
         let style = if let Some(style_file) = &manifest.style {
-            let style_path = dir.join(style_file);
+            let style_path = fs::canonicalize(dir.join(style_file))
+                .context("Failed to resolve manifest.style path")?;
+            
+            if !style_path.starts_with(&canonical_root) {
+                return Err(anyhow::anyhow!("Illegal manifest.style path: outside plugin root"));
+            }
             fs::read_to_string(style_path).ok()
         } else {
             None
@@ -712,9 +744,22 @@ impl PluginScanner {
     }
 }
 
-/// Strict sanitizer for plugin directory names to prevent directory traversal.
-/// Replaces non-alphanumeric (excluding '-' and '_') with '_' and rejects '.', '..', and empty strings.
+/// Collision-free sanitizer for plugin directory names.
+/// Uses URL-safe Base64 of the plugin ID to ensure uniqueness.
 fn sanitize_plugin_dir_name(id: &str) -> Result<String> {
+    use base64::{engine::general_purpose, Engine as _};
+    let encoded = general_purpose::URL_SAFE_NO_PAD.encode(id);
+    
+    if encoded.is_empty() || encoded == "." || encoded == ".." {
+        return Err(anyhow::anyhow!("Invalid plugin ID for directory naming: {}", id));
+    }
+
+    Ok(encoded)
+}
+
+/// Legacy sanitizer used in earlier versions (v2.5.4 early rollout).
+/// Replaced by Base64 encoding to prevent collisions.
+fn legacy_sanitize_id(id: &str) -> String {
     let sanitized: String = id
         .trim()
         .chars()
@@ -726,10 +771,5 @@ fn sanitize_plugin_dir_name(id: &str) -> Result<String> {
             }
         })
         .collect();
-
-    if sanitized.is_empty() || sanitized == "." || sanitized == ".." {
-        return Err(anyhow::anyhow!("Invalid plugin ID for directory naming: {}", id));
-    }
-
-    Ok(sanitized)
+    sanitized
 }
