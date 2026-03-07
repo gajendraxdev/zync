@@ -264,7 +264,7 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
     return (
         <div className={cn(
             "absolute inset-0 flex flex-col transition-all",
-            tab.view === 'terminal' && terminalTransparencyEnabled ? "bg-transparent" : "bg-app-bg",
+            tab.view === 'terminal' && terminalTransparencyEnabled && !isConnecting && !isError ? "bg-transparent" : "bg-app-bg",
             !isActive && "hidden",
             isActive && "animate-in fade-in slide-in-from-bottom-2 duration-300 ease-out fill-mode-forwards"
         )}>
