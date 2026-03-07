@@ -217,17 +217,31 @@ impl TunnelManager {
             if parts.len() == 3 {
                 if let Ok(remote_port) = parts[1].parse::<u16>() {
                     let mut remote_forwards_guard = self.remote_forwards.lock().await;
-                    if let Some((_, _, saved_bind_address)) =
-                        remote_forwards_guard.remove(&remote_port)
-                    {
+                    let found = remote_forwards_guard.get(&remote_port).cloned();
+
+                    if let Some((_, _, saved_bind_address)) = found {
                         if let Some(session) = session {
                             let handle = session.lock().await;
                             let bind_addr =
                                 bind_address_override.unwrap_or_else(|| saved_bind_address);
-                            let _ = handle
+                            let res = handle
                                 .cancel_tcpip_forward(bind_addr.clone(), remote_port as u32)
                                 .await;
-                            println!("[TUNNEL] Cancelled remote forwarding on port {} (bind address: {})", remote_port, bind_addr);
+
+                            if res.is_ok() {
+                                remote_forwards_guard.remove(&remote_port);
+                                println!("[TUNNEL] Cancelled remote forwarding on port {} (bind address: {})", remote_port, bind_addr);
+                            } else {
+                                println!(
+                                    "[TUNNEL ERROR] Failed to cancel remote forwarding on port {}: {:?}",
+                                    remote_port,
+                                    res.err()
+                                );
+                            }
+                        } else {
+                            // If no session is provided, the connection is likely gone.
+                            // We remove it from local state to keep the UI in sync.
+                            remote_forwards_guard.remove(&remote_port);
                         }
                     } else {
                         println!(
