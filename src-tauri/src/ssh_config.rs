@@ -27,7 +27,7 @@ pub fn parse_config(path: &Path) -> Result<Vec<ParsedSshConnection>> {
     let mut current_host: Option<ParsedSshConnection> = None;
 
     for line in content.lines() {
-        let line = line.trim();
+        let line = strip_inline_comments(line).trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
@@ -129,4 +129,35 @@ pub fn parse_config(path: &Path) -> Result<Vec<ParsedSshConnection>> {
     }
 
     Ok(connections)
+}
+
+fn strip_inline_comments(line: &str) -> &str {
+    let mut in_quotes = false;
+    let mut quote_char = ' ';
+    let mut escaped = false;
+
+    for (i, c) in line.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if c == '\\' {
+            escaped = true;
+            continue;
+        }
+        if (c == '"' || c == '\'') && !escaped {
+            if in_quotes {
+                if c == quote_char {
+                    in_quotes = false;
+                }
+            } else {
+                in_quotes = true;
+                quote_char = c;
+            }
+        }
+        if c == '#' && !in_quotes && !escaped {
+            return &line[..i];
+        }
+    }
+    line
 }

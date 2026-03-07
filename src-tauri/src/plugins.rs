@@ -116,7 +116,7 @@ impl PluginScanner {
         }
 
         let state_path = config_dir.join("plugins.json");
-        let mut state = Self::load_state(app).unwrap_or_default();
+        let mut state = Self::load_state(app)?;
 
         state.enabled_plugins.insert(id, enabled);
 
@@ -639,9 +639,7 @@ impl PluginScanner {
 
         // Use manifest ID or safe name for directory
         // Sanitize ID for path
-        let dir_name = manifest
-            .id
-            .replace(|c: char| !c.is_alphanumeric() && c != '.' && c != '-', "_");
+        let dir_name = sanitize_plugin_dir_name(&manifest.id)?;
         let target_dir = plugins_dir.join(&dir_name);
 
         if target_dir.exists() {
@@ -663,8 +661,7 @@ impl PluginScanner {
 
         // Need to find the directory - scanning or guessing
         // Since we name dirs by ID (sanitized), we can try that first
-        let dir_name =
-            plugin_id.replace(|c: char| !c.is_alphanumeric() && c != '.' && c != '-', "_");
+        let dir_name = sanitize_plugin_dir_name(plugin_id)?;
         let target_dir = plugins_dir.join(&dir_name);
 
         if target_dir.exists() {
@@ -713,4 +710,26 @@ impl PluginScanner {
             enabled: true, // Default, overwritten by scan
         })
     }
+}
+
+/// Strict sanitizer for plugin directory names to prevent directory traversal.
+/// Replaces non-alphanumeric (excluding '-' and '_') with '_' and rejects '.', '..', and empty strings.
+fn sanitize_plugin_dir_name(id: &str) -> Result<String> {
+    let sanitized: String = id
+        .trim()
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+
+    if sanitized.is_empty() || sanitized == "." || sanitized == ".." {
+        return Err(anyhow::anyhow!("Invalid plugin ID for directory naming: {}", id));
+    }
+
+    Ok(sanitized)
 }
