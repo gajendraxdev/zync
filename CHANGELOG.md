@@ -14,8 +14,6 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Security
 
-- **Virtual Agent Key Registration**: Delayed SSH private key registration until after successful handshake to prevent pre-auth key leakage. ([3df9766])
-- **OOM Protection**: Added a 256KB sanity cap to Virtual Agent packet frames to prevent malicious server-side memory exhaustion. ([3df9766])
 - **Plugin ID Sanitization**: Implemented strict whitelist-based sanitization for plugin directory names to prevent directory traversal attacks. ([f766ac2])
 - **Path Traversal Shield**: Hardened plugin asset loading with path canonicalization and strict root-directory validation. ([f766ac2])
 - **Plugin Load Error Propagation**: Upgraded plugin loading to strictly propagate filesystem read errors, preventing partially failed plugins from entering an inconsistent active state. ([7048422])
@@ -24,15 +22,11 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Fixed
 
-- **Terminal Vibrancy Consistency**: Fixed empty terminal states where the background incorrectly remained opaque even when vibrancy was enabled. ([734bdf9])
-- **Tab-Switch Command Persistence**: Fixed a bug where switching tabs during a connection handshake could prematurely clear the `terminal-ready` signal. ([734bdf9])
-- **Tooltip Keyboard Accessibility**: Added focus and blur event handlers to tooltips for full keyboard navigation and screen-reader support. ([f9e31f4])
 - **Terminal Listener Exhaustive Cleanup**: Updated the terminal manager to explicitly unlisten from all tauri event handlers before clearing cleanup timeouts, preventing potential listener leaks. ([7048422])
-- **SSH Config Comment Parsing**: Added quote-aware and escape-aware inline comment stripping for `ssh_config` properties to prevent parsing errors on lines with trailing comments. ([f44bf56])
 
 ### Internal
 
-- **Code Polish**: Refined log macro imports, optimized SSH config helper scope, and unified terminal session refs per security audit feedback. ([7048422])
+- **Code Polish**: Refined log macro imports, optimized SSH config helper scope, and unified terminal session refs per security audit feedback. ([7048422],[0b4e9f8])
 
 ## [2.5.4] - 2026-03-07
 
@@ -265,7 +259,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 [f44bf56]: https://github.com/zync-sh/zync/commit/f44bf56
 [734bdf9]: https://github.com/zync-sh/zync/commit/734bdf9
 [f9e31f4]: https://github.com/zync-sh/zync/commit/f9e31f4
-[7048422]: https://github.com/zync-sh/zync/commit/7048422
+[0b4e9f8]: https://github.com/zync-sh/zync/commit/0b4e9f8
 [2.5.2]: https://github.com/zync-sh/zync/compare/v2.5.1...v2.5.2
 [2.5.1]: https://github.com/zync-sh/zync/compare/v2.5.0...v2.5.1
 [2.5.0]: https://github.com/zync-sh/zync/compare/v2.4.1...v2.5.0
