@@ -4,6 +4,30 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.5.5] - 2026-03-08
+
+### Added
+
+- **Atomic Plugin Installation**: Implemented atomic extraction using temporary folders to prevent corrupted states during installs or updates. ([f766ac2])
+- **Collision-Free Plugin Naming**: Switched to Base64-hashed directory names to prevent filesystem ID collisions, with automatic legacy folder migration. ([f766ac2])
+- **Lazy Loaded Modals**: Modals like `SettingsModal` and `AddTunnelModal` are now lazy-loaded, improving initial bundle size and application startup speed. ([f9e31f4])
+
+### Security
+
+- **Plugin ID Sanitization**: Implemented strict whitelist-based sanitization for plugin directory names to prevent directory traversal attacks. ([f766ac2])
+- **Path Traversal Shield**: Hardened plugin asset loading with path canonicalization and strict root-directory validation. ([f766ac2])
+- **Plugin Load Error Propagation**: Upgraded plugin loading to strictly propagate filesystem read errors, preventing partially failed plugins from entering an inconsistent active state. ([7048422])
+- **SSH Key Decoding Fix**: Fixed a critical bug where encrypted private key passphrases were ignored; implemented robust decoding for all standard OpenSSH formats. ([3df9766])
+- **Single-Pass Virtual Agent**: Optimized the virtual agent's key identification response to a single-pass loop, reducing performance overhead and potential timing side-channels. ([3df9766])
+
+### Fixed
+
+- **Terminal Listener Exhaustive Cleanup**: Updated the terminal manager to explicitly unlisten from all tauri event handlers before clearing cleanup timeouts, preventing potential listener leaks. ([7048422])
+
+### Internal
+
+- **Code Polish**: Refined log macro imports, optimized SSH config helper scope, and unified terminal session refs per security audit feedback. ([7048422],[0b4e9f8])
+
 ## [2.5.4] - 2026-03-07
 
 ### Added
@@ -14,9 +38,6 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Sidebar Header Redesign**: Polished the sidebar header and "+" dropdown menu with better spacing and clipping fixes. ([#38])
 - **Dynamic Theme Accent Synchronization**: Implemented intelligent accent color reset logic—choosing a new theme now automatically updates the app accent to match the theme's default. ([#38])
 - **Stable Theme Default Swatch**: Added a dedicated "Theme Default" swatch in settings that accurately reflects the original theme color even when a custom accent is active, using plugin manifest metadata. ([#38])
-- **Atomic Plugin Installation**: Implemented atomic extraction using temporary folders to prevent corrupted states during installs or updates. ([#38])
-- **Collision-Free Plugin Naming**: Switched to Base64-hashed directory names to prevent filesystem ID collisions, with automatic legacy folder migration. ([#38])
-- **Lazy Loaded Modals**: Modals like `SettingsModal` and `AddTunnelModal` are now lazy-loaded, improving initial bundle size and application startup speed. ([#38])
 
 ### Changed
 
@@ -228,10 +249,16 @@ All notable changes to Zync are documented in this file. The format is based on 
 - Auto-updates
 - Multiple themes (Dark, Light, Dracula)
 
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.5.4...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.5.5...HEAD
+[2.5.5]: https://github.com/zync-sh/zync/compare/v2.5.4...v2.5.5
 [2.5.4]: https://github.com/zync-sh/zync/compare/v2.5.3...v2.5.4
 [2.5.3]: https://github.com/zync-sh/zync/compare/v2.5.2...v2.5.3
 [#38]: https://github.com/zync-sh/zync/pull/38
+[f766ac2]: https://github.com/zync-sh/zync/commit/f766ac2
+[3df9766]: https://github.com/zync-sh/zync/commit/3df9766
+[7048422]: https://github.com/zync-sh/zync/commit/7048422
+[f9e31f4]: https://github.com/zync-sh/zync/commit/f9e31f4
+[0b4e9f8]: https://github.com/zync-sh/zync/commit/0b4e9f8
 [2.5.2]: https://github.com/zync-sh/zync/compare/v2.5.1...v2.5.2
 [2.5.1]: https://github.com/zync-sh/zync/compare/v2.5.0...v2.5.1
 [2.5.0]: https://github.com/zync-sh/zync/compare/v2.4.1...v2.5.0
