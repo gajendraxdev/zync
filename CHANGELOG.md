@@ -11,6 +11,12 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Atomic Plugin Installation**: Implemented atomic extraction using temporary folders to prevent corrupted states during installs or updates. ([f766ac2])
 - **Collision-Free Plugin Naming**: Switched to Base64-hashed directory names to prevent filesystem ID collisions, with automatic legacy folder migration. ([f766ac2])
 - **Lazy Loaded Modals**: Modals like `SettingsModal` and `AddTunnelModal` are now lazy-loaded, improving initial bundle size and application startup speed. ([f9e31f4])
+- **Glass Empty States**: Improved terminal empty state legibility with high-blur glassmorphism (`backdrop-blur-xl`) when vibrancy is enabled. ([42eeb4c])
+
+### Changed
+
+- **Unified Sidebar Transition**: Overhauled sidebar animation to use a coordinated layout width transition, eliminating visual gaps and sub-pixel desync artifacts. ([bc4ec09])
+- **Optimized Sidebar Duration**: Reduced sidebar toggle duration to 300ms for a snappier, more responsive user experience. ([bc4ec09])
 
 ### Security
 
@@ -23,6 +29,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 ### Fixed
 
 - **Terminal Listener Exhaustive Cleanup**: Updated the terminal manager to explicitly unlisten from all tauri event handlers before clearing cleanup timeouts, preventing potential listener leaks. ([7048422])
+- **Throttled Terminal Resizing**: Implemented intelligent resize throttling for xterm.js instances to prevent layout thrashing and maintain 60FPS during UI transitions. ([bc4ec09])
 
 ### Internal
 
@@ -259,6 +266,8 @@ All notable changes to Zync are documented in this file. The format is based on 
 [7048422]: https://github.com/zync-sh/zync/commit/7048422
 [f9e31f4]: https://github.com/zync-sh/zync/commit/f9e31f4
 [0b4e9f8]: https://github.com/zync-sh/zync/commit/0b4e9f8
+[42eeb4c]: https://github.com/zync-sh/zync/commit/42eeb4c
+[bc4ec09]: https://github.com/zync-sh/zync/commit/bc4ec09
 [2.5.2]: https://github.com/zync-sh/zync/compare/v2.5.1...v2.5.2
 [2.5.1]: https://github.com/zync-sh/zync/compare/v2.5.0...v2.5.1
 [2.5.0]: https://github.com/zync-sh/zync/compare/v2.4.1...v2.5.0
