@@ -1,8 +1,10 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
+use log::info;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use std::time::Duration;
 use tauri::{AppHandle, Manager};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -598,8 +600,11 @@ impl PluginScanner {
         println!("[Plugins] Installing from: {}", url);
 
         // 1. Download
-        let client = reqwest::Client::new();
-        let response = client.get(url).send().await?;
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .map_err(|e| anyhow!("Failed to create HTTP client: {}", e))?;
+        let response: reqwest::Response = client.get(url).send().await?;
 
         if !response.status().is_success() {
             return Err(anyhow::anyhow!(
@@ -670,7 +675,8 @@ impl PluginScanner {
     }
 
     pub fn uninstall_plugin(app: &AppHandle, plugin_id: &str) -> Result<()> {
-        let config_dir = app.path().app_config_dir()?;
+        let config_dir = app.path().app_config_dir()
+        .context("Failed to resolve app config directory")?;
         let plugins_dir = config_dir.join("plugins");
 
         let dir_name = sanitize_plugin_dir_name(plugin_id)?;
@@ -710,13 +716,20 @@ impl PluginScanner {
             if !script_path.starts_with(&canonical_root) {
                 return Err(anyhow::anyhow!("Illegal manifest.main path: outside plugin root"));
             }
-            fs::read_to_string(script_path).ok()
+            
+            let content = fs::read_to_string(&script_path)
+                .with_context(|| format!("Failed to read main script from {}", script_path.display()))?;
+            info!("[Plugins] Loaded main script from: {}", script_path.display());
+            Some(content)
         } else {
             let default_script = dir.join("worker.js");
             if default_script.exists() {
                  let script_path = fs::canonicalize(default_script)?;
                  if script_path.starts_with(&canonical_root) {
-                     fs::read_to_string(script_path).ok()
+                      let content = fs::read_to_string(&script_path)
+                          .with_context(|| format!("Failed to read default worker script from {}", script_path.display()))?;
+                      info!("[Plugins] Loaded default worker script from: {}", script_path.display());
+                      Some(content)
                  } else { None }
             } else { None }
         };
@@ -729,7 +742,11 @@ impl PluginScanner {
             if !style_path.starts_with(&canonical_root) {
                 return Err(anyhow::anyhow!("Illegal manifest.style path: outside plugin root"));
             }
-            fs::read_to_string(style_path).ok()
+            
+            let content = fs::read_to_string(&style_path)
+                .with_context(|| format!("Failed to read style file from {}", style_path.display()))?;
+            info!("[Plugins] Loaded style from: {}", style_path.display());
+            Some(content)
         } else {
             None
         };
