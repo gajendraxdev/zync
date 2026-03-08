@@ -174,7 +174,10 @@ export function TerminalManager({ connectionId, isVisible, hideTabs = false }: {
 
     if (!activeConnectionId) {
         return (
-            <div className={cn("h-full flex items-center justify-center text-app-muted", terminalTransparencyEnabled ? "bg-transparent" : "bg-app-bg")}>
+            <div className={cn(
+                "h-full flex flex-col items-center justify-center text-app-muted",
+                terminalTransparencyEnabled ? "bg-app-bg/80 backdrop-blur-xl" : "bg-app-bg"
+            )}>
                 <p>Select a connection to view terminals</p>
             </div>
         );
@@ -224,7 +227,10 @@ export function TerminalManager({ connectionId, isVisible, hideTabs = false }: {
             <div ref={terminalContentRef} className={cn("flex-1 overflow-hidden relative", terminalTransparencyEnabled ? "bg-transparent" : "bg-app-bg")}>
                 <AiCommandBar connectionId={activeConnectionId} activeTermId={activeTabId} constraintRef={terminalContentRef} />
                 {tabs.length === 0 ? (
-                    <div className={cn("h-full flex flex-col items-center justify-center text-app-muted", terminalTransparencyEnabled ? "bg-transparent" : "bg-app-bg")}>
+                    <div className={cn(
+                        "h-full flex flex-col items-center justify-center text-app-muted z-20",
+                        terminalTransparencyEnabled ? "bg-app-bg/80 backdrop-blur-xl" : "bg-app-bg"
+                    )}>
                         <TerminalIcon size={48} className="mb-4 opacity-20" />
                         <p>No active terminals</p>
                         <button onClick={handleNewTab} className="mt-4 text-app-accent hover:underline">Open New Terminal</button>
