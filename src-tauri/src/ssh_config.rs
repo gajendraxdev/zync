@@ -14,6 +14,7 @@ pub struct ParsedSshConnection {
     pub private_key_path: Option<String>,
     pub jump_server_alias: Option<String>,
     pub jump_server_id: Option<String>,
+    pub aliases: Vec<String>, // Add full alias list
 }
 
 pub fn parse_config(path: &Path) -> Result<Vec<ParsedSshConnection>> {
@@ -44,7 +45,7 @@ pub fn parse_config(path: &Path) -> Result<Vec<ParsedSshConnection>> {
         // Let's perform a cleaner value extraction.
 
         // Re-split strictly
-        let (key_str, value_str) =
+        let (key_str, mut value_str) =
             if let Some(idx) = line.find(|c: char| c.is_whitespace() || c == '=') {
                 let k = &line[..idx];
                 let mut remainder = &line[idx..];
@@ -54,6 +55,15 @@ pub fn parse_config(path: &Path) -> Result<Vec<ParsedSshConnection>> {
             } else {
                 (line, "")
             };
+        
+        // Helper function to strip wrapping quotes
+        fn strip_wrapping_quotes(s: &str) -> &str {
+            s.trim_matches(|c| c == '"' || c == '\'')
+                .trim_matches(|c| c == '"' || c == '\'')
+        }
+        
+        // Normalize value_str by removing wrapping quotes
+        value_str = strip_wrapping_quotes(value_str);
 
         if key_str.to_lowercase() == "host" {
             // Push previous
@@ -67,6 +77,7 @@ pub fn parse_config(path: &Path) -> Result<Vec<ParsedSshConnection>> {
 
             // Start new - handle potential multiple aliases on Host line
             let primary_alias = value_str.split_whitespace().next().unwrap_or(value_str);
+            let aliases: Vec<String> = value_str.split_whitespace().map(|s| s.to_string()).collect();
 
             current_host = Some(ParsedSshConnection {
                 id: String::new(),               // Will be set on push
@@ -77,6 +88,7 @@ pub fn parse_config(path: &Path) -> Result<Vec<ParsedSshConnection>> {
                 private_key_path: None,
                 jump_server_alias: None,
                 jump_server_id: None,
+                aliases, // Store full alias list
             });
         } else if let Some(host) = current_host.as_mut() {
             match key_str.to_lowercase().as_str() {
@@ -90,7 +102,7 @@ pub fn parse_config(path: &Path) -> Result<Vec<ParsedSshConnection>> {
                 "identityfile" => {
                     // expansion of ~ is tricky in rust std, but crucial
                     // Strip quotes FIRST
-                    let mut path = value_str.trim_matches('"').trim_matches('\'').to_string();
+                    let mut path = value_str.to_string();
 
                     // Then expand ~
                     if path.starts_with("~") {
@@ -117,7 +129,7 @@ pub fn parse_config(path: &Path) -> Result<Vec<ParsedSshConnection>> {
     // Pass 2: Resolve Jump Server Aliases to IDs
     let alias_map: std::collections::HashMap<String, String> = connections
         .iter()
-        .map(|c| (c.name.clone(), c.id.clone()))
+        .flat_map(|c| c.aliases.iter().map(|alias| (alias.clone(), c.id.clone())))
         .collect();
 
     for conn in &mut connections {
