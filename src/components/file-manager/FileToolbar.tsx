@@ -2,6 +2,7 @@ import { ChevronRight, Home, LayoutGrid, LayoutList, Plus, RefreshCw, Search, Up
 import { useState, useEffect, useRef } from 'react';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/Button';
+import { ZPortal } from '../ui/ZPortal';
 import { useAppStore } from '../../store/useAppStore'; // Updated Import
 
 interface FileToolbarProps {
@@ -345,10 +346,12 @@ export function FileToolbar({
 
           {isMenuOpen && (
             <>
-              <div
-                className="fixed inset-0 z-40"
-                onClick={() => setIsMenuOpen(false)}
-              />
+              <ZPortal>
+                <div
+                  className="absolute inset-0 z-40 bg-transparent"
+                  onClick={() => setIsMenuOpen(false)}
+                />
+              </ZPortal>
               <div className="absolute top-full right-0 mt-2 w-48 bg-app-panel/95 backdrop-blur-xl border border-app-border/40 rounded-xl shadow-2xl z-50 flex flex-col p-1 animate-in fade-in zoom-in-95 duration-200">
                 <button
                   onClick={() => {
