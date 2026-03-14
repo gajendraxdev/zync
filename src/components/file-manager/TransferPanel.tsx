@@ -111,7 +111,7 @@ export function TransferPanel({ onClose, indicatorRef }: TransferPanelProps) {
       />
       <div
         ref={panelRef}
-        className="absolute bg-app-panel/95 backdrop-blur-xl border border-app-border rounded-xl shadow-2xl animate-in slide-in-from-top-4 fade-in duration-200"
+        className="absolute z-50 bg-app-panel/95 backdrop-blur-xl border border-app-border rounded-xl shadow-2xl animate-in slide-in-from-top-4 fade-in duration-200"
         style={panelStyle}
       >
         {/* Header */}
