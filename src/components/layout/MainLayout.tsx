@@ -134,57 +134,21 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
     const closeTerminal = useAppStore(state => state.closeTerminal);
     const setActiveTerminal = useAppStore(state => state.setActiveTerminal);
 
+    // Feature Pinning
+    const toggleConnectionFeature = useAppStore(state => state.toggleConnectionFeature);
+    const localPinnedFeatures = useAppStore(state => state.settings.localTerm?.pinnedFeatures);
+
     // Local state for open feature tabs
-    // Default open features? None, or maybe just what user opens.
     const [openFeatures, setOpenFeatures] = useState<string[]>([]);
 
     // Snippet quick access overlay state
     const [isSnippetPickerOpen, setIsSnippetPickerOpen] = useState(false);
     const [isSnippetSidebarOpen, setIsSnippetSidebarOpen] = useState(false);
 
-    // Global Tunnels Tab
-    if (tab.type === 'port-forwarding') {
-        return (
-            <div className={cn(
-                "absolute inset-0 z-10 bg-app-bg",
-                !isActive && "hidden",
-                isActive && "animate-in fade-in zoom-in-95 duration-200"
-            )}>
-                <Suspense fallback={<TabLoading />}>
-                    <GlobalTunnelList />
-                </Suspense>
-            </div>
-        );
-    }
-
-    // Release Notes Tab
-    if (tab.type === 'release-notes') {
-        return (
-            <div className={cn(
-                "absolute inset-0 z-10 bg-app-bg",
-                !isActive && "hidden",
-                isActive && "animate-in fade-in slide-in-from-bottom-2 duration-200"
-            )}>
-                <ReleaseNotesTab />
-            </div>
-        );
-    }
-
-    if (!tab.connectionId) {
-        return null;
-    }
-
-    const isConnecting = connection?.status === 'connecting';
-    const isError = connection?.status === 'error';
-
-    // Feature Pinning
-    const toggleConnectionFeature = useAppStore(state => state.toggleConnectionFeature);
-    const localPinnedFeatures = useAppStore(state => state.settings.localTerm?.pinnedFeatures);
-    
-    // Use a stable empty array to prevent unnecessary re-renders of child components
+    // Effect hooks must be unconditional
+    // Ensure active view is always in openFeatures
     const pinnedFeatures = tab.connectionId === 'local' ? (localPinnedFeatures || EMPTY_ARRAY) : (connection?.pinnedFeatures || EMPTY_ARRAY);
 
-    // Ensure active view is always in openFeatures
     useEffect(() => {
         if (tab.view && tab.view !== 'terminal' && !pinnedFeatures.includes(tab.view)) {
             setOpenFeatures(prev => {
@@ -196,22 +160,7 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
         }
     }, [tab.view, pinnedFeatures]);
 
-    // Handle Tab Selection
-    const handleTabSelect = (view: any, termId?: string) => {
-        setTabView(tab.id, view);
-        if (view === 'terminal' && termId && tab.connectionId) {
-            setActiveTerminal(tab.connectionId, termId);
-        }
-    };
-
-    const handleFeatureClose = (feature: string) => {
-        setOpenFeatures(prev => prev.filter(f => f !== feature));
-        // If we closed the active view, switch back to terminal
-        if (tab.view === feature) {
-            setTabView(tab.id, 'terminal');
-        }
-    };
-
+    // Listen for keyboard shortcut events to open features
     const handleOpenFeature = useCallback((feature: string) => {
         setOpenFeatures(prev => {
             if (!prev.includes(feature) && !pinnedFeatures.includes(feature)) {
@@ -222,37 +171,6 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
         setTabView(tab.id, feature as any);
     }, [pinnedFeatures, setTabView, tab.id]);
 
-    const handleTogglePin = (feature: string) => {
-        if (tab.connectionId) {
-            toggleConnectionFeature(tab.connectionId, feature);
-            // If we are unpinning, ensure it stays open in local state
-            if (pinnedFeatures.includes(feature)) {
-                if (!openFeatures.includes(feature)) {
-                    setOpenFeatures(prev => [...prev, feature]);
-                }
-            } else {
-                // Pinning: remove from openFeatures since it's now in pinnedFeatures
-                setOpenFeatures(prev => prev.filter(f => f !== feature));
-            }
-        }
-    };
-
-    const handleTerminalClose = (termId: string) => {
-        if (tab.connectionId) {
-            closeTerminal(tab.connectionId, termId);
-            // If we closed the last terminal, maybe we should create a new one automatically?
-            // Store handles active ID update, but empty state is handled by TerminalManager
-        }
-    };
-
-    const handleNewTerminal = () => {
-        if (tab.connectionId) {
-            createTerminal(tab.connectionId);
-            setTabView(tab.id, 'terminal');
-        }
-    };
-
-    // Listen for keyboard shortcut events to open features
     useEffect(() => {
         const handleFeatureEvent = (e: Event) => {
             const customEvent = e as CustomEvent;
@@ -288,6 +206,87 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
         window.addEventListener('ssh-ui:toggle-snippet-sidebar', handler);
         return () => window.removeEventListener('ssh-ui:toggle-snippet-sidebar', handler);
     }, [tab.id]);
+
+    // -- Conditional Returns for special tab types (Must be after ALL hooks) --
+
+    if (tab.type === 'port-forwarding') {
+        return (
+            <div className={cn(
+                "absolute inset-0 z-10 bg-app-bg",
+                !isActive && "hidden",
+                isActive && "animate-in fade-in zoom-in-95 duration-200"
+            )}>
+                <Suspense fallback={<TabLoading />}>
+                    <GlobalTunnelList />
+                </Suspense>
+            </div>
+        );
+    }
+
+    if (tab.type === 'release-notes') {
+        return (
+            <div className={cn(
+                "absolute inset-0 z-10 bg-app-bg",
+                !isActive && "hidden",
+                isActive && "animate-in fade-in slide-in-from-bottom-2 duration-200"
+            )}>
+                <ReleaseNotesTab />
+            </div>
+        );
+    }
+
+    if (!tab.connectionId) {
+        return null;
+    }
+
+    const isConnecting = connection?.status === 'connecting';
+    const isError = connection?.status === 'error';
+
+    // Handle Tab Selection
+    const handleTabSelect = (view: any, termId?: string) => {
+        setTabView(tab.id, view);
+        if (view === 'terminal' && termId && tab.connectionId) {
+            setActiveTerminal(tab.connectionId, termId);
+        }
+    };
+
+    const handleFeatureClose = (feature: string) => {
+        setOpenFeatures(prev => prev.filter(f => f !== feature));
+        // If we closed the active view, switch back to terminal
+        if (tab.view === feature) {
+            setTabView(tab.id, 'terminal');
+        }
+    };
+
+    const handleTogglePin = (feature: string) => {
+        if (tab.connectionId) {
+            toggleConnectionFeature(tab.connectionId, feature);
+            // If we are unpinning, ensure it stays open in local state
+            if (pinnedFeatures.includes(feature)) {
+                if (!openFeatures.includes(feature)) {
+                    setOpenFeatures(prev => [...prev, feature]);
+                }
+            } else {
+                // Pinning: remove from openFeatures since it's now in pinnedFeatures
+                setOpenFeatures(prev => prev.filter(f => f !== feature));
+            }
+        }
+    };
+
+    const handleTerminalClose = (termId: string) => {
+        if (tab.connectionId) {
+            closeTerminal(tab.connectionId, termId);
+            // If we closed the last terminal, maybe we should create a new one automatically?
+            // Store handles active ID update, but empty state is handled by TerminalManager
+        }
+    };
+
+    const handleNewTerminal = () => {
+        if (tab.connectionId) {
+            createTerminal(tab.connectionId);
+            setTabView(tab.id, 'terminal');
+        }
+    };
 
     // Ensure we start with at least 'terminal' available conceptually, 
     // though combined bar renders terminals from store.
@@ -401,6 +400,11 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
                             {isSnippetPickerOpen && (
                                 <SnippetPicker
                                     connectionId={tab.connectionId}
+                                    /* 
+                                       Note: isOpen is technically redundant here because of the conditional 
+                                       rendering above, but we keep it because SnippetPicker uses it internally
+                                       for focus management and animation transitions.
+                                    */
                                     isOpen={isSnippetPickerOpen}
                                     onClose={() => setIsSnippetPickerOpen(false)}
                                 />
@@ -431,7 +435,7 @@ export function MainLayout({ children }: { children: ReactNode }) {
     // Pre-load snippets once on app startup so the picker/sidebar always have data
     useEffect(() => {
         loadSnippets();
-    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [loadSnippets]);
     const [showWizard, setShowWizard] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
     const [windowWidth, setWindowWidth] = useState(window.innerWidth);
