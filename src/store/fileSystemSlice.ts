@@ -305,9 +305,9 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
 
             for (const source of sources) {
                 // Extract filename handling Windows slashes only when strictly necessary
-                const separatorRegex = isWindowsLocal ? /[/\\]/ : /\//;
-                const originalName = source.split(separatorRegex).pop() || 'unknown';
-                let destPath = currentPath === '/' ? `/${originalName}` : `${currentPath}/${originalName}`;
+                const separator = isWindowsLocal ? '\\' : '/';
+                const originalName = source.split(isWindowsLocal ? /[/\\]/ : /\//).pop() || 'unknown';
+                let destPath = currentPath.endsWith(separator) ? `${currentPath}${originalName}` : `${currentPath}${separator}${originalName}`;
 
                 // Handle Collision (Auto-Rename)
                 // If cut and same path, skip

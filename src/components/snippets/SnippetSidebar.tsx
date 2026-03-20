@@ -20,7 +20,7 @@ export function SnippetSidebar({ connectionId, isOpen, onClose }: SnippetSidebar
         if (!isOpen) return;
         
         // Auto-focus search input
-        setTimeout(() => inputRef.current?.focus(), 100);
+        const focusTimer = window.setTimeout(() => inputRef.current?.focus(), 100);
 
         const handleKeyDown = (e: KeyboardEvent) => {
             if (e.key === 'Escape') {
@@ -29,7 +29,10 @@ export function SnippetSidebar({ connectionId, isOpen, onClose }: SnippetSidebar
             }
         };
         window.addEventListener('keydown', handleKeyDown, { capture: true });
-        return () => window.removeEventListener('keydown', handleKeyDown, { capture: true });
+        return () => {
+            window.clearTimeout(focusTimer);
+            window.removeEventListener('keydown', handleKeyDown, { capture: true });
+        };
     }, [isOpen, onClose]);
 
     // Filter by connection scope + search query
@@ -74,6 +77,7 @@ export function SnippetSidebar({ connectionId, isOpen, onClose }: SnippetSidebar
                     onClick={onClose}
                     className="text-app-muted hover:text-app-text hover:bg-app-surface/50 transition-all p-1 rounded-md"
                     title="Close (Ctrl+Shift+`)"
+                    aria-label="Close snippets"
                 >
                     <X size={12} />
                 </button>
@@ -90,6 +94,7 @@ export function SnippetSidebar({ connectionId, isOpen, onClose }: SnippetSidebar
                         onChange={e => setSearch(e.target.value)}
                         placeholder="Search..."
                         className="flex-1 min-w-0 bg-transparent text-[10px] text-app-text placeholder:text-app-muted/40 outline-none"
+                        aria-label="Search snippets"
                     />
                 </div>
             </div>

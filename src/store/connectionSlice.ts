@@ -587,8 +587,8 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
             const updated = current.includes(feature)
                 ? current.filter(f => f !== feature)
                 : [...current, feature];
-            // @ts-ignore - store access
-            get().updateLocalTermSettings({ pinnedFeatures: updated });
+            // Use specific store method to sync pined features to local terminal settings
+            (get() as any as AppStore).updateLocalTermSettings({ pinnedFeatures: updated });
             return;
         }
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useCallback, useState, useMemo, memo } from 'react';
 import { Command } from 'cmdk';
 import { Globe, Server, Search, CornerDownLeft } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
@@ -11,15 +11,15 @@ interface SnippetPickerProps {
     onClose: () => void;
 }
 
-export function SnippetPicker({ connectionId, isOpen, onClose }: SnippetPickerProps) {
+export const SnippetPicker = memo(function SnippetPicker({ connectionId, isOpen, onClose }: SnippetPickerProps) {
     const snippets = useAppStore(state => state.snippets);
     const inputRef = useRef<HTMLInputElement>(null);
     const [selectedValue, setSelectedValue] = useState<string>('');
 
     // Filter snippets scoped to this connection + globals
-    const filteredSnippets = snippets.filter(s =>
+    const filteredSnippets = useMemo(() => snippets.filter(s =>
         !s.connectionId || s.connectionId === connectionId
-    );
+    ), [snippets, connectionId]);
 
     const runSnippet = useCallback((command: string) => {
         onClose();
@@ -158,4 +158,4 @@ export function SnippetPicker({ connectionId, isOpen, onClose }: SnippetPickerPr
             </div>
         </ZPortal>
     );
-}
+});
