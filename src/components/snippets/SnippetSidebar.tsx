@@ -24,9 +24,10 @@ export function SnippetSidebar({ connectionId, isOpen, onClose }: SnippetSidebar
 
         if (!isOpen && wasOpen) {
             // Restore focus only when transitioning from open to closed
-            requestAnimationFrame(() => {
-                window.dispatchEvent(new CustomEvent('ssh-ui:term-focus'));
-            });
+            if (document.activeElement instanceof HTMLElement) {
+                document.activeElement.blur();
+            }
+            window.dispatchEvent(new CustomEvent('ssh-ui:term-focus'));
             return;
         }
         if (!isOpen) {
@@ -66,14 +67,14 @@ export function SnippetSidebar({ connectionId, isOpen, onClose }: SnippetSidebar
     }, {} as Record<string, typeof filteredSnippets>);
 
     const runSnippet = useCallback((command: string) => {
+        if (document.activeElement instanceof HTMLElement) {
+            document.activeElement.blur();
+        }
+        window.dispatchEvent(new CustomEvent('ssh-ui:term-focus'));
         window.dispatchEvent(new CustomEvent('ssh-ui:run-command', {
             detail: { connectionId, command: command + '\r' }
         }));
         showToast('success', 'Command sent to terminal');
-        // Restore focus immediately after running
-        requestAnimationFrame(() => {
-            window.dispatchEvent(new CustomEvent('ssh-ui:term-focus'));
-        });
     }, [connectionId, showToast]);
 
     return (
