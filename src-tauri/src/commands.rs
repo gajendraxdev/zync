@@ -923,10 +923,35 @@ pub async fn fs_mkdir(
 pub async fn fs_rename(
     connection_id: String,
     old_path: String,
-    new_path: String,
+    mut new_path: String,
+    auto_rename: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     if connection_id == "local" {
+        if auto_rename.unwrap_or(false) && std::path::Path::new(&new_path).exists() {
+             let path_buf = std::path::PathBuf::from(&new_path);
+             let parent = path_buf.parent().unwrap_or_else(|| std::path::Path::new(""));
+             let file_stem = path_buf.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+             let extension = path_buf.extension().and_then(|s| s.to_str()).unwrap_or("");
+             let mut counter = 1;
+
+             loop {
+                 let new_name = if extension.is_empty() {
+                     format!("{} ({})", file_stem, counter)
+                 } else {
+                     format!("{} ({}) .{}", file_stem, counter, extension)
+                 };
+                 let new_name = new_name.replace(" .", ".");
+                 let candidate = parent.join(new_name).to_string_lossy().to_string();
+                 if !std::path::Path::new(&candidate).exists() {
+                     new_path = candidate;
+                     break;
+                 }
+                 counter += 1;
+                 if counter > 100 { break; }
+             }
+        }
+
         state
             .file_system
             .rename(&connection_id, &old_path, &new_path)
@@ -934,6 +959,10 @@ pub async fn fs_rename(
             .map_err(|e| e.to_string())
     } else {
         let sftp = get_sftp_or_reconnect(&state, &connection_id).await?;
+
+        if auto_rename.unwrap_or(false) {
+            new_path = state.file_system.get_unique_path_remote(&sftp, &new_path).await.map_err(|e| e.to_string())?;
+        }
         let timeout_duration = std::time::Duration::from_secs(10);
         
         match tokio::time::timeout(timeout_duration, state.file_system.rename_remote(&sftp, &old_path, &new_path)).await {
