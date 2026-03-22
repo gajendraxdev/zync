@@ -31,6 +31,14 @@ import { Modal } from './ui/Modal';
 import { useTauriFileDrop } from '../hooks/useTauriFileDrop';
 import { FileBottomToolbar } from './file-manager/FileBottomToolbar';
 
+export interface Conflict {
+  source: string;
+  target: string;
+  name: string;
+  op: 'move' | 'copy';
+  sourceConnectionId: string;
+}
+
 export function FileManager({ connectionId, isVisible }: { connectionId?: string; isVisible?: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const globalActiveId = useAppStore(state => state.activeConnectionId);
@@ -110,20 +118,8 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
   const [dragSourceConnectionId, setDragSourceConnectionId] = useState<string | null>(null);
   
   // Conflict Resolution State
-  const [pendingConflicts, setPendingConflicts] = useState<{
-    source: string;
-    target: string;
-    name: string;
-    op: 'move' | 'copy';
-    sourceConnectionId?: string;
-  }[]>([]);
-  const [currentConflict, setCurrentConflict] = useState<{
-    source: string;
-    target: string;
-    name: string;
-    op: 'move' | 'copy';
-    sourceConnectionId?: string;
-  } | null>(null);
+  const [pendingConflicts, setPendingConflicts] = useState<Conflict[]>([]);
+  const [currentConflict, setCurrentConflict] = useState<Conflict | null>(null);
 
   // Copy to Server State
   const [isCopyModalOpen, setIsCopyModalOpen] = useState(false);
@@ -211,29 +207,37 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
     const executionList: typeof ops = [];
 
     try {
-      // Pass 1: Check for existence
-      for (const op of ops) {
-        const exists = await window.ipcRenderer.invoke('fs_exists', {
+      // Pass 1: Check for existence (Parallelized)
+      const existenceResults = await Promise.all(ops.map(op => 
+        window.ipcRenderer.invoke('fs_exists', {
           connectionId: activeConnectionId,
           path: op.target,
-        });
+        })
+      ));
 
+      existenceResults.forEach((exists, i) => {
         if (exists) {
-          conflicts.push(op);
+          conflicts.push(ops[i]);
         } else {
-          executionList.push(op);
+          executionList.push(ops[i]);
         }
-      }
+      });
 
       // Pass 2: Execute immediate actions
       if (executionList.length > 0) {
         const sameConnection = executionList.every(item => item.sourceConnectionId === activeConnectionId);
         
         if (sameConnection) {
-          // Same connection: Use batch store action for efficiency
-          const sources = executionList.map(item => item.source);
-          const opType = executionList[0].op; // Assumes all in list have same op type
-          await pasteEntries(activeConnectionId, sources, opType === 'move' ? 'cut' : 'copy');
+          // Group by operation type (move/copy) to ensure correct store action
+          const groups = executionList.reduce((acc, item) => {
+            if (!acc[item.op]) acc[item.op] = [];
+            acc[item.op].push(item.source);
+            return acc;
+          }, {} as Record<string, string[]>);
+
+          for (const [opType, sources] of Object.entries(groups)) {
+            await pasteEntries(activeConnectionId, sources, opType === 'move' ? 'cut' : 'copy');
+          }
         } else {
           // Cross connection: Loop through and start transfers
           for (const item of executionList) {
@@ -371,10 +375,86 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
           }
 
           if (action === 'overwrite') {
-            await window.ipcRenderer.invoke('fs_delete', {
-              connectionId: activeConnectionId,
-              path: target,
-            });
+            // Safe Overwrite: Rename existing to backup first
+            const backupPath = `${target}.bak-${Date.now()}`;
+            try {
+              await window.ipcRenderer.invoke('fs_rename', {
+                connectionId: activeConnectionId,
+                oldPath: target,
+                newPath: backupPath,
+                autoRename: false
+              });
+              
+              // Now perform the move/copy
+              let opSuccess = false;
+              try {
+                if (sourceConnectionId === activeConnectionId) {
+                  if (op === 'move') {
+                    await window.ipcRenderer.invoke('fs_rename', {
+                      connectionId: activeConnectionId,
+                      oldPath: source,
+                      newPath: finalTarget,
+                      autoRename: false
+                    });
+                  } else {
+                    await window.ipcRenderer.invoke('fs_copy_batch', {
+                      connectionId: activeConnectionId,
+                      operations: [{ from: source, to: finalTarget }]
+                    });
+                  }
+                } else {
+                    // Cross connection
+                    const transferId = addTransfer({
+                      sourceConnectionId,
+                      sourcePath: source,
+                      destinationConnectionId: activeConnectionId,
+                      destinationPath: finalTarget,
+                    });
+        
+                    const args: any = { sourcePath: source, destinationPath: finalTarget, transferId };
+                    let command = "sftp:copyToServer";
+        
+                    if (sourceConnectionId === "local") {
+                      command = "sftp:put";
+                      args.id = activeConnectionId;
+                      args.localPath = source;
+                      args.remotePath = finalTarget;
+                    } else if (activeConnectionId === "local") {
+                      command = "sftp:get";
+                      args.id = sourceConnectionId;
+                      args.remotePath = source;
+                      args.localPath = finalTarget;
+                    } else {
+                      args.sourceConnectionId = sourceConnectionId;
+                      args.destinationConnectionId = activeConnectionId;
+                    }
+        
+                    await window.ipcRenderer.invoke(command, args);
+                }
+                opSuccess = true;
+              } finally {
+                if (opSuccess) {
+                  // Success: Delete the backup
+                  await window.ipcRenderer.invoke('fs_delete', {
+                    connectionId: activeConnectionId,
+                    path: backupPath,
+                  }).catch(() => {}); // If delete fails, it's just a stray file
+                } else {
+                  // Failure: Restore the backup
+                  await window.ipcRenderer.invoke('fs_rename', {
+                    connectionId: activeConnectionId,
+                    oldPath: backupPath,
+                    newPath: target,
+                    autoRename: false
+                  }).catch(() => {});
+                }
+              }
+              successCount++;
+              continue; // Handled specially
+            } catch (err) {
+              showToast('error', `Failed to prepare overwrite for "${conflict.name}"`);
+              continue;
+            }
           }
 
           if (sourceConnectionId === activeConnectionId) {
