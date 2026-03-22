@@ -3,7 +3,7 @@ import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { useState } from 'react';
 
-export type ConflictAction = 'overwrite' | 'skip' | 'rename' | 'cancel';
+export type ConflictAction = 'overwrite' | 'skip' | 'rename';
 
 interface ConflictModalProps {
     isOpen: boolean;
