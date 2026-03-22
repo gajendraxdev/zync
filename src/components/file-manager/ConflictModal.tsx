@@ -79,7 +79,14 @@ export function ConflictModal({
                         </div>
                         <div>
                             <div className="text-[11px] font-bold text-app-text/90 uppercase tracking-wider">Keep Both</div>
-                            <div className="text-[10px] text-app-text/40">Auto-rename the new file to "{fileName} (1)"</div>
+                            <div className="text-[10px] text-app-text/40">
+                                {(() => {
+                                    const pathParts = fileName.match(/^(.*?)(\.[^.]*)?$/);
+                                    const base = pathParts ? pathParts[1] : fileName;
+                                    const ext = pathParts && pathParts[2] ? pathParts[2] : '';
+                                    return `Auto-rename the new file to "${base} (1)${ext}"`;
+                                })()}
+                            </div>
                         </div>
                     </button>
 

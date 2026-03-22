@@ -458,6 +458,7 @@ const FileListItem = memo(({
       onContextMenu={(e) => {
         e.stopPropagation();
         onContextMenu(e, file);
+        if (!isSelected) onSelect(file.name, false);
       }}
       className={cn(
         'border-b border-app-border/20 cursor-pointer transition-colors outline-none',
@@ -626,7 +627,7 @@ export function FileGrid({
             className="flex-1 flex flex-col items-center justify-center text-app-muted opacity-50 select-none pb-20 h-full"
             onContextMenu={(e) => onContextMenu(e)}
           >
-            <Folder size={64} className="mb-4 stroke-1 animate-pulse" />
+            <Folder size={64} className="mb-4 stroke-1" />
             <p className="text-lg font-medium opacity-80">Empty directory</p>
             <p className="text-sm opacity-50">Drag files here to upload</p>
           </motion.div>
