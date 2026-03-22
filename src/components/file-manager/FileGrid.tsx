@@ -21,6 +21,7 @@ import { useAppStore } from '../../store/useAppStore';
 import { useState, useMemo, useEffect, memo } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import { convertFileSrc } from '@tauri-apps/api/core';
+const normalizePath = (p: string) => p.replace(/[\\/]+/g, '/').replace(/\/$/, '') || '/';
 import { setCurrentDragSource } from '../../lib/dragDrop';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -171,19 +172,14 @@ const FileGridItem = memo(({
         setCurrentDragSource({ connectionId, path: fullPath });
 
         const dragPreview = document.createElement('div');
-        dragPreview.style.cssText = `
-          position: absolute; top: -1000px; padding: 8px; border-radius: 8px;
-          background-color: var(--color-app-surface); border: 1px solid var(--color-app-border);
-          display: flex; align-items: center; gap: 8px; z-index: 1000; width: fit-content;
-        `;
-
-        const iconClone = document.createElement('div');
-        iconClone.innerHTML = draggedFiles.length > 1 ? '📚' : (isFolder ? '📁' : '📄');
-        dragPreview.appendChild(iconClone);
+        dragPreview.style.cssText = 'position: absolute; top: -1000px; padding: 8px 12px; background: var(--color-app-surface); border: 1px solid var(--color-app-border); border-radius: 10px; font-weight: 500; font-size: 13px; color: var(--color-app-text); z-index: 9999; pointer-events: none; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);';
+        
+        const iconNode = document.createElement('span');
+        iconNode.textContent = draggedFiles.length > 1 ? '📚' : (isFolder ? '📁' : '📄');
+        dragPreview.appendChild(iconNode);
 
         const nameNode = document.createElement('span');
         nameNode.textContent = draggedFiles.length > 1 ? `${draggedFiles.length} items` : file.name;
-        nameNode.style.cssText = 'font-size: 12px; line-height: 1; font-weight: 500; color: var(--color-app-text); white-space: nowrap; max-width: 150px; overflow: hidden; text-overflow: ellipsis; display: block;';
         dragPreview.appendChild(nameNode);
 
         document.body.appendChild(dragPreview);
@@ -220,6 +216,10 @@ const FileGridItem = memo(({
       }}
       onDrop={(e: any) => {
         if (!isFolder || !onMove || !currentPath) return;
+
+        // Only handle internal drops, let external drops bubble up
+        if (!e.dataTransfer.types.includes('application/json')) return;
+        
         e.preventDefault();
         e.stopPropagation();
         if (e.currentTarget instanceof HTMLElement) e.currentTarget.style.outline = 'none';
@@ -227,30 +227,34 @@ const FileGridItem = memo(({
         try {
           const data = JSON.parse(e.dataTransfer.getData('application/json'));
           if (data && onMove) {
-            if (data.paths && Array.isArray(data.paths) && data.paths.length > 0) {
-              const targetFolder = currentPath === '/' ? `/${file.name}` : `${currentPath}/${file.name}`;
-              const moves: { source: string; target: string; sourceConnectionId?: string }[] = [];
-              data.paths.forEach((sourcePath: string) => {
-                const sourceName = sourcePath.split(/[/\\]/).pop();
-                if (!sourceName || sourcePath === targetFolder) return;
-                moves.push({ 
-                  source: sourcePath, 
-                  target: `${targetFolder}/${sourceName}`,
-                  sourceConnectionId: data.connectionId
-                });
+            const targetFolder = normalizePath(currentPath === '/' ? `/${file.name}` : `${currentPath}/${file.name}`);
+            const moves: { source: string; target: string; sourceConnectionId?: string }[] = [];
+            
+            const handleSource = (sourcePath: string, sourceName?: string) => {
+              const normSource = normalizePath(sourcePath);
+              const name = sourceName || normSource.split(/[/\\]/).pop();
+              if (!name) return;
+
+              // Self-drop check
+              if (normSource === targetFolder) return;
+              
+              // Descendant check: Cannot move a folder into its own subdirectory
+              if (targetFolder.startsWith(normSource + '/')) return;
+
+              moves.push({ 
+                source: normSource, 
+                target: `${targetFolder}/${name}`,
+                sourceConnectionId: data.connectionId
               });
-              if (moves.length > 0) onMove(moves);
+            };
+
+            if (data.paths && Array.isArray(data.paths)) {
+              data.paths.forEach((s: string) => handleSource(s));
             } else if (data.path) {
-              const sourceFileName = data.name || data.path.split(/[/\\]/).pop();
-              const targetFolder = currentPath === '/' ? `/${file.name}` : `${currentPath}/${file.name}`;
-              if (data.path !== `${currentPath}/${file.name}`) {
-                onMove([{ 
-                  source: data.path, 
-                  target: `${targetFolder}/${sourceFileName}`,
-                  sourceConnectionId: data.connectionId
-                }]);
-              }
+              handleSource(data.path, data.name);
             }
+
+            if (moves.length > 0) onMove(moves);
           }
         } catch (err) {
           console.error('Failed to parse drag data', err);
@@ -400,8 +404,17 @@ const FileListItem = memo(({
         setCurrentDragSource({ connectionId, path: fullPath });
 
         const dragPreview = document.createElement('div');
-        dragPreview.innerHTML = isFolder ? `📁 ${file.name}` : `📄 ${file.name}`;
-        dragPreview.style.cssText = 'position: absolute; top: -1000px; padding: 8px; background: var(--color-app-surface); border: 1px solid var(--color-app-border); border-radius: 8px; font-weight: 500; font-size: 14px;';
+        dragPreview.style.cssText = 'position: absolute; top: -1000px; padding: 8px 12px; background: var(--color-app-surface); border: 1px solid var(--color-app-border); border-radius: 10px; font-weight: 500; font-size: 13px; color: var(--color-app-text); z-index: 9999; pointer-events: none; display: flex; items-center: center; gap: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);';
+        
+        const iconNode = document.createElement('span');
+        const isDir = file.type === 'd' || file.type === 'l';
+        iconNode.textContent = draggedFiles.length > 1 ? '📚' : (isDir ? '📁' : '📄');
+        dragPreview.appendChild(iconNode);
+
+        const nameNode = document.createElement('span');
+        nameNode.textContent = draggedFiles.length > 1 ? `${draggedFiles.length} items` : file.name;
+        dragPreview.appendChild(nameNode);
+
         document.body.appendChild(dragPreview);
         e.dataTransfer.setDragImage(dragPreview, 20, 20);
         // Remove the preview element from DOM after the drag has started
@@ -427,6 +440,10 @@ const FileListItem = memo(({
       }}
       onDrop={(e: any) => {
         if (!isFolder || !onMove || !currentPath) return;
+
+        // Only handle internal drops, let external drops bubble up
+        if (!e.dataTransfer.types.includes('application/json')) return;
+
         e.preventDefault();
         e.stopPropagation();
         if (e.currentTarget instanceof HTMLElement) e.currentTarget.style.outline = 'none';
@@ -434,29 +451,34 @@ const FileListItem = memo(({
         try {
           const data = JSON.parse(e.dataTransfer.getData('application/json'));
           if (data && onMove) {
-            const targetFolder = currentPath === '/' ? `/${file.name}` : `${currentPath}/${file.name}`;
-            
-            // Handle multi-file paths (same logic as FileGridItem)
-            if (data.paths && Array.isArray(data.paths) && data.paths.length > 0) {
-              const moves: { source: string; target: string; sourceConnectionId?: string }[] = [];
-              data.paths.forEach((sourcePath: string) => {
-                const sourceName = sourcePath.split(/[/\\]/).pop();
-                if (!sourceName || sourcePath === targetFolder) return;
-                moves.push({ 
-                  source: sourcePath, 
-                  target: `${targetFolder}/${sourceName}`,
-                  sourceConnectionId: data.connectionId
-                });
-              });
-              if (moves.length > 0) onMove(moves);
-            } else if (data.path && data.path !== `${currentPath}/${file.name}`) {
-              const sourceName = data.name || data.path.split(/[/\\]/).pop();
-              onMove([{ 
-                source: data.path, 
-                target: `${targetFolder}/${sourceName}`,
+            const targetFolder = normalizePath(currentPath === '/' ? `/${file.name}` : `${currentPath}/${file.name}`);
+            const moves: { source: string; target: string; sourceConnectionId?: string }[] = [];
+
+            const handleSource = (sourcePath: string, sourceName?: string) => {
+              const normSource = normalizePath(sourcePath);
+              const name = sourceName || normSource.split(/[/\\]/).pop();
+              if (!name) return;
+
+              // Self-drop check
+              if (normSource === targetFolder) return;
+
+              // Descendant check
+              if (targetFolder.startsWith(normSource + '/')) return;
+
+              moves.push({ 
+                source: normSource, 
+                target: `${targetFolder}/${name}`,
                 sourceConnectionId: data.connectionId
-              }]);
+              });
+            };
+
+            if (data.paths && Array.isArray(data.paths)) {
+              data.paths.forEach((s: string) => handleSource(s));
+            } else if (data.path) {
+              handleSource(data.path, data.name);
             }
+
+            if (moves.length > 0) onMove(moves);
           }
         } catch (err) {
           console.error('Failed to parse drag data', err);

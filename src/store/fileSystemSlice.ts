@@ -5,6 +5,27 @@ import type { FileEntry } from '../components/file-manager/types';
 // @ts-ignore
 const ipc = window.ipcRenderer;
 
+/**
+ * Splits a filename into base and extension, handling dotfiles correctly.
+ * .env -> base: .env, ext: ""
+ * test.txt -> base: test, ext: .txt
+ */
+export function splitFileName(name: string): { base: string; ext: string } {
+    // If it starts with a dot and has no other dots, it's a hidden file like .env
+    if (name.startsWith('.') && name.indexOf('.', 1) === -1) {
+        return { base: name, ext: '' };
+    }
+    const lastDot = name.lastIndexOf('.');
+    // If no dot, or dot is at the beginning (but we handled the single dot case above)
+    if (lastDot === -1 || lastDot === 0) {
+        return { base: name, ext: '' };
+    }
+    return {
+        base: name.slice(0, lastDot),
+        ext: name.slice(lastDot)
+    };
+}
+
 export interface FileSystemState {
     files: Record<string, FileEntry[]>; // keyed by connectionId
     currentPath: Record<string, string>; // keyed by connectionId
@@ -322,9 +343,7 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
 
                 // Collision Detection Loop
                 if (source === destPath || await get().checkPathExists(connectionId, destPath)) {
-                    const match = originalName.match(/^(.*?)(\.[^.]*)?$/);
-                    const base = match ? match[1] : originalName;
-                    const ext = match && match[2] ? match[2] : '';
+                    const { base, ext } = splitFileName(originalName);
                     let counter = 1;
 
                     while (true) {
@@ -332,7 +351,7 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
                         destPath = normCurrentPath === '/' ? `/${newName}` : `${normCurrentPath}/${newName}`;
 
                         // Check local optimistic list too to avoid collisions within the batch
-                        const collisionInBatch = newEntries.some(e => e.path === destPath);
+                        const collisionInBatch = newEntries.some(e => normalizePath(e.path) === destPath);
                         if (source !== destPath && !collisionInBatch && !(await get().checkPathExists(connectionId, destPath))) {
                             break;
                         }
@@ -394,11 +413,11 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
                 const currentFiles = state.files[connectionId] || [];
                 
                 // 1. Remove sources if this is a move (cut)
-                let newFiles = currentFiles;
+                let filesAfterRemoval = currentFiles;
+                const normalizedSourcesSet = new Set(sources.map(s => normalizePath(s)));
+
                 if (op === 'cut') {
-                    // Normalize paths for reliable comparison
-                    const normalizedSources = sources.map(s => normalizePath(s));
-                    newFiles = newFiles.filter(f => !normalizedSources.includes(normalizePath(f.path)));
+                    filesAfterRemoval = currentFiles.filter(f => !normalizedSourcesSet.has(normalizePath(f.path)));
                 }
 
                 // 2. Only add new entries if they belong in the CURRENT directory
@@ -407,11 +426,11 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
                     return normalizePath(entryParent) === normCurrentPath;
                 });
 
-                newFiles = [...newFiles, ...filteredNewEntries];
+                const updatedFiles = filesAfterRemoval.concat(filteredNewEntries);
 
                 return {
                     isLoading: { ...state.isLoading, [connectionId]: false },
-                    files: { ...state.files, [connectionId]: newFiles }
+                    files: { ...state.files, [connectionId]: updatedFiles }
                 };
             });
 

@@ -2,6 +2,7 @@ import { Copy, SkipForward, FileText, AlertTriangle } from 'lucide-react';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { useState } from 'react';
+import { splitFileName } from '../../store/fileSystemSlice';
 
 export type ConflictAction = 'overwrite' | 'skip' | 'rename';
 
@@ -81,9 +82,7 @@ export function ConflictModal({
                             <div className="text-[11px] font-bold text-app-text/90 uppercase tracking-wider">Keep Both</div>
                             <div className="text-[10px] text-app-text/40">
                                 {(() => {
-                                    const pathParts = fileName.match(/^(.*?)(\.[^.]*)?$/);
-                                    const base = pathParts ? pathParts[1] : fileName;
-                                    const ext = pathParts && pathParts[2] ? pathParts[2] : '';
+                                    const { base, ext } = splitFileName(fileName);
                                     return `Auto-rename the new file to "${base} (1)${ext}"`;
                                 })()}
                             </div>
