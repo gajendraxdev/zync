@@ -41,6 +41,12 @@ export function FileEditor({ filename, initialContent, onSave, onClose }: FileEd
   const colRef = useRef<HTMLSpanElement>(null);
   const sizeRef = useRef<HTMLSpanElement>(null);
   const sizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (sizeTimeoutRef.current) clearTimeout(sizeTimeoutRef.current);
+    };
+  }, []);
   const hasChangesRef = useRef(false);
   const isSavingRef = useRef(false);
 
