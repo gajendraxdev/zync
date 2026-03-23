@@ -576,6 +576,11 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
         term.reset();
       }
 
+      // Get initial path if any
+      const terminals = useAppStore.getState().terminals;
+      const terminalTab = terminals[connectionId || 'local']?.find(t => t.id === sessionId);
+      const initialPath = terminalTab?.initialPath;
+
       window.ipcRenderer
         .invoke('terminal:create', {
           termId: sessionId,
@@ -583,6 +588,7 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
           rows: term.rows,
           cols: term.cols,
           shell: shellSetting,
+          cwd: initialPath,
         })
         .catch((err) => {
           console.error('Failed to create terminal:', err);

@@ -12,8 +12,11 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Go to Line (Ctrl+G)**: Implementation of a modal and shortcut for fast line migration. ([21ff87a])
 - **Search & Replace (Ctrl+F)**: Integrated CodeMirror search panels with a dedicated toolbar button. ([7c0035f])
 - **Word Completion**: Buffer-based autocompletion for a lightweight "LSP-lite" typing experience. ([ddb0687])
-- **UI Refinement**: Styled the editor autocompletion menu to match the Zync theme with premium typography and accent highlights. ([8e7c173])
 - **Custom Deletion Modal**: Replaced native browser `confirm()` with a themed `ConfirmModal` in the sidebar, featuring highlighted host and folder names. ([f1aaa84])
+- **Tab Bar Layout Refinement**: Fixed `CombinedTabBar` dropdown overlapping active tabs by aligning the menu to the left of the actions group, causing it to open to the right. ([86ea5db])
+- **Open Terminal Here**: Added a context menu option to launch a terminal session at the selected path. ([7609ea8])
+- **Terminal Deduplication**: Intelligent tab management that re-uses existing terminal sessions if they match the requested path, preventing workspace clutter.
+- **Synced Terminal Mode**: Integrated "Open Synced Terminal Here" feature. A synced terminal automatically follows your navigation in the File Manager, using real-time path synchronization.
 
 ### Fixed
 
@@ -395,5 +398,6 @@ All notable changes to Zync are documented in this file. The format is based on 
 [7c0035f]: https://github.com/zync-sh/zync/commit/7c0035f
 [21ff87a]: https://github.com/zync-sh/zync/commit/21ff87a
 [f1aaa84]: https://github.com/zync-sh/zync/commit/f1aaa84
+[86ea5db]: https://github.com/zync-sh/zync/commit/86ea5db
 
 
