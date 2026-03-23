@@ -10,6 +10,8 @@ import {
   Trash2,
   Upload,
   Unplug,
+  Terminal,
+  Zap,
 } from 'lucide-react';
 import { ConfirmModal } from './ui/ConfirmModal';
 import { useCallback, useEffect, useState, useRef } from 'react';
@@ -42,8 +44,10 @@ export interface Conflict {
 export function FileManager({ connectionId, isVisible }: { connectionId?: string; isVisible?: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const globalActiveId = useAppStore(state => state.activeConnectionId);
+  const activeTabId = useAppStore(state => state.activeTabId);
   const connections = useAppStore(state => state.connections);
   const activeConnectionId = connectionId || globalActiveId;
+  const syncedTerminalId = useAppStore(state => state.syncedTerminalId[activeConnectionId || 'local']);
   const addTransfer = useAppStore(state => state.addTransfer);
   const failTransfer = useAppStore(state => state.failTransfer);
 
@@ -143,6 +147,19 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  // Sync terminal to FM navigation if a synced terminal is active
+  useEffect(() => {
+    if (syncedTerminalId && currentPath && isVisible) {
+      const isLocal = (activeConnectionId === 'local' || !activeConnectionId);
+      const cdCmd = isLocal 
+        ? `cd "${currentPath.replace(/"/g, '\\"')}"\r`
+        : `cd '${currentPath.replace(/'/g, "'\\''")}' && clear\r`;
+      
+      console.log('[FM] Syncing terminal to:', currentPath);
+      window.ipcRenderer.invoke('terminal:write', { termId: syncedTerminalId, data: cdCmd });
+    }
+  }, [currentPath, syncedTerminalId, activeConnectionId, isVisible]);
 
   // Combine store loading and local processing
   const isLoading = loading || isProcessing;
@@ -989,6 +1006,71 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
           },
         },
         {
+          label: 'Open Terminal Here',
+          icon: <Terminal size={14} />,
+          action: () => {
+            if (!contextMenu?.file || !activeConnectionId) return;
+            const item = contextMenu.file;
+            const targetPath = item.type === 'd' 
+              ? (currentPath === '/' ? `/${item.name}` : `${currentPath}/${item.name}`)
+              : currentPath;
+            
+            const terminals = useAppStore.getState().terminals[activeConnectionId || 'local'] || [];
+            // Match if paths are identical, OR if it's the first/default terminal (initialPath undefined)
+            const existing = terminals.find(t => t.initialPath === targetPath && !t.isSynced);
+            const defaultTerm = !existing ? terminals.find(t => t.initialPath === undefined && !t.isSynced && terminals.length === 1) : null;
+
+            if (existing) {
+                useAppStore.getState().setActiveTerminal(activeConnectionId || 'local', existing.id);
+            } else if (defaultTerm) {
+                // Adopt the default terminal
+                useAppStore.getState().setActiveTerminal(activeConnectionId || 'local', defaultTerm.id);
+                useAppStore.getState().setTerminalInitialPath(activeConnectionId || 'local', defaultTerm.id, targetPath);
+                
+                const isLocal = activeConnectionId === 'local' || !activeConnectionId;
+                const cdCmd = isLocal 
+                    ? `cd "${targetPath.replace(/"/g, '\\"')}"\r`
+                    : `cd '${targetPath.replace(/'/g, "'\\''")}' && clear\r`;
+                window.ipcRenderer.invoke('terminal:write', { termId: defaultTerm.id, data: cdCmd });
+            } else {
+                const termId = useAppStore.getState().createTerminal(activeConnectionId, targetPath);
+                useAppStore.getState().setActiveTerminal(activeConnectionId, termId);
+            }
+
+            if (activeTabId) {
+                useAppStore.getState().setTabView(activeTabId, 'terminal');
+            }
+            setContextMenu(null);
+          }
+        },
+        {
+          label: 'Open Synced Terminal Here',
+          icon: <Zap size={14} className="text-yellow-500" />,
+          action: () => {
+            if (!contextMenu?.file || !activeConnectionId) return;
+            const item = contextMenu.file;
+            const targetPath = item.type === 'd' 
+              ? (currentPath === '/' ? `/${item.name}` : `${currentPath}/${item.name}`)
+              : currentPath;
+            
+            const terminals = useAppStore.getState().terminals[activeConnectionId || 'local'] || [];
+            const existingSynced = terminals.find(t => t.isSynced);
+
+            let termId: string;
+            if (existingSynced) {
+                termId = existingSynced.id;
+            } else {
+                termId = useAppStore.getState().createTerminal(activeConnectionId, targetPath, true);
+            }
+
+            if (activeTabId) {
+                useAppStore.getState().setTabView(activeTabId, 'terminal');
+            }
+            useAppStore.getState().setActiveTerminal(activeConnectionId, termId);
+            setContextMenu(null);
+          }
+        },
+        {
           label: 'Rename',
           icon: <FolderInput size={14} />,
           action: () => openRenameModal(contextMenu.file?.name as string),
@@ -1028,6 +1110,62 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
           label: 'Upload Files',
           icon: <Upload size={14} />,
           action: handleUpload,
+        },
+        {
+          label: 'Open Terminal Here',
+          icon: <Terminal size={14} />,
+          action: () => {
+            if (!activeConnectionId) return;
+            const targetPath = currentPath;
+            const terminals = useAppStore.getState().terminals[activeConnectionId || 'local'] || [];
+            // Match if paths are identical, OR if it's the first/default terminal (initialPath undefined)
+            const existing = terminals.find(t => t.initialPath === targetPath && !t.isSynced);
+            const defaultTerm = !existing ? terminals.find(t => t.initialPath === undefined && !t.isSynced && terminals.length === 1) : null;
+
+            if (existing) {
+                useAppStore.getState().setActiveTerminal(activeConnectionId || 'local', existing.id);
+            } else if (defaultTerm) {
+                // Adopt the default terminal
+                useAppStore.getState().setActiveTerminal(activeConnectionId || 'local', defaultTerm.id);
+                useAppStore.getState().setTerminalInitialPath(activeConnectionId || 'local', defaultTerm.id, targetPath);
+                
+                const isLocal = activeConnectionId === 'local' || !activeConnectionId;
+                const cdCmd = isLocal 
+                    ? `cd "${targetPath.replace(/"/g, '\\"')}"\r`
+                    : `cd '${targetPath.replace(/'/g, "'\\''")}' && clear\r`;
+                window.ipcRenderer.invoke('terminal:write', { termId: defaultTerm.id, data: cdCmd });
+            } else {
+                const termId = useAppStore.getState().createTerminal(activeConnectionId, targetPath);
+                useAppStore.getState().setActiveTerminal(activeConnectionId, termId);
+            }
+
+            if (activeTabId) {
+                useAppStore.getState().setTabView(activeTabId, 'terminal');
+            }
+            setContextMenu(null);
+          }
+        },
+        {
+          label: 'Open Synced Terminal Here',
+          icon: <Zap size={14} className="text-yellow-500" />,
+          action: () => {
+            if (!activeConnectionId) return;
+            const terminals = useAppStore.getState().terminals[activeConnectionId || 'local'] || [];
+            const existingSynced = terminals.find(t => t.isSynced);
+
+            let termId: string;
+            if (existingSynced) {
+                termId = existingSynced.id;
+            } else {
+                termId = useAppStore.getState().createTerminal(activeConnectionId, currentPath, true);
+            }
+
+            if (activeTabId) {
+                useAppStore.getState().setTabView(activeTabId, 'terminal');
+            }
+            useAppStore.getState().setActiveTerminal(activeConnectionId, termId);
+            setContextMenu(null);
+          }
         },
         {
           label: 'New Folder',

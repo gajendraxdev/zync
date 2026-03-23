@@ -526,6 +526,7 @@ pub async fn terminal_create(
     cols: u16,
     rows: u16,
     shell: Option<String>,
+    cwd: Option<String>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
@@ -540,7 +541,7 @@ pub async fn terminal_create(
         // Use term_id (UUID) for the session, not connection_id
         state
             .pty_manager
-            .create_local_session(term_id.clone(), connection_id, cols, rows, app, shell)
+            .create_local_session(term_id.clone(), connection_id, cols, rows, app, shell, cwd)
             .await
             .map_err(|e| e.to_string())?;
         Ok(term_id)
@@ -630,7 +631,7 @@ pub async fn terminal_create(
         println!("[TERM] SSH channel opened, requesting PTY");
         state
             .pty_manager
-            .create_remote_session(term_id.clone(), connection_id, channel, cols, rows, app)
+            .create_remote_session(term_id.clone(), connection_id, channel, cols, rows, app, cwd)
             .await
             .map_err(|e| e.to_string())?;
 
