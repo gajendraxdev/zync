@@ -40,6 +40,9 @@ export function FileEditor({ filename, initialContent, onSave, onClose }: FileEd
   const lineRef = useRef<HTMLSpanElement>(null);
   const colRef = useRef<HTMLSpanElement>(null);
   const sizeRef = useRef<HTMLSpanElement>(null);
+  const sizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasChangesRef = useRef(false);
+  const isSavingRef = useRef(false);
 
   const theme = useAppStore(state => state.settings.theme);
 
@@ -192,7 +195,16 @@ export function FileEditor({ filename, initialContent, onSave, onClose }: FileEd
   useEffect(() => {
     contentRef.current = initialContent;
     setHasChanges(false);
+    hasChangesRef.current = false;
   }, [initialContent]);
+  
+  useEffect(() => {
+    isSavingRef.current = isSaving;
+  }, [isSaving]);
+
+  useEffect(() => {
+    hasChangesRef.current = hasChanges;
+  }, [hasChanges]);
 
   // Force Focus on Mount
   useEffect(() => {
@@ -331,9 +343,14 @@ export function FileEditor({ filename, initialContent, onSave, onClose }: FileEd
         if (colRef.current) colRef.current.textContent = (pos - line.from + 1).toString();
         
         if (update.docChanged && sizeRef.current) {
-          // Use TextEncoder to get actual UTF-8 byte length instead of UTF-16 code units
-          const bytes = new TextEncoder().encode(state.doc.toString()).length;
-          sizeRef.current.textContent = `${(bytes / 1024).toFixed(1)} KB`;
+          // Debounce actual byte-size calculation (O(N) work)
+          if (sizeTimeoutRef.current) clearTimeout(sizeTimeoutRef.current);
+          sizeTimeoutRef.current = setTimeout(() => {
+             if (sizeRef.current) {
+                const bytes = new TextEncoder().encode(state.doc.toString()).length;
+                sizeRef.current.textContent = `${(bytes / 1024).toFixed(1)} KB`;
+             }
+          }, 300);
         }
       }
     }));
@@ -353,7 +370,10 @@ export function FileEditor({ filename, initialContent, onSave, onClose }: FileEd
         if ((event.ctrlKey || event.metaKey) && event.key === 's') {
           event.preventDefault();
           event.stopPropagation();
-          saveRef.current();
+          // Guard save against overlaps and non-dirty saves
+          if (hasChangesRef.current && !isSavingRef.current) {
+            saveRef.current();
+          }
           return true;
         }
         // Ctrl/Cmd + F
@@ -363,8 +383,9 @@ export function FileEditor({ filename, initialContent, onSave, onClose }: FileEd
           openSearchPanel(view);
           return true;
         }
-        // Ctrl/Cmd + G (Go to Line)
-        if ((event.ctrlKey || event.metaKey) && event.key === 'g') {
+        // Ctrl/Cmd + Shift + G (Go to Line)
+        // Switch to Shift+G to avoid conflict with searches 'Find Next' (Ctrl+G)
+        if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'g') {
           event.preventDefault();
           event.stopPropagation();
           setShowGoToLine(true);
@@ -413,7 +434,7 @@ export function FileEditor({ filename, initialContent, onSave, onClose }: FileEd
             variant="ghost"
             size="icon"
             onClick={handleSearch}
-            title="Search (Ctrl+F)"
+            title="Search (Ctrl+F) | Find Next (Ctrl+G)"
             aria-label="Search"
             className="text-app-muted hover:text-app-text"
           >
@@ -444,6 +465,7 @@ export function FileEditor({ filename, initialContent, onSave, onClose }: FileEd
 
       <div className="flex-1 overflow-hidden relative">
         <CodeMirror
+          key={filename} // Force refresh on file switch
           ref={editorRef}
           value={contentRef.current}
           height="100%"
