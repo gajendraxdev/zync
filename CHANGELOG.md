@@ -4,6 +4,8 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-03-24
+
 ### Added
 
 - **Editor Polish Pass**: Enhanced `FileEditor.tsx` with high-performance "Pro" features.
@@ -14,9 +16,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Word Completion**: Buffer-based autocompletion for a lightweight "LSP-lite" typing experience. ([ddb0687])
 - **Custom Deletion Modal**: Replaced native browser `confirm()` with a themed `ConfirmModal` in the sidebar, featuring highlighted host and folder names. ([f1aaa84])
 - **Tab Bar Layout Refinement**: Fixed `CombinedTabBar` dropdown overlapping active tabs by aligning the menu to the left of the actions group, causing it to open to the right. ([86ea5db])
-- **Open Terminal Here**: Added a context menu option to launch a terminal session at the selected path. ([7609ea8])
-- **Terminal Deduplication**: Intelligent tab management that re-uses existing terminal sessions if they match the requested path, preventing workspace clutter.
-- **Synced Terminal Mode**: Integrated "Open Synced Terminal Here" feature. A synced terminal automatically follows your navigation in the File Manager, using real-time path synchronization.
+- **Terminal Enhancements**: Integrated "Open Terminal Here," Session Deduplication, and Synced Terminal mode (live path follow) for a unified CLI/GUI experience. ([c53fde6])
 
 ### Fixed
 
@@ -354,8 +354,9 @@ All notable changes to Zync are documented in this file. The format is based on 
 - Auto-updates
 - Multiple themes (Dark, Light, Dracula)
 
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.7.0...HEAD
-[2.7.0]: https://github.com/zync-sh/zync/compare/v2.6.2...v2.7.0
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.8.0...HEAD
+[2.8.0]: https://github.com/zync-sh/zync/compare/v2.7.0...v2.8.0
+[2.7.0]: https://github.com/zync-sh/zync/compare/v2.6.0...v2.7.0
 [2.6.2]: https://github.com/zync-sh/zync/compare/v2.6.1...v2.6.2
 [2.6.1]: https://github.com/zync-sh/zync/compare/v2.6.0...v2.6.1
 [2.6.0]: https://github.com/zync-sh/zync/compare/v2.5.5...v2.6.0
