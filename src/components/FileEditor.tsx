@@ -479,7 +479,7 @@ export function FileEditor({ filename, initialContent, onSave, onClose }: FileEd
           <div className="h-3 w-px bg-app-border/50" />
           <div className="flex items-center gap-1.5">
              <span className="opacity-60 text-[9px] uppercase">Filesize</span>
-             <span ref={sizeRef} className="text-app-text">{(initialContent.length / 1024).toFixed(1)} KB</span>
+             <span ref={sizeRef} className="text-app-text">{(new TextEncoder().encode(initialContent).length / 1024).toFixed(1)} KB</span>
           </div>
         </div>
         
@@ -505,8 +505,9 @@ export function FileEditor({ filename, initialContent, onSave, onClose }: FileEd
       >
         <div className="space-y-4">
           <div className="flex flex-col gap-1.5">
-            <label className="text-[11px] font-medium text-app-muted uppercase tracking-wider">Line Number</label>
+            <label htmlFor="goToLineInput" className="text-[11px] font-medium text-app-muted uppercase tracking-wider">Line Number</label>
             <input
+              id="goToLineInput"
               autoFocus
               type="text"
               placeholder="e.g. 42"
