@@ -137,6 +137,50 @@ export function FileEditor({ filename, initialContent, onSave, onClose }: FileEd
       ".cm-activeLineGutter": {
         backgroundColor: "rgba(255, 255, 255, 0.03)",
         color: "var(--color-app-text)"
+      },
+      // Autocomplete Tooltip
+      ".cm-tooltip": {
+        backgroundColor: "var(--color-app-panel) !important",
+        border: "1px solid var(--color-app-border) !important",
+        borderRadius: "6px !important",
+        overflow: "hidden !important",
+        boxShadow: "0 4px 12px rgba(0, 0, 0, 0.5) !important",
+        padding: "4px !important"
+      },
+      ".cm-tooltip-autocomplete ul": {
+        fontFamily: "var(--font-mono) !important",
+        fontSize: "12px !important",
+        maxHeight: "250px !important"
+      },
+      ".cm-tooltip-autocomplete ul li": {
+        borderRadius: "4px !important",
+        padding: "4px 8px !important",
+        color: "var(--color-app-text) !important",
+        display: "flex !important",
+        alignItems: "center !important",
+        gap: "8px !important"
+      },
+      ".cm-tooltip-autocomplete ul li[aria-selected]": {
+        backgroundColor: "var(--color-app-accent) !important",
+        color: "white !important"
+      },
+      ".cm-completionIcon": {
+        opacity: "0.6",
+        width: "12px !important",
+        marginRight: "4px !important"
+      },
+      ".cm-completionIcon-word::after": {
+        content: "'abc'",
+        fontSize: "8px",
+        fontWeight: "bold"
+      },
+      ".cm-completionLabel": {
+        flex: 1
+      },
+      ".cm-completionDetail": {
+        fontStyle: "italic",
+        opacity: "0.5",
+        fontSize: "10px"
       }
     }, { dark: theme === 'dark' });
   }, [theme]);
