@@ -1130,11 +1130,12 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
                 useAppStore.getState().setActiveTerminal(activeConnectionId || 'local', defaultTerm.id);
                 useAppStore.getState().setTerminalInitialPath(activeConnectionId || 'local', defaultTerm.id, targetPath);
                 
-                const isLocal = activeConnectionId === 'local' || !activeConnectionId;
-                const cdCmd = isLocal 
-                    ? `cd "${targetPath.replace(/"/g, '\\"')}"\r`
-                    : `cd '${targetPath.replace(/'/g, "'\\''")}' && clear\r`;
-                window.ipcRenderer.invoke('terminal:write', { termId: defaultTerm.id, data: cdCmd });
+                // Safe navigation IPC
+                window.ipcRenderer.invoke('terminal:navigate', { 
+                    connectionId: activeConnectionId || 'local',
+                    termId: defaultTerm.id, 
+                    path: targetPath 
+                });
             } else {
                 const termId = useAppStore.getState().createTerminal(activeConnectionId, targetPath);
                 useAppStore.getState().setActiveTerminal(activeConnectionId, termId);
@@ -1157,6 +1158,13 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
             let termId: string;
             if (existingSynced) {
                 termId = existingSynced.id;
+                // Navigate existing synced terminal to current path
+                window.ipcRenderer.invoke('terminal:navigate', {
+                    connectionId: activeConnectionId || 'local',
+                    termId: termId,
+                    path: currentPath
+                });
+                useAppStore.getState().setTerminalCwd(activeConnectionId || 'local', termId, currentPath);
             } else {
                 termId = useAppStore.getState().createTerminal(activeConnectionId, currentPath, true);
             }

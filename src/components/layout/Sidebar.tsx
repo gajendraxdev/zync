@@ -608,10 +608,9 @@ export function Sidebar({ className }: { className?: string }) {
                                             expandedFolders={expandedFolders}
                                             toggleFolder={toggleFolder}
                                             updateConnectionFolder={updateConnectionFolder}
-                                            deleteFolder={deleteFolder}
                                             onDeleteFolder={(f) => setDeletingFolder(f)}
                                             onRenameFolder={handleRenameFolder}
-                                            renameFolder={renameFolder}
+                                            onMoveFolder={renameFolder}
                                             connectionItemProps={{ onEdit: openEditConnection, onDelete: (c: Connection) => setDeletingConnection(c), onViewDetails: (c: Connection) => setViewingDetailsId(c.id) }}
                                         />
                                     ))}
@@ -640,10 +639,9 @@ export function Sidebar({ className }: { className?: string }) {
                                     expandedFolders={expandedFolders}
                                     toggleFolder={toggleFolder}
                                     updateConnectionFolder={updateConnectionFolder}
-                                    deleteFolder={deleteFolder}
                                     onDeleteFolder={(f) => setDeletingFolder(f)}
                                     onRenameFolder={handleRenameFolder}
-                                    renameFolder={renameFolder}
+                                    onMoveFolder={renameFolder}
                                     connectionItemProps={{ onEdit: openEditConnection, onDelete: (c: Connection) => setDeletingConnection(c), onViewDetails: (c: Connection) => setViewingDetailsId(c.id) }}
                                 />
                             ))}
@@ -1246,10 +1244,9 @@ function FolderItem({
     expandedFolders,
     toggleFolder,
     updateConnectionFolder,
-    deleteFolder,
     onDeleteFolder,
     onRenameFolder,
-    renameFolder, // Direct context action for DnD
+    onMoveFolder, // Used for internal DnD moves
     connectionItemProps
 }: {
     node: TreeNode;
@@ -1258,10 +1255,9 @@ function FolderItem({
     expandedFolders: Set<string>;
     toggleFolder: (p: string) => void;
     updateConnectionFolder: (id: string, f: string) => void;
-    deleteFolder: (f: string) => void;
     onDeleteFolder: (f: string) => void;
     onRenameFolder: (f: string) => void;
-    renameFolder: (oldName: string, newName: string, newTags?: string[]) => void;
+    onMoveFolder: (oldName: string, newName: string) => void;
     connectionItemProps: ConnectionItemProps;
 }) {
     const isExpanded = expandedFolders.has(node.path);
@@ -1323,7 +1319,7 @@ function FolderItem({
                         // Actually, renaming 'A' to 'Target/A' handles this (it just becomes same path).
 
                         const newName = `${node.path}/${srcFolderPath.split('/').pop()}`;
-                        renameFolder(srcFolderPath, newName);
+                        onMoveFolder(srcFolderPath, newName);
                     }
                 }}
             >
@@ -1392,9 +1388,8 @@ function FolderItem({
                                 expandedFolders={expandedFolders}
                                 toggleFolder={toggleFolder}
                                 updateConnectionFolder={updateConnectionFolder}
-                                deleteFolder={deleteFolder}
                                 onRenameFolder={onRenameFolder}
-                                renameFolder={renameFolder}
+                                onMoveFolder={onMoveFolder}
                                 connectionItemProps={connectionItemProps}
                                 onDeleteFolder={onDeleteFolder}
                             />
