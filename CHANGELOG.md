@@ -14,6 +14,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 - Fixed a bug where creating a new "Synced Terminal" from the background context menu failed to track its `lastKnownCwd`, breaking future path matching operations. ([7d8809e])
 - Removed an unnecessary `connectionId` argument from the background context menu's `terminal:navigate` IPC call to align with the core backend signature. ([7d8809e])
+- Fixed AGAIN `CombinedTabBar` dropdown overlapping active tabs by aligning the menu to the left of the actions group, causing it to open to the right. ([e604f6f])
 
 ## [2.8.0] - 2026-03-24
 
@@ -423,5 +424,6 @@ All notable changes to Zync are documented in this file. The format is based on 
 [c53fde6]: https://github.com/zync-sh/zync/commit/c53fde6
 [0dd4487]: https://github.com/zync-sh/zync/commit/0dd4487
 [7d8809e]: https://github.com/zync-sh/zync/commit/7d8809e
+[e604f6f]: https://github.com/zync-sh/zync/commit/e604f6f
 
 
