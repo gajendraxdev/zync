@@ -3,7 +3,9 @@ import {
   Copy,
   Download,
   FileArchive,
+  FilePlus,
   FolderInput,
+  Plus,
   RotateCw,
   Scissors,
   Server,
@@ -100,6 +102,8 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
   // Modal States
   const [isNewFolderModalOpen, setIsNewFolderModalOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
+  const [isNewFileModalOpen, setIsNewFileModalOpen] = useState(false);
+  const [newFileName, setNewFileName] = useState('');
   const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
   const [renameOldName, setRenameOldName] = useState('');
   const [renameNewName, setRenameNewName] = useState('');
@@ -580,14 +584,14 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
         // If TerminalManager already created one without a path, ensureTerminal is a no-op
         // (terminal already exists). If none exists yet, it creates one with the path baked in.
         // Either way, we then tag any still-untracked terminals (covers the race case).
-        ensureTerminal(activeConnectionId, path);
+        // Either way, we then tag any still-untracked terminals (covers the race case).
+        const termId = ensureTerminal(activeConnectionId, path);
         const store = useAppStore.getState();
-        store.terminals[activeConnectionId]?.forEach(t => {
-          if (!t.initialPath && !t.lastKnownCwd && !t.isSynced) {
+        const t = store.terminals[activeConnectionId]?.find(tab => tab.id === termId);
+        if (t && !t.initialPath && !t.lastKnownCwd && !t.isSynced) {
             store.setTerminalInitialPath(activeConnectionId, t.id, path);
             store.setTerminalCwd(activeConnectionId, t.id, path);
-          }
-        });
+        }
       } catch (error: any) {
         if (error.message?.includes('Connection not found')) {
           useAppStore.getState().disconnect(activeConnectionId);
@@ -712,17 +716,62 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
   // --- Action Handlers (Create, Rename, Upload, Delete, Download) ---
 
   const handleCreateFolder = async () => {
-    if (!newFolderName.trim() || !activeConnectionId) return;
-    await createFolder(activeConnectionId, newFolderName);
+    const trimmedName = newFolderName.trim();
+    if (!trimmedName || !activeConnectionId) return;
+    if (trimmedName.includes('/') || trimmedName.includes('\\') || trimmedName === '.' || trimmedName === '..') {
+      showToast('error', 'Invalid folder name: Contains invalid characters');
+      return;
+    }
+    // Check for local collision
+    if (files.some(f => f.name.toLowerCase() === trimmedName.toLowerCase())) {
+      showToast('error', `A file or folder named "${trimmedName}" already exists.`);
+      return;
+    }
+    await createFolder(activeConnectionId, trimmedName);
     setIsNewFolderModalOpen(false);
     setNewFolderName('');
   };
 
-  const handleRename = async () => {
-    if (!renameNewName.trim() || !activeConnectionId) return;
+  const handleCreateFile = async () => {
+    const trimmedName = newFileName.trim();
+    if (!trimmedName || !activeConnectionId) return;
+    if (trimmedName.includes('/') || trimmedName.includes('\\') || trimmedName === '.' || trimmedName === '..') {
+      showToast('error', 'Invalid file name: Contains invalid characters');
+      return;
+    }
+    // Check for local collision
+    if (files.some(f => f.name.toLowerCase() === trimmedName.toLowerCase())) {
+      showToast('error', `A file or folder named "${trimmedName}" already exists.`);
+      return;
+    }
+    try {
+      const fullPath = currentPath === '/' ? `/${trimmedName}` : `${currentPath}/${trimmedName}`;
+      await window.ipcRenderer.invoke('fs_touch', { connectionId: activeConnectionId, path: fullPath });
+      refreshFiles(activeConnectionId);
+      setIsNewFileModalOpen(false);
+      setNewFileName('');
+    } catch (error: any) {
+      if (handleConnectionError(activeConnectionId, error)) return;
+      showToast('error', `Failed to create file: ${error.message || String(error)}`);
+    }
+  };
 
-    if (renameNewName !== renameOldName) {
-      await renameEntry(activeConnectionId, renameOldName, renameNewName);
+
+  const handleRename = async () => {
+    const trimmedName = renameNewName.trim();
+    if (!trimmedName || !activeConnectionId) return;
+    if (trimmedName.includes('/') || trimmedName.includes('\\') || trimmedName === '.' || trimmedName === '..') {
+      showToast('error', 'Invalid name: Contains invalid characters');
+      return;
+    }
+
+    if (trimmedName !== renameOldName) {
+      // Check for local collision (exclude the current file being renamed to allow case-only changes)
+      if (files.some(f => f.name !== renameOldName && f.name.toLowerCase() === trimmedName.toLowerCase())) {
+        showToast('error', `A file or folder named "${trimmedName}" already exists.`);
+        return;
+      }
+      await renameEntry(activeConnectionId, renameOldName, trimmedName);
     }
     setIsRenameModalOpen(false);
     setRenameNewName('');
@@ -1060,22 +1109,30 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
             const terminals = useAppStore.getState().terminals[activeConnectionId || 'local'] || [];
             const existingSynced = terminals.find(t => t.isSynced);
 
-            let termId: string;
-            if (existingSynced) {
-                termId = existingSynced.id;
-                // CodeRabbit: Update reused synced terminal path and trigger navigation
-                useAppStore.getState().setTerminalCwd(activeConnectionId || 'local', termId, targetPath);
-                window.ipcRenderer.invoke('terminal:navigate', { termId, path: targetPath });
-            } else {
-                termId = useAppStore.getState().createTerminal(activeConnectionId, targetPath, true);
-                useAppStore.getState().setTerminalCwd(activeConnectionId || 'local', termId, targetPath);
-            }
+            const handleSyncedTerminal = async () => {
+                let termId: string;
+                if (existingSynced) {
+                    termId = existingSynced.id;
+                    // CodeRabbit: Await reused synced terminal IPC before updating store to prevent desync on failure
+                    try {
+                        await window.ipcRenderer.invoke('terminal:navigate', { termId, path: targetPath });
+                        useAppStore.getState().setTerminalCwd(activeConnectionId || 'local', termId, targetPath);
+                    } catch (err: any) {
+                        showToast('error', `Failed to navigate synced terminal: ${err.message || String(err)}`);
+                        return; // Halt on failure
+                    }
+                } else {
+                    termId = useAppStore.getState().createTerminal(activeConnectionId, targetPath, true);
+                    useAppStore.getState().setTerminalCwd(activeConnectionId || 'local', termId, targetPath);
+                }
 
-            if (activeTabId) {
-                useAppStore.getState().setTabView(activeTabId, 'terminal');
-            }
-            useAppStore.getState().setActiveTerminal(activeConnectionId, termId);
-            setContextMenu(null);
+                if (activeTabId) {
+                    useAppStore.getState().setTabView(activeTabId, 'terminal');
+                }
+                useAppStore.getState().setActiveTerminal(activeConnectionId, termId);
+                setContextMenu(null);
+            };
+            handleSyncedTerminal();
           }
         },
         {
@@ -1174,9 +1231,20 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
           }
         },
         {
-          label: 'New Folder',
-          icon: <FolderInput size={14} />,
-          action: () => setIsNewFolderModalOpen(true),
+          label: 'New...',
+          icon: <Plus size={14} />,
+          children: [
+            {
+              label: 'New File',
+              icon: <FilePlus size={14} />,
+              action: () => setIsNewFileModalOpen(true),
+            },
+            {
+              label: 'New Folder',
+              icon: <FolderInput size={14} />,
+              action: () => setIsNewFolderModalOpen(true),
+            },
+          ]
         },
         {
           label: 'Refresh',
@@ -1484,6 +1552,7 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
           }
         }}
         onNewFolder={() => setIsNewFolderModalOpen(true)}
+        onNewFile={() => setIsNewFileModalOpen(true)}
         onDownloadAsZip={activeConnectionId !== 'local' ? handleDownloadAsZip : undefined}
         selectedCount={selectedFiles.length}
         viewMode={viewMode}
@@ -1563,6 +1632,26 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
       )}
 
       {/* Modals */}
+      <Modal isOpen={isNewFileModalOpen} onClose={() => setIsNewFileModalOpen(false)} title="New File">
+        <div className="space-y-4">
+          <Input
+            label="File Name"
+            placeholder="my-file.txt"
+            value={newFileName}
+            onChange={(e) => setNewFileName(e.target.value)}
+            autoFocus
+            onKeyDown={(e) => e.key === 'Enter' && handleCreateFile()}
+          />
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="ghost" onClick={() => setIsNewFileModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateFile}>Create</Button>
+          </div>
+        </div>
+      </Modal>
+
+
       <Modal isOpen={isNewFolderModalOpen} onClose={() => setIsNewFolderModalOpen(false)} title="New Folder">
         <div className="space-y-4">
           <Input
