@@ -905,15 +905,17 @@ pub async fn fs_touch(
             .await
             .map_err(|e| e.to_string())
     } else {
-        let sftp = get_sftp_or_reconnect(&state, &connection_id).await?;
+        let mut sftp = get_sftp_or_reconnect(&state, &connection_id).await?;
         let timeout_duration = std::time::Duration::from_secs(10);
 
-        // Check for existence before touch to provide better error
-        if let Ok(true) = state.file_system.exists_remote(&sftp, &path).await {
-             return Err(format!("An item with the name '{}' already exists in this directory.", std::path::Path::new(&path).file_name().unwrap_or_default().to_string_lossy()));
-        }
+        let touch_fut = async {
+            if let Ok(true) = state.file_system.exists_remote(&sftp, &path).await {
+                 return Err(format!("An item with the name '{}' already exists in this directory.", std::path::Path::new(&path).file_name().unwrap_or_default().to_string_lossy()));
+            }
+            state.file_system.create_file_remote(&sftp, &path).await.map_err(|e| e.to_string())
+        };
 
-        match tokio::time::timeout(timeout_duration, state.file_system.create_file_remote(&sftp, &path)).await {
+        match tokio::time::timeout(timeout_duration, touch_fut).await {
             Ok(Ok(_)) => Ok(()),
             Ok(Err(e)) if e.to_string().to_lowercase().contains("session closed") => {
                 println!("[FS] SFTP session closed during touch, retrying...");
@@ -923,8 +925,17 @@ pub async fn fs_touch(
                         c.sftp_session = None;
                     }
                 }
-                let sftp = get_sftp_or_reconnect(&state, &connection_id).await?;
-                match tokio::time::timeout(timeout_duration, state.file_system.create_file_remote(&sftp, &path)).await {
+                sftp = get_sftp_or_reconnect(&state, &connection_id).await?;
+                
+                let retry_fut = async {
+                    if let Ok(true) = state.file_system.exists_remote(&sftp, &path).await {
+                        // After reconnect, if it exists, it likely means our original request succeeded before the disconnect
+                        return Ok(());
+                    }
+                    state.file_system.create_file_remote(&sftp, &path).await.map_err(|e| e.to_string())
+                };
+
+                match tokio::time::timeout(timeout_duration, retry_fut).await {
                     Ok(Ok(_)) => Ok(()),
                     Ok(Err(e)) => Err(e.to_string()),
                     Err(_) => Err(format!("DISCONNECTED: SFTP touch timed out after {}s", timeout_duration.as_secs())),
@@ -960,15 +971,17 @@ pub async fn fs_mkdir(
             .await
             .map_err(|e| e.to_string())
     } else {
-        let sftp = get_sftp_or_reconnect(&state, &connection_id).await?;
+        let mut sftp = get_sftp_or_reconnect(&state, &connection_id).await?;
         let timeout_duration = std::time::Duration::from_secs(10);
 
-        // Check for existence before mkdir
-        if let Ok(true) = state.file_system.exists_remote(&sftp, &path).await {
-             return Err(format!("An item with the name '{}' already exists in this directory.", std::path::Path::new(&path).file_name().unwrap_or_default().to_string_lossy()));
-        }
+        let mkdir_fut = async {
+            if let Ok(true) = state.file_system.exists_remote(&sftp, &path).await {
+                 return Err(format!("An item with the name '{}' already exists in this directory.", std::path::Path::new(&path).file_name().unwrap_or_default().to_string_lossy()));
+            }
+            state.file_system.create_dir_remote(&sftp, &path).await.map_err(|e| e.to_string())
+        };
 
-        match tokio::time::timeout(timeout_duration, state.file_system.create_dir_remote(&sftp, &path)).await {
+        match tokio::time::timeout(timeout_duration, mkdir_fut).await {
             Ok(Ok(_)) => Ok(()),
             Ok(Err(e)) if e.to_string().to_lowercase().contains("session closed") => {
                 println!("[FS] SFTP session closed during mkdir, retrying...");
@@ -978,8 +991,17 @@ pub async fn fs_mkdir(
                         c.sftp_session = None;
                     }
                 }
-                let sftp = get_sftp_or_reconnect(&state, &connection_id).await?;
-                match tokio::time::timeout(timeout_duration, state.file_system.create_dir_remote(&sftp, &path)).await {
+                sftp = get_sftp_or_reconnect(&state, &connection_id).await?;
+                
+                let retry_fut = async {
+                    if let Ok(true) = state.file_system.exists_remote(&sftp, &path).await {
+                        // After reconnect, if it exists, it likely means our original request succeeded before the disconnect
+                        return Ok(());
+                    }
+                    state.file_system.create_dir_remote(&sftp, &path).await.map_err(|e| e.to_string())
+                };
+
+                match tokio::time::timeout(timeout_duration, retry_fut).await {
                     Ok(Ok(_)) => Ok(()),
                     Ok(Err(e)) => Err(e.to_string()),
                     Err(_) => Err(format!("DISCONNECTED: SFTP mkdir timed out after {}s", timeout_duration.as_secs())),

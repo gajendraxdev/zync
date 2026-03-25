@@ -115,6 +115,10 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
         if (currentTabs.length === 0) {
             return get().createTerminal(connectionId, initialPath);
         }
+        const activeId = state.activeTerminalIds[connectionId];
+        if (activeId) {
+            return activeId;
+        }
         return currentTabs[0].id;
     },
 
