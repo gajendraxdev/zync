@@ -6,13 +6,18 @@ interface PluginPanelProps {
     panelId: string;
     pluginId: string;
     connectionId: string | null;
+    /** Declared permissions from the plugin's manifest.json */
+    permissions?: string[];
 }
 
 /**
  * Renders a plugin panel inside a sandboxed iframe.
  * Provides a postMessage bridge so the panel can still call zync.terminal.send(), etc.
+ *
+ * Security: All bridge calls are gated by the plugin's declared permissions.
+ * The iframe runs without allow-same-origin to prevent accessing the raw Tauri IPC.
  */
-export function PluginPanel({ html, panelId, pluginId, connectionId }: PluginPanelProps) {
+export function PluginPanel({ html, panelId, pluginId, connectionId, permissions = [] }: PluginPanelProps) {
     const iframeRef = useRef<HTMLIFrameElement>(null);
     const theme = useAppStore(s => s.settings.theme);
 
@@ -27,34 +32,72 @@ export function PluginPanel({ html, panelId, pluginId, connectionId }: PluginPan
             muted: computed.getPropertyValue('--app-muted').trim() || '#94a3b8',
             primary: computed.getPropertyValue('--app-accent').trim() || '#6366f1',
         };
-        console.log('[Zync PluginPanel] Sending Theme Config:', colors);
         iframeRef.current.contentWindow.postMessage({
             type: 'zync:theme:update',
             payload: { theme, colors }
         }, '*');
     };
 
-    // Broadcast theme changes to the iframe natively
+    // Broadcast theme changes to the iframe
     useEffect(() => {
         sendTheme();
     }, [theme]);
 
     // Listen for messages FROM the iframe (plugin panel calling zync.*)
     useEffect(() => {
+        /** Returns true if the plugin has declared the given permission token. */
+        const hasPermission = (token: string): boolean => permissions.includes(token);
+
+        /** Logs a denied permission warning so developers can debug their manifest. */
+        const denyPermission = (token: string, msgType: string) => {
+            console.warn(
+                `[Zync Security] Plugin "${pluginId}" blocked. Missing permission "${token}" for "${msgType}". ` +
+                `Add "${token}" to the permissions array in manifest.json.`
+            );
+        };
+
         const handler = (e: MessageEvent) => {
             if (!iframeRef.current || e.source !== iframeRef.current.contentWindow) return;
             const { type, payload } = e.data || {};
             if (!type) return;
 
             if (type === 'zync:terminal:send') {
+                if (!hasPermission('terminal:write')) {
+                    denyPermission('terminal:write', type);
+                    return;
+                }
                 window.dispatchEvent(new CustomEvent('zync:terminal:send', { detail: { text: payload.text, connectionId } }));
+
             } else if (type === 'zync:terminal:opentab') {
+                if (!hasPermission('terminal:newtab')) {
+                    denyPermission('terminal:newtab', type);
+                    return;
+                }
                 window.dispatchEvent(new CustomEvent('ssh-ui:new-terminal-tab', { detail: { connectionId, command: payload.command } }));
+
             } else if (type === 'zync:statusbar:set') {
+                if (!hasPermission('statusbar:write')) {
+                    denyPermission('statusbar:write', type);
+                    return;
+                }
                 window.dispatchEvent(new CustomEvent('zync:statusbar:set', { detail: payload }));
+
             } else if (type === 'zync:ui:notify') {
+                if (!hasPermission('ui:notify')) {
+                    denyPermission('ui:notify', type);
+                    return;
+                }
                 window.dispatchEvent(new CustomEvent('zync:ui:notify', { detail: payload }));
+
             } else if (type === 'zync:ui:confirm') {
+                if (!hasPermission('ui:confirm')) {
+                    denyPermission('ui:confirm', type);
+                    iframeRef.current?.contentWindow?.postMessage({
+                        type: 'zync:ui:confirm:response',
+                        payload: { requestId: payload.requestId, error: 'Permission denied: ui:confirm not declared in manifest.' }
+                    }, '*');
+                    return;
+                }
                 import('../../store/useAppStore').then(({ useAppStore }) => {
                     useAppStore.getState().showConfirmDialog({
                         title: payload.title || 'Confirm',
@@ -69,7 +112,16 @@ export function PluginPanel({ html, panelId, pluginId, connectionId }: PluginPan
                         }, '*');
                     });
                 });
+
             } else if (type === 'zync:ssh:exec') {
+                if (!hasPermission('ssh:exec')) {
+                    denyPermission('ssh:exec', type);
+                    iframeRef.current?.contentWindow?.postMessage({
+                        type: 'zync:ssh:exec:response',
+                        payload: { requestId: payload.requestId, error: 'Permission denied: ssh:exec not declared in manifest.' }
+                    }, '*');
+                    return;
+                }
                 if (!connectionId) {
                     iframeRef.current?.contentWindow?.postMessage({
                         type: 'zync:ssh:exec:response',
@@ -97,7 +149,7 @@ export function PluginPanel({ html, panelId, pluginId, connectionId }: PluginPan
 
         window.addEventListener('message', handler);
         return () => window.removeEventListener('message', handler);
-    }, [panelId, pluginId, connectionId]);
+    }, [panelId, pluginId, connectionId, permissions]);
 
     // Inject the zync shim into the panel HTML
     const shimScript = `
@@ -121,17 +173,27 @@ window.zync = {
             window.parent.postMessage({ type: 'zync:ui:notify', payload: opts }, '*');
         },
         confirm: function(opts) {
-            return new Promise((resolve) => {
-                const reqId = Math.random().toString(36).substr(2, 9);
+            return new Promise((resolve, reject) => {
+                const reqId = Math.random().toString(36).slice(2, 11);
+                let settled = false;
                 
                 const listener = (event) => {
                     const { type, payload } = event.data || {};
                     if (type === 'zync:ui:confirm:response' && payload.requestId === reqId) {
+                        settled = true;
                         window.removeEventListener('message', listener);
-                        resolve(payload.confirmed);
+                        if (payload.error) reject(new Error(payload.error));
+                        else resolve(payload.confirmed);
                     }
                 };
                 window.addEventListener('message', listener);
+                
+                setTimeout(() => {
+                    if (!settled) {
+                        window.removeEventListener('message', listener);
+                        reject(new Error('ui:confirm request timed out (30s)'));
+                    }
+                }, 30000);
                 
                 window.parent.postMessage({ 
                     type: 'zync:ui:confirm', 
@@ -143,17 +205,26 @@ window.zync = {
     ssh: {
         exec: function(command) {
             return new Promise((resolve, reject) => {
-                const reqId = Math.random().toString(36).substr(2, 9);
+                const reqId = Math.random().toString(36).slice(2, 11);
+                let settled = false;
                 
                 const listener = (event) => {
                     const { type, payload } = event.data || {};
                     if (type === 'zync:ssh:exec:response' && payload.requestId === reqId) {
+                        settled = true;
                         window.removeEventListener('message', listener);
                         if (payload.error) reject(new Error(payload.error));
                         else resolve(payload.result);
                     }
                 };
                 window.addEventListener('message', listener);
+
+                setTimeout(() => {
+                    if (!settled) {
+                        window.removeEventListener('message', listener);
+                        reject(new Error('ssh:exec request timed out (30s)'));
+                    }
+                }, 30000);
                 
                 window.parent.postMessage({ 
                     type: 'zync:ssh:exec', 
@@ -174,7 +245,9 @@ window.zync = {
                 ref={iframeRef}
                 srcDoc={fullHtml}
                 onLoad={sendTheme}
-                sandbox="allow-scripts allow-same-origin allow-modals"
+                // Security: allow-same-origin removed to prevent plugins from accessing
+                // the raw Tauri IPC window object and bypassing the permission bridge.
+                sandbox="allow-scripts allow-modals"
                 className="flex-1 w-full border-0 bg-transparent"
                 title={`Plugin Panel: ${panelId}`}
             />

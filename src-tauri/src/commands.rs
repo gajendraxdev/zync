@@ -3053,8 +3053,8 @@ pub async fn plugins_toggle(app: AppHandle, id: String, enabled: bool) -> Result
 }
 
 #[tauri::command]
-pub async fn plugins_install(app: AppHandle, url: String) -> Result<String, String> {
-    crate::plugins::PluginScanner::install_plugin(&app, &url)
+pub async fn plugins_install(app: AppHandle, url: String, sha256: Option<String>) -> Result<String, String> {
+    crate::plugins::PluginScanner::install_plugin(&app, &url, sha256)
         .await
         .map_err(|e| e.to_string())
 }

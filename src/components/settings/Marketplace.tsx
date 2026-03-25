@@ -12,10 +12,11 @@ interface RegistryPlugin {
     description: string;
     author: string;
     downloadUrl: string;
-    thumbnailUrl?: string; // Optional
-    icon?: string; // Lucide icon name
+    thumbnailUrl?: string;
+    icon?: string;
     mode?: 'dark' | 'light';
     type?: 'theme' | 'tool';
+    sha256?: string; // Optional checksum for integrity verification
 }
 
 interface MarketplaceProps {
@@ -96,7 +97,10 @@ export function Marketplace({ onInstallSuccess }: MarketplaceProps) {
             // We use the downloadUrl. If it's a mock URL, this will fail in the backend unless we mock that too.
             // For the mock "Oceanic", let's assume it might fail if the URL isn't real.
             // But the flow is correct.
-            await ipcRenderer.invoke('plugins_install', { url: plugin.downloadUrl });
+            await ipcRenderer.invoke('plugins_install', {
+                url: plugin.downloadUrl,
+                sha256: plugin.sha256 ?? null,
+            });
 
             // 2. Reload Plugins locally (Backend doesn't auto-reload yet, or maybe it does?)
             // We should trigger a reload.
@@ -122,7 +126,11 @@ export function Marketplace({ onInstallSuccess }: MarketplaceProps) {
         setInstallingId(id); // Use same loading state
         try {
             await ipcRenderer.invoke('plugins_uninstall', { id });
-            window.location.reload(); // Refresh to update list
+            if (onInstallSuccess) {
+                onInstallSuccess();
+            } else {
+                window.location.reload();
+            }
         } catch (err: any) {
             console.error(err);
             alert(`Failed to uninstall: ${err.message || err}`);
