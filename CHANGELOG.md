@@ -4,17 +4,30 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Added
+
+- **New File Support**: Added ability to create empty files locally and remotely via SFTP. ([ad0e116])
+- **Cascading Context Menus**: Implemented recursive, nested context menus with smart edge-detection positioning. ([ad0e116])
+- **File Manager Hardening**: Added pre-emptive existence checks for files/folders before creation or rename to provide clear user-friendly errors. ([ad0e116])
+
 ### Changed
 
 - **Smart "Open Terminal Here" Optimization**: Refactored the context menu to check if a terminal is already open at the target path, switching focus without forcing a reload or clearing the terminal history. ([7d8809e])
 - The `terminal:navigate` IPC command now only issues a `cd` command to the PTY instead of `cd && clear`. This prevents the entire terminal scroll-back buffer from being wiped out every time the user clicks a new folder in the File Manager while using Synced Mode. ([7d8809e])
 - Refactored `initHomeDirectory` in `FileManager.tsx` to automatically supply the active home directory to `ensureTerminal` upon successful connection, improving the reliability of the terminal bootstrap process so it starts natively at the remote directory rather than requiring a post-launch `cd` command. ([7d8809e])
+- Updated `ensureTerminal` in `terminalSlice` to return the new terminal ID, enabling better tracking of newly created tabs. ([ad0e116])
+
+### Security & Technical Audit
+
+- **SFTP Command Hardening**: Added 10-second request timeouts and automatic session recovery logic to remote `touch` and `mkdir` operations. ([ad0e116])
 
 ### Fixed
 
 - Fixed a bug where creating a new "Synced Terminal" from the background context menu failed to track its `lastKnownCwd`, breaking future path matching operations. ([7d8809e])
 - Removed an unnecessary `connectionId` argument from the background context menu's `terminal:navigate` IPC call to align with the core backend signature. ([7d8809e])
-- Fixed AGAIN `CombinedTabBar` dropdown overlapping active tabs by aligning the menu to the left of the actions group, causing it to open to the right. ([e604f6f])
+- Fixed regression in `CombinedTabBar` dropdown positioning that caused it to overlap active tabs; re-aligned the menu to the left of the actions group so it opens to the right. ([e604f6f])
+- **Terminal Navigation Race Condition**: Added `await` to `terminal:navigate` IPC calls in the file manager to prevent store/state sync desynchronization on failure. ([ad0e116])
+
 
 ## [2.8.0] - 2026-03-24
 
@@ -425,5 +438,6 @@ All notable changes to Zync are documented in this file. The format is based on 
 [0dd4487]: https://github.com/zync-sh/zync/commit/0dd4487
 [7d8809e]: https://github.com/zync-sh/zync/commit/7d8809e
 [e604f6f]: https://github.com/zync-sh/zync/commit/e604f6f
+[ad0e116]: https://github.com/zync-sh/zync/commit/ad0e116
 
 
