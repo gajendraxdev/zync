@@ -1,8 +1,7 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useCallback, useMemo } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 
 interface PluginPanelProps {
-    html: string;
     panelId: string;
     pluginId: string;
     connectionId: string | null;
@@ -17,11 +16,16 @@ interface PluginPanelProps {
  * Security: All bridge calls are gated by the plugin's declared permissions.
  * The iframe runs without allow-same-origin to prevent accessing the raw Tauri IPC.
  */
-export function PluginPanel({ html, panelId, pluginId, connectionId, permissions = [] }: PluginPanelProps) {
+const EMPTY_PERMISSIONS: string[] = [];
+
+export function PluginPanel({ panelId, pluginId, connectionId, permissions = EMPTY_PERMISSIONS }: PluginPanelProps) {
     const iframeRef = useRef<HTMLIFrameElement>(null);
     const theme = useAppStore(s => s.settings.theme);
 
-    const sendTheme = () => {
+    // Robustness: Stabilize permissions reference even if parent passes a new array literal
+    const stablePermissions = useMemo(() => permissions, [JSON.stringify(permissions)]);
+
+    const sendTheme = useCallback(() => {
         if (!iframeRef.current || !iframeRef.current.contentWindow) return;
         const computed = getComputedStyle(document.documentElement);
         const colors = {
@@ -36,24 +40,29 @@ export function PluginPanel({ html, panelId, pluginId, connectionId, permissions
             type: 'zync:theme:update',
             payload: { theme, colors }
         }, '*');
-    };
+    }, [theme]);
 
     // Broadcast theme changes to the iframe
     useEffect(() => {
         sendTheme();
-    }, [theme]);
+    }, [sendTheme]);
 
     // Listen for messages FROM the iframe (plugin panel calling zync.*)
     useEffect(() => {
         /** Returns true if the plugin has declared the given permission token. */
-        const hasPermission = (token: string): boolean => permissions.includes(token);
+        const hasPermission = (token: string): boolean => stablePermissions.includes(token);
 
-        /** Logs a denied permission warning so developers can debug their manifest. */
-        const denyPermission = (token: string, msgType: string) => {
+        /** Sends an explicit PermissionError to the plugin so it can reject the calling Promise. */
+        const denyPermission = (token: string, apiIdentifier: string, requestId?: string) => {
             console.warn(
-                `[Zync Security] Plugin "${pluginId}" blocked. Missing permission "${token}" for "${msgType}". ` +
-                `Add "${token}" to the permissions array in manifest.json.`
+                `[Zync Security] Plugin "${pluginId}" blocked. Missing permission "${token}" for "${apiIdentifier}".`
             );
+            if (requestId) {
+                iframeRef.current?.contentWindow?.postMessage({
+                    type: 'zync:error:permission',
+                    payload: { requestId, permission: token, apiIdentifier }
+                }, '*');
+            }
         };
 
         const handler = (e: MessageEvent) => {
@@ -63,39 +72,35 @@ export function PluginPanel({ html, panelId, pluginId, connectionId, permissions
 
             if (type === 'zync:terminal:send') {
                 if (!hasPermission('terminal:write')) {
-                    denyPermission('terminal:write', type);
+                    denyPermission('terminal:write', 'zync.terminal.send', payload.requestId);
                     return;
                 }
                 window.dispatchEvent(new CustomEvent('zync:terminal:send', { detail: { text: payload.text, connectionId } }));
 
             } else if (type === 'zync:terminal:opentab') {
                 if (!hasPermission('terminal:newtab')) {
-                    denyPermission('terminal:newtab', type);
+                    denyPermission('terminal:newtab', 'zync.terminal.newTab', payload.requestId);
                     return;
                 }
                 window.dispatchEvent(new CustomEvent('ssh-ui:new-terminal-tab', { detail: { connectionId, command: payload.command } }));
 
             } else if (type === 'zync:statusbar:set') {
                 if (!hasPermission('statusbar:write')) {
-                    denyPermission('statusbar:write', type);
+                    denyPermission('statusbar:write', 'zync.statusBar.set', payload.requestId);
                     return;
                 }
                 window.dispatchEvent(new CustomEvent('zync:statusbar:set', { detail: payload }));
 
             } else if (type === 'zync:ui:notify') {
                 if (!hasPermission('ui:notify')) {
-                    denyPermission('ui:notify', type);
+                    denyPermission('ui:notify', 'zync.ui.notify', payload.requestId);
                     return;
                 }
                 window.dispatchEvent(new CustomEvent('zync:ui:notify', { detail: payload }));
 
             } else if (type === 'zync:ui:confirm') {
                 if (!hasPermission('ui:confirm')) {
-                    denyPermission('ui:confirm', type);
-                    iframeRef.current?.contentWindow?.postMessage({
-                        type: 'zync:ui:confirm:response',
-                        payload: { requestId: payload.requestId, error: 'Permission denied: ui:confirm not declared in manifest.' }
-                    }, '*');
+                    denyPermission('ui:confirm', 'zync.ui.confirm', payload.requestId);
                     return;
                 }
                 import('../../store/useAppStore').then(({ useAppStore }) => {
@@ -115,11 +120,7 @@ export function PluginPanel({ html, panelId, pluginId, connectionId, permissions
 
             } else if (type === 'zync:ssh:exec') {
                 if (!hasPermission('ssh:exec')) {
-                    denyPermission('ssh:exec', type);
-                    iframeRef.current?.contentWindow?.postMessage({
-                        type: 'zync:ssh:exec:response',
-                        payload: { requestId: payload.requestId, error: 'Permission denied: ssh:exec not declared in manifest.' }
-                    }, '*');
+                    denyPermission('ssh:exec', 'zync.ssh.exec', payload.requestId);
                     return;
                 }
                 if (!connectionId) {
@@ -144,109 +145,87 @@ export function PluginPanel({ html, panelId, pluginId, connectionId, permissions
                             }, '*');
                         });
                 });
+            } else if (type === 'zync:fs:readTextFile') {
+                if (!hasPermission('fs:read')) {
+                    denyPermission('fs:read', 'zync.fs.readTextFile', payload.requestId);
+                    return;
+                }
+                if (!connectionId) {
+                    iframeRef.current?.contentWindow?.postMessage({ type: 'zync:fs:readTextFile:response', payload: { requestId: payload.requestId, error: 'No active connection' } }, '*');
+                    return;
+                }
+                import('../../lib/tauri-ipc').then(({ ipcRenderer }) => {
+                    ipcRenderer.invoke('fs_read_file', { connectionId, path: payload.path })
+                        .then(result => iframeRef.current?.contentWindow?.postMessage({ type: 'zync:fs:readTextFile:response', payload: { requestId: payload.requestId, result } }, '*'))
+                        .catch(error => iframeRef.current?.contentWindow?.postMessage({ type: 'zync:fs:readTextFile:response', payload: { requestId: payload.requestId, error: String(error) } }, '*'));
+                });
+            } else if (type === 'zync:fs:writeTextFile') {
+                if (!hasPermission('fs:write')) {
+                    denyPermission('fs:write', 'zync.fs.writeTextFile', payload.requestId);
+                    return;
+                }
+                if (!connectionId) {
+                    iframeRef.current?.contentWindow?.postMessage({ type: 'zync:fs:writeTextFile:response', payload: { requestId: payload.requestId, error: 'No active connection' } }, '*');
+                    return;
+                }
+                import('../../lib/tauri-ipc').then(({ ipcRenderer }) => {
+                    ipcRenderer.invoke('fs_write_file', { connectionId, path: payload.path, content: payload.content })
+                        .then(() => iframeRef.current?.contentWindow?.postMessage({ type: 'zync:fs:writeTextFile:response', payload: { requestId: payload.requestId } }, '*'))
+                        .catch(error => iframeRef.current?.contentWindow?.postMessage({ type: 'zync:fs:writeTextFile:response', payload: { requestId: payload.requestId, error: String(error) } }, '*'));
+                });
+            } else if (type === 'zync:fs:readDir') {
+                if (!hasPermission('fs:read')) {
+                    denyPermission('fs:read', 'zync.fs.readDir', payload.requestId);
+                    return;
+                }
+                if (!connectionId) {
+                    iframeRef.current?.contentWindow?.postMessage({ type: 'zync:fs:readDir:response', payload: { requestId: payload.requestId, error: 'No active connection' } }, '*');
+                    return;
+                }
+                import('../../lib/tauri-ipc').then(({ ipcRenderer }) => {
+                    ipcRenderer.invoke('fs_list', { connectionId, path: payload.path })
+                        .then(result => {
+                            const rawList = Array.isArray(result.children || result) ? (result.children || result) : [];
+                            const formattedList = rawList.map((item: any) => {
+                                const date = new Date(item.modified);
+                                return {
+                                    ...item,
+                                    modified: (!isNaN(date.getTime())) ? date.toISOString() : null
+                                };
+                            });
+                            iframeRef.current?.contentWindow?.postMessage({ 
+                                type: 'zync:fs:readDir:response', 
+                                payload: { requestId: payload.requestId, result: formattedList } 
+                            }, '*');
+                        })
+                        .catch(error => iframeRef.current?.contentWindow?.postMessage({ type: 'zync:fs:readDir:response', payload: { requestId: payload.requestId, error: String(error) } }, '*'));
+                });
+            } else if (type === 'zync:theme:set') {
+                if (!hasPermission('theme:set')) {
+                    denyPermission('theme:set', 'zync.theme.set', payload.requestId);
+                    return;
+                }
+                // ... Theme setting implementation ...
+            } else if (type === 'zync:window:create') {
+                if (!hasPermission('window:create')) {
+                    denyPermission('window:create', 'zync.window.create', payload.requestId);
+                    return;
+                }
+                // ... Window creation implementation ...
             }
         };
 
         window.addEventListener('message', handler);
         return () => window.removeEventListener('message', handler);
-    }, [panelId, pluginId, connectionId, permissions]);
-
-    // Inject the zync shim into the panel HTML
-    const shimScript = `
-<script>
-window.zync = {
-    terminal: {
-        send: function(text) {
-            window.parent.postMessage({ type: 'zync:terminal:send', payload: { text } }, '*');
-        },
-        newTab: function(opts) {
-            window.parent.postMessage({ type: 'zync:terminal:opentab', payload: opts }, '*');
-        }
-    },
-    statusBar: {
-        set: function(id, text) {
-            window.parent.postMessage({ type: 'zync:statusbar:set', payload: { id, text } }, '*');
-        }
-    },
-    ui: {
-        notify: function(opts) {
-            window.parent.postMessage({ type: 'zync:ui:notify', payload: opts }, '*');
-        },
-        confirm: function(opts) {
-            return new Promise((resolve, reject) => {
-                const reqId = Math.random().toString(36).slice(2, 11);
-                let settled = false;
-                
-                const listener = (event) => {
-                    const { type, payload } = event.data || {};
-                    if (type === 'zync:ui:confirm:response' && payload.requestId === reqId) {
-                        settled = true;
-                        window.removeEventListener('message', listener);
-                        if (payload.error) reject(new Error(payload.error));
-                        else resolve(payload.confirmed);
-                    }
-                };
-                window.addEventListener('message', listener);
-                
-                setTimeout(() => {
-                    if (!settled) {
-                        window.removeEventListener('message', listener);
-                        reject(new Error('ui:confirm request timed out (30s)'));
-                    }
-                }, 30000);
-                
-                window.parent.postMessage({ 
-                    type: 'zync:ui:confirm', 
-                    payload: { ...opts, requestId: reqId } 
-                }, '*');
-            });
-        }
-    },
-    ssh: {
-        exec: function(command) {
-            return new Promise((resolve, reject) => {
-                const reqId = Math.random().toString(36).slice(2, 11);
-                let settled = false;
-                
-                const listener = (event) => {
-                    const { type, payload } = event.data || {};
-                    if (type === 'zync:ssh:exec:response' && payload.requestId === reqId) {
-                        settled = true;
-                        window.removeEventListener('message', listener);
-                        if (payload.error) reject(new Error(payload.error));
-                        else resolve(payload.result);
-                    }
-                };
-                window.addEventListener('message', listener);
-
-                setTimeout(() => {
-                    if (!settled) {
-                        window.removeEventListener('message', listener);
-                        reject(new Error('ssh:exec request timed out (30s)'));
-                    }
-                }, 30000);
-                
-                window.parent.postMessage({ 
-                    type: 'zync:ssh:exec', 
-                    payload: { command, requestId: reqId } 
-                }, '*');
-            });
-        }
-    }
-};
-</script>
-`;
-
-    const fullHtml = html.replace('<head>', `<head>\n${shimScript}`) || `<html><head>${shimScript}</head><body>${html}</body></html>`;
-
+    }, [pluginId, connectionId, stablePermissions]);
     return (
         <div className="absolute inset-0 z-10 bg-app-bg flex flex-col">
             <iframe
                 ref={iframeRef}
-                srcDoc={fullHtml}
+                src={`plugin://${pluginId}/index.html`}
                 onLoad={sendTheme}
-                // Security: allow-same-origin removed to prevent plugins from accessing
-                // the raw Tauri IPC window object and bypassing the permission bridge.
+                // Security: origin isolation is strictly enforced by the custom plugin:// protocol.
+                // allow-same-origin is safely omitted.
                 sandbox="allow-scripts allow-modals"
                 className="flex-1 w-full border-0 bg-transparent"
                 title={`Plugin Panel: ${panelId}`}

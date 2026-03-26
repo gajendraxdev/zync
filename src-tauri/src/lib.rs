@@ -12,7 +12,10 @@ mod ssh_parser;
 mod ai;
 
 use commands::AppState;
-use tauri::{Manager, Emitter};
+use tauri::{Manager, Emitter, http::{Response, HeaderValue}};
+use std::io::BufReader;
+use std::fs::File;
+use std::io::Read;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -217,6 +220,274 @@ pub fn run() {
             commands::ai_get_ollama_models,
             commands::ai_get_provider_models,
         ])
+        .register_uri_scheme_protocol("plugin", move |app_handle, request| {
+            let uri = request.uri();
+            
+            // Extract plugin ID (host) and file path
+            let plugin_id = match uri.host() {
+                Some(id) if !id.is_empty() => id,
+                _ => {
+                    return Response::builder()
+                        .status(400)
+                        .body(Vec::new())
+                        .unwrap();
+                }
+            };
+            let path = uri.path().trim_start_matches('/');
+            
+            // Handle virtual Zync API script injection without hitting the filesystem
+            if path == "__zync_api.js" {
+                let shim = r#"
+window.zync = {
+    terminal: {
+        send: function(text) {
+            window.parent.postMessage({ type: 'zync:terminal:send', payload: { text } }, '*');
+        },
+        newTab: function(opts) {
+            window.parent.postMessage({ type: 'zync:terminal:opentab', payload: opts }, '*');
+        }
+    },
+    statusBar: {
+        set: function(id, text) {
+            window.parent.postMessage({ type: 'zync:statusbar:set', payload: { id, text } }, '*');
+        }
+    },
+    ui: {
+        notify: function(opts) {
+            window.parent.postMessage({ type: 'zync:ui:notify', payload: opts }, '*');
+        },
+        confirm: function(opts) {
+            return new Promise((resolve, reject) => {
+                const reqId = Math.random().toString(36).slice(2, 11);
+                let settled = false;
+                const listener = (event) => {
+                    const { type, payload } = event.data || {};
+                    if (type === 'zync:ui:confirm:response' && payload.requestId === reqId) {
+                        settled = true;
+                        window.removeEventListener('message', listener);
+                        if (payload.error) reject(new Error(payload.error));
+                        else resolve(payload.confirmed);
+                    }
+                };
+                window.addEventListener('message', listener);
+                setTimeout(() => {
+                    if (!settled) {
+                        window.removeEventListener('message', listener);
+                        reject(new Error('ui:confirm request timed out (30s)'));
+                    }
+                }, 30000);
+                window.parent.postMessage({ type: 'zync:ui:confirm', payload: { ...opts, requestId: reqId } }, '*');
+            });
+        }
+    },
+    ssh: {
+        exec: function(command) {
+            return new Promise((resolve, reject) => {
+                const reqId = Math.random().toString(36).slice(2, 11);
+                let settled = false;
+                const listener = (event) => {
+                    const { type, payload } = event.data || {};
+                    if (type === 'zync:ssh:exec:response' && payload.requestId === reqId) {
+                        settled = true;
+                        window.removeEventListener('message', listener);
+                        if (payload.error) reject(new Error(payload.error));
+                        else resolve(payload.result);
+                    }
+                };
+                window.addEventListener('message', listener);
+                setTimeout(() => {
+                    if (!settled) {
+                        window.removeEventListener('message', listener);
+                        reject(new Error('ssh:exec request timed out (30s)'));
+                    }
+                }, 30000);
+                window.parent.postMessage({ type: 'zync:ssh:exec', payload: { command, requestId: reqId } }, '*');
+            });
+        }
+    },
+    fs: {
+        readTextFile: function(path) {
+            return new Promise((resolve, reject) => {
+                const reqId = Math.random().toString(36).slice(2, 11);
+                let settled = false;
+                const listener = (event) => {
+                    const { type, payload } = event.data || {};
+                    if (type === 'zync:fs:readTextFile:response' && payload.requestId === reqId) {
+                        settled = true;
+                        window.removeEventListener('message', listener);
+                        if (payload.error) reject(new Error(payload.error));
+                        else resolve(payload.result);
+                    }
+                };
+                window.addEventListener('message', listener);
+                setTimeout(() => {
+                    if (!settled) {
+                        window.removeEventListener('message', listener);
+                        reject(new Error('fs:readTextFile request timed out (30s)'));
+                    }
+                }, 30000);
+                window.parent.postMessage({ type: 'zync:fs:readTextFile', payload: { path, requestId: reqId } }, '*');
+            });
+        },
+        writeTextFile: function(path, contents) {
+            return new Promise((resolve, reject) => {
+                const reqId = Math.random().toString(36).slice(2, 11);
+                let settled = false;
+                const listener = (event) => {
+                    const { type, payload } = event.data || {};
+                    if (type === 'zync:fs:writeTextFile:response' && payload.requestId === reqId) {
+                        settled = true;
+                        window.removeEventListener('message', listener);
+                        if (payload.error) reject(new Error(payload.error));
+                        else resolve(payload.result);
+                    }
+                };
+                window.addEventListener('message', listener);
+                setTimeout(() => {
+                    if (!settled) {
+                        window.removeEventListener('message', listener);
+                        reject(new Error('fs:writeTextFile request timed out (30s)'));
+                    }
+                }, 30000);
+                window.parent.postMessage({ type: 'zync:fs:writeTextFile', payload: { path, contents, requestId: reqId } }, '*');
+            });
+        },
+        readDir: function(path) {
+            return new Promise((resolve, reject) => {
+                const reqId = Math.random().toString(36).slice(2, 11);
+                let settled = false;
+                const listener = (event) => {
+                    const { type, payload } = event.data || {};
+                    if (type === 'zync:fs:readDir:response' && payload.requestId === reqId) {
+                        settled = true;
+                        window.removeEventListener('message', listener);
+                        if (payload.error) reject(new Error(payload.error));
+                        else resolve(payload.result);
+                    }
+                };
+                window.addEventListener('message', listener);
+                setTimeout(() => {
+                    if (!settled) {
+                        window.removeEventListener('message', listener);
+                        reject(new Error('fs:readDir request timed out (30s)'));
+                    }
+                }, 30000);
+                window.parent.postMessage({ type: 'zync:fs:readDir', payload: { path, requestId: reqId } }, '*');
+            });
+        }
+    }
+};
+"#;
+                return Response::builder()
+                    .header("Content-Type", "application/javascript")
+                    .header("Access-Control-Allow-Origin", "*")
+                    .body(shim.as_bytes().to_vec())
+                    .unwrap();
+            }
+
+            // Resolve physical path in app_config_dir/plugins/<id>/<path>
+            let config_dir = app_handle.path().app_config_dir().unwrap_or_default();
+            let mut file_path = config_dir.join("plugins").join(plugin_id);
+            
+            if path.is_empty() {
+                file_path.push("index.html");
+            } else {
+                file_path.push(path);
+            }
+
+            // Security: Prevent path traversal (extra check)
+            let plugin_root = config_dir.join("plugins").join(plugin_id);
+            
+            // Build the absolute path and check if it's within plugin_root
+            // We use canonicalize() to resolve all . and .. components
+            // If the file doesn't exist, we return 404 BEFORE checking starts_with
+            if !file_path.exists() {
+                return Response::builder()
+                    .status(404)
+                    .body(Vec::new())
+                    .unwrap();
+            }
+
+            let canonical_root = match plugin_root.canonicalize() {
+                Ok(p) => p,
+                Err(_) => {
+                    return Response::builder()
+                        .status(404)
+                        .body(Vec::new())
+                        .unwrap();
+                }
+            };
+
+            let canonical_path = match file_path.canonicalize() {
+                Ok(p) => p,
+                Err(_) => {
+                    return Response::builder()
+                        .status(404)
+                        .body(Vec::new())
+                        .unwrap();
+                }
+            };
+
+            if !canonical_path.starts_with(canonical_root) {
+                return Response::builder()
+                    .status(403)
+                    .body(Vec::new())
+                    .unwrap();
+            }
+
+            match fs::read(&canonical_path) {
+                Ok(mut content) => {
+                    let mime = match canonical_path.extension().and_then(|ext| ext.to_str()) {
+                        Some("html") => "text/html",
+                        Some("js") => "application/javascript",
+                        Some("css") => "text/css",
+                        Some("svg") => "image/svg+xml",
+                        Some("png") => "image/png",
+                        Some("jpg") | Some("jpeg") => "image/jpeg",
+                        Some("json") => "application/json",
+                        _ => "application/octet-stream",
+                    };
+
+                    // Auto-inject the zync API shim into HTML files
+                    if mime == "text/html" {
+                        if let Ok(html_str) = String::from_utf8(content.clone()) {
+                            let script_tag = format!(r#"<script src="plugin://{}/__zync_api.js"></script>"#, plugin_id);
+                            
+                            // Case-insensitive ASCII search preserving byte positions
+                            fn find_tag_ci(haystack: &str, tag: &str) -> Option<usize> {
+                                haystack.as_bytes()
+                                    .windows(tag.len())
+                                    .position(|w| w.eq_ignore_ascii_case(tag.as_bytes()))
+                            }
+
+                            let injected = if let Some(pos) = find_tag_ci(&html_str, "<head>") {
+                                let end = pos + 6; // length of "<head>"
+                                format!("{}{}{}", &html_str[..end], script_tag, &html_str[end..])
+                            } else if let Some(pos) = find_tag_ci(&html_str, "<body>") {
+                                let end = pos + 6;
+                                format!("{}{}{}", &html_str[..end], script_tag, &html_str[end..])
+                            } else {
+                                format!("{}{}", script_tag, html_str)
+                            };
+                            
+                            content = injected.into_bytes();
+                        }
+                    }
+
+                    Response::builder()
+                        .header("Content-Type", mime)
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(content)
+                        .unwrap()
+                }
+                Err(_) => {
+                    Response::builder()
+                        .status(404)
+                        .body(Vec::new())
+                        .unwrap()
+                }
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

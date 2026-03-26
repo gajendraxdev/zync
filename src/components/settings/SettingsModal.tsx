@@ -11,11 +11,7 @@ import { Select } from '../ui/Select';
 import { clsx } from 'clsx';
 import { Marketplace } from './Marketplace';
 
-
-interface SettingsModalProps {
-    isOpen: boolean;
-    onClose: () => void;
-}
+type Tab = 'general' | 'terminal' | 'appearance' | 'fileManager' | 'shortcuts' | 'plugins' | 'ai' | 'about';
 
 interface RegistryPlugin {
     id: string;
@@ -29,7 +25,57 @@ interface RegistryPlugin {
     type?: 'theme' | 'tool';
 }
 
-type Tab = 'general' | 'terminal' | 'appearance' | 'fileManager' | 'shortcuts' | 'plugins' | 'ai' | 'about';
+interface SettingsModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+}
+
+// Icon Resolver Helper extracted for modularity
+const IconResolver = ({ name, path, size = 16, className = "" }: { name?: string, path?: string, size?: number, className?: string }) => {
+    const [imgError, setImgError] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
+
+    const icons: any = {
+        Activity, Cpu, Gauge, Layers, Globe, Zap, Shield, Lock, Terminal, Package, Plug, FileText, Monitor, SettingsIcon, Folder
+    };
+
+    // Reset state when name/path changes
+    useEffect(() => {
+        setImgError(false);
+        setIsLoading(true);
+    }, [name, path]);
+
+    // If name looks like a image file and we have a path
+    const isImage = name && (name.endsWith('.png') || name.endsWith('.svg') || name.endsWith('.jpg') || name.endsWith('.jpeg'));
+
+    if (isImage && path && !imgError) {
+        // Ensure path doesn't have trailing slash and filename doesn't have leading slash
+        const cleanPath = path.endsWith('/') ? path.slice(0, -1) : path;
+        const cleanName = name.startsWith('/') ? name.slice(1) : name;
+        const fullPath = `${cleanPath}/${cleanName}`;
+        const assetUrl = convertFileSrc(fullPath);
+
+        return (
+            <div className={clsx("relative overflow-hidden flex items-center justify-center rounded-sm bg-black/5", className)} style={{ width: size, height: size }}>
+                {isLoading && <div className="absolute inset-0 animate-pulse bg-white/10" />}
+                <img
+                    src={assetUrl}
+                    alt=""
+                    className={clsx("w-full h-full object-contain transition-opacity duration-200", isLoading ? "opacity-0" : "opacity-100")}
+                    onLoad={() => setIsLoading(false)}
+                    onError={() => {
+                        console.error(`[PluginIcon] Load Error: ${assetUrl}`);
+                        setImgError(true);
+                        setIsLoading(false);
+                    }}
+                />
+            </div>
+        );
+    }
+
+    const Icon = (name && icons[name]) || (name && icons[name.charAt(0).toUpperCase() + name.slice(1)]) || Plug;
+    return <Icon size={size} className={className} />;
+};
 
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     const settings = useAppStore(state => state.settings);
@@ -47,7 +93,6 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     // About / Update State
     const [appVersion, setAppVersion] = useState('');
     // Global Update State
-    // Global Update State
     const updateStatus = useAppStore(state => state.updateStatus);
     const updateInfo = useAppStore(state => state.updateInfo);
     const setUpdateStatus = useAppStore(state => state.setUpdateStatus);
@@ -60,7 +105,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     const [showRestartConfirm, setShowRestartConfirm] = useState(false);
 
     // Plugins State
-    const [plugins, setPlugins] = useState<any[]>([]);
+    const { executeCommand, loadPlugins, plugins } = usePlugins();
     const [isLoadingPlugins, setIsLoadingPlugins] = useState(false);
     const [registry, setRegistry] = useState<RegistryPlugin[]>([]);
     const [isLoadingRegistry, setIsLoadingRegistry] = useState(false);
@@ -72,7 +117,6 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     const [apiKeyDraft, setApiKeyDraft] = useState('');
     const [apiKeySaved, setApiKeySaved] = useState(false);
 
-    const { executeCommand } = usePlugins();
     const showConfirmDialog = useAppStore(state => state.showConfirmDialog);
     const showToast = useAppStore(state => state.showToast);
 
@@ -87,8 +131,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     useEffect(() => {
         if (isOpen && (activeTab === 'plugins' || activeTab === 'appearance')) {
             setIsLoadingPlugins(true);
-            window.ipcRenderer.invoke('plugins:load')
-                .then((list: any) => setPlugins(list))
+            loadPlugins()
                 .catch((err: any) => console.error('Failed to load plugins', err))
                 .finally(() => setIsLoadingPlugins(false));
 
@@ -99,12 +142,6 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 .then(data => setRegistry(data.plugins || []))
                 .catch(err => console.error('Failed to fetch registry', err))
                 .finally(() => setIsLoadingRegistry(false));
-        } else if (isOpen && activeTab === 'appearance') {
-            setIsLoadingPlugins(true);
-            window.ipcRenderer.invoke('plugins:load')
-                .then((list: any) => setPlugins(list))
-                .catch((err: any) => console.error('Failed to load plugins', err))
-                .finally(() => setIsLoadingPlugins(false));
         }
     }, [isOpen, activeTab]);
 
@@ -112,15 +149,12 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         setProcessingId(id);
         setActiveMenu(null);
         try {
-            // Optimistic update
-            setPlugins(prev => prev.map(p => p.manifest.id === id ? { ...p, enabled } : p));
-            await window.ipcRenderer.invoke('plugins:toggle', { id, enabled });
+            await window.ipcRenderer.invoke('plugins_toggle', { id, enabled });
+            await loadPlugins(); // Refresh list to reflect changes
             showToast('info', `Plugin ${enabled ? 'enabled' : 'disabled'}. Restart required.`);
         } catch (error) {
             console.error('Failed to toggle plugin', error);
             showToast('error', 'Failed to update plugin state');
-            // Revert on error
-            setPlugins(prev => prev.map(p => p.manifest.id === id ? { ...p, enabled: !enabled } : p));
         } finally {
             setProcessingId(null);
         }
@@ -140,6 +174,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         setActiveMenu(null);
         try {
             await window.ipcRenderer.invoke('plugins_uninstall', { id });
+            await loadPlugins(); // Refresh list
             showToast('success', 'Plugin uninstalled successfully');
             setNeedsRestart(true);
         } catch (err: any) {
@@ -155,7 +190,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         setActiveMenu(null);
         try {
             await window.ipcRenderer.invoke('plugins_install', { url: plugin.downloadUrl });
-            await window.ipcRenderer.invoke('plugins:load');
+            await loadPlugins(); // Refresh list
             showToast('success', 'Plugin updated successfully');
             setNeedsRestart(true);
         } catch (err: any) {
@@ -224,52 +259,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         }
     }, [isOpen]);
 
-    // Icon Resolver Helper
-    const IconResolver = ({ name, path, size = 16, className = "" }: { name?: string, path?: string, size?: number, className?: string }) => {
-        const [imgError, setImgError] = useState(false);
-        const [isLoading, setIsLoading] = useState(true);
-
-        const icons: any = {
-            Activity, Cpu, Gauge, Layers, Globe, Zap, Shield, Lock, Terminal, Package, Plug, FileText, Monitor, SettingsIcon, Folder
-        };
-
-        // Reset state when name/path changes
-        useEffect(() => {
-            setImgError(false);
-            setIsLoading(true);
-        }, [name, path]);
-
-        // If name looks like a image file and we have a path
-        const isImage = name && (name.endsWith('.png') || name.endsWith('.svg') || name.endsWith('.jpg') || name.endsWith('.jpeg'));
-
-        if (isImage && path && !imgError) {
-            // Ensure path doesn't have trailing slash and filename doesn't have leading slash
-            const cleanPath = path.endsWith('/') ? path.slice(0, -1) : path;
-            const cleanName = name.startsWith('/') ? name.slice(1) : name;
-            const fullPath = `${cleanPath}/${cleanName}`;
-            const assetUrl = convertFileSrc(fullPath);
-
-            return (
-                <div className={clsx("relative overflow-hidden flex items-center justify-center rounded-sm bg-black/5", className)} style={{ width: size, height: size }}>
-                    {isLoading && <div className="absolute inset-0 animate-pulse bg-white/10" />}
-                    <img
-                        src={assetUrl}
-                        alt=""
-                        className={clsx("w-full h-full object-contain transition-opacity duration-200", isLoading ? "opacity-0" : "opacity-100")}
-                        onLoad={() => setIsLoading(false)}
-                        onError={() => {
-                            console.error(`[PluginIcon] Load Error: ${assetUrl}`);
-                            setImgError(true);
-                            setIsLoading(false);
-                        }}
-                    />
-                </div>
-            );
-        }
-
-        const Icon = (name && icons[name]) || (name && icons[name.charAt(0).toUpperCase() + name.slice(1)]) || Plug;
-        return <Icon size={size} className={className} />;
-    };
+    // Note: IconResolver extracted to top-level helper
 
     // Version comparison helper
     const isNewer = (v1: string) => {
@@ -560,8 +550,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                                             </button>
                                                         )}
                                                         <button
-                                                            onClick={() => {
-                                                                if (confirm("Are you sure you want to clear all connections? This cannot be undone.")) {
+                                                            onClick={async () => {
+                                                                const confirmed = await showConfirmDialog({
+                                                                    title: "Clear All Connections",
+                                                                    message: "Are you sure you want to clear all connections? This cannot be undone.",
+                                                                    confirmText: "Clear",
+                                                                    variant: "danger"
+                                                                });
+                                                                if (confirmed) {
                                                                     useAppStore.getState().clearConnections();
                                                                     showToast('info', 'Connections cleared.');
                                                                 }
@@ -1160,7 +1156,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                         </div>
                                     ) : (
                                         <div className="h-full">
-                                            <Marketplace onInstallSuccess={() => setNeedsRestart(true)} />
+                                            <Marketplace onPluginChange={() => setNeedsRestart(true)} />
                                         </div>
                                     )}
                                 </div>
@@ -1502,23 +1498,20 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                             disabled:opacity-50 disabled:cursor-not-allowed
                                         `}
                                     >
-                                        <div className={`shrink-0 ${updateStatus === 'checking' ? 'animate-spin' : ''}`}>
+                                        <div className={`shrink-0 ${(updateStatus === 'checking' || updateStatus === 'downloading') ? 'animate-spin' : ''}`}>
                                             {updateStatus === 'checking' && <RefreshCw size={14} />}
                                             {updateStatus === 'idle' && <RefreshCw size={14} />}
                                             {updateStatus === 'available' && <Download size={14} />}
+                                            {updateStatus === 'downloading' && <RefreshCw size={14} />}
                                             {updateStatus === 'not-available' && <Check size={14} />}
                                             {updateStatus === 'error' && <AlertTriangle size={14} />}
+                                            {updateStatus === 'ready' && <RefreshCw size={14} />}
                                         </div>
                                         <span>
                                             {updateStatus === 'idle' && 'Check for Updates'}
                                             {updateStatus === 'checking' && 'Checking...'}
                                             {updateStatus === 'available' && 'Download Update'}
-                                            {updateStatus === 'downloading' && (
-                                                <>
-                                                    <RefreshCw size={14} className="animate-spin shrink-0" />
-                                                    <span>Downloading...</span>
-                                                </>
-                                            )}
+                                            {updateStatus === 'downloading' && 'Downloading...'}
                                             {updateStatus === 'ready' && 'Install & Restart'}
                                             {updateStatus === 'not-available' && 'Up to date'}
                                             {updateStatus === 'error' && 'Check Failed'}

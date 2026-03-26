@@ -16,6 +16,7 @@ import { ShieldAlert, Loader2 } from 'lucide-react';
 import ReleaseNotesTab from '../tabs/ReleaseNotesTab';
 import { SnippetPicker } from '../snippets/SnippetPicker';
 import { SnippetSidebar } from '../snippets/SnippetSidebar';
+import { HeadlessPluginRunner } from '../plugins/HeadlessPluginRunner';
 
 declare global {
     interface Window {
@@ -364,7 +365,6 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
                                 return (
                                     <PluginPanel
                                         key={panel.id}
-                                        html={panel.html}
                                         panelId={panel.id}
                                         pluginId={panel.pluginId}
                                         connectionId={tab.connectionId || null}
@@ -684,6 +684,7 @@ export function MainLayout({ children }: { children: ReactNode }) {
             {showWizard && <SetupWizard onComplete={() => setShowWizard(false)} />}
             <CommandPalette />
             <ShortcutManager />
+            <HeadlessPluginRunner />
 
             {/* Sidebar Overlay for Mobile */}
             {

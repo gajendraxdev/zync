@@ -1,8 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Search, Download, Trash2, Loader2, Package, Plug, Activity, Cpu, Gauge, Layers, Globe, Zap, Shield, Lock, Monitor, FileText, Settings as SettingsIcon } from 'lucide-react';
+import { Search, Download, Trash2, Loader2, Package, Plug, Activity, Cpu, Gauge, Layers, Globe, Zap, Shield, Lock, Monitor, FileText, Settings as SettingsIcon, ShieldAlert } from 'lucide-react';
 import { clsx } from 'clsx';
 import { usePlugins } from '../../context/PluginContext';
 import { ipcRenderer } from '../../lib/tauri-ipc';
+import { Modal } from '../ui/Modal';
+import { Button } from '../ui/Button';
+import { useAppStore } from '../../store/useAppStore';
 
 // Registry Data Type
 interface RegistryPlugin {
@@ -17,10 +20,11 @@ interface RegistryPlugin {
     mode?: 'dark' | 'light';
     type?: 'theme' | 'tool';
     sha256?: string; // Optional checksum for integrity verification
+    permissions?: string[]; // The capabilities this plugin requires
 }
 
 interface MarketplaceProps {
-    onInstallSuccess?: () => void;
+    onPluginChange?: () => void;
 }
 
 // Registry URL (Make this configurable later)
@@ -58,13 +62,16 @@ const PluginImage = ({ url, icon, name, size = 20 }: { url?: string, icon?: stri
     );
 };
 
-export function Marketplace({ onInstallSuccess }: MarketplaceProps) {
-    const { plugins: installedPlugins } = usePlugins();
+export function Marketplace({ onPluginChange }: MarketplaceProps) {
+    const { plugins: installedPlugins, loadPlugins } = usePlugins();
     const [registry, setRegistry] = useState<RegistryPlugin[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [installingId, setInstallingId] = useState<string | null>(null);
+    const [pendingConsent, setPendingConsent] = useState<RegistryPlugin | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
     const [error, setError] = useState<string | null>(null);
+    const showConfirmDialog = useAppStore(state => state.showConfirmDialog);
+    const showToast = useAppStore(state => state.showToast);
 
     useEffect(() => {
         fetchRegistry();
@@ -90,26 +97,28 @@ export function Marketplace({ onInstallSuccess }: MarketplaceProps) {
         }
     };
 
-    const handleInstall = async (plugin: RegistryPlugin) => {
+    const handleInstall = (plugin: RegistryPlugin) => {
+        if (plugin.permissions && plugin.permissions.length > 0) {
+            setPendingConsent(plugin);
+        } else {
+            executeInstall(plugin, []);
+        }
+    };
+
+    const executeInstall = async (plugin: RegistryPlugin, approvedPermissions: string[]) => {
+        setPendingConsent(null);
         setInstallingId(plugin.id);
         try {
-            // 1. Install via Backend
-            // We use the downloadUrl. If it's a mock URL, this will fail in the backend unless we mock that too.
-            // For the mock "Oceanic", let's assume it might fail if the URL isn't real.
-            // But the flow is correct.
             await ipcRenderer.invoke('plugins_install', {
                 url: plugin.downloadUrl,
                 sha256: plugin.sha256 ?? null,
+                approvedPermissions: approvedPermissions
             });
 
-            // 2. Reload Plugins locally (Backend doesn't auto-reload yet, or maybe it does?)
-            // We should trigger a reload.
-            await ipcRenderer.invoke('plugins:load'); // Trigger backend scan
-
-            // 3. Notify
-            // (Ideally reload happens automatically via event, but we can force it)
-            if (onInstallSuccess) {
-                onInstallSuccess();
+            await loadPlugins(); // Trigger global refresh
+            
+            if (onPluginChange) {
+                onPluginChange();
             } else {
                 window.location.reload(); // Fallback
             }
@@ -122,18 +131,27 @@ export function Marketplace({ onInstallSuccess }: MarketplaceProps) {
     };
 
     const handleUninstall = async (id: string) => {
-        if (!confirm("Are you sure you want to uninstall this plugin?")) return;
+        const confirmed = await showConfirmDialog({
+            title: "Uninstall Plugin",
+            message: "Are you sure you want to uninstall this plugin?",
+            confirmText: "Uninstall",
+            variant: "danger"
+        });
+        if (!confirmed) return;
+
         setInstallingId(id); // Use same loading state
         try {
             await ipcRenderer.invoke('plugins_uninstall', { id });
-            if (onInstallSuccess) {
-                onInstallSuccess();
+            await loadPlugins(); // Trigger global refresh
+            showToast('success', 'Plugin uninstalled successfully');
+            if (onPluginChange) {
+                onPluginChange();
             } else {
                 window.location.reload();
             }
         } catch (err: any) {
             console.error(err);
-            alert(`Failed to uninstall: ${err.message || err}`);
+            showToast('error', `Failed to uninstall: ${err.message || err}`);
         } finally {
             setInstallingId(null);
         }
@@ -270,11 +288,60 @@ export function Marketplace({ onInstallSuccess }: MarketplaceProps) {
             {/* Footer */}
             <div className="p-3 border-t border-[var(--color-app-border)] text-[10px] text-[var(--color-app-muted)] flex justify-between">
                 <span>Registry: GitHub (Static)</span>
-                {/* <button className="hover:text-[var(--color-app-text)] flex items-center gap-1">
-                    <GitBranch className="w-3 h-3" />
-                    Submit Plugin
-                </button> */}
             </div>
+
+            {/* Dynamic Consent Modal */}
+            <Modal
+                isOpen={pendingConsent !== null}
+                onClose={() => setPendingConsent(null)}
+                title="Plugin Installation"
+                width="max-w-md"
+            >
+                {pendingConsent && (
+                    <div className="space-y-4">
+                        <div className="flex items-center gap-3 p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-400">
+                            <ShieldAlert className="shrink-0" size={20} />
+                            <p className="text-sm font-medium">
+                                This plugin wants access to the following secure APIs.
+                            </p>
+                        </div>
+                        
+                        <div className="text-sm text-[var(--color-app-text)] leading-relaxed bg-[var(--color-app-surface)] p-3 rounded-lg border border-[var(--color-app-border)]">
+                            <ul className="space-y-2">
+                                {pendingConsent.permissions?.map(p => (
+                                    <li key={p} className="flex items-center gap-2">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-[var(--color-app-accent)]" />
+                                        <code className="text-xs bg-black/20 px-1.5 py-0.5 rounded text-[var(--color-app-muted)]">
+                                            {p}
+                                        </code>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+
+                        <p className="text-[11px] text-[var(--color-app-muted)]">
+                            You should only grant permissions to authors you trust. If you are unsure, do not install this plugin.
+                        </p>
+
+                        <div className="flex justify-end gap-3 pt-2">
+                            <Button
+                                variant="ghost"
+                                onClick={() => setPendingConsent(null)}
+                                className="hover:bg-[var(--color-app-surface)]"
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                variant="primary"
+                                onClick={() => executeInstall(pendingConsent, pendingConsent.permissions || [])}
+                                className="min-w-[100px] bg-[var(--color-app-accent)] text-white border-none transition-colors"
+                            >
+                                Allow and Install
+                            </Button>
+                        </div>
+                    </div>
+                )}
+            </Modal>
         </div>
     );
 }

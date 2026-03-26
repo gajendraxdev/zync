@@ -51,6 +51,13 @@ pub struct TunnelStatusChange {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CommandResult {
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: i32,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CopyOperation {
     pub from: String,
@@ -1948,7 +1955,7 @@ pub async fn ssh_exec(
     connection_id: String,
     command: String,
     state: State<'_, AppState>,
-) -> Result<String, String> {
+) -> Result<CommandResult, String> {
     if connection_id == "local" {
         // Execute local command
         let (shell, arg) = if cfg!(target_os = "windows") {
@@ -1963,12 +1970,25 @@ pub async fn ssh_exec(
             .output()
             .map_err(|e| format!("Failed to execute local command: {}", e))?;
 
-        if output.status.success() {
-            String::from_utf8(output.stdout).map_err(|e| format!("Invalid UTF-8 output: {}", e))
+        let (stdout, stderr, exit_code) = if output.status.success() {
+            (
+                String::from_utf8_lossy(&output.stdout).to_string(),
+                String::from_utf8_lossy(&output.stderr).to_string(),
+                0,
+            )
         } else {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            Err(format!("Command failed: {}", stderr))
-        }
+            (
+                String::from_utf8_lossy(&output.stdout).to_string(),
+                String::from_utf8_lossy(&output.stderr).to_string(),
+                output.status.code().unwrap_or(1),
+            )
+        };
+
+        Ok(CommandResult {
+            stdout,
+            stderr,
+            exit_code,
+        })
     } else {
         // Execute SSH command
         let connections = state.connections.lock().await;
@@ -2002,15 +2022,14 @@ pub async fn ssh_exec(
                     }
                 }
 
-                if exit_status == 0 {
-                    return String::from_utf8(stdout).map_err(|e| e.to_string());
-                } else {
-                    let err_str = String::from_utf8_lossy(&stderr);
-                    return Err(format!(
-                        "Remote command failed (Exit {}): {}",
-                        exit_status, err_str
-                    ));
-                }
+                let stdout_str = String::from_utf8_lossy(&stdout).to_string();
+                let stderr_str = String::from_utf8_lossy(&stderr).to_string();
+
+                return Ok(CommandResult {
+                    stdout: stdout_str,
+                    stderr: stderr_str,
+                    exit_code: exit_status as i32,
+                });
             }
         }
         Err("Connection not found".to_string())
@@ -3053,8 +3072,13 @@ pub async fn plugins_toggle(app: AppHandle, id: String, enabled: bool) -> Result
 }
 
 #[tauri::command]
-pub async fn plugins_install(app: AppHandle, url: String, sha256: Option<String>) -> Result<String, String> {
-    crate::plugins::PluginScanner::install_plugin(&app, &url, sha256)
+pub async fn plugins_install(
+    app: AppHandle, 
+    url: String, 
+    sha256: Option<String>, 
+    approved_permissions: Option<Vec<String>>
+) -> Result<String, String> {
+    crate::plugins::PluginScanner::install_plugin(&app, &url, sha256, approved_permissions)
         .await
         .map_err(|e| e.to_string())
 }

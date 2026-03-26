@@ -8,11 +8,17 @@ use std::path::PathBuf;
 use std::time::Duration;
 use tauri::{AppHandle, Manager};
 
+fn default_plugin_type() -> String {
+    "panel".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
     pub id: String,
     pub name: String,
     pub version: String,
+    #[serde(default = "default_plugin_type")]
+    pub r#type: String,
     pub main: Option<String>,
     pub style: Option<String>,
     pub mode: Option<String>, // "dark" | "light"
@@ -611,7 +617,12 @@ impl PluginScanner {
         }
     }
 
-    pub async fn install_plugin(app: &AppHandle, url: &str, expected_sha256: Option<String>) -> Result<String> {
+    pub async fn install_plugin(
+        app: &AppHandle, 
+        url: &str, 
+        expected_sha256: Option<String>,
+        approved_permissions: Option<Vec<String>>
+    ) -> Result<String> {
         println!("[Plugins] Installing from: {}", url);
 
         // 1. Download
@@ -628,7 +639,18 @@ impl PluginScanner {
             ));
         }
 
+        // Security: Limit plugin downloads to 50MB to prevent OOM
+        const MAX_PLUGIN_SIZE: u64 = 50 * 1024 * 1024;
+        if let Some(len) = response.content_length() {
+            if len > MAX_PLUGIN_SIZE {
+                return Err(anyhow!("Plugin too large: {} bytes (max {})", len, MAX_PLUGIN_SIZE));
+            }
+        }
+
         let bytes = response.bytes().await?;
+        if bytes.len() as u64 > MAX_PLUGIN_SIZE {
+            return Err(anyhow!("Plugin too large: {} bytes (max {})", bytes.len(), MAX_PLUGIN_SIZE));
+        }
 
         // 1b. Checksum Verification
         if let Some(expected_hash) = expected_sha256 {
@@ -660,6 +682,20 @@ impl PluginScanner {
 
         let manifest: Manifest = serde_json::from_str(&manifest_content)
             .context("Invalid manifest.json in plugin zip")?;
+
+        // 2b. Strict Consent Verification
+        // Protect against Registry Bypass Attacks where a plugin advertises no permissions in the marketplace
+        // but sneaks them into its compiled manifest json.
+        let approved = approved_permissions.unwrap_or_default();
+        let requested = manifest.permissions.clone().unwrap_or_default();
+        for req in requested {
+            if !approved.contains(&req) {
+                 warn!("[Plugins] Security policy violation: Plugin '{}' requested unapproved permission '{}'", manifest.id, req);
+                 return Err(anyhow::anyhow!(
+                    "Security policy violation: Plugin requested permission '{}' which was not approved by the user.", req
+                 ));
+            }
+        }
 
         // 3. Extract to plugins dir
         let config_dir = app

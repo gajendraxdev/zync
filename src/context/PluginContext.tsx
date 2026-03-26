@@ -8,6 +8,8 @@ interface Plugin {
         id: string;
         name: string;
         version: string;
+        type?: string;
+        permissions?: string[];
         main?: string;
         style?: string;
         mode?: string;
@@ -39,6 +41,7 @@ interface PluginContextType {
     commands: PluginCommand[];
     panels: PluginPanel[];
     executeCommand: (id: string) => void;
+    loadPlugins: () => Promise<void>;
 }
 
 const PluginContext = createContext<PluginContextType>({
@@ -46,16 +49,22 @@ const PluginContext = createContext<PluginContextType>({
     loaded: false,
     commands: [],
     panels: [],
-    executeCommand: () => { }
+    executeCommand: () => { },
+    loadPlugins: async () => {},
 });
 
 export const usePlugins = () => useContext(PluginContext);
 
-// The code that runs INSIDE the Web Worker
-// We use a template literal to inject it securely
-// The code that runs INSIDE the Web Worker
-// We use a template literal to inject it securely
 const WORKER_BOOTSTRAP = `
+class PermissionError extends Error {
+    constructor(permission, apiIdentifier) {
+        super(\`Access denied: Missing permission "\${permission}" for "\${apiIdentifier}"\`);
+        this.name = 'PermissionError';
+        this.permission = permission;
+        this.apiIdentifier = apiIdentifier;
+    }
+}
+
 const zync = {
     callbacks: {},
     commandHandlers: {},
@@ -72,102 +81,70 @@ const zync = {
         }
     },
 
-    // Generic Request helper
     request: (type, payload) => {
         return new Promise((resolve, reject) => {
-             const requestId = Math.random().toString(36).substring(7);
+             const requestId = crypto.randomUUID();
              zync.pendingRequests[requestId] = { resolve, reject };
              self.postMessage({ type, payload: { ...payload, requestId } });
         });
     },
 
     ui: {
-        notify: async (opts) => {
-            self.postMessage({ type: 'api:ui:notify', payload: opts });
-        }
+        notify: (opts) => self.postMessage({ type: 'api:ui:notify', payload: opts }),
+        confirm: (opts) => zync.request('api:ui:confirm', opts)
     },
 
     fs: {
-        readFile: (path) => zync.request('api:fs:read', { path }),
-        writeFile: (path, content) => zync.request('api:fs:write', { path, content }),
-        ls: (path) => zync.request('api:fs:list', { path }),
+        readTextFile: (path) => zync.request('api:fs:read', { path }),
+        writeTextFile: (path, content) => zync.request('api:fs:write', { path, content }),
+        readDir: (path) => zync.request('api:fs:list', { path }),
         exists: (path) => zync.request('api:fs:exists', { path }),
         mkdir: (path) => zync.request('api:fs:mkdir', { path }),
     },
 
-    commands: {
-        register: (id, title, handler) => {
-            zync.commandHandlers[id] = handler;
-            self.postMessage({ type: 'api:commands:register', payload: { id, title } });
-        }
-    },
-    
-    theme: {
-        set: (themeName) => {
-            self.postMessage({ type: 'api:theme:set', payload: { theme: themeName } });
-        }
+    ssh: {
+        exec: (command) => zync.request('api:ssh:exec', { command }),
     },
 
     terminal: {
-        send: (text) => {
-            self.postMessage({ type: 'api:terminal:send', payload: { text } });
-        }
+        send: (text) => self.postMessage({ type: 'api:terminal:send', payload: { text } }),
+        newTab: (opts) => zync.request('api:terminal:opentab', opts)
     },
 
     statusBar: {
-        set: (id, text) => {
-            self.postMessage({ type: 'api:statusbar:set', payload: { id, text } });
-        },
-        clear: (id) => {
-            self.postMessage({ type: 'api:statusbar:set', payload: { id, text: '' } });
-        }
+        set: (id, text) => self.postMessage({ type: 'api:statusbar:set', payload: { id, text } })
     },
 
-    panel: {
-        register: (id, title, html) => {
-            self.postMessage({ type: 'api:panel:register', payload: { id, title, html } });
-        }
+    theme: {
+        set: (theme) => zync.request('api:theme:set', { theme })
     },
 
     window: {
-        showQuickPick: (items, options) => {
-            return zync.request('api:window:showQuickPick', { items, options });
-        },
-        create: (options) => {
-            return zync.request('api:window:create', options);
-        }
-    },
-
-    plugins: {
-        list: () => zync.request('api:plugins:load', {})
-    },
-
-    logger: {
-        log: (msg) => {
-            self.postMessage({ type: 'api:log', payload: msg });
-        }
+        create: (opts) => zync.request('api:window:create', opts),
+        showQuickPick: (items, options) => zync.request('api:window:showQuickPick', { items, options })
     }
 };
 
 self.onmessage = async (e) => {
-    const { type, payload } = e.data;
-    
-    // Handle Responses
+    const { type, payload } = e.data || {};
+    if (!type) return;
+
     if (type.endsWith(':response')) {
-         const { requestId, result, error } = payload;
-         // Special handling for Quick Pick legacy format (optional, but good for robust)
-         // Actually, if we standardized zync.request, we use zync.pendingRequests
-         
-         const handler = zync.pendingRequests[requestId];
-         if (handler) {
-             if (error) handler.reject(error);
-             else handler.resolve(result); // Result might be selectedItem or file content
-             delete zync.pendingRequests[requestId];
-         }
-         return;
-    }
-    
-    if (type === 'init') {
+        const { requestId, result, error } = payload || {};
+        const handler = zync.pendingRequests[requestId];
+        if (handler) {
+            if (error) handler.reject(new Error(error));
+            else handler.resolve(result);
+            delete zync.pendingRequests[requestId];
+        }
+    } else if (type === 'api:error:permission') {
+        const { requestId, permission, apiIdentifier } = payload || {};
+        const handler = zync.pendingRequests[requestId];
+        if (handler) {
+            handler.reject(new PermissionError(permission, apiIdentifier));
+            delete zync.pendingRequests[requestId];
+        }
+    } else if (type === 'init') {
         zync.emit('ready');
     } else if (type === 'command:execute') {
         const handler = zync.commandHandlers[payload.id];
@@ -175,7 +152,6 @@ self.onmessage = async (e) => {
     }
 };
 
-// Expose zync globally to the user script
 self.zync = zync;
 `;
 
@@ -185,248 +161,144 @@ export const PluginProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const [commands, setCommands] = useState<PluginCommand[]>([]);
     const [panels, setPanels] = useState<PluginPanel[]>([]);
     const workers = useRef<Map<string, Worker>>(new Map());
+    const pluginsRef = useRef<Plugin[]>([]);
     const showToast = useAppStore(state => state.showToast);
 
+    // Sync ref with state to avoid stale closures in worker handlers
     useEffect(() => {
-        loadPlugins();
-        return () => {
-            // Cleanup workers
-            workers.current.forEach(w => w.terminate());
-            workers.current.clear();
-        };
-    }, []);
-
-    const loadPlugins = async () => {
-        try {
-            const loadedPlugins: Plugin[] = await ipcRenderer.invoke('plugins:load');
-            console.log('[Plugins] Discovered:', loadedPlugins);
-            setPlugins(loadedPlugins);
-
-            // Initialize Workers
-            loadedPlugins.forEach(plugin => {
-                // 1. Inject CSS if present
-                if (plugin.style) {
-                    const styleId = `plugin-style-${plugin.manifest.id}`;
-                    if (!document.getElementById(styleId)) {
-                        const styleEl = document.createElement('style');
-                        styleEl.id = styleId;
-                        styleEl.textContent = plugin.style;
-                        document.head.appendChild(styleEl);
-                        // console.log(`[Plugin] Injected styles for ${plugin.manifest.id}`);
-                    }
-                }
-
-                // 2. Start Worker if script is present
-                if (!plugin.script) return;
-
-                try {
-                    // Combine bootstrap + user script
-                    const blobContent = [WORKER_BOOTSTRAP, '\n\n// USER SCRIPT START\n\n', plugin.script];
-                    const blob = new Blob(blobContent, { type: 'application/javascript' });
-                    const workerUrl = URL.createObjectURL(blob);
-
-                    const worker = new Worker(workerUrl);
-
-                    // Handle messages FROM the worker
-                    worker.onmessage = (e) => {
-                        const { type, payload } = e.data;
-                        handlePluginMessage(plugin.manifest.id, type, payload);
-                    };
-
-                    worker.onerror = (e) => {
-                        console.error(`[Plugin Error] ${plugin.manifest.id}:`, e.message);
-                    };
-
-                    // Start it
-                    worker.postMessage({ type: 'init' });
-
-                    workers.current.set(plugin.manifest.id, worker);
-
-                } catch (err) {
-                    console.error(`[Plugin] Failed to start ${plugin.manifest.id}:`, err);
-                }
-            });
-
-            setLoaded(true);
-        } catch (err) {
-            console.error('[Plugins] Failed to load:', err);
-        }
-    };
+        pluginsRef.current = plugins;
+    }, [plugins]);
 
     const respond = (pluginId: string, type: string, payload: any) => {
         const worker = workers.current.get(pluginId);
-        if (worker) {
-            worker.postMessage({ type: `${type}:response`, payload });
+        if (worker) worker.postMessage({ type: `${type}:response`, payload });
+    };
+
+    const checkPermission = (pluginId: string, permission: string, requestId?: string) => {
+        const plugin = pluginsRef.current.find(p => p.manifest.id === pluginId);
+        if (!plugin) return false;
+        const approved = plugin.manifest.permissions || [];
+        if (approved.includes(permission) || approved.includes(`${permission.split(':')[0]}:*`)) return true;
+
+        console.warn(`[Zync Security] Permission denied: '${permission}' for '${pluginId}'`);
+        showToast('error', `Plugin '${plugin.manifest.name}' blocked: missing '${permission}'`);
+
+        if (requestId) {
+            const worker = workers.current.get(pluginId);
+            worker?.postMessage({
+                type: 'api:error:permission',
+                payload: { requestId, permission, apiIdentifier: `zync.${permission.replace(':', '.')}` }
+            });
         }
+        return false;
     };
 
     const handlePluginMessage = async (pluginId: string, type: string, payload: any) => {
-        // API Implementation Bridge
         switch (type) {
-            case 'api:panel:register':
-                setPanels(prev => {
-                    if (prev.some(p => p.id === payload.id)) return prev;
-                    return [...prev, { id: payload.id, title: payload.title, html: payload.html, pluginId }];
-                });
-                // Also dispatch a DOM event so other components can react immediately
-                window.dispatchEvent(new CustomEvent('zync:panel:register', { detail: { id: payload.id, title: payload.title, pluginId } }));
-                break;
             case 'api:ui:notify':
-                showToast(payload.type || 'info', payload.body || payload.message || payload.title || 'Plugin notification');
+                showToast(payload.type || 'info', payload.message || 'Notification');
                 break;
             case 'api:ui:confirm':
-                const confirmed = await useAppStore.getState().showConfirmDialog({
-                    title: payload.title || 'Confirm',
-                    message: payload.message || 'Are you sure?',
-                    confirmText: payload.confirmText,
-                    cancelText: payload.cancelText,
-                    variant: payload.variant
-                });
-                respond(pluginId, type, { requestId: payload.requestId, confirmed });
+                const confirmed = await useAppStore.getState().showConfirmDialog(payload);
+                respond(pluginId, type, { requestId: payload.requestId, result: confirmed });
                 break;
             case 'api:terminal:send':
-                const activeConnId = useAppStore.getState().activeConnectionId;
-                window.dispatchEvent(new CustomEvent('zync:terminal:send', { detail: { text: payload.text, connectionId: activeConnId } }));
+                if (!checkPermission(pluginId, 'terminal:write', payload.requestId)) return;
+                window.dispatchEvent(new CustomEvent('zync:terminal:send', { detail: { text: payload.text } }));
                 break;
-            case 'api:statusbar:set':
-                window.dispatchEvent(new CustomEvent('zync:statusbar:set', { detail: { id: payload.id, text: payload.text } }));
+            case 'api:terminal:opentab':
+                if (!checkPermission(pluginId, 'terminal:newtab', payload.requestId)) return;
+                window.dispatchEvent(new CustomEvent('ssh-ui:new-terminal-tab', { detail: payload }));
                 break;
-            case 'api:log':
-                console.log(`[Plugin Log]`, payload);
-                break;
-            case 'api:commands:register':
-                setCommands(prev => {
-                    if (prev.some(cmd => cmd.id === payload.id)) return prev;
-                    return [...prev, {
-                        id: payload.id,
-                        title: payload.title,
-                        pluginId
-                    }];
-                });
-                break;
-            case 'api:theme:set':
-                console.log('[PluginContext] Theme set requested:', payload.theme);
-                useAppStore.getState().updateSettings({ theme: payload.theme });
-                showToast('success', `Theme changed to ${payload.theme}`);
-                break;
-            case 'api:window:showQuickPick':
-                // Dispatch event for CommandPalette to handle
-                window.dispatchEvent(new CustomEvent('zync:quick-pick', {
-                    detail: {
-                        items: payload.items,
-                        options: payload.options,
-                        requestId: payload.requestId,
-                        pluginId
-                    }
-                }));
-                break;
-            case 'api:plugins:load':
+            case 'api:ssh:exec':
+                if (!checkPermission(pluginId, 'ssh:exec', payload.requestId)) return;
                 try {
-                    const list = await ipcRenderer.invoke('plugins:load');
-                    respond(pluginId, 'api:plugins:load', {
-                        requestId: payload.requestId,
-                        result: list
-                    });
-                } catch (e) {
-                    console.error('[PluginContext] Failed to load plugins for worker:', e);
-                    respond(pluginId, 'api:plugins:load', {
-                        requestId: payload.requestId,
-                        result: [],
-                        error: String(e)
-                    });
-                }
-                break;
-
-            // File System Bridge
-            case 'api:fs:read':
-                try {
-                    const content = await ipcRenderer.invoke('plugin_fs_read', { path: payload.path });
-                    respond(pluginId, type, { requestId: payload.requestId, result: content });
+                    const connId = useAppStore.getState().activeConnectionId;
+                    const result = await ipcRenderer.invoke('ssh_exec', { connectionId: connId, command: payload.command });
+                    respond(pluginId, type, { requestId: payload.requestId, result });
                 } catch (e: any) {
                     respond(pluginId, type, { requestId: payload.requestId, error: e.toString() });
                 }
+                break;
+            case 'api:fs:read':
+                if (!checkPermission(pluginId, 'fs:read', payload.requestId)) return;
+                ipcRenderer.invoke('plugin_fs_read', { path: payload.path })
+                    .then(res => respond(pluginId, type, { requestId: payload.requestId, result: res }))
+                    .catch(e => respond(pluginId, type, { requestId: payload.requestId, error: e.toString() }));
                 break;
             case 'api:fs:write':
-                try {
-                    await ipcRenderer.invoke('plugin_fs_write', { path: payload.path, content: payload.content });
-                    respond(pluginId, type, { requestId: payload.requestId, result: true });
-                } catch (e: any) {
-                    respond(pluginId, type, { requestId: payload.requestId, error: e.toString() });
-                }
+                if (!checkPermission(pluginId, 'fs:write', payload.requestId)) return;
+                ipcRenderer.invoke('plugin_fs_write', { path: payload.path, content: payload.content })
+                    .then(() => respond(pluginId, type, { requestId: payload.requestId, result: true }))
+                    .catch(e => respond(pluginId, type, { requestId: payload.requestId, error: e.toString() }));
                 break;
             case 'api:fs:list':
-                try {
-                    const entries = await ipcRenderer.invoke('plugin_fs_list', { path: payload.path });
-                    respond(pluginId, type, { requestId: payload.requestId, result: entries });
-                } catch (e: any) {
-                    respond(pluginId, type, { requestId: payload.requestId, error: e.toString() });
-                }
+                if (!checkPermission(pluginId, 'fs:read', payload.requestId)) return;
+                ipcRenderer.invoke('plugin_fs_list', { path: payload.path })
+                    .then(res => respond(pluginId, type, { requestId: payload.requestId, result: res }))
+                    .catch(e => respond(pluginId, type, { requestId: payload.requestId, error: e.toString() }));
                 break;
-            case 'api:fs:exists':
-                try {
-                    const exists = await ipcRenderer.invoke('plugin_fs_exists', { path: payload.path });
-                    respond(pluginId, type, { requestId: payload.requestId, result: exists });
-                } catch (e: any) {
-                    respond(pluginId, type, { requestId: payload.requestId, error: e.toString() });
-                }
-                break;
-            case 'api:fs:mkdir':
-                try {
-                    await ipcRenderer.invoke('plugin_fs_create_dir', { path: payload.path });
-                    respond(pluginId, type, { requestId: payload.requestId, result: true });
-                } catch (e: any) {
-                    respond(pluginId, type, { requestId: payload.requestId, error: e.toString() });
-                }
+            case 'api:theme:set':
+                if (!checkPermission(pluginId, 'theme:set', payload.requestId)) return;
+                useAppStore.getState().updateSettings({ theme: payload.theme });
+                respond(pluginId, type, { requestId: payload.requestId, result: true });
                 break;
             case 'api:window:create':
-                try {
-                    await ipcRenderer.invoke('plugin_window_create', payload);
-                    respond(pluginId, type, { requestId: payload.requestId, result: true });
-                } catch (e: any) {
-                    respond(pluginId, type, { requestId: payload.requestId, error: e.toString() });
-                }
+                if (!checkPermission(pluginId, 'window:create', payload.requestId)) return;
+                ipcRenderer.invoke('plugin_window_create', payload)
+                    .then(() => respond(pluginId, type, { requestId: payload.requestId, result: true }))
+                    .catch(e => respond(pluginId, type, { requestId: payload.requestId, error: e.toString() }));
                 break;
+            case 'api:commands:register':
+                setCommands(prev => [...prev.filter(c => c.id !== payload.id), { ...payload, pluginId }]);
+                break;
+            case 'api:panel:register':
+                setPanels(prev => [...prev.filter(p => p.id !== payload.id), { ...payload, pluginId }]);
+                break;
+            case 'api:window:showQuickPick':
+                window.dispatchEvent(new CustomEvent('zync:quick-pick', { detail: { ...payload, pluginId } }));
+                break;
+            default:
+                console.warn('[PluginContext] Unknown message:', type);
+        }
+    };
+
+    const loadPlugins = async () => {
+        try {
+            const list: Plugin[] = await ipcRenderer.invoke('plugins_load');
+            setPlugins(list);
+            list.filter(p => (p.script && p.enabled)).forEach(p => {
+                const blob = new Blob([WORKER_BOOTSTRAP, '\n\n// USER SCRIPT START\n\n', p.script!], { type: 'application/javascript' });
+                const url = URL.createObjectURL(blob);
+                const worker = new Worker(url);
+                URL.revokeObjectURL(url);
+                worker.onmessage = (e) => handlePluginMessage(p.manifest.id, e.data.type, e.data.payload);
+                worker.postMessage({ type: 'init' });
+                workers.current.set(p.manifest.id, worker);
+            });
+            setLoaded(true);
+        } catch (e) {
+            console.error('[Plugins] Load failed:', e);
         }
     };
 
     const executeCommand = (id: string) => {
         const cmd = commands.find(c => c.id === id);
-        if (!cmd) return;
-
-        const worker = workers.current.get(cmd.pluginId);
-        if (worker) {
-            worker.postMessage({ type: 'command:execute', payload: { id } });
-        }
+        if (cmd) workers.current.get(cmd.pluginId)?.postMessage({ type: 'command:execute', payload: { id } });
     };
 
-    // Listen for Quick Pick selections from UI
     useEffect(() => {
-        const handleQuickPickSelect = (e: any) => {
-            const { requestId, pluginId, selectedItem } = e.detail;
-            // console.log('[PluginContext] Quick Pick selected:', { requestId, pluginId, selectedItem });
-
-            // Respond using standardized format? 
-            // The worker expects `result` in payload for generic handler.
-            // But for Quick Pick, we sent `selectedItem`.
-            // Let's modify respond helper or just call postMessage manually here to match expectation.
-            // Wait, my updated WORKER_BOOTSTRAP uses generic handler which expects `result`.
-            // So I should send `result: selectedItem`.
-
-            const worker = workers.current.get(pluginId);
-            if (worker) {
-                worker.postMessage({
-                    type: 'api:window:showQuickPick:response',
-                    payload: { requestId, result: selectedItem } // CHANGED from selectedItem to result
-                });
-            }
+        loadPlugins();
+        const qp = (e: any) => respond(e.detail.pluginId, 'api:window:showQuickPick', { requestId: e.detail.requestId, result: e.detail.selectedItem });
+        window.addEventListener('zync:quick-pick-select', qp);
+        return () => { 
+            window.removeEventListener('zync:quick-pick-select', qp); 
+            workers.current.forEach(w => w.terminate()); 
         };
-
-        window.addEventListener('zync:quick-pick-select', handleQuickPickSelect);
-        return () => window.removeEventListener('zync:quick-pick-select', handleQuickPickSelect);
     }, []);
 
     return (
-        <PluginContext.Provider value={{ plugins, loaded, commands, panels, executeCommand }}>
+        <PluginContext.Provider value={{ plugins, loaded, commands, panels, executeCommand, loadPlugins }}>
             {children}
         </PluginContext.Provider>
     );
