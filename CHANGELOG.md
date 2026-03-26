@@ -2,7 +2,7 @@
 
 All notable changes to Zync are documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.0.0] - 2026-03-26
+## [2.9.0] - 2026-03-26
 
 ### Added
 - **Hardened Plugin IPC Bridge**: Implemented a zero-trust communication layer for both UI panels and headless workers, featuring explicit permission propagation and catchable `PermissionError` rejections. ([46cc436])
@@ -455,8 +455,8 @@ All notable changes to Zync are documented in this file. The format is based on 
 [e604f6f]: https://github.com/zync-sh/zync/commit/e604f6f
 [ad0e116]: https://github.com/zync-sh/zync/commit/ad0e116
 [bb7f0d9]: https://github.com/zync-sh/zync/commit/bb7f0d9
-[Unreleased]: https://github.com/zync-sh/zync/compare/3.0.0...HEAD
-[3.0.0]: https://github.com/zync-sh/zync/compare/2.8.1...3.0.0
+[Unreleased]: https://github.com/zync-sh/zync/compare/2.9.0...HEAD
+[2.9.0]: https://github.com/zync-sh/zync/compare/2.8.1...2.9.0
 [46cc436]: https://github.com/zync-sh/zync/commit/46cc436528b0c2b3f8601551815f099402e8a586
 [2.8.1]: https://github.com/zync-sh/zync/compare/2.8.0...2.8.1
 [2.8.0]: https://github.com/zync-sh/zync/compare/2.7.0...2.8.0
