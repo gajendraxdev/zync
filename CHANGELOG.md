@@ -11,9 +11,21 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Expanded AI Providers**: Added support for **Groq** and **Mistral** AI providers (OpenAI-compatible) for ultra-fast command generation and reasoning. ([7f3480e])
 - **AI Agent Mode (v2.8.2)**: Introduced a new agentic reasoning engine with a step-by-step planning UI, a terminal feedback loop for automated diagnostics and fixes, and 35+ hardcoded safety rails. ([7f3480e])
 - **Package Cleanup**: Removed legacy syntax highlighter and windowing type definitions from `package.json`. ([7f3480e])
+- **"Sandwich" Layout Modernization**: Implemented a modern app architecture with a full-width `TabBar` header and a persistent `StatusBar` footer, consolidating global workspace controls into a unified header. ([9aa7d67])
+- **Platform-Aware Workspace Shortcuts**: Dashboard search now automatically handles `⌘+P` (Mac) and `Ctrl+P` (Windows/Linux) based on the user's platform. ([9aa7d67])
+
+### Changed
+
+- **Technical Hardening & Reliability**: 
+    - Refactored Dashboard metrics polling with live store state to prevent desynchronization during tab switching. ([9aa7d67])
+    - Optimized React performance through memoization of expensive connection tree sets and event handlers. ([9aa7d67])
+    - Hardened IPC robustness by replacing module-level assertions with safe optional chaining in the layout layer. ([9aa7d67])
+    - Switched folder interaction logic to idiomatic React state management for consistent drag-and-drop feedback. ([9aa7d67])
+- **Sidebar De-cluttering**: Optimized the sidebar by removing redundant footers, maximizing space for connection browsing. ([9aa7d67])
+- **Tooltip Flexibility**: Added an optional `dismissOnClick` property for granular interaction control. ([9aa7d67])
+- **Audit & Type Safety**: Addressed CodeRabbit findings regarding modal lifecycle guards and type safety in the Tab layer. ([9aa7d67])
 
 ## [2.8.1] - 2026-03-25
-
 
 ### Added
 
@@ -455,6 +467,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 [ad0e116]: https://github.com/zync-sh/zync/commit/ad0e116
 [bb7f0d9]: https://github.com/zync-sh/zync/commit/bb7f0d9
 [7f3480e]: https://github.com/zync-sh/zync/commit/7f3480e
+[9aa7d67]: https://github.com/zync-sh/zync/commit/9aa7d67
 [Unreleased]: https://github.com/zync-sh/zync/compare/2.8.1...HEAD
 [2.8.1]: https://github.com/zync-sh/zync/compare/2.8.0...2.8.1
 [2.8.0]: https://github.com/zync-sh/zync/compare/2.7.0...2.8.0
