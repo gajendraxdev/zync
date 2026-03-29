@@ -1,4 +1,3 @@
-
 import { Wifi, WifiOff } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
 import { cn } from '../../lib/utils';
@@ -8,6 +7,7 @@ export function StatusBar() {
   const activeConnectionId = useAppStore(state => state.activeConnectionId);
   const connections = useAppStore(state => state.connections);
   const activeConnection = connections.find((c) => c.id === activeConnectionId);
+  const version = useAppStore(state => state.settings.lastSeenVersion);
 
 
 
@@ -39,6 +39,8 @@ export function StatusBar() {
         {/* Active Action Feedback */}
         <StatusMessage />
         <span>Ready</span>
+        <div className="h-3 w-px bg-app-border mx-1" />
+        <span className="text-app-muted cursor-default hover:text-app-text transition-colors">v{version || '0.0.0'}</span>
       </div>
     </div>
   );
