@@ -72,8 +72,8 @@ export interface AppSettings {
     };
     expandedFolders: string[];
     ai: {
-        provider: 'ollama' | 'gemini' | 'openai' | 'claude';
-        keys?: { gemini?: string; openai?: string; claude?: string };
+        provider: 'ollama' | 'gemini' | 'openai' | 'claude' | 'groq' | 'mistral';
+        keys?: { gemini?: string; openai?: string; claude?: string; groq?: string; mistral?: string };
         model?: string;
         ollamaUrl?: string;
         enabled: boolean;

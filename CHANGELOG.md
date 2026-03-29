@@ -4,7 +4,16 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Added
+
+- **Monaco Editor Integration**: Successfully migrated from CodeMirror 6 to Monaco Editor for all file editing operations. Features include managed model lifecycles for memory efficiency, URI-based model reuse, and robust dirty-state detection for a seamless "Pro" development experience. ([7f3480e])
+- **Local Language Intelligence**: Integrated `@enjoys/context-engine` (v1.8.0) to provide local, zero-backend autocomplete, hover documentation, and definitions for 94+ languages, including improved detection for extensionless files like `Dockerfile` and `Makefile`. ([7f3480e])
+- **Expanded AI Providers**: Added support for **Groq** and **Mistral** AI providers (OpenAI-compatible) for ultra-fast command generation and reasoning. ([7f3480e])
+- **AI Agent Mode (v2.8.2)**: Introduced a new agentic reasoning engine with a step-by-step planning UI, a terminal feedback loop for automated diagnostics and fixes, and 35+ hardcoded safety rails. ([7f3480e])
+- **Package Cleanup**: Removed legacy syntax highlighter and windowing type definitions from `package.json`. ([7f3480e])
+
 ## [2.8.1] - 2026-03-25
+
 
 ### Added
 
@@ -445,6 +454,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 [e604f6f]: https://github.com/zync-sh/zync/commit/e604f6f
 [ad0e116]: https://github.com/zync-sh/zync/commit/ad0e116
 [bb7f0d9]: https://github.com/zync-sh/zync/commit/bb7f0d9
+[7f3480e]: https://github.com/zync-sh/zync/commit/7f3480e
 [Unreleased]: https://github.com/zync-sh/zync/compare/2.8.1...HEAD
 [2.8.1]: https://github.com/zync-sh/zync/compare/2.8.0...2.8.1
 [2.8.0]: https://github.com/zync-sh/zync/compare/2.7.0...2.8.0
