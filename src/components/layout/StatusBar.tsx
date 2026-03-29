@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+
 import { Wifi, WifiOff } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
 import { cn } from '../../lib/utils';
@@ -9,19 +9,7 @@ export function StatusBar() {
   const connections = useAppStore(state => state.connections);
   const activeConnection = connections.find((c) => c.id === activeConnectionId);
 
-  // Plugin status bar slots: { [id]: text }
-  const [pluginSlots, setPluginSlots] = useState<Record<string, string>>({});
 
-  useEffect(() => {
-    const handler = (e: any) => {
-      const { id, text } = e.detail;
-      setPluginSlots(prev => ({ ...prev, [id]: text }));
-    };
-    window.addEventListener('zync:statusbar:set', handler);
-    return () => window.removeEventListener('zync:statusbar:set', handler);
-  }, []);
-
-  const pluginTexts = Object.values(pluginSlots).filter(Boolean);
 
   return (
     <div className="h-6 bg-app-panel border-t border-app-border flex items-center px-3 text-[10px] select-none text-app-text/80 justify-between shrink-0">
@@ -39,13 +27,14 @@ export function StatusBar() {
             </>
           )}
         </div>
-        {/* Plugin Status Bar Slots */}
-        {pluginTexts.map((text, i) => (
-          <span key={i} className="text-app-muted font-mono">{text}</span>
-        ))}
+
+        {/* Plugin Status Bar Slots (Temporarily disabled per UX request) */}
       </div>
 
       <div className="flex items-center gap-4">
+        {/* High-performance container for Editor cursor status (no React re-renders) */}
+        <span id="global-editor-status" className="text-app-muted font-mono text-[10px] tracking-wide" />
+        
         <StatusBarTransferIndicator />
         {/* Active Action Feedback */}
         <StatusMessage />
