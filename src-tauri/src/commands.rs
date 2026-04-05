@@ -3796,8 +3796,14 @@ pub async fn ai_clear_brain_sessions(
             Ok(p) => p,
             Err(_) => continue, // path doesn't exist or is inaccessible, skip
         };
+        // Only delete if it's a session folder exactly 2 levels deep:
+        // brain/{connection}/{session} — prevents deleting brain/ or brain/{connection}/.
         if canon_path.starts_with(&canon_brain) && canon_path.is_dir() {
-            let _ = std::fs::remove_dir_all(&canon_path);
+            if let Ok(rel) = canon_path.strip_prefix(&canon_brain) {
+                if rel.components().count() == 2 {
+                    let _ = std::fs::remove_dir_all(&canon_path);
+                }
+            }
         }
     }
 

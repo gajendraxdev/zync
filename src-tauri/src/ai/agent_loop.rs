@@ -157,11 +157,17 @@ async fn run_inner(
         ).await? {
             Some(steps) => steps,
             None => {
+                let was_cancelled = cancel.load(Ordering::Relaxed);
+                let summary = if was_cancelled {
+                    "Stopped by user."
+                } else {
+                    "Plan rejected — no changes were made."
+                };
                 let session_path = super::brain::save_session(
                     app, run_id, &request.goal, conn_id, conn_label, model_name,
-                    false, "Plan rejected — no changes were made.", &[],
+                    false, summary, &[],
                 ).map(|p| p.to_string_lossy().to_string());
-                emit_done(app, run_id, false, "Plan rejected — no changes were made.", vec![], session_path);
+                emit_done(app, run_id, false, summary, vec![], session_path);
                 return Ok(());
             }
         }

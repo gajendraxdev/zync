@@ -443,7 +443,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 - Auto-updates
 - Multiple themes (Dark, Light, Dracula)
 
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.8.0...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.9.1...HEAD
 [2.8.0]: https://github.com/zync-sh/zync/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/zync-sh/zync/compare/v2.6.0...v2.7.0
 [2.6.2]: https://github.com/zync-sh/zync/compare/v2.6.1...v2.6.2
@@ -498,11 +498,9 @@ All notable changes to Zync are documented in this file. The format is based on 
 [7f3480e]: https://github.com/zync-sh/zync/commit/7f3480e
 [9aa7d67]: https://github.com/zync-sh/zync/commit/9aa7d67
 [ad807aa]: https://github.com/zync-sh/zync/commit/ad807aa
-[88bb61a]: https://github.com/zync-sh/zync/commit/c7a430f
-[Unreleased]: https://github.com/zync-sh/zync/compare/2.9.1...HEAD
-[2.9.1]: https://github.com/zync-sh/zync/compare/2.9.0...2.9.1
-[2.8.1]: https://github.com/zync-sh/zync/compare/2.8.0...2.8.1
-[2.8.0]: https://github.com/zync-sh/zync/compare/2.7.0...2.8.0
-[2.9.0]: https://github.com/zync-sh/zync/compare/2.8.0...2.9.0
+[88bb61a]: https://github.com/zync-sh/zync/commit/88bb61a
+[2.9.1]: https://github.com/zync-sh/zync/compare/v2.9.0...v2.9.1
+[2.9.0]: https://github.com/zync-sh/zync/compare/v2.8.1...v2.9.0
+[2.8.1]: https://github.com/zync-sh/zync/compare/v2.8.0...v2.8.1
 
 
