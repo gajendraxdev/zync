@@ -157,11 +157,17 @@ async fn run_inner(
         ).await? {
             Some(steps) => steps,
             None => {
+                let was_cancelled = cancel.load(Ordering::Relaxed);
+                let summary = if was_cancelled {
+                    "Stopped by user."
+                } else {
+                    "Plan rejected — no changes were made."
+                };
                 let session_path = super::brain::save_session(
                     app, run_id, &request.goal, conn_id, conn_label, model_name,
-                    false, "Plan rejected — no changes were made.", &[],
+                    false, summary, &[],
                 ).map(|p| p.to_string_lossy().to_string());
-                emit_done(app, run_id, false, "Plan rejected — no changes were made.", vec![], session_path);
+                emit_done(app, run_id, false, summary, vec![], session_path);
                 return Ok(());
             }
         }
@@ -239,11 +245,17 @@ async fn run_inner(
         iterations += 1;
 
         // ── Call AI ──
-        let response = call_provider(
-            app, run_id, &messages, &config,
-            AGENT_SYSTEM_PROMPT,
-            tools::execution_tool_schemas(&config),
-        ).await?;
+        let response = tokio::select! {
+            result = call_provider(
+                app, run_id, &messages, &config,
+                AGENT_SYSTEM_PROMPT,
+                tools::execution_tool_schemas(&config),
+            ) => result?,
+            _ = poll_until_cancel(&cancel) => {
+                finish!(false, "Stopped by user.", action_log);
+                return Ok(());
+            }
+        };
 
         // ── No tool calls → check for text-based tool call fallback ──
         // Some models (e.g. Mistral in degraded mode) output tool calls as raw JSON text
