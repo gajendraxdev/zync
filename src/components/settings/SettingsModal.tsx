@@ -1451,12 +1451,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                             <div className="w-52">
                                                 <Select
                                                     value={settings.ai?.provider || 'ollama'}
-                                                    onChange={(v) => updateAiSettings({ provider: v as any })}
+                                                    onChange={(v) => updateAiSettings({ provider: v as any, model: undefined })}
                                                     options={[
                                                         { value: 'ollama', label: 'Ollama (Local / Free)' },
                                                         { value: 'gemini', label: 'Gemini (Free BYOK)' },
                                                         { value: 'openai', label: 'OpenAI (BYOK)' },
                                                         { value: 'claude', label: 'Claude (BYOK)' },
+                                                        { value: 'groq', label: 'Groq (BYOK)' },
+                                                        { value: 'mistral', label: 'Mistral (BYOK)' },
                                                     ]}
                                                 />
                                             </div>
@@ -1526,6 +1528,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                                     {settings.ai?.provider === 'claude' && (
                                                         <>Pay-as-you-go, credit card required.{' '}
                                                             <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer" className="text-[var(--color-app-accent)] hover:underline">Get Claude API key</a></>
+                                                    )}
+                                                    {settings.ai?.provider === 'groq' && (
+                                                        <>Fast OpenAI-compatible inference.{' '}
+                                                            <a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer" className="text-[var(--color-app-accent)] hover:underline">Get Groq API key</a></>
+                                                    )}
+                                                    {settings.ai?.provider === 'mistral' && (
+                                                        <>OpenAI-compatible hosted models.{' '}
+                                                            <a href="https://console.mistral.ai/api-keys/" target="_blank" rel="noopener noreferrer" className="text-[var(--color-app-accent)] hover:underline">Get Mistral API key</a></>
                                                     )}
                                                 </p>
                                             </div>
