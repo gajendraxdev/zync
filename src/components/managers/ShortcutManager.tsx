@@ -132,13 +132,11 @@ export function ShortcutManager() {
             // Zoom
             else if (matchShortcut(e, kb.zoomIn || 'Mod+=')) {
                 e.preventDefault();
-                // Send to main process or handle in renderer? 
-                // Renderer zoom can be done via webFrame but usually global
-                window.ipcRenderer.invoke('app:zoomIn');
+                window.ipcRenderer?.invoke('app:zoomIn');
             }
             else if (matchShortcut(e, kb.zoomOut || 'Mod+-')) {
                 e.preventDefault();
-                window.ipcRenderer.invoke('app:zoomOut');
+                window.ipcRenderer?.invoke('app:zoomOut');
             }
             // Feature Shortcuts (Files, Port Forwarding, Snippets, Dashboard)
             else if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'f') {
