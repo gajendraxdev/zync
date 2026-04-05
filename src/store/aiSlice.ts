@@ -1,119 +1,63 @@
 import { StateCreator } from 'zustand';
-import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { AppStore } from './useAppStore';
+import {
+    checkOllamaAvailability,
+    fetchOllamaModels,
+    fetchProviderModels,
+    translateAiStream,
+} from '../ai/services/aiClient';
+import type {
+    AiContext,
+    AiDisplayEntry,
+    AiResult,
+    AiStreamChunkPayload,
+    AiStreamDonePayload,
+    ChatMessage,
+} from '../ai/types/common';
 
 const HISTORY_TAIL_LENGTH = 100;
-const RETENTION_LIMIT = 200; // Per-host display history limit
-
-export interface AiResult {
-    command: string;
-    explanation: string;
-    safety: 'safe' | 'moderate' | 'dangerous';
-    answer?: string;
-}
-
-/** A single message in the AI conversation history (sent to backend as context). */
-export interface ChatMessage {
-    role: 'user' | 'assistant';
-    content: string;
-}
-
-/** A single displayed chat entry in the AI Sidebar UI. */
-export interface AiDisplayEntry {
-    id: string;
-    query: string;
-    result: AiResult | null;
-    error: string | null;
-    /** Attached context snapshot (e.g., terminal output, file content) */
-    contextSnapshot?: string | null;
-    /** Timestamp for display */
-    timestamp: number;
-}
-
-/** Active context attached to the current AI input */
-export interface AiContext {
-    type: 'terminal' | 'file';
-    label: string;
-    content: string;
-}
-
-interface AiStreamChunkPayload {
-    requestId: string;
-    chunk: string;
-    done: boolean;
-    error: string | null;
-}
-
-interface AiStreamDonePayload {
-    requestId: string;
-    result: AiResult | null;
-    error: string | null;
-}
+const RETENTION_LIMIT = 200;
 
 export interface AiSlice {
-    // --- Sidebar UI State ---
-    isAiSidebarOpen: boolean;
-    openAiSidebar: () => void;
-    closeAiSidebar: () => void;
-    toggleAiSidebar: () => void;
-
-    // --- Streaming & Loading ---
     aiLoading: boolean;
     aiResult: AiResult | null;
     aiError: string | null;
     aiStreamingText: string;
     clearAiResult: () => void;
 
-    // --- Query History (for up-arrow navigation) ---
     aiQueryHistory: string[];
     aiHistoryIndex: number;
     pushAiHistory: (query: string) => void;
     clearAiQueryHistory: () => void;
     setAiHistoryIndex: (index: number) => void;
 
-    // --- Per-Host Conversation Context (sent to backend) ---
-    /** Keyed by connectionId. Cleared only when user explicitly clears. */
     aiConversations: Record<string, ChatMessage[]>;
     addToConversation: (connectionId: string, message: ChatMessage) => void;
     clearConversation: (connectionId: string) => void;
 
-    // --- Per-Host Display History (persisted sidebar chat) ---
-    /** Keyed by connectionId. Only cleared by user action. */
     aiDisplayHistory: Record<string, AiDisplayEntry[]>;
     addToDisplayHistory: (connectionId: string, entry: AiDisplayEntry) => void;
     clearDisplayHistory: (connectionId: string) => void;
-    /** Clear the entire display history for all connections */
     clearAllHistory: () => void;
 
-    // --- Attached Context (context pill in the input area) ---
     aiAttachedContext: AiContext | null;
     setAiAttachedContext: (context: AiContext | null) => void;
 
-    // --- Core Query Submission ---
     submitAiQuery: (query: string, context: Record<string, any>, connectionId: string | null) => Promise<void>;
 
-    // --- Provider / Model Queries ---
     checkOllama: () => Promise<boolean>;
     getOllamaModels: () => Promise<string[]>;
     getProviderModels: () => Promise<string[]>;
 }
 
 export const createAiSlice: StateCreator<AppStore, [], [], AiSlice> = (set, get) => ({
-    // --- Sidebar ---
-    isAiSidebarOpen: false,
-    openAiSidebar: () => set({ isAiSidebarOpen: true }),
-    closeAiSidebar: () => set({ isAiSidebarOpen: false }),
-    toggleAiSidebar: () => set(state => ({ isAiSidebarOpen: !state.isAiSidebarOpen })),
-
-    // --- Streaming & Loading ---
     aiLoading: false,
     aiResult: null,
     aiError: null,
     aiStreamingText: '',
     clearAiResult: () => set({ aiResult: null, aiError: null, aiStreamingText: '' }),
 
-    // --- Query History ---
     aiQueryHistory: [],
     aiHistoryIndex: -1,
     pushAiHistory: (query) => {
@@ -123,7 +67,6 @@ export const createAiSlice: StateCreator<AppStore, [], [], AiSlice> = (set, get)
     clearAiQueryHistory: () => set({ aiQueryHistory: [], aiHistoryIndex: -1 }),
     setAiHistoryIndex: (index) => set({ aiHistoryIndex: index }),
 
-    // --- Per-Host Conversation Context ---
     aiConversations: {},
     addToConversation: (connectionId, message) => set(state => {
         const existing = state.aiConversations[connectionId] || [];
@@ -141,7 +84,6 @@ export const createAiSlice: StateCreator<AppStore, [], [], AiSlice> = (set, get)
         return { aiConversations: next };
     }),
 
-    // --- Per-Host Display History ---
     aiDisplayHistory: {},
     addToDisplayHistory: (connectionId, entry) => set(state => {
         const existing = state.aiDisplayHistory[connectionId] || [];
@@ -162,20 +104,16 @@ export const createAiSlice: StateCreator<AppStore, [], [], AiSlice> = (set, get)
     }),
     clearAllHistory: () => set({ aiDisplayHistory: {}, aiConversations: {} }),
 
-    // --- Attached Context ---
     aiAttachedContext: null,
     setAiAttachedContext: (context) => set({ aiAttachedContext: context }),
 
-    // --- Core Query Submission ---
     submitAiQuery: async (query, context, connectionId) => {
-        // Guard against concurrent calls
         if (get().aiLoading) return;
 
         set({ aiLoading: true, aiResult: null, aiError: null, aiStreamingText: '' });
         const requestId = crypto.randomUUID();
         const cleanups: UnlistenFn[] = [];
 
-        // Snapshot conversation history for this host
         const currentHistory = connectionId ? (get().aiConversations[connectionId] || []) : [];
         const history: ChatMessage[] = currentHistory.slice(-HISTORY_TAIL_LENGTH);
 
@@ -209,14 +147,14 @@ export const createAiSlice: StateCreator<AppStore, [], [], AiSlice> = (set, get)
                 rejectDone = reject;
             });
 
-            await invoke('ai_translate_stream', { query, context, requestId, history });
+            await translateAiStream({ query, context, requestId, history });
             const result = await donePromise;
 
             if (result) {
                 const finalResult: AiResult = {
                     command: result.command,
                     explanation: result.explanation,
-                    safety: (result.safety as AiResult['safety']) || 'moderate',
+                    safety: result.safety || 'moderate',
                     answer: result.answer ?? undefined,
                 };
 
@@ -226,14 +164,12 @@ export const createAiSlice: StateCreator<AppStore, [], [], AiSlice> = (set, get)
                     aiStreamingText: '',
                 });
 
-                // Save turn to per-host conversation context
                 if (connectionId) {
                     get().addToConversation(connectionId, { role: 'user', content: query });
                     const aiContent = result.answer ? result.answer : `cmd:${result.command}`;
                     get().addToConversation(connectionId, { role: 'assistant', content: aiContent });
                 }
 
-                // Archive to per-host display history
                 if (connectionId) {
                     const entry: AiDisplayEntry = {
                         id: requestId,
@@ -246,15 +182,17 @@ export const createAiSlice: StateCreator<AppStore, [], [], AiSlice> = (set, get)
                     get().addToDisplayHistory(connectionId, entry);
                 }
 
-                // Clear attached context after submission
                 set({ aiAttachedContext: null });
             } else {
+                // null result means the stream completed without a parseable result
+                // (e.g. the model returned only streaming chunks with no final payload).
+                // aiAttachedContext is intentionally preserved here so the user can
+                // retry the query with the same context attached.
                 set({ aiLoading: false, aiStreamingText: '' });
             }
         } catch (error: any) {
             const msg = error instanceof Error ? error.message : String(error);
-            
-            // Archive error to per-host display history
+
             if (connectionId) {
                 const contextSnapshot = get().aiAttachedContext?.content ?? null;
                 const entry: AiDisplayEntry = {
@@ -278,7 +216,7 @@ export const createAiSlice: StateCreator<AppStore, [], [], AiSlice> = (set, get)
 
     checkOllama: async () => {
         try {
-            return await invoke<boolean>('ai_check_ollama');
+            return await checkOllamaAvailability();
         } catch {
             return false;
         }
@@ -286,7 +224,7 @@ export const createAiSlice: StateCreator<AppStore, [], [], AiSlice> = (set, get)
 
     getOllamaModels: async () => {
         try {
-            return await invoke<string[]>('ai_get_ollama_models');
+            return await fetchOllamaModels();
         } catch {
             return [];
         }
@@ -294,7 +232,7 @@ export const createAiSlice: StateCreator<AppStore, [], [], AiSlice> = (set, get)
 
     getProviderModels: async () => {
         try {
-            return await invoke<string[]>('ai_get_provider_models');
+            return await fetchProviderModels();
         } catch {
             return [];
         }
