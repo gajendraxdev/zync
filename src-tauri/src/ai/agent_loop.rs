@@ -170,10 +170,12 @@ async fn run_inner(
                 };
                 let session_path = if let Some(dir) = &session_dir {
                     if let Some(ts) = &session_ts {
-                        super::brain::finalize_session(
-                            dir, ts, run_id, &request.goal, conn_label, model_name,
-                            false, summary, &[],
-                        );
+                    if let Err(e) = super::brain::finalize_session(
+                        dir, ts, run_id, &request.goal, conn_label, model_name,
+                        false, summary, &[],
+                    ) {
+                        eprintln!("[brain] failed to finalize session: {}", e);
+                    }
                     }
                     Some(dir.to_string_lossy().to_string())
                 } else {
@@ -220,7 +222,7 @@ async fn run_inner(
         ($success:expr, $summary:expr, $actions:expr) => {{
             let session_path = if let Some(dir) = &session_dir {
                 if let Some(ts) = &session_ts {
-                    super::brain::finalize_session(
+                    if let Err(e) = super::brain::finalize_session(
                         dir,
                         ts,
                         run_id,
@@ -230,7 +232,9 @@ async fn run_inner(
                         $success,
                         $summary,
                         &$actions,
-                    );
+                    ) {
+                        eprintln!("[brain] failed to finalize session: {}", e);
+                    }
                 }
                 Some(dir.to_string_lossy().to_string())
             } else {
