@@ -236,7 +236,7 @@ export const useAgentRunStore = create<AgentRunStore>()(
         conversations: {
           ...s.conversations,
           [scope]: msgs.filter(
-            (m) => !(m.type === 'thinking' && m.id.startsWith(runId))
+            (m) => !(m.type === 'thinking' && m.id.startsWith(`${runId}-`))
           ),
         },
       };
