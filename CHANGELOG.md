@@ -4,6 +4,8 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.10.0]
+
 ### Added
 - **Plugin-Hosted Editor Runtime**: Introduced `FileEditorHost` with provider-aware rendering, built-in plain fallback, and CodeMirror default provider surfaces. ([a9afb01])
 - **CodeMirror Helper Test Surface**: Added `tests/codeMirrorHelpers.test.mjs` to lock language mapping, comment shortcuts, status formatting, and provider helper behavior. ([a9afb01])
@@ -489,7 +491,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 - Auto-updates
 - Multiple themes (Dark, Light, Dracula)
 
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.9.1...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.10.0...HEAD
 [#38]: https://github.com/zync-sh/zync/pull/38
 [f766ac2]: https://github.com/zync-sh/zync/commit/f766ac2
 [3df9766]: https://github.com/zync-sh/zync/commit/3df9766
@@ -555,3 +557,6 @@ All notable changes to Zync are documented in this file. The format is based on 
 [2.5.5]: https://github.com/zync-sh/zync/compare/v2.5.4...v2.5.5
 [2.5.4]: https://github.com/zync-sh/zync/compare/v2.5.3...v2.5.4
 [2.5.3]: https://github.com/zync-sh/zync/compare/v2.5.2...v2.5.3
+
+[2.10.0]: https://github.com/zync-sh/zync/compare/v2.9.2...v2.10.0
+
