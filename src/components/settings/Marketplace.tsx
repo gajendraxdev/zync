@@ -104,23 +104,21 @@ export function Marketplace({ onInstallSuccess }: MarketplaceProps) {
             // For the mock "Oceanic", let's assume it might fail if the URL isn't real.
             // But the flow is correct.
             await ipcRenderer.invoke('plugins_install', { url: plugin.downloadUrl });
-
-            // 2. Reload Plugins locally (Backend doesn't auto-reload yet, or maybe it does?)
-            // We should trigger a reload.
-            await ipcRenderer.invoke('plugins:load'); // Trigger backend scan
-
-            // 3. Notify
-            // (Ideally reload happens automatically via event, but we can force it)
-            if (onInstallSuccess) {
-                onInstallSuccess();
-            } else {
-                window.location.reload(); // Fallback
-            }
+            await refreshInstalledPlugins();
         } catch (err: any) {
             console.error(err);
             alert(`Failed to install: ${err.message || err}`);
         } finally {
             setInstallingId(null);
+        }
+    };
+
+    const refreshInstalledPlugins = async () => {
+        await ipcRenderer.invoke('plugins:load');
+        if (onInstallSuccess) {
+            onInstallSuccess();
+        } else {
+            window.location.reload();
         }
     };
 
