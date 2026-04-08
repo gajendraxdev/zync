@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { ZPortal } from '../ui/ZPortal';
 import { useAppStore } from '../../store/useAppStore'; // Updated Import
@@ -10,6 +10,7 @@ import { Select } from '../ui/Select';
 
 import { clsx } from 'clsx';
 import { Marketplace } from './Marketplace';
+import { buildEditorProviderOptions, formatEditorCapabilities, getPluginCategory, getPluginCategoryLabel } from '../editor/providers';
 
 
 interface SettingsModalProps {
@@ -26,7 +27,7 @@ interface RegistryPlugin {
     downloadUrl: string;
     thumbnailUrl?: string; // Optional
     mode?: 'dark' | 'light';
-    type?: 'theme' | 'tool';
+    type?: 'theme' | 'tool' | 'editor-provider' | 'icon-theme';
 }
 
 type Tab = 'general' | 'terminal' | 'appearance' | 'fileManager' | 'shortcuts' | 'plugins' | 'ai' | 'about';
@@ -86,9 +87,18 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         }
     };
 
-    const { executeCommand } = usePlugins();
+    const { executeCommand, editorProviders } = usePlugins();
     const showConfirmDialog = useAppStore(state => state.showConfirmDialog);
     const showToast = useAppStore(state => state.showToast);
+    const editorProviderOptions = useMemo(() => buildEditorProviderOptions(editorProviders), [editorProviders]);
+    const activeEditorProvider = useMemo(() => {
+        const selectedId = settings.editor?.defaultProvider;
+        return editorProviders.find((provider) => provider.manifest.id === selectedId) ?? null;
+    }, [editorProviders, settings.editor?.defaultProvider]);
+    const activeEditorCapabilitySummary = useMemo(
+        () => formatEditorCapabilities(activeEditorProvider?.manifest.editor?.supports, 5),
+        [activeEditorProvider?.manifest.editor?.supports]
+    );
 
     // Sync apiKeyDraft when provider changes or tab opens
     const currentProvider = settings.ai?.provider || 'ollama';
@@ -551,6 +561,38 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                                         }`}
                                                 />
                                             </button>
+                                        </div>
+                                    </div>
+                                </Section>
+
+                                <Section title="Editor">
+                                    <div className="space-y-3 rounded-lg border border-[var(--color-app-border)] bg-[var(--color-app-surface)]/50 p-4">
+                                        <div className="flex items-center justify-between gap-4">
+                                            <div className="min-w-0">
+                                                <h4 className="text-sm font-medium text-[var(--color-app-text)]">Default File Editor</h4>
+                                                <p className="mt-1 text-xs text-[var(--color-app-muted)]">
+                                                    Choose which editor opens files from the file manager. Plugin-based editors appear here automatically, and CodeMirror is the recommended default.
+                                                </p>
+                                            </div>
+                                            <div className="w-64 shrink-0">
+                                                <Select
+                                                    value={settings.editor?.defaultProvider ?? 'com.zync.editor.codemirror'}
+                                                    onChange={(value) => updateSettings({
+                                                        editor: {
+                                                            ...(settings.editor || {}),
+                                                            defaultProvider: value
+                                                        }
+                                                    })}
+                                                    options={editorProviderOptions}
+                                                    showSearch={false}
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="rounded-md border border-[var(--color-app-border)] bg-[var(--color-app-bg)]/40 px-3 py-2 text-xs text-[var(--color-app-muted)]">
+                                            <span className="font-medium text-[var(--color-app-text)]">Capabilities:</span>{' '}
+                                            {activeEditorProvider
+                                                ? activeEditorCapabilitySummary
+                                                : 'Built-in fallback editor'}
                                         </div>
                                     </div>
                                 </Section>
@@ -1142,6 +1184,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                                             const registryItem = registry.find(r => r.id === plugin.manifest.id);
                                                             const hasUpdate = registryItem && registryItem.version !== plugin.manifest.version;
                                                             const isProcessing = processingId === plugin.manifest.id;
+                                                            const categoryLabel = getPluginCategoryLabel(getPluginCategory(plugin.manifest));
 
                                                             return (
                                                                 <div key={plugin.manifest.id} className="group relative flex items-center justify-between p-2.5 bg-[var(--color-app-surface)]/50 rounded-lg border border-[var(--color-app-border)]/50 transition-all hover:border-[var(--color-app-border)]">
@@ -1155,6 +1198,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                                                         <div className="min-w-0">
                                                                             <div className="flex items-center gap-2">
                                                                                 <h4 className="text-xs font-medium text-[var(--color-app-text)] leading-none truncate max-w-[150px]">{plugin.manifest.name}</h4>
+                                                                                <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[var(--color-app-bg)] border border-[var(--color-app-border)] text-[var(--color-app-muted)] shrink-0 uppercase tracking-wide">
+                                                                                    {categoryLabel}
+                                                                                </span>
                                                                                 <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[var(--color-app-bg)] border border-[var(--color-app-border)] text-[var(--color-app-muted)] shrink-0">
                                                                                     v{plugin.manifest.version}
                                                                                 </span>
