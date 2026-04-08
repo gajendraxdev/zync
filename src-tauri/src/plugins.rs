@@ -905,63 +905,30 @@ impl PluginScanner {
 
         let bytes = response.bytes().await?;
         let cursor = std::io::Cursor::new(bytes);
-
-        // 2. Unzip
         let mut archive = zip::ZipArchive::new(cursor)?;
+        Self::install_from_zip_archive(app, &mut archive)
+    }
 
-        // Find manifest to get ID/Directory Name
-        let mut manifest_content = String::new();
-        {
-            let mut manifest_file = archive
-                .by_name("manifest.json")
-                .context("Plugin zip is missing manifest.json")?;
-            std::io::Read::read_to_string(&mut manifest_file, &mut manifest_content)?;
+    pub fn install_plugin_from_local_path(app: &AppHandle, path: &str) -> Result<String> {
+        let candidate_path = PathBuf::from(path);
+        let source_path = fs::canonicalize(&candidate_path)
+            .with_context(|| format!("Failed to resolve path: {}", candidate_path.display()))?;
+
+        if source_path.is_file() {
+            let file = fs::File::open(&source_path)
+                .with_context(|| format!("Failed to open plugin archive: {}", source_path.display()))?;
+            let mut archive = zip::ZipArchive::new(file)
+                .with_context(|| format!("Invalid plugin archive: {}", source_path.display()))?;
+            return Self::install_from_zip_archive(app, &mut archive);
         }
 
-        let manifest: Manifest = serde_json::from_str(&manifest_content)
-            .context("Invalid manifest.json in plugin zip")?;
-
-        // 3. Extract to plugins dir
-        let config_dir = app
-            .path()
-            .app_config_dir()
-            .context("Failed to get config dir")?;
-        let plugins_dir = config_dir.join("plugins");
-
-        if !plugins_dir.exists() {
-            fs::create_dir_all(&plugins_dir)?;
+        if source_path.is_dir() {
+            return Self::install_from_directory(app, &source_path);
         }
 
-        // Use collision-free on-disk name (Base64 of ID)
-        let dir_name = sanitize_plugin_dir_name(&manifest.id)?;
-        let target_dir = plugins_dir.join(&dir_name);
-
-        // Legacy Migration: If old sanitized name exists, we'll keep the new one but could rename
-        // However, a better approach is to check if the new target exists.
-        
-        let temp_dir_name = format!("tmp-{}", uuid::Uuid::new_v4());
-        let temp_dir = plugins_dir.join(&temp_dir_name);
-        fs::create_dir_all(&temp_dir)?;
-
-        println!("[Plugins] Extracting to temp: {:?}", temp_dir);
-        if let Err(e) = archive.extract(&temp_dir) {
-            let _ = fs::remove_dir_all(&temp_dir);
-            return Err(e.into());
-        }
-
-        // Validate extraction
-        if !temp_dir.join("manifest.json").exists() {
-            let _ = fs::remove_dir_all(&temp_dir);
-            return Err(anyhow::anyhow!("Extracted plugin is missing manifest.json"));
-        }
-
-        // Atomic Swap
-        if target_dir.exists() {
-            fs::remove_dir_all(&target_dir)?;
-        }
-        fs::rename(&temp_dir, &target_dir)?;
-
-        Ok(manifest.id)
+        Err(anyhow!(
+            "Unsupported plugin source. Expected a zip file or plugin directory."
+        ))
     }
 
     pub fn uninstall_plugin(app: &AppHandle, plugin_id: &str) -> Result<()> {
@@ -986,6 +953,114 @@ impl PluginScanner {
         } else {
             Err(anyhow::anyhow!("Plugin directory not found for ID: {}", plugin_id))
         }
+    }
+
+    fn install_from_zip_archive<R: std::io::Read + std::io::Seek>(
+        app: &AppHandle,
+        archive: &mut zip::ZipArchive<R>,
+    ) -> Result<String> {
+        let manifest = Self::read_manifest_from_archive(archive)?;
+        let (_plugins_dir, target_dir, temp_dir) = Self::prepare_install_paths(app, &manifest.id)?;
+
+        println!("[Plugins] Extracting to temp: {:?}", temp_dir);
+        if let Err(e) = archive.extract(&temp_dir) {
+            let _ = fs::remove_dir_all(&temp_dir);
+            return Err(e.into());
+        }
+
+        if !temp_dir.join("manifest.json").exists() {
+            let _ = fs::remove_dir_all(&temp_dir);
+            return Err(anyhow!("Extracted plugin is missing manifest.json"));
+        }
+
+        Self::finalize_install(&target_dir, &temp_dir)?;
+        Ok(manifest.id)
+    }
+
+    fn install_from_directory(app: &AppHandle, source_dir: &Path) -> Result<String> {
+        let manifest_path = source_dir.join("manifest.json");
+        let manifest_content = fs::read_to_string(&manifest_path)
+            .with_context(|| format!("Plugin directory is missing {}", manifest_path.display()))?;
+        let manifest: Manifest =
+            serde_json::from_str(&manifest_content).context("Invalid manifest.json in plugin directory")?;
+
+        let (_plugins_dir, target_dir, temp_dir) = Self::prepare_install_paths(app, &manifest.id)?;
+        Self::copy_dir_recursive(source_dir, &temp_dir)?;
+
+        if !temp_dir.join("manifest.json").exists() {
+            let _ = fs::remove_dir_all(&temp_dir);
+            return Err(anyhow!("Plugin directory copy failed: missing manifest.json"));
+        }
+
+        Self::finalize_install(&target_dir, &temp_dir)?;
+        Ok(manifest.id)
+    }
+
+    fn prepare_install_paths(
+        app: &AppHandle,
+        plugin_id: &str,
+    ) -> Result<(PathBuf, PathBuf, PathBuf)> {
+        let config_dir = app
+            .path()
+            .app_config_dir()
+            .context("Failed to get config dir")?;
+        let plugins_dir = config_dir.join("plugins");
+        if !plugins_dir.exists() {
+            fs::create_dir_all(&plugins_dir)?;
+        }
+
+        let dir_name = sanitize_plugin_dir_name(plugin_id)?;
+        let target_dir = plugins_dir.join(&dir_name);
+        let temp_dir_name = format!("tmp-{}", uuid::Uuid::new_v4());
+        let temp_dir = plugins_dir.join(&temp_dir_name);
+        fs::create_dir_all(&temp_dir)?;
+
+        Ok((plugins_dir, target_dir, temp_dir))
+    }
+
+    fn finalize_install(target_dir: &Path, temp_dir: &Path) -> Result<()> {
+        if target_dir.exists() {
+            fs::remove_dir_all(target_dir)?;
+        }
+        fs::rename(temp_dir, target_dir)?;
+        Ok(())
+    }
+
+    fn read_manifest_from_archive<R: std::io::Read + std::io::Seek>(
+        archive: &mut zip::ZipArchive<R>,
+    ) -> Result<Manifest> {
+        let mut manifest_content = String::new();
+        {
+            let mut manifest_file = archive
+                .by_name("manifest.json")
+                .context("Plugin zip is missing manifest.json")?;
+            std::io::Read::read_to_string(&mut manifest_file, &mut manifest_content)?;
+        }
+
+        let manifest: Manifest = serde_json::from_str(&manifest_content)
+            .context("Invalid manifest.json in plugin zip")?;
+        Ok(manifest)
+    }
+
+    fn copy_dir_recursive(source: &Path, destination: &Path) -> Result<()> {
+        if !destination.exists() {
+            fs::create_dir_all(destination)?;
+        }
+
+        for entry in fs::read_dir(source)? {
+            let entry = entry?;
+            let source_path = entry.path();
+            let destination_path = destination.join(entry.file_name());
+
+            if source_path.is_dir() {
+                Self::copy_dir_recursive(&source_path, &destination_path)?;
+            } else if source_path.is_file() {
+                fs::copy(&source_path, &destination_path)
+                    .with_context(|| format!("Failed to copy {}", source_path.display()))?;
+            }
+        }
+
+        Ok(())
     }
 
     fn load_plugin(dir: &PathBuf) -> Result<Plugin> {
