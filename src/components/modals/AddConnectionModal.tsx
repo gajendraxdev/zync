@@ -8,6 +8,8 @@ import { useAppStore, Connection } from '../../store/useAppStore';
 import { open } from '@tauri-apps/plugin-dialog';
 import { cn } from '../../lib/utils';
 import { Laptop, Key, Settings as SettingsIcon, ShieldCheck, CheckCircle2, AlertCircle, Loader2, FileText } from 'lucide-react';
+import { testConnectionIpc, type ConnectionConfigPayload } from '../../features/connections/infrastructure/connectionIpc';
+import { buildConnectionSavePayload, buildConnectionTestPayload, hasRequiredHostAndUsername } from '../../features/connections/domain';
 
 const ImportSshModal = lazy(() => import('./ImportSshModal').then(mod => ({ default: mod.ImportSshModal })));
 
@@ -82,23 +84,14 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
 
 
     const handleSave = () => {
-        if (!formData.host || !formData.username) return;
+        if (!hasRequiredHostAndUsername(formData)) return;
 
-        const connectionData = {
-            id: editingConnectionId || Math.random().toString(36).substr(2, 9),
-            name: formData.name || formData.host,
-            host: formData.host!,
-            username: formData.username!,
-            port: formData.port || 22,
-            password: authMethod === 'password' ? formData.password : undefined,
-            privateKeyPath: authMethod === 'key' ? formData.privateKeyPath : undefined,
-            status: editingConnectionId ? (connections.find((c: Connection) => c.id === editingConnectionId)?.status || 'disconnected') : 'disconnected',
-            jumpServerId: formData.jumpServerId,
-            icon: formData.icon,
-            theme: formData.theme,
-            folder: formData.folder,
-            tags: formData.tags || []
-        } as Connection;
+        const connectionData = buildConnectionSavePayload({
+            formData,
+            authMethod,
+            editingConnectionId,
+            connections,
+        }) as Connection;
 
         if (editingConnectionId) {
             editConnection(connectionData);
@@ -110,7 +103,7 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
     };
 
     const handleTestConnection = async () => {
-        if (!formData.host || !formData.username) {
+        if (!hasRequiredHostAndUsername(formData)) {
             setTestStatus('error');
             setTestMessage('Host and Username are required.');
             return;
@@ -120,52 +113,13 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
         setTestMessage('');
 
         try {
-            // Construct the config object expected by the backend
-            // NOTE: We rely on a hypothetical 'ssh_test_connection' command or similar.
-            // Since we haven't implemented that yet, we'll placeholder it.
-            // Ideally, we'd invoke('ssh_test_connection', { config: ... })
+            const config = buildConnectionTestPayload({
+                formData,
+                authMethod,
+                connections,
+            });
 
-            // Helper to convert frontend connection to backend ConnectionConfig
-            const toBackendConfig = (c: any, password?: string, keyPath?: string): any => {
-                // const method = c.password ? 'password' : 'key'; // simplified detection
-                // For the current form (formData), we use the explicit authMethod state
-                const isForm = c === formData;
-
-                let auth_method;
-                if (isForm) {
-                    if (authMethod === 'password') {
-                        auth_method = { type: 'Password', password: password || '' };
-                    } else {
-                        auth_method = { type: 'PrivateKey', key_path: keyPath || '', passphrase: null };
-                    }
-                } else {
-                    // For regular connections from store
-                    if (c.password) {
-                        auth_method = { type: 'Password', password: c.password };
-                    } else {
-                        auth_method = { type: 'PrivateKey', key_path: c.privateKeyPath || '', passphrase: null };
-                    }
-                }
-
-                return {
-                    id: c.id || 'test-temp',
-                    name: c.name || 'Test Connection',
-                    host: c.host,
-                    port: Number(c.port) || 22,
-                    username: c.username,
-                    auth_method,
-                    jump_host: null // Recursion handled below for the main config
-                };
-            };
-
-            const jumpServerConn = formData.jumpServerId ? connections.find(c => c.id === formData.jumpServerId) : undefined;
-
-            const config = {
-                ...toBackendConfig(formData, formData.password, formData.privateKeyPath),
-                jump_host: jumpServerConn ? toBackendConfig(jumpServerConn) : null
-            };
-
-            await window.ipcRenderer.invoke('ssh:test', config);
+            await testConnectionIpc(config as ConnectionConfigPayload);
 
             setTestStatus('success');
             setTestMessage('Connection successful!');
@@ -203,7 +157,7 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
         }
     };
 
-    const isValid = !!formData.host && !!formData.username;
+    const isValid = hasRequiredHostAndUsername(formData);
 
     return (
         <Modal

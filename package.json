@@ -20,7 +20,13 @@
     "test:sidebar-submit": "node ./node_modules/typescript/bin/tsc -p tsconfig.agent-tests.json && node tests/sidebarSubmit.test.mjs",
     "test:redact": "node ./node_modules/typescript/bin/tsc -p tsconfig.agent-tests.json && node tests/redactContext.test.mjs",
     "test:agent-run-store": "node ./node_modules/typescript/bin/tsc -p tsconfig.agent-tests.json && node tests/agentRunStore.partialize.test.mjs",
-    "test": "node ./node_modules/typescript/bin/tsc -p tsconfig.agent-tests.json && node tests/redactContext.test.mjs && node tests/requestContext.test.mjs && node tests/providerCatalog.test.mjs && node tests/sidebarSubmit.test.mjs && node tests/aiSidebarResize.test.mjs && node tests/codeMirrorHelpers.test.mjs && node tests/agentRunStore.partialize.test.mjs"
+    "test:connection-domain": "node ./node_modules/typescript/bin/tsc -p tsconfig.agent-tests.json && node tests/connectionDomain.test.mjs",
+    "test:connection-form-transforms": "node ./node_modules/typescript/bin/tsc -p tsconfig.agent-tests.json && node tests/connectionFormTransforms.test.mjs",
+    "test:connection-service": "node ./node_modules/typescript/bin/tsc -p tsconfig.agent-tests.json && node tests/connectionService.test.mjs",
+    "test:connection-tab-service": "node ./node_modules/typescript/bin/tsc -p tsconfig.agent-tests.json && node tests/connectionTabService.test.mjs",
+    "test:connection-lifecycle-service": "node ./node_modules/typescript/bin/tsc -p tsconfig.agent-tests.json && node tests/connectionLifecycleService.test.mjs",
+    "test:tunnel-autostart-service": "node ./node_modules/typescript/bin/tsc -p tsconfig.agent-tests.json && node tests/tunnelAutoStartService.test.mjs",
+    "test": "node ./node_modules/typescript/bin/tsc -p tsconfig.agent-tests.json && node tests/redactContext.test.mjs && node tests/requestContext.test.mjs && node tests/providerCatalog.test.mjs && node tests/sidebarSubmit.test.mjs && node tests/aiSidebarResize.test.mjs && node tests/codeMirrorHelpers.test.mjs && node tests/agentRunStore.partialize.test.mjs && node tests/connectionDomain.test.mjs && node tests/connectionFormTransforms.test.mjs && node tests/connectionService.test.mjs && node tests/connectionTabService.test.mjs && node tests/connectionLifecycleService.test.mjs && node tests/tunnelAutoStartService.test.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.1",
