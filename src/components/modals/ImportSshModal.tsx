@@ -5,6 +5,7 @@ import { Button } from '../ui/Button';
 import { CheckCircle2, AlertCircle, Loader2, FolderOpen } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { OSIcon } from '../icons/OSIcon';
+import { importSshConfigIpc, internalizeImportedConnectionsIpc } from '../../features/connections/infrastructure/connectionIpc';
 
 interface ImportSshModalProps {
     isOpen: boolean;
@@ -32,7 +33,7 @@ export function ImportSshModal({ isOpen, onClose, onImport }: ImportSshModalProp
         setIsLoading(true);
         setError(null);
         try {
-            const result = await window.ipcRenderer.invoke('ssh:importConfig');
+            const result = await importSshConfigIpc();
             if (Array.isArray(result)) {
                 setConfigs(result);
                 // Select all by default
@@ -72,7 +73,7 @@ export function ImportSshModal({ isOpen, onClose, onImport }: ImportSshModalProp
             const selected = configs.filter(c => selectedIds.has(c.id));
 
             // Internalize keys (copy to app data)
-            const internalizeResult = await window.ipcRenderer.invoke('ssh:internalize-connections', selected);
+            const internalizeResult = await internalizeImportedConnectionsIpc(selected);
 
             // Check how many were internalized
             let internalizedCount = 0;

@@ -1,5 +1,35 @@
 import { StateCreator } from 'zustand';
 import type { AppStore } from './useAppStore';
+import {
+    addFolderToState,
+    deleteFolderFromState,
+    mergeImportedConnections,
+    renameFolderInState,
+    upsertConnectionInState,
+    updateConnectionFolderInState,
+} from '../features/connections/application/connectionService';
+import {
+    activateExistingConnectionTab,
+    createConnectionTabState,
+    createLocalTerminalTabState,
+    ensureGlobalSnippetsTab,
+    ensureSingleTabByType,
+    findConnectionTab,
+} from '../features/connections/application/tabService';
+import {
+    getCloseTabPreActions,
+    markConnectionConnected,
+    markConnectionErrorIfNeeded,
+    markConnectionStatus,
+    reduceTabCloseState,
+} from '../features/connections/application/connectionLifecycleService';
+import {
+    pinFeatureOnConnectionIfNeeded,
+    startAutoStartTunnels,
+} from '../features/connections/application/tunnelAutoStartService';
+import { buildConnectConfig } from '../features/connections/domain';
+import { connectIpc, disconnectIpc, getRemoteCwdIpc } from '../features/connections/infrastructure/connectionIpc';
+import { loadConnectionsIpc, saveConnectionsIpc } from '../features/connections/infrastructure/connectionPersistence';
 
 export interface Connection {
     id: string;
@@ -106,8 +136,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
             // }
 
             console.error('[RENDERER] Loading connections...');
-            // @ts-ignore
-            const loaded = await window.ipcRenderer.invoke('connections:get');
+            const loaded = await loadConnectionsIpc();
             console.error('[RENDERER] Loaded connections from IPC:', loaded);
             if (loaded && (loaded.connections || Array.isArray(loaded))) {
                 let conns = Array.isArray(loaded) ? loaded : loaded.connections;
@@ -135,19 +164,19 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
 
     addConnection: (conn, isTemp = false) => {
         set(state => {
-            const newConns = [...state.connections, conn];
+            const next = upsertConnectionInState(state, conn);
             if (!isTemp) {
-                saveToMain(newConns, state.folders);
+                saveToMain(next.connections, next.folders);
             }
-            return { connections: newConns };
+            return { connections: next.connections, folders: next.folders };
         });
     },
 
     editConnection: (updatedConn) => {
         set(state => {
-            const newConns = state.connections.map(c => c.id === updatedConn.id ? updatedConn : c);
-            saveToMain(newConns, state.folders);
-            return { connections: newConns };
+            const next = upsertConnectionInState(state, updatedConn);
+            saveToMain(next.connections, next.folders);
+            return { connections: next.connections, folders: next.folders };
         });
     },
 
@@ -169,30 +198,8 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
 
     importConnections: (newConns) => {
         set(state => {
-            // (Simplified logic from Context - needs full implementation)
             console.log('[IMPORT] Raw Imported Connections:', newConns);
-            const existingMap = new Map(state.connections.map(c => [c.name, c.id]));
-            const connsToAdd: Connection[] = [];
-
-            for (const conn of newConns) {
-                if (existingMap.has(conn.name)) {
-                    // Update existing
-                    const existingId = existingMap.get(conn.name)!;
-                    const existingConn = state.connections.find(c => c.id === existingId)!;
-                    connsToAdd.push({ ...conn, id: existingId, status: existingConn.status });
-                } else {
-                    connsToAdd.push(conn);
-                }
-            }
-
-            const importedNames = new Set(newConns.map(c => c.name));
-            const preserved = state.connections.filter(c => !importedNames.has(c.name));
-
-            // Merge and Deduplicate by ID
-            const allConns = [...preserved, ...connsToAdd];
-            const uniqueConns = Array.from(new Map(allConns.map(c => [c.id, c])).values());
-
-            const finalConns = uniqueConns;
+            const finalConns = mergeImportedConnections(state.connections, newConns);
 
             saveToMain(finalConns, state.folders);
             return { connections: finalConns };
@@ -207,7 +214,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
     connect: async (id) => {
         // Optimistic update
         set(state => ({
-            connections: state.connections.map(c => c.id === id ? { ...c, status: 'connecting' } : c)
+            connections: markConnectionStatus(state.connections, id, 'connecting')
         }));
 
         try {
@@ -219,78 +226,23 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
             const conn = connections.find(c => c.id === id);
             if (!conn) throw new Error('Connection not found');
 
-            // Recursive helper to build config with cycle detection
-            const buildConfig = (connectionId: string, visited: Set<string> = new Set()): any => {
-                if (visited.has(connectionId)) {
-                    console.error('[CONNECT] Cycle detected in jump host chain:', connectionId);
-                    return null;
-                }
-                visited.add(connectionId);
-
-                // Depth limit check (arbitrary safety limit)
-                if (visited.size > 10) {
-                    console.error('[CONNECT] Jump host chain too deep');
-                    return null;
-                }
-
-                const c = connections.find(conn => conn.id === connectionId);
-                if (!c) return null;
-
-                const auth_method = c.privateKeyPath
-                    ? { type: 'PrivateKey', key_path: c.privateKeyPath, passphrase: c.password || null }
-                    : { type: 'Password', password: c.password || '' };
-
-                const config: any = {
-                    id: c.id,
-                    name: c.name,
-                    host: c.host,
-                    port: c.port,
-                    username: c.username,
-                    auth_method,
-                    jump_host: undefined
-                };
-
-                if (c.jumpServerId) {
-                    const jumpConfig = buildConfig(c.jumpServerId, new Set(visited));
-                    if (jumpConfig) {
-                        config.jump_host = jumpConfig;
-                    }
-                }
-                return config;
-            };
-
-            const fullConfig = buildConfig(id);
+            const fullConfig = buildConnectConfig(connections, id);
             if (!fullConfig) throw new Error('Failed to build connection config (possible cycle or missing host)');
 
             console.log('[CONNECT] Connecting with config:', fullConfig);
 
-            // @ts-ignore
-            const response = await window.ipcRenderer.invoke('ssh:connect', fullConfig);
+            const response = await connectIpc(fullConfig);
 
             // Fetch home path after connection
             let homePath = '/';
             try {
-                // @ts-ignore
-                homePath = await window.ipcRenderer.invoke('fs:cwd', id);
+                homePath = await getRemoteCwdIpc(id);
             } catch (e) {
                 console.error('[CONNECT] Failed to fetch home path:', e);
             }
 
             set(state => {
-                let newConns = state.connections.map(c => c.id === id ? { ...c, status: 'connected' as const, lastConnected: Date.now(), homePath } : c);
-
-                // Handle OS Detection
-                // @ts-ignore
-                if (response && response.detected_os) {
-                    // @ts-ignore
-                    const osId = response.detected_os.toLowerCase();
-                    newConns = newConns.map(c => {
-                        if (c.id === id && (!c.icon || c.icon === 'Server')) {
-                            return { ...c, icon: osId };
-                        }
-                        return c;
-                    });
-                }
+                const newConns = markConnectionConnected(state.connections, id, homePath, response?.detected_os);
                 saveToMain(newConns, state.folders);
                 return { connections: newConns };
             });
@@ -304,23 +256,18 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                 // @ts-ignore
                 const startTunnel = get().startTunnel;
 
-                // @ts-ignore
-                const autoStartPromises = tunnels
-                    .filter((t: any) => t.autoStart)
-                    .map((t: any) => startTunnel(t.id, id).catch((e: any) => console.error(`Failed to auto-start tunnel ${t.name}:`, e)));
+                const autoStartCount = await startAutoStartTunnels(
+                    tunnels,
+                    id,
+                    startTunnel,
+                    (tunnel, error) => console.error(`Failed to auto-start tunnel ${tunnel.name}:`, error),
+                );
 
-                await Promise.all(autoStartPromises);
-
-                if (autoStartPromises.length > 0) {
+                if (autoStartCount > 0) {
                     // 1. Pin 'port-forwarding' feature if not already pinned
                     const conn = get().connections.find(c => c.id === id);
                     if (conn) {
-                        const currentPinned = conn.pinnedFeatures || [];
-                        if (!currentPinned.includes('port-forwarding')) {
-                            // Use toggleConnectionFeature logic manually to ensure add only
-                            const updatedPinned = [...currentPinned, 'port-forwarding'];
-                            get().editConnection({ ...conn, pinnedFeatures: updatedPinned });
-                        }
+                        pinFeatureOnConnectionIfNeeded<Connection>(conn, 'port-forwarding', (next) => get().editConnection(next));
                     }
 
                     // User requested silent open, so we do NOT switch view.
@@ -333,23 +280,16 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
             console.error('Connection failed:', error);
             // Only update to error state if not already in error to prevent loops
             set(state => {
-                const currentConn = state.connections.find(c => c.id === id);
-                // Avoid setting error if already error (prevents reconnection loops)
-                if (currentConn?.status !== 'error') {
-                    return {
-                        connections: state.connections.map(c =>
-                            c.id === id ? { ...c, status: 'error' } : c
-                        )
-                    };
-                }
-                return state;
+                const nextConnections = markConnectionErrorIfNeeded(state.connections, id);
+                if (nextConnections === state.connections) return state;
+                return { connections: nextConnections };
             });
         }
     },
 
     disconnect: async (id) => {
         try {
-            await window.ipcRenderer.invoke('ssh:disconnect', id);
+            await disconnectIpc(id);
         } catch (error) {
             console.error('Failed to disconnect backend:', error);
         } finally {
@@ -358,113 +298,65 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
 
             // Always update state to disconnected to ensure UI reflects closure
             set(state => ({
-                connections: state.connections.map(c => c.id === id ? { ...c, status: 'disconnected' } : c)
+                connections: markConnectionStatus(state.connections, id, 'disconnected')
             }));
         }
     },
 
     openTab: (connectionId, startView = 'terminal') => {
         set(state => {
-            // Logic moved from Context
             if (connectionId === 'local') {
-                const newTab: Tab = {
-                    id: crypto.randomUUID(),
-                    type: 'connection',
-                    title: 'Local Terminal',
-                    connectionId: 'local',
-                    view: 'terminal'
-                };
-                return { tabs: [...state.tabs, newTab], activeTabId: newTab.id, activeConnectionId: 'local' };
+                return createLocalTerminalTabState(state.tabs);
             }
 
             const conn = state.connections.find(c => c.id === connectionId);
             if (!conn) return state;
 
-            // Check for existing tab for this connection (excluding generic or other views if needed, but here we want main connection tab)
-            // We specifically look for a tab with type 'connection' and matching connectionId
-            const existingTab = state.tabs.find(t => t.connectionId === conn.id && t.type === 'connection');
+            const existingTab = findConnectionTab(state.tabs, conn.id);
 
             if (existingTab) {
-                // Return updated state with potentially changed view
-                const updatedTabs = state.tabs.map(t =>
-                    t.id === existingTab.id && startView && t.view !== startView
-                        ? { ...t, view: startView }
-                        : t
-                );
-
                 // Auto connect if disconnected or error even if tab exists (e.g. user clicked to reconnect)
                 if (conn.status === 'disconnected' || conn.status === 'error') {
                     get().connect(conn.id);
                 }
 
-                return {
-                    tabs: updatedTabs,
-                    activeTabId: existingTab.id,
-                    activeConnectionId: conn.id
-                };
+                return activateExistingConnectionTab(state.tabs, existingTab, startView);
             }
-
-            const newTab: Tab = {
-                id: crypto.randomUUID(),
-                type: 'connection',
-                title: conn.name || conn.host,
-                connectionId: conn.id,
-                view: startView as any
-            };
 
             // Auto connect if disconnected or error
             if (conn.status === 'disconnected' || conn.status === 'error') {
                 get().connect(conn.id);
             }
 
-            return { tabs: [...state.tabs, newTab], activeTabId: newTab.id, activeConnectionId: conn.id };
+            return createConnectionTabState(state.tabs, conn, startView);
         });
     },
 
     openPortForwardingTab: () => {
         set(state => {
-            const existing = state.tabs.find(t => t.type === 'port-forwarding');
-            if (existing) {
-                return { activeTabId: existing.id };
-            }
-            const newTab: Tab = {
+            return ensureSingleTabByType(state.tabs, 'port-forwarding', () => ({
                 id: crypto.randomUUID(),
                 type: 'port-forwarding',
                 title: 'Port Forwarding',
-                view: 'port-forwarding'
-            };
-            return { tabs: [...state.tabs, newTab], activeTabId: newTab.id };
+                view: 'port-forwarding',
+            }));
         });
     },
 
     openReleaseNotesTab: () => {
         set(state => {
-            const existing = state.tabs.find(t => t.type === 'release-notes');
-            if (existing) return { activeTabId: existing.id };
-            const newTab: Tab = {
+            return ensureSingleTabByType(state.tabs, 'release-notes', () => ({
                 id: crypto.randomUUID(),
                 type: 'release-notes',
                 title: "What's New",
                 view: 'terminal', // placeholder, not used for this type
-            };
-            return { tabs: [...state.tabs, newTab], activeTabId: newTab.id };
+            }));
         });
     },
 
     openSnippetsTab: () => {
         set(state => {
-            // Check if we already have a Global Snippets tab (local connection + snippets view)
-            const existing = state.tabs.find(t => t.connectionId === 'local' && t.view === 'snippets');
-            if (existing) return { activeTabId: existing.id };
-
-            const newTab: Tab = {
-                id: crypto.randomUUID(),
-                type: 'connection',
-                title: 'Global Snippets',
-                connectionId: 'local',
-                view: 'snippets'
-            };
-            return { tabs: [...state.tabs, newTab], activeTabId: newTab.id, activeConnectionId: 'local' };
+            return ensureGlobalSnippetsTab(state.tabs);
         });
     },
 
@@ -472,35 +364,16 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
         const state = get();
         const tab = state.tabs.find(t => t.id === tabId);
 
-        // Confirmation Logic should likely be in UI component, but we can do basic check here?
-        // Actually, for Redux/Zustand, it's better if UI handles confirmation dialogs and CALLS this only when confirmed.
-        // But for now let's implement the state change.
-
-        if (tab && tab.connectionId && tab.connectionId !== 'local') {
-            const conn = state.connections.find(c => c.id === tab.connectionId);
-            if (conn && conn.status === 'connected') {
-                // We disconnect when the tab closes? Or keep background? 
-                // Original context asked for confirmation then disconnected.
-                get().disconnect(conn.id);
-            }
+        const preActions = getCloseTabPreActions(tab, state.connections);
+        if (preActions.disconnectConnectionId) {
+            get().disconnect(preActions.disconnectConnectionId);
         }
-
-        // Also clear terminals for local connection when closing local tab
-        if (tab && tab.connectionId === 'local') {
+        if (preActions.clearLocalTerminals) {
             get().clearTerminals('local');
         }
 
         set(state => {
-            const newTabs = state.tabs.filter(t => t.id !== tabId);
-            let newActive = state.activeTabId;
-            if (state.activeTabId === tabId) {
-                newActive = newTabs.length > 0 ? newTabs[newTabs.length - 1].id : null;
-            }
-            // Update activeConnectionId based on new activeTab
-            const activeTab = newTabs.find(t => t.id === newActive);
-            const activeConnId = activeTab?.connectionId || null;
-
-            return { tabs: newTabs, activeTabId: newActive, activeConnectionId: activeConnId };
+            return reduceTabCloseState(state.tabs, state.activeTabId, tabId);
         });
     },
 
@@ -519,10 +392,10 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
 
     addFolder: (name, tags) => {
         set(state => {
-            if (state.folders.some(f => f.name === name)) return state;
-            const newFolders = [...state.folders, { name, tags }];
-            saveToMain(state.connections, newFolders);
-            return { folders: newFolders };
+            const next = addFolderToState(state, name, tags);
+            if (next.folders === state.folders) return state;
+            saveToMain(state.connections, next.folders);
+            return { folders: next.folders };
         });
     },
 
@@ -537,28 +410,26 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
            For this migration step, let's implement basic deletion to pass Typescript.
         */
         set(state => {
-            const newFolders = state.folders.filter(f => f.name !== name);
-            saveToMain(state.connections, newFolders);
-            return { folders: newFolders };
+            const next = deleteFolderFromState(state, name);
+            saveToMain(next.connections, next.folders);
+            return { folders: next.folders, connections: next.connections };
         });
     },
 
     renameFolder: (oldName, newName, newTags) => {
         set(state => {
-            const newFolders = state.folders.map(f => f.name === oldName ? { ...f, name: newName, tags: newTags || f.tags } : f);
-            // Also update connections
-            const newConns = state.connections.map(c => c.folder === oldName ? { ...c, folder: newName } : c);
+            const next = renameFolderInState(state, oldName, newName, newTags);
 
-            saveToMain(newConns, newFolders);
-            return { folders: newFolders, connections: newConns };
+            saveToMain(next.connections, next.folders);
+            return { folders: next.folders, connections: next.connections };
         });
     },
 
     updateConnectionFolder: (connectionId, folderName) => {
         set(state => {
-            const newConns = state.connections.map(c => c.id === connectionId ? { ...c, folder: folderName } : c);
-            saveToMain(newConns, state.folders);
-            return { connections: newConns };
+            const next = updateConnectionFolderInState(state, connectionId, folderName);
+            saveToMain(next.connections, state.folders);
+            return { connections: next.connections };
         });
     },
 
@@ -609,9 +480,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
 
 const saveToMain = async (connections: Connection[], folders: Folder[]) => {
     try {
-        const toSave = connections.map(({ status, ...c }) => c);
-        // @ts-ignore
-        await window.ipcRenderer.invoke('connections:save', { connections: toSave, folders });
+        await saveConnectionsIpc(connections, folders);
     } catch (error) {
         console.error('Failed to save connections:', error);
     }

@@ -176,6 +176,30 @@ export function Sidebar({ className }: { className?: string }) {
         toggleExpandedFolder(folderPath);
     };
 
+    const handleAllHostsDrop = useCallback((e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const connId = e.dataTransfer.getData('connection-id');
+        const folderPath = e.dataTransfer.getData('folder-path');
+
+        if (connId) {
+            updateConnectionFolder(connId, '');
+        } else if (folderPath) {
+            // Move folder to root -> Rename to just its basename
+            const baseName = folderPath.split('/').pop();
+            if (baseName && baseName !== folderPath) {
+                renameFolder(folderPath, baseName);
+            }
+        }
+    }, [renameFolder, updateConnectionFolder]);
+
+    const handleAllHostsDragOver = useCallback((e: React.DragEvent) => {
+        const types = Array.from(e.dataTransfer.types || []);
+        if (types.includes('connection-id') || types.includes('folder-path')) {
+            e.preventDefault();
+        }
+    }, []);
+
     const handleRenameFolder = (path: string) => {
         setFolderToRename(path);
         setIsRenameFolderModalOpen(true);
@@ -339,7 +363,10 @@ export function Sidebar({ className }: { className?: string }) {
                 <div className={cn(
                     "flex-1 overflow-y-auto pb-4 scrollbar-hide",
                     compactMode ? "px-2 space-y-0.5" : "px-3 space-y-2"
-                )}>
+                )}
+                    onDragOver={handleAllHostsDragOver}
+                    onDrop={handleAllHostsDrop}
+                >
                     {/* VISUAL SECTIONS LOGIC */}
                     {activeConnections.length > 0 ? (
                         <>
@@ -359,24 +386,12 @@ export function Sidebar({ className }: { className?: string }) {
                             <SidebarSection
                                 title="All Hosts"
                                 compactMode={compactMode}
-                                onDrop={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    const connId = e.dataTransfer.getData('connection-id');
-                                    const folderPath = e.dataTransfer.getData('folder-path');
-
-                                    if (connId) {
-                                        updateConnectionFolder(connId, '');
-                                    } else if (folderPath) {
-                                        // Move folder to root -> Rename to just its basename
-                                        const baseName = folderPath.split('/').pop();
-                                        if (baseName && baseName !== folderPath) {
-                                            renameFolder(folderPath, baseName);
-                                        }
-                                    }
-                                }}
                             >
-                                <div className="pl-1">
+                                <div
+                                    className="pl-1 min-h-6"
+                                    onDragOver={handleAllHostsDragOver}
+                                    onDrop={handleAllHostsDrop}
+                                >
                                     {/* Render Recursive Tree (Filtered to exclude active if not searching) */}
                                     {Object.keys(treeRoot.children).sort().map(key => (
                                         <FolderItem
@@ -405,31 +420,37 @@ export function Sidebar({ className }: { className?: string }) {
                             </SidebarSection>
                         </>
                     ) : (
-                        <div className="pl-1">
-                            {Object.keys(treeRoot.children).sort().map(key => (
-                                <FolderItem
-                                    key={key}
-                                    node={treeRoot.children[key]}
-                                    isCollapsed={false}
-                                    compactMode={compactMode}
-                                    expandedFolders={expandedFolders}
-                                    toggleFolder={toggleFolder}
-                                    updateConnectionFolder={updateConnectionFolder}
-                                    onDeleteFolder={(f) => setDeletingFolder(f)}
-                                    onRenameFolder={handleRenameFolder}
-                                    onMoveFolder={renameFolder}
-                                    connectionItemProps={connectionItemProps}
-                                />
-                            ))}
-                            {treeRoot.connections.map(conn => (
-                                <ConnectionItem
-                                    key={conn.id}
-                                    conn={conn}
-                                    isCollapsed={false}
-                                    {...connectionItemProps}
-                                />
-                            ))}
-                        </div>
+                        <SidebarSection title="All Hosts" compactMode={compactMode}>
+                            <div
+                                className="pl-1 min-h-6"
+                                onDragOver={handleAllHostsDragOver}
+                                onDrop={handleAllHostsDrop}
+                            >
+                                {Object.keys(treeRoot.children).sort().map(key => (
+                                    <FolderItem
+                                        key={key}
+                                        node={treeRoot.children[key]}
+                                        isCollapsed={false}
+                                        compactMode={compactMode}
+                                        expandedFolders={expandedFolders}
+                                        toggleFolder={toggleFolder}
+                                        updateConnectionFolder={updateConnectionFolder}
+                                        onDeleteFolder={(f) => setDeletingFolder(f)}
+                                        onRenameFolder={handleRenameFolder}
+                                        onMoveFolder={renameFolder}
+                                        connectionItemProps={connectionItemProps}
+                                    />
+                                ))}
+                                {treeRoot.connections.map(conn => (
+                                    <ConnectionItem
+                                        key={conn.id}
+                                        conn={conn}
+                                        isCollapsed={false}
+                                        {...connectionItemProps}
+                                    />
+                                ))}
+                            </div>
+                        </SidebarSection>
                     )}
                 </div>
             </div>
