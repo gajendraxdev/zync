@@ -36,9 +36,9 @@ runTest('buildConnectionSavePayload keeps existing edit status', () => {
   assert.equal(payload.password, 'secret');
 });
 
-runTest('buildConnectionSavePayload sets disconnected for new connection', () => {
+runTest('buildConnectionSavePayload sets disconnected for valid new connection', () => {
   const payload = buildConnectionSavePayload({
-    formData: { host: '10.0.0.2', username: 'ubuntu', port: 70000 },
+    formData: { host: '10.0.0.2', username: 'ubuntu', port: 22 },
     authMethod: 'password',
     editingConnectionId: null,
     connections: [],
@@ -47,6 +47,19 @@ runTest('buildConnectionSavePayload sets disconnected for new connection', () =>
   assert.equal(payload.status, 'disconnected');
   assert.equal(payload.port, 22);
   assert.equal(payload.privateKeyPath, undefined);
+});
+
+runTest('buildConnectionSavePayload throws on invalid port', () => {
+  assert.throws(
+    () =>
+      buildConnectionSavePayload({
+        formData: { host: '10.0.0.2', username: 'ubuntu', port: 70000 },
+        authMethod: 'password',
+        editingConnectionId: null,
+        connections: [],
+      }),
+    /Port must be an integer between 1 and 65535/
+  );
 });
 
 runTest('buildConnectionTestPayload builds key auth config and jump host', () => {

@@ -543,9 +543,12 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
                             const renamedSuffix = report.renamed.length > 0
                                 ? `, renamed ${report.renamed.length}`
                                 : '';
+                            const conflictSuffix = report.conflicted > 0
+                                ? `, ${report.conflicted} conflicts`
+                                : '';
                             showToast(
                                 'success',
-                                `Imported ${report.selected}: ${report.created} new, ${report.updated} updated, ${report.skipped} skipped${renamedSuffix}.`
+                                `Imported ${report.selected}: ${report.created} new, ${report.updated} updated, ${report.skipped} skipped${conflictSuffix}${renamedSuffix}.`
                             );
                             onClose();
                         }}
