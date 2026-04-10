@@ -1,4 +1,4 @@
-import type { Connection } from '../../../store/connectionSlice';
+import type { Connection } from './types.js';
 
 export interface ConnectAuthMethodPassword {
     type: 'Password';

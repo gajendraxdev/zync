@@ -1,4 +1,4 @@
-import type { Connection, Folder } from '../../../store/connectionSlice';
+import type { Connection, Folder } from '../domain/types.js';
 import {
     addFolderExact,
     isFolderOrDescendant,

@@ -1,4 +1,4 @@
-import type { Connection, Tab } from '../../../store/connectionSlice';
+import type { Connection, Tab } from '../domain/types.js';
 
 export interface TabState {
     tabs: Tab[];

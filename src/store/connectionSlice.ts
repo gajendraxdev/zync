@@ -1,5 +1,6 @@
 import { StateCreator } from 'zustand';
 import type { AppStore } from './useAppStore';
+import type { Connection, Folder, Tab } from '../features/connections/domain/types.js';
 import {
     addFolderToState,
     deleteFolderFromState,
@@ -27,43 +28,10 @@ import {
     pinFeatureOnConnectionIfNeeded,
     startAutoStartTunnels,
 } from '../features/connections/application/tunnelAutoStartService';
-import { buildConnectConfig, normalizeFolderPath } from '../features/connections/domain';
+import { buildConnectConfig, normalizeFolderPath, type ImportPlanItem } from '../features/connections/domain';
 import { connectIpc, disconnectIpc, getRemoteCwdIpc } from '../features/connections/infrastructure/connectionIpc';
 import { loadConnectionsIpc, saveConnectionsIpc } from '../features/connections/infrastructure/connectionPersistence';
-
-export interface Connection {
-    id: string;
-    name: string;
-    host: string;
-    username: string;
-    port: number;
-    password?: string;
-    privateKeyPath?: string;
-    status: 'disconnected' | 'connecting' | 'connected' | 'error';
-    jumpServerId?: string;
-    lastConnected?: number;
-    icon?: string;
-    folder?: string;
-    theme?: string;
-    tags?: string[];
-    createdAt?: number;
-    isFavorite?: boolean;
-    pinnedFeatures?: string[];
-    homePath?: string;
-}
-
-export interface Folder {
-    name: string;
-    tags?: string[];
-}
-
-export interface Tab {
-    id: string;
-    type: 'connection' | 'settings' | 'port-forwarding' | 'release-notes';
-    title: string;
-    connectionId?: string;
-    view: 'dashboard' | 'files' | 'port-forwarding' | 'snippets' | 'terminal';
-}
+export type { Connection, Folder, Tab } from '../features/connections/domain/types.js';
 
 export interface ConnectionSlice {
     connections: Connection[];
@@ -80,7 +48,7 @@ export interface ConnectionSlice {
     addConnection: (conn: Connection, isTemp?: boolean) => void;
     editConnection: (conn: Connection) => void;
     deleteConnection: (id: string) => void;
-    importConnections: (conns: Connection[]) => void;
+    importConnections: (conns: Connection[] | ImportPlanItem[]) => void;
     clearConnections: () => void;
 
     // Connection Actions
@@ -200,7 +168,50 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
     importConnections: (newConns) => {
         set(state => {
             console.log('[IMPORT] Raw Imported Connections:', newConns);
-            const finalConns = mergeImportedConnections(state.connections, newConns);
+            const isPlanItems = Array.isArray(newConns)
+                && newConns.length > 0
+                && typeof newConns[0] === 'object'
+                && newConns[0] !== null
+                && 'connection' in (newConns[0] as object);
+
+            let finalConns: Connection[];
+
+            if (isPlanItems) {
+                const planItems = newConns as ImportPlanItem[];
+                let nextConnections = [...state.connections];
+                const creates: Connection[] = [];
+
+                planItems.forEach((item) => {
+                    const normalizedFolder = normalizeFolderPath(item.connection.folder || '');
+                    const normalizedConnection = { ...item.connection, folder: normalizedFolder };
+
+                    if (item.targetId) {
+                        const targetIndex = nextConnections.findIndex((connection) => connection.id === item.targetId);
+                        if (targetIndex >= 0) {
+                            const existing = nextConnections[targetIndex];
+                            nextConnections[targetIndex] = {
+                                ...normalizedConnection,
+                                id: existing.id,
+                                status: existing.status,
+                            };
+                            return;
+                        }
+                    }
+
+                    creates.push(normalizedConnection);
+                });
+
+                finalConns = creates.length > 0
+                    ? mergeImportedConnections(nextConnections, creates)
+                    : nextConnections;
+            } else {
+                finalConns = mergeImportedConnections(state.connections, newConns as Connection[]);
+            }
+
+            finalConns = finalConns.map((connection) => ({
+                ...connection,
+                folder: normalizeFolderPath(connection.folder || ''),
+            }));
             const folderMap = new Map(state.folders.map((folder) => [normalizeFolderPath(folder.name), folder] as const));
             finalConns.forEach((connection) => {
                 const normalized = normalizeFolderPath(connection.folder || '');
@@ -488,10 +499,13 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
     }
 });
 
-const saveToMain = async (connections: Connection[], folders: Folder[]) => {
-    try {
-        await saveConnectionsIpc(connections, folders);
-    } catch (error) {
-        console.error('Failed to save connections:', error);
-    }
+let pendingSave: Promise<void> = Promise.resolve();
+
+const saveToMain = (connections: Connection[], folders: Folder[]): Promise<void> => {
+    pendingSave = pendingSave
+        .then(() => saveConnectionsIpc(connections, folders))
+        .catch((error) => {
+            console.error('Failed to save connections:', error);
+        });
+    return pendingSave;
 };
