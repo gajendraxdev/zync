@@ -1,3 +1,5 @@
+import type { Connection } from '../domain/types';
+
 export interface AuthMethodPassword {
     type: 'Password';
     password: string;
@@ -28,13 +30,15 @@ export interface ConnectResponsePayload {
     detected_os?: string | null;
 }
 
+export type ImportedConnectionPayload = Connection;
+
 export const testConnectionIpc = async (config: ConnectionConfigPayload): Promise<string> =>
     window.ipcRenderer.invoke('ssh:test', config);
 
-export const importSshConfigIpc = async (): Promise<any[]> =>
+export const importSshConfigIpc = async (): Promise<ImportedConnectionPayload[]> =>
     window.ipcRenderer.invoke('ssh:importConfig');
 
-export const internalizeImportedConnectionsIpc = async (connections: any[]): Promise<any[]> =>
+export const internalizeImportedConnectionsIpc = async (connections: ImportedConnectionPayload[]): Promise<ImportedConnectionPayload[]> =>
     window.ipcRenderer.invoke('ssh:internalize-connections', connections);
 
 export const connectIpc = async (config: ConnectionConfigPayload): Promise<ConnectResponsePayload> =>
