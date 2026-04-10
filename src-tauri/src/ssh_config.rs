@@ -19,7 +19,15 @@ pub struct ParsedSshConnection {
 
 // Helper function to strip wrapping quotes from values
 fn strip_wrapping_quotes(s: &str) -> &str {
-    s.trim_matches(|c| c == '"' || c == '\'')
+    let bytes = s.as_bytes();
+    if bytes.len() >= 2 {
+        let first = bytes[0];
+        let last = bytes[bytes.len() - 1];
+        if (first == b'"' && last == b'"') || (first == b'\'' && last == b'\'') {
+            return &s[1..s.len() - 1];
+        }
+    }
+    s
 }
 
 pub fn parse_config(path: &Path) -> Result<Vec<ParsedSshConnection>> {
@@ -28,6 +36,10 @@ pub fn parse_config(path: &Path) -> Result<Vec<ParsedSshConnection>> {
     }
 
     let content = fs::read_to_string(path)?;
+    parse_config_text(&content)
+}
+
+pub fn parse_config_text(content: &str) -> Result<Vec<ParsedSshConnection>> {
     let mut connections = Vec::new();
 
     let mut current_host: Option<ParsedSshConnection> = None;
@@ -43,13 +55,6 @@ pub fn parse_config(path: &Path) -> Result<Vec<ParsedSshConnection>> {
             continue;
         }
 
-        // let key = parts[0].to_lowercase();
-        // Handle "Key = Value" or "Key Value"
-        // We'll simplisticly join the rest, assuming space separation without '=' for now,
-        // or simplistic handling. The standard allows both.
-        // Let's perform a cleaner value extraction.
-
-        // Re-split strictly
         let (key_str, mut value_str) =
             if let Some(idx) = line.find(|c: char| c.is_whitespace() || c == '=') {
                 let k = &line[..idx];
@@ -126,10 +131,19 @@ pub fn parse_config(path: &Path) -> Result<Vec<ParsedSshConnection>> {
     }
 
     // Pass 2: Resolve Jump Server Aliases to IDs
-    let alias_map: std::collections::HashMap<String, String> = connections
-        .iter()
-        .flat_map(|c| c.aliases.iter().map(|alias| (alias.clone(), c.id.clone())))
-        .collect();
+    let mut alias_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for connection in &connections {
+        for alias in &connection.aliases {
+            if let Some(existing_id) = alias_map.get(alias) {
+                eprintln!(
+                    "[SSH Config] Duplicate alias '{}' ignored: keeping id '{}' and skipping id '{}'",
+                    alias, existing_id, connection.id
+                );
+                continue;
+            }
+            alias_map.insert(alias.clone(), connection.id.clone());
+        }
+    }
 
     for conn in &mut connections {
         if let Some(alias) = &conn.jump_server_alias {
@@ -171,4 +185,40 @@ fn strip_inline_comments(line: &str) -> &str {
         }
     }
     line
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_config_text;
+
+    #[test]
+    fn parse_config_text_parses_basic_host_block() {
+        let text = r#"
+Host app-prod
+  HostName 10.1.2.3
+  User ubuntu
+  Port 2222
+"#;
+
+        let parsed = parse_config_text(text).expect("should parse");
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].name, "app-prod");
+        assert_eq!(parsed[0].host, "10.1.2.3");
+        assert_eq!(parsed[0].username, "ubuntu");
+        assert_eq!(parsed[0].port, 2222);
+    }
+
+    #[test]
+    fn parse_config_text_ignores_inline_comments_outside_quotes() {
+        let text = r#"
+Host app
+  HostName "10.0.0.5 # inside" # trailing comment
+  User root
+"#;
+
+        let parsed = parse_config_text(text).expect("should parse");
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].host, "10.0.0.5 # inside");
+        assert_eq!(parsed[0].username, "root");
+    }
 }
