@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { Select } from '../ui/Select';
@@ -353,14 +353,30 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
     const [sourceDiagnostics, setSourceDiagnostics] = useState<{ severity: 'info' | 'success' | 'error'; message: string } | null>(null);
     const [importReport, setImportReport] = useState<ImportReport | null>(null);
     const [bulkConflictDecision, setBulkConflictDecision] = useState<ImportResolution>('update');
+    const loadRequestIdRef = useRef(0);
+    const importRequestIdRef = useRef(0);
+    const isModalActiveRef = useRef(false);
+    const existingConnectionsOnOpenRef = useRef(existingConnections);
+
+    const isRequestActive = (requestId: number, type: 'load' | 'import') =>
+        isModalActiveRef.current
+        && (type === 'load' ? loadRequestIdRef.current : importRequestIdRef.current) === requestId;
 
     useEffect(() => {
+        isModalActiveRef.current = isOpen;
+        if (!isOpen) {
+            loadRequestIdRef.current += 1;
+            importRequestIdRef.current += 1;
+            setIsImporting(false);
+        }
+
         if (isOpen) {
+            existingConnectionsOnOpenRef.current = existingConnections;
             setSourceType('default_ssh');
             setSourceFilePath('');
             setSourceText('');
             setIsSourceBarExpanded(false);
-            void loadConfigsFromSource('default_ssh', '', '', existingConnections);
+            void loadConfigsFromSource('default_ssh', '', '', existingConnectionsOnOpenRef.current);
         } else {
             setConfigs([]);
             setSelectedIds(new Set());
@@ -376,7 +392,7 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
             setImportReport(null);
             setBulkConflictDecision('update');
         }
-    }, [isOpen, existingConnections]);
+    }, [isOpen]);
 
     const loadConfigsFromSource = async (
         source: SshImportSourceType,
@@ -384,6 +400,7 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
         textContent: string,
         baselineConnections: Connection[],
     ) => {
+        const requestId = ++loadRequestIdRef.current;
         setIsLoadingConfigs(true);
         setError(null);
         setSourceDiagnostics(null);
@@ -393,6 +410,10 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
                 path: filePath,
                 content: textContent,
             });
+
+            if (!isRequestActive(requestId, 'load')) {
+                return;
+            }
 
             if (Array.isArray(result)) {
                 const normalizedConnections = result.map(normalizeImportedConnectionPayload);
@@ -414,6 +435,9 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
                 });
             }
         } catch (err: any) {
+            if (!isRequestActive(requestId, 'load')) {
+                return;
+            }
             console.error('Failed to import SSH config', err);
             setError(err.message || 'Failed to read SSH config file');
             setSourceDiagnostics({
@@ -424,7 +448,9 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
             setSelectedIds(new Set());
             setDecisions({});
         } finally {
-            setIsLoadingConfigs(false);
+            if (isRequestActive(requestId, 'load')) {
+                setIsLoadingConfigs(false);
+            }
         }
     };
 
@@ -546,6 +572,7 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
     });
 
     const handleImport = async () => {
+        const requestId = ++importRequestIdRef.current;
         setIsImporting(true);
         try {
             const selectedPlanItems = planSummary.toImport;
@@ -559,6 +586,9 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
             const internalizeResult = await internalizeImportedConnectionsIpc(
                 selectedConnections.map(toImportedConnectionPayload)
             );
+            if (!isRequestActive(requestId, 'import')) {
+                return;
+            }
 
             if (Array.isArray(internalizeResult)) {
                 const normalizedInternalized = internalizeResult.map(normalizeImportedConnectionPayload);
@@ -571,12 +601,11 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
                     c.privateKeyPath && c.privateKeyPath !== selectedConnections[i]?.privateKeyPath
                 ).length;
                 console.log(`[Import] Internalized keys for ${internalizedCount} connections.`);
-                const mergedPlanItems = selectedPlanItems.map((item, index) => {
+                const mergedPlanItems = selectedPlanItems.map((item) => {
                     const byId = internalizedById.get(item.connection.id);
-                    const byIndex = normalizedInternalized[index];
                     return {
                         ...item,
-                        connection: byId || byIndex || item.connection,
+                        connection: byId || item.connection,
                     };
                 });
                 onImport(mergedPlanItems);
@@ -588,6 +617,9 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
             setImportReport(nextReport);
             onImportReport?.(nextReport);
         } catch (importError) {
+            if (!isRequestActive(requestId, 'import')) {
+                return;
+            }
             console.error('Failed to internalize keys:', importError);
             const plannedFallback = planSummary.toImport;
             let fallbackItems = plannedFallback;
@@ -601,7 +633,9 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
             setImportReport(nextReport);
             onImportReport?.(nextReport);
         } finally {
-            setIsImporting(false);
+            if (isRequestActive(requestId, 'import') || isModalActiveRef.current) {
+                setIsImporting(false);
+            }
         }
     };
 

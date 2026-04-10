@@ -76,6 +76,19 @@ runTest('getCloseTabPreActions returns local terminal clear action for local tab
   assert.equal(actions.clearLocalTerminals, true);
 });
 
+runTest('getCloseTabPreActions keeps local terminal session when other local terminal tab exists', () => {
+  const actions = getCloseTabPreActions(
+    { id: 't1', connectionId: 'local', view: 'terminal' },
+    [
+      { id: 't1', connectionId: 'local', view: 'terminal' },
+      { id: 't2', connectionId: 'local', view: 'terminal' },
+    ],
+    [],
+  );
+  assert.equal(actions.disconnectConnectionId, null);
+  assert.equal(actions.clearLocalTerminals, false);
+});
+
 runTest('getCloseTabPreActions does not clear local terminals for local snippets tab', () => {
   const actions = getCloseTabPreActions(
     { id: 't1', connectionId: 'local', view: 'snippets' },

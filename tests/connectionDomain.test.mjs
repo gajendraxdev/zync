@@ -20,6 +20,7 @@ import {
 } from '../.tmp-agent-tests/src/features/connections/domain/connectionConfig.js';
 import {
   hasRequiredHostAndUsername,
+  getCredentialHealthChecks,
 } from '../.tmp-agent-tests/src/features/connections/domain/validation.js';
 import {
   normalizeFolderPath,
@@ -48,6 +49,28 @@ runTest('required-field helper checks trimmed host and username', () => {
   assert.equal(hasRequiredHostAndUsername({ host: ' 1.1.1.1 ', username: ' root ' }), true);
   assert.equal(hasRequiredHostAndUsername({ host: '  ', username: 'root' }), false);
   assert.equal(hasRequiredHostAndUsername({ host: '1.1.1.1', username: '' }), false);
+});
+
+runTest('credential health checks surface actionable hints', () => {
+  const passwordChecks = getCredentialHealthChecks(
+    { host: 'localhost', username: 'root', password: '123' },
+    'password',
+  );
+  assert.equal(passwordChecks.some((check) => check.message.includes('very short')), true);
+  assert.equal(passwordChecks.some((check) => check.message.includes('root@localhost')), true);
+
+  const keyChecks = getCredentialHealthChecks(
+    { host: 'edge-alias', username: 'ubuntu', privateKeyPath: 'id_custom' },
+    'key',
+  );
+  assert.equal(keyChecks.some((check) => check.message.includes('uncommon')), true);
+  assert.equal(keyChecks.some((check) => check.message.includes('domain/IP pattern')), true);
+
+  const missingKeyChecks = getCredentialHealthChecks(
+    { host: '10.0.0.5', username: 'ubuntu', privateKeyPath: '' },
+    'key',
+  );
+  assert.equal(missingKeyChecks.some((check) => check.message.includes('uncommon')), false);
 });
 
 runTest('folder exact helpers preserve current exact-match semantics', () => {

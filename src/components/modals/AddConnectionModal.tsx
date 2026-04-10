@@ -569,6 +569,7 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
                                 'success',
                                 `Imported ${report.selected}: ${report.created} new, ${report.updated} updated, ${report.skipped} skipped${conflictSuffix}${renamedSuffix}.`
                             );
+                            setIsImportModalOpen(false);
                             onClose();
                         }}
                     />

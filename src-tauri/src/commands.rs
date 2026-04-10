@@ -2278,6 +2278,11 @@ pub async fn ssh_import_config_from_file(
     if !config_path.is_file() {
         return Err("Selected SSH config path is not a file.".to_string());
     }
+    let metadata = std::fs::metadata(config_path)
+        .map_err(|e| format!("Cannot stat SSH config file: {}", e))?;
+    if metadata.len() > MAX_IMPORT_TEXT_BYTES as u64 {
+        return Err("SSH config file too large (max 1 MiB).".to_string());
+    }
     std::fs::File::open(config_path)
         .map_err(|e| format!("Cannot read SSH config file: {}", e))?;
 
