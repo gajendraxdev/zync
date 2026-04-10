@@ -55,7 +55,7 @@ await runTest('startAutoStartTunnels starts auto-start tunnels and swallows per-
     (tunnel, error) => errors.push(`${tunnel.id}:${String(error)}`),
   );
 
-  assert.equal(count, 2);
+  assert.equal(count, 1);
   assert.deepEqual(started, ['t1', 't2']);
   assert.equal(errors.length, 1);
 });

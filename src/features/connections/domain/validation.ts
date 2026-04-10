@@ -1,4 +1,4 @@
-import { normalizeFolderPath, normalizePort, normalizeText } from './normalization.js';
+import { normalizeFolderPath, normalizeText, parsePort } from './normalization.js';
 
 export interface ConnectionDraft {
     name?: string;
@@ -28,7 +28,8 @@ export const hasRequiredHostAndUsername = (draft: ConnectionDraft): boolean =>
 export const validateConnectionDraft = (draft: ConnectionDraft, authMode: AuthMode): ValidationResult => {
     const errors: string[] = [];
     const fieldErrors: ValidationResult['fieldErrors'] = {};
-    const normalizedPort = normalizePort(draft.port);
+    const portResult = parsePort(draft.port);
+    const normalizedPort = portResult.normalizedPort;
     const normalizedFolder = normalizeFolderPath(draft.folder);
     const normalizedHost = normalizeText(draft.host);
     const normalizedUsername = normalizeText(draft.username);
@@ -49,12 +50,9 @@ export const validateConnectionDraft = (draft: ConnectionDraft, authMode: AuthMo
         fieldErrors.privateKeyPath = message;
     }
 
-    // Keep parity with current app behavior: invalid ports normalize to 22.
-    // This validation only guards hard-invalid values that become NaN before normalize.
-    if (draft.port !== undefined && Number.isNaN(Number(draft.port))) {
-        const message = 'Port must be a valid number.';
-        errors.push(message);
-        fieldErrors.port = message;
+    if (portResult.error) {
+        errors.push(portResult.error);
+        fieldErrors.port = portResult.error;
     }
 
     return { ok: errors.length === 0, errors, fieldErrors, normalizedPort, normalizedFolder };

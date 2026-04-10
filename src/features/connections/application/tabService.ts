@@ -7,6 +7,17 @@ export interface TabState {
 }
 
 export const createLocalTerminalTabState = (tabs: Tab[]): TabState => {
+    const existingLocalTerminal = tabs.find(
+        (tab) => tab.connectionId === 'local' && tab.type === 'connection' && tab.view === 'terminal',
+    );
+    if (existingLocalTerminal) {
+        return {
+            tabs,
+            activeTabId: existingLocalTerminal.id,
+            activeConnectionId: 'local',
+        };
+    }
+
     const newTab: Tab = {
         id: crypto.randomUUID(),
         type: 'connection',
@@ -67,14 +78,15 @@ export const ensureSingleTabByType = (
     tabs: Tab[],
     type: Tab['type'],
     makeTab: () => Tab,
-): { tabs?: Tab[]; activeTabId: string } => {
+): { tabs?: Tab[]; activeTabId: string; activeConnectionId?: string | null } => {
+    const nextActiveConnectionId = type === 'connection' ? undefined : null;
     const existing = tabs.find((tab) => tab.type === type);
     if (existing) {
-        return { activeTabId: existing.id };
+        return { activeTabId: existing.id, activeConnectionId: nextActiveConnectionId };
     }
 
     const newTab = makeTab();
-    return { tabs: [...tabs, newTab], activeTabId: newTab.id };
+    return { tabs: [...tabs, newTab], activeTabId: newTab.id, activeConnectionId: nextActiveConnectionId };
 };
 
 export const ensureGlobalSnippetsTab = (

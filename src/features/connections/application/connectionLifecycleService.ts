@@ -55,6 +55,7 @@ export interface CloseTabPreActions {
 
 export const getCloseTabPreActions = (
     tab: Tab | undefined,
+    tabs: Tab[],
     connections: Connection[],
 ): CloseTabPreActions => {
     if (!tab?.connectionId) {
@@ -63,6 +64,13 @@ export const getCloseTabPreActions = (
 
     if (tab.connectionId === 'local') {
         return { disconnectConnectionId: null, clearLocalTerminals: true };
+    }
+
+    const hasOtherTabsForConnection = tabs.some(
+        (item) => item.id !== tab.id && item.connectionId === tab.connectionId,
+    );
+    if (hasOtherTabsForConnection) {
+        return { disconnectConnectionId: null, clearLocalTerminals: false };
     }
 
     const connection = connections.find((item) => item.id === tab.connectionId);

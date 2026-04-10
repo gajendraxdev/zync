@@ -5,10 +5,12 @@ export interface PersistedConnectionPayload {
     folders: Folder[];
 }
 
+export type LoadConnectionsIpcResult = PersistedConnectionPayload | Connection[];
+
 export const toPersistedConnections = (connections: Connection[]): Array<Omit<Connection, 'status'>> =>
     connections.map(({ status, ...connection }) => connection);
 
-export const loadConnectionsIpc = async (): Promise<any> =>
+export const loadConnectionsIpc = async (): Promise<LoadConnectionsIpcResult> =>
     window.ipcRenderer.invoke('connections:get');
 
 export const saveConnectionsIpc = async (

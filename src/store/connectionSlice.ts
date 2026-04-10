@@ -27,7 +27,7 @@ import {
     pinFeatureOnConnectionIfNeeded,
     startAutoStartTunnels,
 } from '../features/connections/application/tunnelAutoStartService';
-import { buildConnectConfig } from '../features/connections/domain';
+import { buildConnectConfig, normalizeFolderPath } from '../features/connections/domain';
 import { connectIpc, disconnectIpc, getRemoteCwdIpc } from '../features/connections/infrastructure/connectionIpc';
 import { loadConnectionsIpc, saveConnectionsIpc } from '../features/connections/infrastructure/connectionPersistence';
 
@@ -138,9 +138,10 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
             console.error('[RENDERER] Loading connections...');
             const loaded = await loadConnectionsIpc();
             console.error('[RENDERER] Loaded connections from IPC:', loaded);
-            if (loaded && (loaded.connections || Array.isArray(loaded))) {
-                let conns = Array.isArray(loaded) ? loaded : loaded.connections;
-                let folders = (loaded.folders || []).map((f: any) => typeof f === 'string' ? { name: f } : f);
+            if (loaded && (Array.isArray(loaded) || 'connections' in loaded)) {
+                const conns = Array.isArray(loaded) ? loaded : loaded.connections;
+                const foldersSource = Array.isArray(loaded) ? [] : (loaded.folders || []);
+                const folders = foldersSource.map((f: any) => typeof f === 'string' ? { name: f } : f);
 
                 // Deduplicate connections by ID to prevent React key collisions
                 const uniqueConns = Array.from(new Map(conns.map((c: any) => [c.id, c])).values());
@@ -200,9 +201,18 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
         set(state => {
             console.log('[IMPORT] Raw Imported Connections:', newConns);
             const finalConns = mergeImportedConnections(state.connections, newConns);
+            const folderMap = new Map(state.folders.map((folder) => [normalizeFolderPath(folder.name), folder] as const));
+            finalConns.forEach((connection) => {
+                const normalized = normalizeFolderPath(connection.folder || '');
+                if (!normalized) return;
+                if (!folderMap.has(normalized)) {
+                    folderMap.set(normalized, { name: normalized });
+                }
+            });
+            const updatedFolders = Array.from(folderMap.values());
 
-            saveToMain(finalConns, state.folders);
-            return { connections: finalConns };
+            saveToMain(finalConns, updatedFolders);
+            return { connections: finalConns, folders: updatedFolders };
         });
     },
 
@@ -364,7 +374,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
         const state = get();
         const tab = state.tabs.find(t => t.id === tabId);
 
-        const preActions = getCloseTabPreActions(tab, state.connections);
+        const preActions = getCloseTabPreActions(tab, state.tabs, state.connections);
         if (preActions.disconnectConnectionId) {
             get().disconnect(preActions.disconnectConnectionId);
         }
@@ -428,8 +438,8 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
     updateConnectionFolder: (connectionId, folderName) => {
         set(state => {
             const next = updateConnectionFolderInState(state, connectionId, folderName);
-            saveToMain(next.connections, state.folders);
-            return { connections: next.connections };
+            saveToMain(next.connections, next.folders);
+            return { connections: next.connections, folders: next.folders };
         });
     },
 

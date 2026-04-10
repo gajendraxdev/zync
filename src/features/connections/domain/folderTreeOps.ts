@@ -5,6 +5,7 @@ export const isFolderOrDescendant = (ancestor: string, target: string): boolean 
     const a = normalizeFolderPath(ancestor);
     const t = normalizeFolderPath(target);
     if (!a || !t) return false;
+    if (a === '/') return t === a || (t.startsWith('/') && t !== '/');
     return t === a || t.startsWith(`${a}/`);
 };
 

@@ -38,13 +38,14 @@ runTest('buildConnectionSavePayload keeps existing edit status', () => {
 
 runTest('buildConnectionSavePayload sets disconnected for new connection', () => {
   const payload = buildConnectionSavePayload({
-    formData: { host: '10.0.0.2', username: 'ubuntu', port: 22 },
+    formData: { host: '10.0.0.2', username: 'ubuntu', port: 70000 },
     authMethod: 'password',
     editingConnectionId: null,
     connections: [],
   });
 
   assert.equal(payload.status, 'disconnected');
+  assert.equal(payload.port, 22);
   assert.equal(payload.privateKeyPath, undefined);
 });
 
@@ -66,6 +67,15 @@ runTest('buildConnectionTestPayload builds key auth config and jump host', () =>
       username: 'ubuntu',
       port: 22,
       password: 'jump-pass',
+      jumpServerId: 'jump2',
+    },
+    {
+      id: 'jump2',
+      name: 'jump-2',
+      host: '192.168.0.2',
+      username: 'ec2-user',
+      port: 2222,
+      privateKeyPath: '/tmp/jump2.pem',
     },
   ];
 
@@ -78,6 +88,7 @@ runTest('buildConnectionTestPayload builds key auth config and jump host', () =>
   assert.equal(payload.auth_method.type, 'PrivateKey');
   assert.equal(payload.jump_host?.auth_method.type, 'Password');
   assert.equal(payload.jump_host?.host, '192.168.0.1');
+  assert.equal(payload.jump_host?.jump_host?.host, '192.168.0.2');
 });
 
 console.log('Connection form transform tests passed.');

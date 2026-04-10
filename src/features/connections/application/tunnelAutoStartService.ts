@@ -26,14 +26,20 @@ export const startAutoStartTunnels = async (
     onTunnelError: TunnelErrorLogger,
 ): Promise<number> => {
     const autoStartTunnels = getAutoStartTunnels(tunnels);
-    await Promise.all(
-        autoStartTunnels.map((tunnel) =>
-            startTunnel(tunnel.id, connectionId).catch((error) => {
-                onTunnelError(tunnel, error);
-            }),
-        ),
+    const results = await Promise.allSettled(
+        autoStartTunnels.map((tunnel) => startTunnel(tunnel.id, connectionId)),
     );
-    return autoStartTunnels.length;
+
+    let successCount = 0;
+    results.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+            successCount += 1;
+            return;
+        }
+        onTunnelError(autoStartTunnels[index], result.reason);
+    });
+
+    return successCount;
 };
 
 export interface PinnedFeatureConnection {

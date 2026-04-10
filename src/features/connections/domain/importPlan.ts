@@ -59,7 +59,7 @@ export const buildImportPlanRows = (
             imported: incoming,
             matchedByName,
             matchedByEndpoint,
-            recommended: matchedByName ? 'update' : 'new',
+            recommended: matchedByName || matchedByEndpoint ? 'update' : 'new',
         };
     });
 };
@@ -109,7 +109,17 @@ export const applyImportPlan = (
         }
 
         const target = row.matchedByName || row.matchedByEndpoint;
-        const matchType: 'name' | 'endpoint' | null = row.matchedByName ? 'name' : row.matchedByEndpoint ? 'endpoint' : null;
+        if (!target) {
+            toImport.push({
+                connection: incoming,
+                targetId: null,
+                matchType: null,
+            });
+            created += 1;
+            continue;
+        }
+
+        const matchType: 'name' | 'endpoint' | null = row.matchedByName ? 'name' : 'endpoint';
         toImport.push({
             connection: incoming,
             targetId: target?.id || null,

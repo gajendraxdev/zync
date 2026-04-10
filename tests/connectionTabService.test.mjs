@@ -26,6 +26,14 @@ runTest('createLocalTerminalTabState appends local tab and activates it', () => 
   assert.equal(state.activeTabId, state.tabs[0].id);
 });
 
+runTest('createLocalTerminalTabState reuses existing local terminal tab', () => {
+  const tabs = [{ id: 'lt1', type: 'connection', title: 'Local Terminal', connectionId: 'local', view: 'terminal' }];
+  const state = createLocalTerminalTabState(tabs);
+  assert.equal(state.tabs, tabs);
+  assert.equal(state.activeTabId, 'lt1');
+  assert.equal(state.activeConnectionId, 'local');
+});
+
 runTest('findConnectionTab returns connection tab only', () => {
   const tabs = [
     { id: '1', type: 'settings', title: 'Settings' },
@@ -60,6 +68,7 @@ runTest('ensureSingleTabByType returns existing tab activation', () => {
   }));
   assert.equal(state.activeTabId, 'pf1');
   assert.equal(state.tabs, undefined);
+  assert.equal(state.activeConnectionId, null);
 });
 
 runTest('ensureGlobalSnippetsTab creates local snippets tab if absent', () => {
