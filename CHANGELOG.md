@@ -22,6 +22,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Import Modal Selection/Filter Behavior**: Updated Select All/Deselect All to operate on visible filtered rows and removed duplicated match-expression rendering paths for better readability and consistency. ([fd1107c])
 - **Import Modal Reliability/Consistency**: Limited bulk conflict actions to selected conflicts, unified dropdown rendering with shared Select primitives, and aligned import payload typing in connection IPC helpers. ([5c7afc3])
 - **Import Source Reliability & IPC Wiring**: Added request-shape mapping for unified source import IPC calls, centralized SSH import text-size guardrails, improved file-source validation, and tightened parser alias/quote handling for safer import behavior. ([64cb56a])
+- **Connection Validation + Import Diagnostics**: Tightened host/username/key-path validation, added lightweight credential health hints in add/edit modal, and added source-level import diagnostics for clearer import troubleshooting feedback. ([636db7a])
 
 ## [2.10.1]
 
@@ -575,6 +576,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 [fd1107c]: https://github.com/zync-sh/zync/commit/fd1107c
 [5c7afc3]: https://github.com/zync-sh/zync/commit/5c7afc3
 [64cb56a]: https://github.com/zync-sh/zync/commit/64cb56a
+[636db7a]: https://github.com/zync-sh/zync/commit/636db7a
 [2.10.1]: https://github.com/zync-sh/zync/compare/v2.10.0...v2.10.1
 [2.10.0]: https://github.com/zync-sh/zync/compare/v2.9.2...v2.10.0
 [2.9.2]: https://github.com/zync-sh/zync/compare/v2.9.1...v2.9.2
