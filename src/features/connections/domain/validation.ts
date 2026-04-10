@@ -44,7 +44,7 @@ export const validateConnectionDraft = (draft: ConnectionDraft, authMode: AuthMo
         errors.push(message);
         fieldErrors.host = message;
     } else if (/\s/.test(normalizedHost)) {
-        const message = 'Host cannot contain spaces.';
+        const message = 'Host cannot contain whitespace characters.';
         errors.push(message);
         fieldErrors.host = message;
     }
@@ -53,7 +53,7 @@ export const validateConnectionDraft = (draft: ConnectionDraft, authMode: AuthMo
         errors.push(message);
         fieldErrors.username = message;
     } else if (/\s/.test(normalizedUsername)) {
-        const message = 'Username cannot contain spaces.';
+        const message = 'Username cannot contain whitespace characters.';
         errors.push(message);
         fieldErrors.username = message;
     }
@@ -79,11 +79,18 @@ export const getCredentialHealthChecks = (draft: ConnectionDraft, authMode: Auth
     const checks: CredentialHealthCheck[] = [];
     const password = normalizeText(draft.password);
     const keyPath = normalizeText(draft.privateKeyPath);
+    const host = normalizeText(draft.host).toLowerCase();
+    const username = normalizeText(draft.username).toLowerCase();
 
     if (authMode === 'password' && !password) {
         checks.push({
             severity: 'info',
             message: 'Password is empty. Ensure server auth supports your selected flow.',
+        });
+    } else if (authMode === 'password' && password.length < 8) {
+        checks.push({
+            severity: 'warning',
+            message: 'Password is very short. Verify credentials and server policy.',
         });
     }
 
@@ -91,6 +98,25 @@ export const getCredentialHealthChecks = (draft: ConnectionDraft, authMode: Auth
         checks.push({
             severity: 'warning',
             message: 'Selected key looks like a public key (.pub). Choose a private key file.',
+        });
+    } else if (authMode === 'key' && keyPath && !/(\.pem|id_rsa|id_ed25519|id_ecdsa|id_dsa)$/i.test(keyPath)) {
+        checks.push({
+            severity: 'info',
+            message: 'Key filename is uncommon. Confirm this is a private key.',
+        });
+    }
+
+    if ((host === 'localhost' || host === '127.0.0.1') && username === 'root') {
+        checks.push({
+            severity: 'warning',
+            message: 'Using root@localhost is unusual for remote SSH. Confirm target details.',
+        });
+    }
+
+    if (host && !host.includes('.')) {
+        checks.push({
+            severity: 'info',
+            message: 'Host has no domain/IP pattern. Ensure DNS/host alias resolves correctly.',
         });
     }
 

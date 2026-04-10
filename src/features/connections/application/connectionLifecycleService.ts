@@ -63,7 +63,13 @@ export const getCloseTabPreActions = (
     }
 
     if (tab.connectionId === 'local' && tab.view === 'terminal') {
-        return { disconnectConnectionId: null, clearLocalTerminals: true };
+        const hasOtherLocalTerminalTabs = tabs.some(
+            (item) => item.id !== tab.id && item.connectionId === 'local' && item.view === 'terminal',
+        );
+        return {
+            disconnectConnectionId: null,
+            clearLocalTerminals: !hasOtherLocalTerminalTabs,
+        };
     }
 
     const hasOtherTabsForConnection = tabs.some(

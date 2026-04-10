@@ -28,8 +28,8 @@ export const mergeImportedConnectionsByName = (
             existingMap.set(conn.name, [conn]);
         }
     }
-    const importedNames = new Set(imported.map((c) => c.name));
     const usedIds = new Set(existing.map((c) => c.id));
+    const matchedIds = new Set<string>();
 
     let created = 0;
     let updated = 0;
@@ -40,6 +40,7 @@ export const mergeImportedConnectionsByName = (
         const match = matches && matches.length > 0 ? matches.shift() : undefined;
         if (match) {
             updated += 1;
+            matchedIds.add(match.id);
             const preservedMetadata: Partial<Connection> = {
                 isFavorite: match.isFavorite,
                 pinnedFeatures: match.pinnedFeatures,
@@ -60,7 +61,7 @@ export const mergeImportedConnectionsByName = (
         }
     }
 
-    const preserved = existing.filter((c) => !importedNames.has(c.name));
+    const preserved = existing.filter((c) => !matchedIds.has(c.id));
     const merged = [...preserved, ...mergedImported];
     return { merged, created, updated };
 };
