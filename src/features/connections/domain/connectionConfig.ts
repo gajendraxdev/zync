@@ -52,9 +52,8 @@ export const buildConnectConfig = (
 
     if (connection.jumpServerId) {
         const jumpConfig = buildConnectConfig(connections, connection.jumpServerId, new Set(visited));
-        if (jumpConfig) {
-            config.jump_host = jumpConfig;
-        }
+        if (!jumpConfig) return null;
+        config.jump_host = jumpConfig;
     }
 
     return config;

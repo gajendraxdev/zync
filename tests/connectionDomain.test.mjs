@@ -75,6 +75,7 @@ runTest('connection folder exact helpers update only targeted rows', () => {
 runTest('tree helpers support subtree checks and remap', () => {
   assert.equal(isFolderOrDescendant('prod', 'prod/web'), true);
   assert.equal(isFolderOrDescendant('prod', 'stage/web'), false);
+  assert.equal(isFolderOrDescendant('/', '/prod/web'), true);
   assert.equal(remapFolderPath('prod/web/api', 'prod', 'production'), 'production/web/api');
 });
 
@@ -86,17 +87,20 @@ runTest('import merge keeps existing ids for same names and dedups by id', () =>
   const incoming = [
     { id: 'x', name: 'web', status: 'disconnected' },
     { id: 'y', name: 'cache', status: 'disconnected' },
+    { id: '   ', name: 'queue', status: 'disconnected' },
   ];
 
   const result = mergeImportedConnectionsByName(existing, incoming);
   assert.equal(result.updated, 1);
-  assert.equal(result.created, 1);
+  assert.equal(result.created, 2);
 
   const web = result.merged.find((c) => c.name === 'web');
   const cache = result.merged.find((c) => c.name === 'cache');
+  const queue = result.merged.find((c) => c.name === 'queue');
   assert.equal(web?.id, 'a');
   assert.equal(web?.status, 'connected');
   assert.equal(cache?.id, 'y');
+  assert.equal((queue?.id || '').trim().length > 0, true);
 });
 
 runTest('import plan builds recommendations and applies new/update/skip decisions', () => {
@@ -106,21 +110,25 @@ runTest('import plan builds recommendations and applies new/update/skip decision
   const incoming = [
     { id: 'x', name: 'web', host: 'prod', username: 'root', port: 22, status: 'disconnected' },
     { id: 'y', name: 'worker', host: 'worker', username: 'ubuntu', port: 22, status: 'disconnected' },
+    { id: 'z', name: 'api-import', host: 'prod', username: 'root', port: 22, status: 'disconnected' },
   ];
 
   const rows = buildImportPlanRows(existing, incoming);
   const webRow = rows.find((row) => row.imported.id === 'x');
   const workerRow = rows.find((row) => row.imported.id === 'y');
+  const endpointRow = rows.find((row) => row.imported.id === 'z');
   assert.equal(webRow?.recommended, 'update');
   assert.equal(workerRow?.recommended, 'new');
+  assert.equal(endpointRow?.recommended, 'update');
 
   const updateApplied = applyImportPlan(existing, rows, {
     x: 'update',
     y: 'skip',
+    z: 'skip',
   });
   assert.equal(updateApplied.updated, 1);
   assert.equal(updateApplied.created, 0);
-  assert.equal(updateApplied.skipped, 1);
+  assert.equal(updateApplied.skipped, 2);
   assert.equal(updateApplied.toImport.length, 1);
   assert.equal(updateApplied.toImport[0].targetId, 'a');
   assert.equal(updateApplied.toImport[0].matchType, 'name');
@@ -129,14 +137,25 @@ runTest('import plan builds recommendations and applies new/update/skip decision
   const applied = applyImportPlan(existing, rows, {
     x: 'new',
     y: 'skip',
+    z: 'skip',
   });
 
   assert.equal(applied.created, 1);
   assert.equal(applied.updated, 0);
-  assert.equal(applied.skipped, 1);
+  assert.equal(applied.skipped, 2);
   assert.equal(applied.toImport.length, 1);
   assert.equal(applied.toImport[0].connection.name.startsWith('web (imported'), true);
   assert.equal(applied.renamed.length, 1);
+
+  const updateWithoutTarget = applyImportPlan(existing, rows, {
+    x: 'skip',
+    y: 'update',
+    z: 'skip',
+  });
+  assert.equal(updateWithoutTarget.updated, 0);
+  assert.equal(updateWithoutTarget.created, 1);
+  assert.equal(updateWithoutTarget.toImport[0].targetId, null);
+  assert.equal(updateWithoutTarget.toImport[0].matchType, null);
 });
 
 runTest('buildConnectConfig builds jump-host chain and rejects simple cycle', () => {
@@ -154,7 +173,7 @@ runTest('buildConnectConfig builds jump-host chain and rejects simple cycle', ()
     { ...connections[1], jumpServerId: 'a' },
   ];
   const cyclicConfig = buildConnectConfig(cyclic, 'a');
-  assert.equal(cyclicConfig?.jump_host?.jump_host, null);
+  assert.equal(cyclicConfig, null);
 });
 
 console.log('Connection domain tests passed.');

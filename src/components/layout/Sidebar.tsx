@@ -281,6 +281,38 @@ export function Sidebar({ className }: { className?: string }) {
         onOpenContextMenu: openConnectionContextMenu,
     }), [openEditConnection, openConnectionContextMenu]);
 
+    const allHostsContent = (
+        <div
+            className="pl-1 min-h-6"
+            onDragOver={handleAllHostsDragOver}
+            onDrop={handleAllHostsDrop}
+        >
+            {Object.keys(treeRoot.children).sort().map(key => (
+                <FolderItem
+                    key={key}
+                    node={treeRoot.children[key]}
+                    isCollapsed={false}
+                    compactMode={compactMode}
+                    expandedFolders={expandedFolders}
+                    toggleFolder={toggleFolder}
+                    updateConnectionFolder={updateConnectionFolder}
+                    onDeleteFolder={(f) => setDeletingFolder(f)}
+                    onRenameFolder={handleRenameFolder}
+                    onMoveFolder={renameFolder}
+                    connectionItemProps={connectionItemProps}
+                />
+            ))}
+            {treeRoot.connections.map(conn => (
+                <ConnectionItem
+                    key={conn.id}
+                    conn={conn}
+                    isCollapsed={false}
+                    {...connectionItemProps}
+                />
+            ))}
+        </div>
+    );
+
     return (
         <div
             ref={sidebarRef}
@@ -363,10 +395,7 @@ export function Sidebar({ className }: { className?: string }) {
                 <div className={cn(
                     "flex-1 overflow-y-auto pb-4 scrollbar-hide",
                     compactMode ? "px-2 space-y-0.5" : "px-3 space-y-2"
-                )}
-                    onDragOver={handleAllHostsDragOver}
-                    onDrop={handleAllHostsDrop}
-                >
+                )}>
                     {/* VISUAL SECTIONS LOGIC */}
                     {activeConnections.length > 0 ? (
                         <>
@@ -387,69 +416,12 @@ export function Sidebar({ className }: { className?: string }) {
                                 title="All Hosts"
                                 compactMode={compactMode}
                             >
-                                <div
-                                    className="pl-1 min-h-6"
-                                    onDragOver={handleAllHostsDragOver}
-                                    onDrop={handleAllHostsDrop}
-                                >
-                                    {/* Render Recursive Tree (Filtered to exclude active if not searching) */}
-                                    {Object.keys(treeRoot.children).sort().map(key => (
-                                        <FolderItem
-                                            key={key}
-                                            node={treeRoot.children[key]}
-                                            isCollapsed={false}
-                                            compactMode={compactMode}
-                                            expandedFolders={expandedFolders}
-                                            toggleFolder={toggleFolder}
-                                            updateConnectionFolder={updateConnectionFolder}
-                                            onDeleteFolder={(f) => setDeletingFolder(f)}
-                                            onRenameFolder={handleRenameFolder}
-                                            onMoveFolder={renameFolder}
-                                            connectionItemProps={connectionItemProps}
-                                        />
-                                    ))}
-                                    {treeRoot.connections.map(conn => (
-                                        <ConnectionItem
-                                            key={conn.id}
-                                            conn={conn}
-                                            isCollapsed={false}
-                                            {...connectionItemProps}
-                                        />
-                                    ))}
-                                </div>
+                                {allHostsContent}
                             </SidebarSection>
                         </>
                     ) : (
                         <SidebarSection title="All Hosts" compactMode={compactMode}>
-                            <div
-                                className="pl-1 min-h-6"
-                                onDragOver={handleAllHostsDragOver}
-                                onDrop={handleAllHostsDrop}
-                            >
-                                {Object.keys(treeRoot.children).sort().map(key => (
-                                    <FolderItem
-                                        key={key}
-                                        node={treeRoot.children[key]}
-                                        isCollapsed={false}
-                                        compactMode={compactMode}
-                                        expandedFolders={expandedFolders}
-                                        toggleFolder={toggleFolder}
-                                        updateConnectionFolder={updateConnectionFolder}
-                                        onDeleteFolder={(f) => setDeletingFolder(f)}
-                                        onRenameFolder={handleRenameFolder}
-                                        onMoveFolder={renameFolder}
-                                        connectionItemProps={connectionItemProps}
-                                    />
-                                ))}
-                                {treeRoot.connections.map(conn => (
-                                    <ConnectionItem
-                                        key={conn.id}
-                                        conn={conn}
-                                        isCollapsed={false}
-                                        {...connectionItemProps}
-                                    />
-                                ))}
-                            </div>
+                            {allHostsContent}
                         </SidebarSection>
                     )}
                 </div>

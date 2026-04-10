@@ -72,19 +72,19 @@ const calculateDropdownCoords = (trigger: HTMLElement): DropdownCoords => {
         }
         : createDefaultBounds();
 
-    const spaceBelow = Math.max(MIN_LIST_HEIGHT, bounds.bottom - triggerRect.bottom - DROPDOWN_GAP);
-    const spaceAbove = Math.max(MIN_LIST_HEIGHT, triggerRect.top - bounds.top - DROPDOWN_GAP);
-    const openUpward = spaceBelow < MIN_PANEL_HEIGHT && spaceAbove > spaceBelow;
+    const availableBelow = Math.max(0, bounds.bottom - triggerRect.bottom - DROPDOWN_GAP);
+    const availableAbove = Math.max(0, triggerRect.top - bounds.top - DROPDOWN_GAP);
+    const openUpward = availableBelow < MIN_PANEL_HEIGHT && availableAbove > availableBelow;
 
     const top = openUpward
-        ? Math.max(bounds.top + DROPDOWN_GAP, triggerRect.top - DROPDOWN_GAP - Math.min(spaceAbove, MAX_PANEL_HEIGHT))
+        ? Math.max(bounds.top + DROPDOWN_GAP, triggerRect.top - DROPDOWN_GAP - Math.min(Math.max(MIN_LIST_HEIGHT, availableAbove), MAX_PANEL_HEIGHT))
         : triggerRect.bottom + DROPDOWN_GAP;
 
     return {
         top,
         left: Math.max(bounds.left + DROPDOWN_GAP, triggerRect.left),
         width: Math.min(triggerRect.width, bounds.width - DROPDOWN_GAP * 2),
-        maxHeight: Math.min(openUpward ? spaceAbove : spaceBelow, MAX_PANEL_HEIGHT),
+        maxHeight: Math.min(openUpward ? availableAbove : availableBelow, MAX_PANEL_HEIGHT),
         openUpward
     };
 };
@@ -209,7 +209,7 @@ export function Select({
                 )}
                 <Command.List
                     className="max-h-40 overflow-y-auto custom-scrollbar p-1 scroll-smooth"
-                    style={portal ? { maxHeight: `${Math.max(MIN_LIST_HEIGHT, coords.maxHeight - (showSearch ? SEARCH_HEADER_HEIGHT + LIST_PADDING : LIST_PADDING))}px` } : undefined}
+                    style={portal ? { maxHeight: `${Math.max(0, coords.maxHeight - (showSearch ? SEARCH_HEADER_HEIGHT + LIST_PADDING : LIST_PADDING))}px` } : undefined}
                 >
                     <Command.Empty className="py-4 text-center text-[9px] text-app-muted/40 font-bold uppercase tracking-widest italic leading-none">
                         No hits

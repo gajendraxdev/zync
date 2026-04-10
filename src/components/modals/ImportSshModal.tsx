@@ -248,7 +248,7 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
 
             if (Array.isArray(internalizeResult)) {
                 const internalizedCount = internalizeResult.filter((c, i) =>
-                    c.privateKeyPath && c.privateKeyPath !== selected[i].privateKeyPath
+                    c.privateKeyPath && c.privateKeyPath !== selected[i]?.privateKeyPath
                 ).length;
                 console.log(`[Import] Internalized keys for ${internalizedCount} connections.`);
                 onImport(internalizeResult);
@@ -267,8 +267,8 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
             onClose();
         } catch (importError) {
             console.error('Failed to internalize keys:', importError);
-            const selected = configs.filter(c => selectedIds.has(c.id));
-            onImport(selected);
+            const plannedFallback = planSummary.toImport.map((item) => item.connection);
+            onImport(plannedFallback.length > 0 ? plannedFallback : configs.filter(c => selectedIds.has(c.id)));
             onImportReport?.({
                 selected: selectedIds.size,
                 created: planSummary.created,
@@ -346,7 +346,16 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
                                 return (
                                     <div
                                         key={config.id}
+                                        role="button"
+                                        tabIndex={0}
+                                        aria-pressed={isSelected}
                                         onClick={() => toggleSelection(config.id)}
+                                        onKeyDown={(event) => {
+                                            if (event.key === 'Enter' || event.key === ' ') {
+                                                event.preventDefault();
+                                                toggleSelection(config.id);
+                                            }
+                                        }}
                                         className={cn(
                                             "grid grid-cols-[auto_1fr_160px] items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-all group",
                                             isSelected

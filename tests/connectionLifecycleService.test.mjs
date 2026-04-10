@@ -54,14 +54,24 @@ runTest('reduceTabCloseState recalculates active tab and connection', () => {
 
 runTest('getCloseTabPreActions returns disconnect for connected remote tab', () => {
   const tab = { id: 't1', connectionId: 'c1' };
+  const tabs = [{ id: 't1', connectionId: 'c1' }];
   const connections = [{ id: 'c1', status: 'connected' }];
-  const actions = getCloseTabPreActions(tab, connections);
+  const actions = getCloseTabPreActions(tab, tabs, connections);
   assert.equal(actions.disconnectConnectionId, 'c1');
   assert.equal(actions.clearLocalTerminals, false);
 });
 
+runTest('getCloseTabPreActions does not disconnect when another tab uses same connection', () => {
+  const tab = { id: 't1', connectionId: 'c1' };
+  const tabs = [{ id: 't1', connectionId: 'c1' }, { id: 't2', connectionId: 'c1' }];
+  const connections = [{ id: 'c1', status: 'connected' }];
+  const actions = getCloseTabPreActions(tab, tabs, connections);
+  assert.equal(actions.disconnectConnectionId, null);
+  assert.equal(actions.clearLocalTerminals, false);
+});
+
 runTest('getCloseTabPreActions returns local terminal clear action for local tab', () => {
-  const actions = getCloseTabPreActions({ id: 't1', connectionId: 'local' }, []);
+  const actions = getCloseTabPreActions({ id: 't1', connectionId: 'local' }, [{ id: 't1', connectionId: 'local' }], []);
   assert.equal(actions.disconnectConnectionId, null);
   assert.equal(actions.clearLocalTerminals, true);
 });

@@ -50,6 +50,23 @@ const toBackendConfig = (
     };
 };
 
+const buildJumpChain = (
+    connections: Connection[],
+    jumpServerId: string | undefined,
+    visited: Set<string> = new Set(),
+): ToBackendConfig | null => {
+    if (!jumpServerId || visited.has(jumpServerId)) return null;
+    visited.add(jumpServerId);
+
+    const jumpConnection = connections.find((connection) => connection.id === jumpServerId);
+    if (!jumpConnection) return null;
+
+    return {
+        ...toBackendConfig(jumpConnection, {} as ConnectionFormDraft, 'password'),
+        jump_host: buildJumpChain(connections, jumpConnection.jumpServerId, new Set(visited)),
+    };
+};
+
 export const buildConnectionSavePayload = ({
     formData,
     authMethod,
@@ -65,7 +82,7 @@ export const buildConnectionSavePayload = ({
     name: formData.name || formData.host || '',
     host: formData.host!,
     username: formData.username!,
-    port: formData.port || 22,
+    port: normalizePort(formData.port),
     password: authMethod === 'password' ? formData.password : undefined,
     privateKeyPath: authMethod === 'key' ? formData.privateKeyPath : undefined,
     status: editingConnectionId ? (connections.find((c) => c.id === editingConnectionId)?.status || 'disconnected') : 'disconnected',
@@ -85,10 +102,8 @@ export const buildConnectionTestPayload = ({
     authMethod: ConnectionAuthMode;
     connections: Connection[];
 }): ToBackendConfig => {
-    const jumpServerConn = formData.jumpServerId ? connections.find((c) => c.id === formData.jumpServerId) : undefined;
-
     return {
         ...toBackendConfig(formData, formData, authMethod, formData.password, formData.privateKeyPath),
-        jump_host: jumpServerConn ? toBackendConfig(jumpServerConn, formData, authMethod) : null,
+        jump_host: buildJumpChain(connections, formData.jumpServerId),
     };
 };

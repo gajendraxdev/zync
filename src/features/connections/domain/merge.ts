@@ -43,7 +43,10 @@ export const mergeImportedConnectionsByName = (
             mergedImported.push({ ...incoming, id: match.id, status: match.status });
         } else {
             created += 1;
-            const safeId = usedIds.has(incoming.id) ? generateUniqueId(usedIds) : incoming.id;
+            const normalizedId = (incoming.id || '').trim();
+            const safeId = normalizedId && !usedIds.has(normalizedId)
+                ? normalizedId
+                : generateUniqueId(usedIds);
             usedIds.add(safeId);
             mergedImported.push({ ...incoming, id: safeId });
         }

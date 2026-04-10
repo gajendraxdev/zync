@@ -72,7 +72,7 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
         setTouched({ host: false, username: false, port: false, keyPath: false });
 
         if (editingConnectionId) {
-            const conn = connections.find(c => c.id === editingConnectionId);
+            const conn = useAppStore.getState().connections.find(c => c.id === editingConnectionId);
             if (conn) {
                 setFormData({
                     ...conn,
@@ -89,7 +89,7 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
 
         setFormData({ name: '', host: '', username: '', port: 22, password: '', privateKeyPath: '', jumpServerId: undefined, icon: 'Server', folder: '', theme: '', tags: [] });
         setAuthMethod('password');
-    }, [isOpen, editingConnectionId, connections]);
+    }, [isOpen, editingConnectionId]);
 
     const validation = useMemo(
         () => validateConnectionDraft(formData, authMethod),
@@ -192,7 +192,7 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
 
             if (!window?.ipcRenderer?.invoke) {
                 setTouched((prev) => ({ ...prev, keyPath: true }));
-                setFormData({ ...formData, privateKeyPath: path });
+                setFormData((prev) => ({ ...prev, privateKeyPath: path }));
                 showToast('success', 'Private key path saved.');
                 return;
             }
@@ -200,10 +200,10 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
             try {
                 const extractedPath = await window.ipcRenderer.invoke('ssh:extract-pem', path);
                 setTouched((prev) => ({ ...prev, keyPath: true }));
-                setFormData({ ...formData, privateKeyPath: extractedPath });
+                setFormData((prev) => ({ ...prev, privateKeyPath: extractedPath }));
             } catch {
                 setTouched((prev) => ({ ...prev, keyPath: true }));
-                setFormData({ ...formData, privateKeyPath: path });
+                setFormData((prev) => ({ ...prev, privateKeyPath: path }));
             }
         } catch (e) {
             console.error('Failed to select key', e);

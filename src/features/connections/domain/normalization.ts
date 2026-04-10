@@ -1,5 +1,10 @@
 export const normalizeText = (value: string | undefined | null): string => (value ?? '').trim();
 
+export interface ParsedPortResult {
+    normalizedPort: number;
+    error: string | null;
+}
+
 export const normalizeFolderPath = (value: string | undefined | null): string =>
 {
     const raw = value ?? '';
@@ -16,13 +21,19 @@ export const normalizeFolderPath = (value: string | undefined | null): string =>
     return normalized;
 };
 
-export const normalizePort = (value: number | string | undefined | null): number => {
+export const parsePort = (value: number | string | undefined | null): ParsedPortResult => {
+    if (value === undefined || value === null || value === '') {
+        return { normalizedPort: 22, error: null };
+    }
     const parsed = Number(value);
-    if (!Number.isFinite(parsed)) return 22;
-    if (!Number.isInteger(parsed)) return 22;
-    if (parsed <= 0 || parsed > 65535) return 22;
-    return parsed;
+    if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0 || parsed > 65535) {
+        return { normalizedPort: 22, error: 'Port must be an integer between 1 and 65535.' };
+    }
+    return { normalizedPort: parsed, error: null };
 };
+
+export const normalizePort = (value: number | string | undefined | null): number =>
+    parsePort(value).normalizedPort;
 
 export const normalizeTags = (tags: string[] | undefined | null): string[] => {
     if (!Array.isArray(tags)) return [];
