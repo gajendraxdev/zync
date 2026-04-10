@@ -7,6 +7,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 ### Added
 - **Connection Domain Test Suite**: Added focused tests for connection domain, transforms, lifecycle, tab services, and tunnel auto-start behavior to lock refactor parity. ([d2a50c3])
 - **Connection Import Planning Module**: Added `importPlan` domain helpers to build deterministic import recommendations and apply decisions for create/update/skip flows. ([088fdf9])
+- **Source-Based SSH Import (Phase 1)**: Added source-driven import support for default `~/.ssh/config`, custom SSH config files, and pasted SSH config text through a unified backend source command. ([64cb56a])
 
 ### Changed
 - **Connection Flow Architecture**: Extracted connection logic into `src/features/connections` domain/application/infrastructure modules and routed store/modal flows through typed helpers. ([d2a50c3])
@@ -20,6 +21,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Connection Import/Validation Edge Cases**: Hardened merge/id collision handling, normalization, field-level validation feedback, and null-safe feature pinning based on reviewed reliability findings. ([d2a50c3])
 - **Import Modal Selection/Filter Behavior**: Updated Select All/Deselect All to operate on visible filtered rows and removed duplicated match-expression rendering paths for better readability and consistency. ([fd1107c])
 - **Import Modal Reliability/Consistency**: Limited bulk conflict actions to selected conflicts, unified dropdown rendering with shared Select primitives, and aligned import payload typing in connection IPC helpers. ([5c7afc3])
+- **Import Source Reliability & IPC Wiring**: Added request-shape mapping for unified source import IPC calls, centralized SSH import text-size guardrails, improved file-source validation, and tightened parser alias/quote handling for safer import behavior. ([64cb56a])
 
 ## [2.10.1]
 
@@ -572,6 +574,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 [088fdf9]: https://github.com/zync-sh/zync/commit/088fdf9
 [fd1107c]: https://github.com/zync-sh/zync/commit/fd1107c
 [5c7afc3]: https://github.com/zync-sh/zync/commit/5c7afc3
+[64cb56a]: https://github.com/zync-sh/zync/commit/64cb56a
 [2.10.1]: https://github.com/zync-sh/zync/compare/v2.10.0...v2.10.1
 [2.10.0]: https://github.com/zync-sh/zync/compare/v2.9.2...v2.10.0
 [2.9.2]: https://github.com/zync-sh/zync/compare/v2.9.1...v2.9.2
