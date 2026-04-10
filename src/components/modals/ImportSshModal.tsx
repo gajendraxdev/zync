@@ -7,12 +7,12 @@ import { CheckCircle2, AlertCircle, Loader2, FolderOpen, Search, X } from 'lucid
 import { cn } from '../../lib/utils';
 import { OSIcon } from '../icons/OSIcon';
 import { importSshConfigIpc, internalizeImportedConnectionsIpc } from '../../features/connections/infrastructure/connectionIpc';
-import { applyImportPlan, buildImportPlanRows, type ImportResolution } from '../../features/connections/domain';
+import { applyImportPlan, buildImportPlanRows, type AppliedImportPlan, type ImportResolution } from '../../features/connections/domain';
 
 interface ImportSshModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onImport: (configs: any[]) => void;
+    onImport: (items: AppliedImportPlan['toImport']) => void;
     onImportReport?: (report: {
         selected: number;
         created: number;
@@ -126,10 +126,10 @@ function ImportSummaryBar({
                 </div>
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                <span className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-emerald-300">
+                <span className="rounded-md border border-app-border bg-app-surface/80 px-2 py-1 text-app-muted">
                     New {createdCount}
                 </span>
-                <span className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-amber-300">
+                <span className="rounded-md border border-app-border bg-app-surface/80 px-2 py-1 text-app-text font-medium">
                     Update {updatedCount}
                 </span>
                 <span className="rounded-md border border-app-border bg-app-surface/70 px-2 py-1 text-app-muted">
@@ -243,17 +243,31 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
     const handleImport = async () => {
         setIsLoading(true);
         try {
-            const selected = planSummary.toImport.map((item) => item.connection);
-            const internalizeResult = await internalizeImportedConnectionsIpc(selected);
+            const selectedPlanItems = planSummary.toImport;
+            const selectedConnections = selectedPlanItems.map((item) => item.connection);
+            const internalizeResult = await internalizeImportedConnectionsIpc(selectedConnections);
 
             if (Array.isArray(internalizeResult)) {
+                const internalizedById = new Map(
+                    internalizeResult
+                        .filter((connection) => connection?.id)
+                        .map((connection) => [connection.id, connection] as const)
+                );
                 const internalizedCount = internalizeResult.filter((c, i) =>
-                    c.privateKeyPath && c.privateKeyPath !== selected[i]?.privateKeyPath
+                    c.privateKeyPath && c.privateKeyPath !== selectedConnections[i]?.privateKeyPath
                 ).length;
                 console.log(`[Import] Internalized keys for ${internalizedCount} connections.`);
-                onImport(internalizeResult);
+                const mergedPlanItems = selectedPlanItems.map((item, index) => {
+                    const byId = internalizedById.get(item.connection.id);
+                    const byIndex = internalizeResult[index];
+                    return {
+                        ...item,
+                        connection: byId || byIndex || item.connection,
+                    };
+                });
+                onImport(mergedPlanItems);
             } else {
-                onImport(selected);
+                onImport(selectedPlanItems);
             }
 
             onImportReport?.({
@@ -267,8 +281,13 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
             onClose();
         } catch (importError) {
             console.error('Failed to internalize keys:', importError);
-            const plannedFallback = planSummary.toImport.map((item) => item.connection);
-            onImport(plannedFallback.length > 0 ? plannedFallback : configs.filter(c => selectedIds.has(c.id)));
+            const plannedFallback = planSummary.toImport;
+            const fallbackItems = plannedFallback.length > 0
+                ? plannedFallback
+                : configs
+                    .filter(c => selectedIds.has(c.id))
+                    .map((connection) => ({ connection, targetId: null, matchType: null }));
+            onImport(fallbackItems);
             onImportReport?.({
                 selected: selectedIds.size,
                 created: planSummary.created,
@@ -380,12 +399,12 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
                                                     {config.name || config.host}
                                                 </h4>
                                                 {row.matchedByName ? (
-                                                    <span className="text-[10px] bg-amber-500/15 px-1 py-0.5 rounded border border-amber-500/30 text-amber-300">
+                                                    <span className="text-[10px] bg-app-surface/80 px-1.5 py-0.5 rounded border border-app-border text-app-muted">
                                                         Name conflict
                                                     </span>
                                                 ) : null}
                                                 {row.matchedByEndpoint ? (
-                                                    <span className="text-[10px] bg-sky-500/15 px-1 py-0.5 rounded border border-sky-500/30 text-sky-300">
+                                                    <span className="text-[10px] bg-app-surface/80 px-1.5 py-0.5 rounded border border-app-border text-app-muted">
                                                         Endpoint match
                                                     </span>
                                                 ) : null}
@@ -401,7 +420,7 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
                                             </div>
 
                                             {hasConflict && (
-                                                <p className="mt-0.5 text-[11px] text-amber-300/90">
+                                                <p className="mt-0.5 text-[11px] text-app-muted">
                                                     Existing: {matchedConnection?.name || matchedConnection?.host}
                                                 </p>
                                             )}

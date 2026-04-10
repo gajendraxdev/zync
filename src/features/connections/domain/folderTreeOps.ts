@@ -1,5 +1,5 @@
 import { normalizeFolderPath } from './normalization.js';
-import type { Connection, Folder } from '../../../store/connectionSlice';
+import type { Connection, Folder } from './types.js';
 
 export const isFolderOrDescendant = (ancestor: string, target: string): boolean => {
     const a = normalizeFolderPath(ancestor);
@@ -15,7 +15,11 @@ export const remapFolderPath = (path: string, oldBase: string, newBase: string):
     const to = normalizeFolderPath(newBase) || newBase || '';
     if (!source || !from || !to) return path || '';
     if (!isFolderOrDescendant(from, source)) return path || '';
-    return source === from ? to : `${to}${source.slice(from.length)}`;
+    if (source === from) return to;
+
+    const remainder = source.slice(from.length).replace(/^\/+/, '');
+    if (to === '/') return remainder ? `/${remainder}` : '/';
+    return `${to}/${remainder}`;
 };
 
 // --- Current-slice parity helpers (exact-match behavior, no normalization side effects) ---

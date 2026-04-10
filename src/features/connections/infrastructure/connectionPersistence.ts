@@ -1,4 +1,4 @@
-import type { Connection, Folder } from '../../../store/connectionSlice';
+import type { Connection, Folder } from '../domain/types.js';
 
 export interface PersistedConnectionPayload {
     connections: Array<Omit<Connection, 'status'>>;

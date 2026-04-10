@@ -1,4 +1,4 @@
-import type { Connection } from '../../../store/connectionSlice';
+import type { Connection } from './types.js';
 import { normalizePort, normalizeText } from './normalization.js';
 
 export type ImportResolution = 'new' | 'update' | 'skip';
@@ -11,15 +11,17 @@ export interface ImportPlanRow {
 }
 
 export interface AppliedImportPlan {
-    toImport: Array<{
-        connection: Connection;
-        targetId: string | null;
-        matchType: 'name' | 'endpoint' | null;
-    }>;
+    toImport: ImportPlanItem[];
     created: number;
     updated: number;
     skipped: number;
     renamed: Array<{ id: string; from: string; to: string }>;
+}
+
+export interface ImportPlanItem {
+    connection: Connection;
+    targetId: string | null;
+    matchType: 'name' | 'endpoint' | null;
 }
 
 const makeUniqueName = (baseName: string, usedNames: Set<string>): string => {
@@ -110,6 +112,8 @@ export const applyImportPlan = (
 
         const target = row.matchedByName || row.matchedByEndpoint;
         if (!target) {
+            const normalized = normalizeText(incoming.name);
+            if (normalized) usedNames.add(normalized);
             toImport.push({
                 connection: incoming,
                 targetId: null,

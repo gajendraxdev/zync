@@ -1,5 +1,5 @@
-import type { Connection } from '../../../store/connectionSlice';
-import { normalizePort } from './normalization.js';
+import type { Connection } from './types.js';
+import { normalizeFolderPath, normalizePort, normalizeTags } from './normalization.js';
 
 export type ConnectionAuthMode = 'password' | 'key';
 
@@ -89,8 +89,8 @@ export const buildConnectionSavePayload = ({
     jumpServerId: formData.jumpServerId,
     icon: formData.icon,
     theme: formData.theme,
-    folder: formData.folder,
-    tags: formData.tags || [],
+    folder: normalizeFolderPath(formData.folder || ''),
+    tags: normalizeTags(formData.tags || []),
 });
 
 export const buildConnectionTestPayload = ({
