@@ -1,5 +1,3 @@
-import type { Connection } from '../domain/types';
-
 export interface AuthMethodPassword {
     type: 'Password';
     password: string;
@@ -30,13 +28,39 @@ export interface ConnectResponsePayload {
     detected_os?: string | null;
 }
 
-export type ImportedConnectionPayload = Connection;
+export interface ImportedConnectionPayload {
+    id: string;
+    name: string;
+    host: string;
+    username: string;
+    port: number;
+    privateKeyPath?: string;
+    jumpServerAlias?: string;
+    jumpServerId?: string;
+    aliases?: string[];
+}
+export type SshImportSourceType = 'default_ssh' | 'file' | 'text';
+export type SshImportSourceRequest =
+    | { sourceType: 'default_ssh' }
+    | { sourceType: 'file'; path: string }
+    | { sourceType: 'text'; content: string };
 
 export const testConnectionIpc = async (config: ConnectionConfigPayload): Promise<string> =>
     window.ipcRenderer.invoke('ssh:test', config);
 
 export const importSshConfigIpc = async (): Promise<ImportedConnectionPayload[]> =>
     window.ipcRenderer.invoke('ssh:importConfig');
+
+export const importSshConfigFromFileIpc = async (path: string): Promise<ImportedConnectionPayload[]> =>
+    importSshConfigBySourceIpc({ sourceType: 'file', path });
+
+export const importSshConfigFromTextIpc = async (content: string): Promise<ImportedConnectionPayload[]> =>
+    importSshConfigBySourceIpc({ sourceType: 'text', content });
+
+export const importSshConfigBySourceIpc = async (
+    request: SshImportSourceRequest,
+): Promise<ImportedConnectionPayload[]> =>
+    window.ipcRenderer.invoke('ssh:importConfigBySource', request);
 
 export const internalizeImportedConnectionsIpc = async (connections: ImportedConnectionPayload[]): Promise<ImportedConnectionPayload[]> =>
     window.ipcRenderer.invoke('ssh:internalize-connections', connections);

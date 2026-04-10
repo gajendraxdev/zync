@@ -7,8 +7,14 @@ import { CheckCircle2, AlertCircle, Loader2, FolderOpen, Search, X, ArrowRight }
 import { cn } from '../../lib/utils';
 import { OSIcon } from '../icons/OSIcon';
 import { registerModal } from '../../lib/modalRegistry';
-import { importSshConfigIpc, internalizeImportedConnectionsIpc, type ImportedConnectionPayload } from '../../features/connections/infrastructure/connectionIpc';
-import { applyImportPlan, buildImportPlanRows, type AppliedImportPlan, type ImportResolution } from '../../features/connections/domain';
+import { open } from '@tauri-apps/plugin-dialog';
+import {
+    importSshConfigBySourceIpc,
+    internalizeImportedConnectionsIpc,
+    type ImportedConnectionPayload,
+    type SshImportSourceType,
+} from '../../features/connections/infrastructure/connectionIpc';
+import { applyImportPlan, buildImportPlanRows, type AppliedImportPlan, type Connection, type ImportResolution } from '../../features/connections/domain';
 
 type ImportReport = {
     selected: number;
@@ -45,6 +51,20 @@ interface ImportSummaryBarProps {
     onApplyConflictDecision: (decision: ImportResolution) => void;
 }
 
+interface ImportSourceBarProps {
+    sourceType: SshImportSourceType;
+    filePath: string;
+    textContent: string;
+    loading: boolean;
+    expanded: boolean;
+    onToggleExpanded: () => void;
+    onSourceTypeChange: (source: SshImportSourceType) => void;
+    onFilePathChange: (value: string) => void;
+    onBrowseFile: () => void;
+    onTextContentChange: (value: string) => void;
+    onLoad: () => void;
+}
+
 const RESOLUTION_OPTIONS: Array<{ value: ImportResolution; label: string }> = [
     { value: 'new', label: 'Import as New' },
     { value: 'update', label: 'Update Existing' },
@@ -60,10 +80,46 @@ const BULK_CONFLICT_OPTIONS: Array<{ value: ImportResolution; label: string }> =
 const IMPORT_TABLE_GRID_CLASS = 'grid-cols-[34px_90px_minmax(0,1.2fr)_minmax(0,1fr)_136px]';
 const IMPORT_ACTION_SELECT_CLASS = 'w-[124px] justify-self-end';
 const IMPORT_ACTION_TRIGGER_CLASS = 'h-8 rounded-md border border-app-border bg-app-bg px-2 text-xs shadow-none';
+const IMPORT_SUMMARY_CHIP_CLASS = 'rounded-md border border-app-border bg-app-surface/70 px-2 py-0.5';
+
+const IMPORT_SOURCE_OPTIONS: Array<{ value: SshImportSourceType; label: string }> = [
+    { value: 'default_ssh', label: '~/.ssh/config' },
+    { value: 'file', label: 'Custom SSH config file' },
+    { value: 'text', label: 'Paste SSH config text' },
+];
+
+const IMPORT_SOURCE_LABELS: Record<SshImportSourceType, string> = {
+    default_ssh: '~/.ssh/config',
+    file: 'Custom SSH config file',
+    text: 'Pasted SSH config text',
+};
+
+const normalizeImportedConnectionPayload = (payload: ImportedConnectionPayload): Connection => ({
+    id: payload.id,
+    name: payload.name,
+    host: payload.host,
+    username: payload.username,
+    port: payload.port,
+    privateKeyPath: payload.privateKeyPath,
+    jumpServerId: payload.jumpServerId,
+    status: 'disconnected',
+    icon: 'Server',
+    tags: [],
+});
+
+const toImportedConnectionPayload = (connection: Connection): ImportedConnectionPayload => ({
+    id: connection.id,
+    name: connection.name,
+    host: connection.host,
+    username: connection.username,
+    port: connection.port,
+    privateKeyPath: connection.privateKeyPath,
+    jumpServerId: connection.jumpServerId,
+});
 
 const createDefaultDecisionMap = (
-    existingConnections: ImportedConnectionPayload[],
-    importedConfigs: ImportedConnectionPayload[],
+    existingConnections: Connection[],
+    importedConfigs: Connection[],
 ): Record<string, ImportResolution> => {
     const rows = buildImportPlanRows(existingConnections, importedConfigs);
     const defaults: Record<string, ImportResolution> = {};
@@ -92,11 +148,11 @@ function ImportSummaryBar({
     onApplyConflictDecision,
 }: ImportSummaryBarProps) {
     return (
-        <div className="px-5 py-2.5 border-b border-app-border bg-app-bg/50">
+        <div className="px-4 py-1.5 border-b border-app-border bg-app-bg/50">
             <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2 text-xs font-medium text-app-muted">
                     <span className="uppercase tracking-wider">Found {totalCount} connections</span>
-                    <span className="rounded-full border border-app-border bg-app-surface px-2 py-0.5 text-[11px] normal-case text-app-text">
+                    <span className="rounded-full border border-app-border bg-app-surface px-1.5 py-0 text-[11px] normal-case text-app-text">
                         Selected {selectedCount}
                     </span>
                     <button
@@ -139,28 +195,28 @@ function ImportSummaryBar({
                         <button
                             type="button"
                             onClick={onSearchOpen}
-                            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-app-border bg-app-bg text-app-muted transition-colors"
+                            className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-app-border bg-app-bg text-app-muted transition-colors"
                             aria-label="Search imported connections"
                         >
-                            <Search className="h-3.5 w-3.5" />
+                            <Search className="h-3 w-3" />
                         </button>
                     )}
                 </div>
             </div>
-            <div className="mt-2 flex items-center justify-between gap-3">
+            <div className="mt-1 flex items-center justify-between gap-3">
                 <div className="flex flex-wrap items-center gap-2 text-xs">
-                    <span className="rounded-md border border-app-border bg-app-surface/70 px-2 py-1 text-app-muted">
+                    <span className={cn(IMPORT_SUMMARY_CHIP_CLASS, 'text-app-muted')}>
                         New {createdCount}
                     </span>
-                    <span className="rounded-md border border-app-border bg-app-surface/70 px-2 py-1 text-app-text font-medium">
+                    <span className={cn(IMPORT_SUMMARY_CHIP_CLASS, 'text-app-text font-medium')}>
                         Update {updatedCount}
                     </span>
-                    <span className="rounded-md border border-app-border bg-app-surface/70 px-2 py-1 text-app-muted">
+                    <span className={cn(IMPORT_SUMMARY_CHIP_CLASS, 'text-app-muted')}>
                         Skip {skippedCount}
                     </span>
                 </div>
                 {conflictCount > 0 && (
-                    <div className="inline-flex items-center gap-1.5 rounded-md border border-app-border bg-app-surface/70 px-1.5 py-1 text-xs">
+                    <div className="inline-flex items-center gap-1.5 rounded-md border border-app-border bg-app-surface/70 px-1.5 py-0.5 text-xs">
                         <span className="text-app-muted">Conflicts {conflictCount}</span>
                         <ArrowRight className="h-3.5 w-3.5 text-app-muted/80" />
                         <Select
@@ -184,50 +240,198 @@ function ImportSummaryBar({
     );
 }
 
+function ImportSourceBar({
+    sourceType,
+    filePath,
+    textContent,
+    loading,
+    expanded,
+    onToggleExpanded,
+    onSourceTypeChange,
+    onFilePathChange,
+    onBrowseFile,
+    onTextContentChange,
+    onLoad,
+}: ImportSourceBarProps) {
+    const isLoadDisabled = loading
+        || (sourceType === 'file' && !filePath.trim())
+        || (sourceType === 'text' && !textContent.trim());
+
+    if (!expanded) {
+        return (
+            <div className="px-5 py-2 border-b border-app-border bg-app-bg/40 flex items-center justify-between gap-3">
+                <p className="text-xs text-app-muted">
+                    Import Source: <span className="text-app-text">{IMPORT_SOURCE_LABELS[sourceType]}</span>
+                </p>
+                <Button size="sm" variant="ghost" onClick={onToggleExpanded}>
+                    Change
+                </Button>
+            </div>
+        );
+    }
+
+    return (
+        <div className="px-5 pt-3 pb-2 border-b border-app-border bg-app-bg/40 space-y-2">
+            <div className="flex items-end gap-2">
+                <Select
+                    label="Import Source"
+                    value={sourceType}
+                    onChange={(value) => onSourceTypeChange(value as SshImportSourceType)}
+                    options={IMPORT_SOURCE_OPTIONS}
+                    showSearch={false}
+                    showCheck={false}
+                    portal
+                    className="flex-1"
+                    triggerClassName="h-8 rounded-md border border-app-border bg-app-bg px-2 text-xs shadow-none"
+                />
+                <Button size="sm" variant="secondary" onClick={onLoad} disabled={isLoadDisabled}>
+                    {loading ? 'Loading…' : 'Load'}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={onToggleExpanded} disabled={loading}>
+                    Done
+                </Button>
+            </div>
+
+            {sourceType === 'file' && (
+                <div className="flex items-center gap-2">
+                    <input
+                        value={filePath}
+                        onChange={(event) => onFilePathChange(event.target.value)}
+                        placeholder="Select SSH config file path..."
+                        className="h-8 flex-1 rounded-md border border-app-border bg-app-bg px-2 text-xs text-app-text outline-none focus:border-app-accent/60"
+                    />
+                    <Button size="sm" variant="ghost" onClick={onBrowseFile} disabled={loading}>
+                        Browse
+                    </Button>
+                </div>
+            )}
+
+            {sourceType === 'text' && (
+                <textarea
+                    value={textContent}
+                    onChange={(event) => onTextContentChange(event.target.value)}
+                    placeholder="Paste SSH config text here..."
+                    className="w-full min-h-[90px] rounded-md border border-app-border bg-app-bg px-2 py-2 text-xs text-app-text outline-none focus:border-app-accent/60"
+                />
+            )}
+        </div>
+    );
+}
+
 export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: ImportSshModalProps) {
     const existingConnections = useAppStore(state => state.connections);
-    const [configs, setConfigs] = useState<ImportedConnectionPayload[]>([]);
+    const showToast = useAppStore(state => state.showToast);
+    const [configs, setConfigs] = useState<Connection[]>([]);
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [decisions, setDecisions] = useState<Record<string, ImportResolution>>({});
+    const [sourceType, setSourceType] = useState<SshImportSourceType>('default_ssh');
+    const [sourceFilePath, setSourceFilePath] = useState('');
+    const [sourceText, setSourceText] = useState('');
+    const [isSourceBarExpanded, setIsSourceBarExpanded] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [isSearchOpen, setIsSearchOpen] = useState(false);
-    const [isLoading, setIsLoading] = useState(false);
+    const [isLoadingConfigs, setIsLoadingConfigs] = useState(false);
+    const [isImporting, setIsImporting] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [importReport, setImportReport] = useState<ImportReport | null>(null);
     const [bulkConflictDecision, setBulkConflictDecision] = useState<ImportResolution>('update');
 
     useEffect(() => {
         if (isOpen) {
-            loadConfigs();
+            setSourceType('default_ssh');
+            setSourceFilePath('');
+            setSourceText('');
+            setIsSourceBarExpanded(false);
+            void loadConfigsFromSource('default_ssh', '', '', existingConnections);
         } else {
             setConfigs([]);
             setSelectedIds(new Set());
             setDecisions({});
+            setSourceType('default_ssh');
+            setSourceFilePath('');
+            setSourceText('');
+            setIsSourceBarExpanded(false);
             setSearchQuery('');
             setIsSearchOpen(false);
             setError(null);
             setImportReport(null);
             setBulkConflictDecision('update');
         }
-    }, [isOpen]);
+    }, [isOpen, existingConnections]);
 
-    const loadConfigs = async () => {
-        setIsLoading(true);
+    const loadConfigsFromSource = async (
+        source: SshImportSourceType,
+        filePath: string,
+        textContent: string,
+        baselineConnections: Connection[],
+    ) => {
+        setIsLoadingConfigs(true);
         setError(null);
         try {
-            const result = await importSshConfigIpc();
+            const result: ImportedConnectionPayload[] = await importSshConfigBySourceIpc({
+                sourceType: source,
+                path: filePath,
+                content: textContent,
+            });
+
             if (Array.isArray(result)) {
-                setConfigs(result);
-                setSelectedIds(new Set(result.map(c => c.id)));
-                setDecisions(createDefaultDecisionMap(existingConnections, result));
+                const normalizedConnections = result.map(normalizeImportedConnectionPayload);
+                setConfigs(normalizedConnections);
+                setSelectedIds(new Set(normalizedConnections.map(c => c.id)));
+                setDecisions(createDefaultDecisionMap(baselineConnections, normalizedConnections));
+                setImportReport(null);
             } else {
                 setConfigs([]);
+                setSelectedIds(new Set());
+                setDecisions({});
             }
         } catch (err: any) {
             console.error('Failed to import SSH config', err);
             setError(err.message || 'Failed to read SSH config file');
+            setConfigs([]);
+            setSelectedIds(new Set());
+            setDecisions({});
         } finally {
-            setIsLoading(false);
+            setIsLoadingConfigs(false);
+        }
+    };
+
+    const handleLoadConfigs = () => {
+        void loadConfigsFromSource(sourceType, sourceFilePath, sourceText, existingConnections);
+    };
+
+    const handleSourceTypeChange = (nextSource: SshImportSourceType) => {
+        setSourceType(nextSource);
+        setError(null);
+        setImportReport(null);
+        setConfigs([]);
+        setSelectedIds(new Set());
+        setDecisions({});
+        setSearchQuery('');
+        setIsSourceBarExpanded(true);
+        if (nextSource === 'default_ssh') {
+            void loadConfigsFromSource('default_ssh', '', '', existingConnections);
+        }
+    };
+
+    const handleBrowseFile = async () => {
+        try {
+            const selected = await open({
+                multiple: false,
+                directory: false,
+                filters: [{ name: 'SSH Config', extensions: ['config', 'ssh', 'txt'] }],
+            });
+            if (!selected) return;
+            const path = Array.isArray(selected) ? selected[0] : selected;
+            if (typeof path === 'string') {
+                setSourceFilePath(path);
+            }
+        } catch (browseError) {
+            console.error('Failed to pick SSH config file', browseError);
+            const message = browseError instanceof Error && browseError.message
+                ? browseError.message
+                : 'Unable to open SSH config file.';
+            showToast('error', message);
         }
     };
 
@@ -309,7 +513,7 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
     });
 
     const handleImport = async () => {
-        setIsLoading(true);
+        setIsImporting(true);
         try {
             const selectedPlanItems = planSummary.toImport;
             if (selectedPlanItems.length === 0) {
@@ -319,21 +523,24 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
                 return;
             }
             const selectedConnections = selectedPlanItems.map((item) => item.connection);
-            const internalizeResult = await internalizeImportedConnectionsIpc(selectedConnections);
+            const internalizeResult = await internalizeImportedConnectionsIpc(
+                selectedConnections.map(toImportedConnectionPayload)
+            );
 
             if (Array.isArray(internalizeResult)) {
+                const normalizedInternalized = internalizeResult.map(normalizeImportedConnectionPayload);
                 const internalizedById = new Map(
-                    internalizeResult
+                    normalizedInternalized
                         .filter((connection) => connection?.id)
                         .map((connection) => [connection.id, connection] as const)
                 );
-                const internalizedCount = internalizeResult.filter((c, i) =>
+                const internalizedCount = normalizedInternalized.filter((c, i) =>
                     c.privateKeyPath && c.privateKeyPath !== selectedConnections[i]?.privateKeyPath
                 ).length;
                 console.log(`[Import] Internalized keys for ${internalizedCount} connections.`);
                 const mergedPlanItems = selectedPlanItems.map((item, index) => {
                     const byId = internalizedById.get(item.connection.id);
-                    const byIndex = internalizeResult[index];
+                    const byIndex = normalizedInternalized[index];
                     return {
                         ...item,
                         connection: byId || byIndex || item.connection,
@@ -361,7 +568,7 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
             setImportReport(nextReport);
             onImportReport?.(nextReport);
         } finally {
-            setIsLoading(false);
+            setIsImporting(false);
         }
     };
 
@@ -370,12 +577,28 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
             isOpen={isOpen}
             onClose={onClose}
             title="Import SSH Connections"
-            subtitle="Select the connections you want to import from your local SSH config file. Choose per-item strategy for duplicates (new/update/skip)."
+            subtitle="Select connections to import and choose duplicate strategy (new/update/skip)."
             className="w-full max-w-2xl"
+            headerClassName="p-3 [&_p]:mt-0.5 [&_p]:text-[11px] [&_p]:leading-4 [&_p]:truncate [&_p]:whitespace-nowrap"
             contentClassName="flex flex-col p-0 overflow-hidden"
+            titleClassName="text-base"
         >
             <div className="flex h-full min-h-0 flex-col">
-                {!isLoading && !error && hasConfigs && (
+                <ImportSourceBar
+                    sourceType={sourceType}
+                    filePath={sourceFilePath}
+                    textContent={sourceText}
+                    loading={isLoadingConfigs}
+                    expanded={isSourceBarExpanded}
+                    onToggleExpanded={() => setIsSourceBarExpanded((prev) => !prev)}
+                    onSourceTypeChange={handleSourceTypeChange}
+                    onFilePathChange={setSourceFilePath}
+                    onBrowseFile={handleBrowseFile}
+                    onTextContentChange={setSourceText}
+                    onLoad={handleLoadConfigs}
+                />
+
+                {!isLoadingConfigs && !error && hasConfigs && (
                     <ImportSummaryBar
                         totalCount={configs.length}
                         selectedCount={selectedCount}
@@ -442,7 +665,7 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
                                 </div>
                             )}
                         </div>
-                    ) : isLoading ? (
+                    ) : isLoadingConfigs ? (
                         <div className="flex flex-col items-center justify-center h-full text-app-muted gap-3">
                             <Loader2 className="w-8 h-8 animate-spin text-app-accent" />
                             <p>Scanning SSH config...</p>
@@ -451,7 +674,7 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
                         <div className="flex flex-col items-center justify-center h-full text-red-500 gap-3 p-4 text-center">
                             <AlertCircle className="w-8 h-8" />
                             <p>{error}</p>
-                            <Button variant="secondary" size="sm" onClick={loadConfigs}>Retry</Button>
+                            <Button variant="secondary" size="sm" onClick={handleLoadConfigs}>Retry</Button>
                         </div>
                     ) : configs.length === 0 ? (
                         <div className="flex flex-col items-center justify-center h-full text-app-muted gap-3">
@@ -583,7 +806,7 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
                             <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
                             <Button
                                 size="sm"
-                                disabled={selectedCount === 0 || isLoading}
+                                disabled={selectedCount === 0 || isLoadingConfigs || isImporting}
                                 onClick={handleImport}
                             >
                                 Import {selectedCount > 0 ? `(${selectedCount})` : ''}

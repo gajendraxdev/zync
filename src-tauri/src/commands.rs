@@ -15,6 +15,8 @@ use tauri_plugin_store::StoreExt;
 use crate::tunnel::TunnelManager;
 use serde::{Deserialize, Serialize};
 
+const MAX_IMPORT_TEXT_BYTES: usize = 1_048_576; // 1 MiB
+
 #[derive(Debug, Serialize)]
 pub struct SystemInfo {
     pub data_dir: String,
@@ -2250,6 +2252,89 @@ pub async fn ssh_import_config(
     // println!("[SSH] Importing config from: {:?}", config_path);
 
     crate::ssh_config::parse_config(&config_path).map_err(|e| e.to_string())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SshImportSourceRequest {
+    pub source_type: String,
+    pub path: Option<String>,
+    pub content: Option<String>,
+}
+
+#[tauri::command]
+pub async fn ssh_import_config_from_file(
+    path: String,
+) -> Result<Vec<crate::ssh_config::ParsedSshConnection>, String> {
+    let normalized = path.trim();
+    if normalized.is_empty() {
+        return Err("Select an SSH config file path first.".to_string());
+    }
+
+    let config_path = std::path::Path::new(normalized);
+    if !config_path.exists() {
+        return Err("SSH config file not found.".to_string());
+    }
+    if !config_path.is_file() {
+        return Err("Selected SSH config path is not a file.".to_string());
+    }
+    std::fs::File::open(config_path)
+        .map_err(|e| format!("Cannot read SSH config file: {}", e))?;
+
+    crate::ssh_config::parse_config(config_path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn ssh_import_config_from_text(
+    content: String,
+) -> Result<Vec<crate::ssh_config::ParsedSshConnection>, String> {
+    if content.trim().is_empty() {
+        return Ok(vec![]);
+    }
+
+    if content.len() > MAX_IMPORT_TEXT_BYTES {
+        return Err("Pasted SSH config is too large (max 1 MiB).".to_string());
+    }
+
+    crate::ssh_config::parse_config_text(&content).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn ssh_import_config_by_source(
+    app: AppHandle,
+    request: SshImportSourceRequest,
+) -> Result<Vec<crate::ssh_config::ParsedSshConnection>, String> {
+    match request.source_type.as_str() {
+        "default_ssh" => ssh_import_config(app).await,
+        "file" => {
+            let path = request
+                .path
+                .as_deref()
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if path.is_empty() {
+                return Err("Select an SSH config file path first.".to_string());
+            }
+            ssh_import_config_from_file(path).await
+        }
+        "text" => {
+            let content = request
+                .content
+                .as_deref()
+                .unwrap_or("")
+                .to_string();
+            if content.trim().is_empty() {
+                return Err("Paste SSH config text first.".to_string());
+            }
+
+            if content.len() > MAX_IMPORT_TEXT_BYTES {
+                return Err("Pasted SSH config is too large (max 1 MiB).".to_string());
+            }
+            ssh_import_config_from_text(content).await
+        }
+        _ => Err("Unsupported SSH import source.".to_string()),
+    }
 }
 
 /// Helper to internalize a single key file
