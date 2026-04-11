@@ -83,6 +83,8 @@ const ipcRenderer = {
       'terminal:close': 'terminal_close',
       'connections:get': 'connections_get',
       'connections:save': 'connections_save',
+      'connections:exportToFile': 'connections_export_to_file',
+      'connections:importFromFile': 'connections_import_from_file',
       'fs_list': 'fs_list',
       'fs_read_file': 'fs_read_file',
       'fs_write_file': 'fs_write_file',
@@ -104,6 +106,9 @@ const ipcRenderer = {
       'ssh:extract-pem': 'ssh_extract_pem',
       'ssh:migrate-all-keys': 'ssh_migrate_all_keys',
       'ssh:importConfig': 'ssh_import_config',
+      'ssh:importConfigFromFile': 'ssh_import_config_from_file',
+      'ssh:importConfigFromText': 'ssh_import_config_from_text',
+      'ssh:importConfigBySource': 'ssh_import_config_by_source',
       'ssh:readConfig': 'ssh_import_config',
       'ssh:internalize-connections': 'ssh_internalize_connections',
       'sftp:put': 'sftp_put',
@@ -258,7 +263,7 @@ const ipcRenderer = {
       }
 
       // Tauri invoke expects a single object as the argument with named keys
-      let payload = args.length === 1 && typeof args[0] === 'object' ? args[0] : { args };
+      let payload = args.length === 1 && args[0] !== null && typeof args[0] === 'object' ? args[0] : { args };
 
       // Manual argument mapping for mismatched commands
       if (tauriCommand === 'ssh_connect' || tauriCommand === 'ssh_test_connection') {
@@ -329,8 +334,6 @@ const ipcRenderer = {
             remotePort: args[3]
           };
         }
-        console.log('[IPC] tunnel_start_local final payload:', payload);
-
       } else if (tauriCommand === 'tunnel_start_remote') {
         if (args.length === 1 && typeof args[0] === 'object' && 'connectionId' in args[0]) {
           const arg = args[0];
@@ -362,10 +365,16 @@ const ipcRenderer = {
         payload = { path: args[0] };
       } else if (tauriCommand === 'shell_open') {
         payload = { path: args[0] };
-      }
-
-      if (tauriCommand === 'ssh_migrate_all_keys') {
+      } else if (tauriCommand === 'ssh_import_config_from_file') {
+        payload = { path: args[0] };
+      } else if (tauriCommand === 'ssh_import_config_from_text') {
+        payload = { content: args[0] };
+      } else if (tauriCommand === 'ssh_import_config_by_source') {
+        payload = { request: args[0] };
+      } else if (tauriCommand === 'ssh_migrate_all_keys') {
         payload = {};
+      } else if (tauriCommand === 'connections_export_to_file' || tauriCommand === 'connections_import_from_file') {
+        payload = { request: args[0] };
       }
 
       return await invoke(tauriCommand, payload);

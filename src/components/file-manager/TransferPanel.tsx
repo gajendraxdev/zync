@@ -8,6 +8,18 @@ interface TransferPanelProps {
   indicatorRef: RefObject<HTMLButtonElement | null>;
 }
 
+const isBenignTransferCancelError = (error: unknown): boolean => {
+  const message = String((error as { message?: string })?.message ?? error ?? '').toLowerCase();
+  return (
+    message === 'not found'
+    || message.includes('transfer not found')
+    || message.includes('already cancelled')
+    || message.includes('already canceled')
+    || message.includes('transfer already cancelled')
+    || message.includes('transfer already canceled')
+  );
+};
+
 export function TransferPanel({ onClose, indicatorRef }: TransferPanelProps) {
   const transfers = useAppStore(state => state.transfers);
   const removeTransfer = useAppStore(state => state.removeTransfer);
@@ -41,7 +53,15 @@ export function TransferPanel({ onClose, indicatorRef }: TransferPanelProps) {
         timersRef.current.delete(id);
       }
     });
+
   }, [transfers, removeTransfer]);
+
+  useEffect(() => {
+    return () => {
+      timersRef.current.forEach((timer) => clearTimeout(timer));
+      timersRef.current.clear();
+    };
+  }, []);
 
   // Click-outside dismiss
   useEffect(() => {
@@ -158,7 +178,10 @@ export function TransferPanel({ onClose, indicatorRef }: TransferPanelProps) {
                           cancelTransfer(transfer.id);
                         } catch (err: any) {
                           const msg = `Failed to cancel transfer: ${err?.message || String(err)}`;
-                          useAppStore.getState().setLastAction(msg, 'error');
+                          useAppStore.getState().setLastAction(
+                            msg,
+                            isBenignTransferCancelError(err) ? 'info' : 'error',
+                          );
                         } finally {
                           setCancellingIds(prev => {
                             const newSet = new Set(prev);
