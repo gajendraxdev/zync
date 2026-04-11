@@ -404,6 +404,7 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
         setIsLoadingConfigs(true);
         setError(null);
         setSourceDiagnostics(null);
+        setImportReport(null);
         try {
             const result: ImportedConnectionPayload[] = await importSshConfigBySourceIpc({
                 sourceType: source,
@@ -455,7 +456,7 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
     };
 
     const handleLoadConfigs = () => {
-        void loadConfigsFromSource(sourceType, sourceFilePath, sourceText, existingConnections);
+        void loadConfigsFromSource(sourceType, sourceFilePath, sourceText, existingConnectionsOnOpenRef.current);
     };
 
     const handleSourceTypeChange = (nextSource: SshImportSourceType) => {
@@ -469,7 +470,7 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
         setSearchQuery('');
         setIsSourceBarExpanded(true);
         if (nextSource === 'default_ssh') {
-            void loadConfigsFromSource('default_ssh', '', '', existingConnections);
+            void loadConfigsFromSource('default_ssh', '', '', existingConnectionsOnOpenRef.current);
         }
     };
 
@@ -478,7 +479,6 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
             const selected = await open({
                 multiple: false,
                 directory: false,
-                filters: [{ name: 'SSH Config', extensions: ['config', 'ssh', 'txt'] }],
             });
             if (!selected) return;
             const path = Array.isArray(selected) ? selected[0] : selected;
@@ -502,8 +502,8 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
     };
 
     const rows = useMemo(
-        () => buildImportPlanRows(existingConnections, configs),
-        [configs, existingConnections]
+        () => buildImportPlanRows(existingConnectionsOnOpenRef.current, configs),
+        [configs]
     );
 
     const filteredRows = useMemo(() => {
@@ -532,8 +532,8 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
     const selectedRows = rows.filter((row) => selectedIds.has(row.imported.id));
     const conflictRows = selectedRows.filter((row) => row.matchedByName || row.matchedByEndpoint);
     const planSummary = useMemo(
-        () => applyImportPlan(existingConnections, selectedRows, decisions),
-        [decisions, existingConnections, selectedRows]
+        () => applyImportPlan(existingConnectionsOnOpenRef.current, selectedRows, decisions),
+        [decisions, selectedRows]
     );
 
     const toggleAll = () => {

@@ -27,6 +27,28 @@ export interface CredentialHealthCheck {
     message: string;
 }
 
+const isIpv4Literal = (value: string): boolean => {
+    if (!/^\d{1,3}(?:\.\d{1,3}){3}$/.test(value)) return false;
+    return value.split('.').every((segment) => {
+        const numeric = Number(segment);
+        return Number.isInteger(numeric) && numeric >= 0 && numeric <= 255;
+    });
+};
+
+const isIpv6Literal = (value: string): boolean => {
+    const trimmed = value.trim();
+    if (!trimmed.includes(':')) return false;
+    return /^[0-9a-f:.]+$/i.test(trimmed);
+};
+
+const isIpLiteral = (value: string): boolean => {
+    if (!value) return false;
+    const normalized = value.startsWith('[') && value.endsWith(']')
+        ? value.slice(1, -1)
+        : value;
+    return isIpv4Literal(normalized) || isIpv6Literal(normalized);
+};
+
 export const hasRequiredHostAndUsername = (draft: ConnectionDraft): boolean =>
     !!normalizeText(draft.host) && !!normalizeText(draft.username);
 
@@ -113,7 +135,7 @@ export const getCredentialHealthChecks = (draft: ConnectionDraft, authMode: Auth
         });
     }
 
-    if (host && !host.includes('.')) {
+    if (host && !host.includes('.') && !isIpLiteral(host)) {
         checks.push({
             severity: 'info',
             message: 'Host has no domain/IP pattern. Ensure DNS/host alias resolves correctly.',
