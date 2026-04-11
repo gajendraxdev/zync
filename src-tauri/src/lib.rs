@@ -170,6 +170,8 @@ pub fn run() {
             commands::terminal_close,
             commands::connections_get,
             commands::connections_save,
+            commands::connections_export_to_file,
+            commands::connections_import_from_file,
             commands::fs_list,
             commands::fs_read_file,
             commands::fs_write_file,
@@ -197,6 +199,9 @@ pub fn run() {
             commands::window_close,
             commands::ssh_exec,
             commands::ssh_import_config,
+            commands::ssh_import_config_from_file,
+            commands::ssh_import_config_from_text,
+            commands::ssh_import_config_by_source,
             commands::ssh_internalize_connections,
             commands::snippets_list,
             commands::snippets_save,
@@ -243,8 +248,4 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
-
-
-
-
 

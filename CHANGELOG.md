@@ -4,6 +4,35 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.11.0]
+
+### Added
+- **Connection Domain Test Suite**: Added focused tests for connection domain, transforms, lifecycle, tab services, and tunnel auto-start behavior to lock refactor parity. ([d2a50c3])
+- **Connection Import Planning Module**: Added `importPlan` domain helpers to build deterministic import recommendations and apply decisions for create/update/skip flows. ([088fdf9])
+- **Source-Based SSH Import (Phase 1)**: Added source-driven import support for default `~/.ssh/config`, custom SSH config files, and pasted SSH config text through a unified backend source command. ([64cb56a])
+- **Connection Manual Smoke Checklist**: Added `tests/connectionManualSmokeChecklist.md` to standardize add/edit/import/cancellation release smoke validation. ([d0d56d7])
+- **Connection Export/Import File Flows**: Added backend commands and UI plumbing for exporting/importing connections in `zync`, JSON, CSV, and SSH config formats. ([a2dffb7])
+- **Scoped Export Modal**: Added `ExportConnectionsModal` with host selection, search, and format selection for connection/folder/all-hosts context exports. ([a2dffb7])
+
+### Changed
+- **Connection Flow Architecture**: Extracted connection logic into `src/features/connections` domain/application/infrastructure modules and routed store/modal flows through typed helpers. ([d2a50c3])
+- **Add Connection Form UX**: Replaced multi-step manual entry with a compact single-scroll structure, mode chooser, validation-aware actions, and cleaner advanced options handling. ([088fdf9])
+- **Shared Modal/Select Primitives**: Extended modal shell slots and reworked select dropdown positioning/escape handling for bounded modal-safe behavior. ([088fdf9])
+- **Import SSH Modal UX**: Refined import modal density and hierarchy with header subtitle guidance, compact connection cards, sticky footer actions, and an extracted `ImportSummaryBar` for cleaner structure. ([fd1107c])
+- **Import Conflict Resolution UX**: Reworked the import list into a compact table-style layout, added conflict bulk-decision controls, and added an in-modal import completion report summary. ([5c7afc3])
+- **Import Modal State Handling**: Prevented open-session resets from store churn, removed index-based internalization fallback, and tightened stale async request handling for load/import actions. ([d0d56d7])
+- **Sidebar Export Entry Points**: Moved export actions into sidebar context menus for connection rows, folder rows, and all-hosts header scope. ([a2dffb7])
+
+### Fixed
+- **Sidebar Host Drag-and-Drop**: Fixed root-folder drag/drop regressions so hosts can be moved reliably into folders and back to the main host area. ([d2a50c3])
+- **Connection Import/Validation Edge Cases**: Hardened merge/id collision handling, normalization, field-level validation feedback, and null-safe feature pinning based on reviewed reliability findings. ([d2a50c3])
+- **Import Modal Selection/Filter Behavior**: Updated Select All/Deselect All to operate on visible filtered rows and removed duplicated match-expression rendering paths for better readability and consistency. ([fd1107c])
+- **Import Modal Reliability/Consistency**: Limited bulk conflict actions to selected conflicts, unified dropdown rendering with shared Select primitives, and aligned import payload typing in connection IPC helpers. ([5c7afc3])
+- **Import Source Reliability & IPC Wiring**: Added request-shape mapping for unified source import IPC calls, centralized SSH import text-size guardrails, improved file-source validation, and tightened parser alias/quote handling for safer import behavior. ([64cb56a])
+- **Connection Validation + Import Diagnostics**: Tightened host/username/key-path validation, added lightweight credential health hints in add/edit modal, and added source-level import diagnostics for clearer import troubleshooting feedback. ([636db7a])
+- **Connection Reliability Hardening**: Added file-source import size guardrails, fixed nested import modal close state, preserved unmatched duplicate records during merge, refined local terminal close behavior, and hardened transfer cancel cleanup/error handling. ([d0d56d7])
+- **Scoped Zync Export Integrity**: Filtered exported folder metadata to the selected connection scope and aligned SSH `ProxyJump` aliases with sanitized `Host` aliases in generated configs. ([a2dffb7])
+
 ## [2.10.1]
 
 ### Added
@@ -501,7 +530,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 - Auto-updates
 - Multiple themes (Dark, Light, Dracula)
 
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.10.1...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.11.0...HEAD
 [#38]: https://github.com/zync-sh/zync/pull/38
 [f766ac2]: https://github.com/zync-sh/zync/commit/f766ac2
 [3df9766]: https://github.com/zync-sh/zync/commit/3df9766
@@ -551,6 +580,14 @@ All notable changes to Zync are documented in this file. The format is based on 
 [b9e726f]: https://github.com/zync-sh/zync/commit/b9e726f
 [bd73a72]: https://github.com/zync-sh/zync/commit/bd73a72
 [1dfe5f3]: https://github.com/zync-sh/zync/commit/1dfe5f3
+[d2a50c3]: https://github.com/zync-sh/zync/commit/d2a50c3
+[088fdf9]: https://github.com/zync-sh/zync/commit/088fdf9
+[fd1107c]: https://github.com/zync-sh/zync/commit/fd1107c
+[5c7afc3]: https://github.com/zync-sh/zync/commit/5c7afc3
+[64cb56a]: https://github.com/zync-sh/zync/commit/64cb56a
+[636db7a]: https://github.com/zync-sh/zync/commit/636db7a
+[a2dffb7]: https://github.com/zync-sh/zync/commit/a2dffb7
+[2.11.0]: https://github.com/zync-sh/zync/compare/v2.10.1...v2.11.0
 [2.10.1]: https://github.com/zync-sh/zync/compare/v2.10.0...v2.10.1
 [2.10.0]: https://github.com/zync-sh/zync/compare/v2.9.2...v2.10.0
 [2.9.2]: https://github.com/zync-sh/zync/compare/v2.9.1...v2.9.2

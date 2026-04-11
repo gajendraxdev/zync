@@ -80,6 +80,13 @@ export const ConnectionItem = memo(function ConnectionItem({ conn, isCollapsed, 
     };
 
     const handleDragOver = (e: React.DragEvent) => {
+        const draggingConnection = e.dataTransfer.types.includes('connection-id');
+        const draggingFolder = e.dataTransfer.types.includes('folder-path');
+        if (draggingConnection || draggingFolder) {
+            e.preventDefault();
+            return;
+        }
+
         const dragSource = getCurrentDragSource();
         if (dragSource && dragSource.connectionId !== conn.id && conn.status === 'connected') {
             e.preventDefault();
