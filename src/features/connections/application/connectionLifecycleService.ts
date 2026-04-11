@@ -37,6 +37,7 @@ export const markConnectionErrorIfNeeded = (
     connectionId: string,
 ): Connection[] => {
     const current = connections.find((connection) => connection.id === connectionId);
+    if (!current) return connections;
     if (current?.status === 'error') return connections;
 
     return markConnectionStatus(connections, connectionId, 'error');
@@ -93,8 +94,14 @@ export const reduceTabCloseState = (
     closingTabId: string,
 ): CloseTabStateResult => {
     const nextTabs = tabs.filter((tab) => tab.id !== closingTabId);
+    const hasCurrentActive = !!activeTabId && nextTabs.some((tab) => tab.id === activeTabId);
+    const fallbackActiveTabId = nextTabs.length > 0 ? nextTabs[nextTabs.length - 1].id : null;
     const nextActiveTabId =
-        activeTabId === closingTabId ? (nextTabs.length > 0 ? nextTabs[nextTabs.length - 1].id : null) : activeTabId;
+        activeTabId === closingTabId
+            ? fallbackActiveTabId
+            : hasCurrentActive
+                ? activeTabId
+                : fallbackActiveTabId;
     const activeTab = nextTabs.find((tab) => tab.id === nextActiveTabId);
 
     return {

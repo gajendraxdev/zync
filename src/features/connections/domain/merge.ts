@@ -41,14 +41,16 @@ export const mergeImportedConnectionsByName = (
         if (match) {
             updated += 1;
             matchedIds.add(match.id);
-            const preservedMetadata: Partial<Connection> = {
-                isFavorite: match.isFavorite,
-                pinnedFeatures: match.pinnedFeatures,
-                icon: match.icon,
-                lastConnected: match.lastConnected,
-                homePath: match.homePath,
-                createdAt: match.createdAt,
-            };
+            const preservedMetadata: Partial<Connection> = {};
+            if (match.isFavorite !== undefined) preservedMetadata.isFavorite = match.isFavorite;
+            if (match.pinnedFeatures !== undefined) preservedMetadata.pinnedFeatures = match.pinnedFeatures;
+            if (match.icon !== undefined) preservedMetadata.icon = match.icon;
+            if (match.lastConnected !== undefined) preservedMetadata.lastConnected = match.lastConnected;
+            if (match.homePath !== undefined) preservedMetadata.homePath = match.homePath;
+            if (match.createdAt !== undefined) preservedMetadata.createdAt = match.createdAt;
+            if (match.folder !== undefined) preservedMetadata.folder = match.folder;
+            if (match.theme !== undefined) preservedMetadata.theme = match.theme;
+            if (match.tags !== undefined) preservedMetadata.tags = match.tags;
             mergedImported.push({ ...incoming, ...preservedMetadata, id: match.id, status: match.status });
         } else {
             created += 1;

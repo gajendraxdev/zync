@@ -71,6 +71,12 @@ runTest('credential health checks surface actionable hints', () => {
     'key',
   );
   assert.equal(missingKeyChecks.some((check) => check.message.includes('uncommon')), false);
+
+  const ipv6Checks = getCredentialHealthChecks(
+    { host: '[2001:db8::1]', username: 'ubuntu' },
+    'password',
+  );
+  assert.equal(ipv6Checks.some((check) => check.message.includes('domain/IP pattern')), false);
 });
 
 runTest('folder exact helpers preserve current exact-match semantics', () => {
@@ -124,6 +130,26 @@ runTest('import merge keeps existing ids for same names and dedups by id', () =>
   assert.equal(web?.status, 'connected');
   assert.equal(cache?.id, 'y');
   assert.equal((queue?.id || '').trim().length > 0, true);
+});
+
+runTest('import merge keeps incoming metadata when match metadata is undefined', () => {
+  const existing = [{ id: 'a', name: 'web', status: 'connected' }];
+  const incoming = [{ id: 'x', name: 'web', status: 'disconnected', icon: 'Ubuntu' }];
+
+  const result = mergeImportedConnectionsByName(existing, incoming);
+  const web = result.merged.find((c) => c.id === 'a');
+  assert.equal(web?.icon, 'Ubuntu');
+});
+
+runTest('import merge preserves existing folder/theme/tags metadata on matched updates', () => {
+  const existing = [{ id: 'a', name: 'web', status: 'connected', folder: 'prod', theme: 'blue', tags: ['core'] }];
+  const incoming = [{ id: 'x', name: 'web', status: 'disconnected' }];
+
+  const result = mergeImportedConnectionsByName(existing, incoming);
+  const web = result.merged.find((c) => c.id === 'a');
+  assert.equal(web?.folder, 'prod');
+  assert.equal(web?.theme, 'blue');
+  assert.deepEqual(web?.tags, ['core']);
 });
 
 runTest('import plan builds recommendations and applies new/update/skip decisions', () => {

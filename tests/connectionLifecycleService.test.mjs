@@ -41,6 +41,12 @@ runTest('markConnectionErrorIfNeeded is idempotent for existing error', () => {
   assert.equal(next, connections);
 });
 
+runTest('markConnectionErrorIfNeeded returns original array when connection is missing', () => {
+  const connections = [{ id: 'a', status: 'connected' }];
+  const next = markConnectionErrorIfNeeded(connections, 'missing');
+  assert.equal(next, connections);
+});
+
 runTest('reduceTabCloseState recalculates active tab and connection', () => {
   const tabs = [
     { id: '1', connectionId: 'c1' },
@@ -50,6 +56,16 @@ runTest('reduceTabCloseState recalculates active tab and connection', () => {
   assert.equal(next.tabs.length, 1);
   assert.equal(next.activeTabId, '1');
   assert.equal(next.activeConnectionId, 'c1');
+});
+
+runTest('reduceTabCloseState falls back when active tab id is dangling', () => {
+  const tabs = [
+    { id: '1', connectionId: 'c1' },
+    { id: '2', connectionId: 'c2' },
+  ];
+  const next = reduceTabCloseState(tabs, 'missing', '1');
+  assert.equal(next.activeTabId, '2');
+  assert.equal(next.activeConnectionId, 'c2');
 });
 
 runTest('getCloseTabPreActions returns disconnect for connected remote tab', () => {

@@ -58,6 +58,12 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
     });
     const [authMethod, setAuthMethod] = useState<'password' | 'key'>('password');
     const [allowDuplicateEndpoint, setAllowDuplicateEndpoint] = useState(false);
+    const activeEditingConnectionId = useMemo(
+        () => (editingConnectionId && connections.some((connection) => connection.id === editingConnectionId))
+            ? editingConnectionId
+            : null,
+        [connections, editingConnectionId]
+    );
 
     useEffect(() => {
         if (!isOpen) return;
@@ -65,14 +71,14 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
         setTestStatus('idle');
         setTestMessage('');
         setAllowDuplicateEndpoint(false);
-        setIsAdvancedOpen(!!editingConnectionId);
+        setIsAdvancedOpen(!!activeEditingConnectionId);
         setShowAllIcons(false);
-        setEntryMode(editingConnectionId ? 'manual' : 'chooser');
+        setEntryMode(activeEditingConnectionId ? 'manual' : 'chooser');
         setSubmitAttempted(false);
         setTouched({ host: false, username: false, port: false, keyPath: false });
 
-        if (editingConnectionId) {
-            const conn = useAppStore.getState().connections.find(c => c.id === editingConnectionId);
+        if (activeEditingConnectionId) {
+            const conn = useAppStore.getState().connections.find(c => c.id === activeEditingConnectionId);
             if (conn) {
                 setFormData({
                     ...conn,
@@ -83,13 +89,17 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
                     tags: conn.tags || []
                 });
                 setAuthMethod(conn.privateKeyPath ? 'key' : 'password');
+                return;
             }
+
+            setFormData({ name: '', host: '', username: '', port: 22, password: '', privateKeyPath: '', jumpServerId: undefined, icon: 'Server', folder: '', theme: '', tags: [] });
+            setAuthMethod('password');
             return;
         }
 
         setFormData({ name: '', host: '', username: '', port: 22, password: '', privateKeyPath: '', jumpServerId: undefined, icon: 'Server', folder: '', theme: '', tags: [] });
         setAuthMethod('password');
-    }, [isOpen, editingConnectionId]);
+    }, [activeEditingConnectionId, isOpen]);
 
     const validation = useMemo(
         () => validateConnectionDraft(formData, authMethod),
@@ -104,14 +114,14 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
     const visiblePortError = (submitAttempted || touched.port) ? portError : '';
     const visibleKeyPathError = (submitAttempted || touched.keyPath) ? keyPathError : '';
     const duplicateConnection = useMemo(
-        () => findDuplicateConnectionByEndpoint(connections, formData, editingConnectionId),
-        [connections, editingConnectionId, formData]
+        () => findDuplicateConnectionByEndpoint(connections, formData, activeEditingConnectionId),
+        [activeEditingConnectionId, connections, formData]
     );
     const credentialHealthChecks = useMemo(
         () => getCredentialHealthChecks(formData, authMethod),
         [formData, authMethod]
     );
-    const canSave = validation.ok && (!duplicateConnection || allowDuplicateEndpoint);
+    const canSave = !duplicateConnection || allowDuplicateEndpoint;
     const selectedIcon = formData.icon || 'Server';
     const compactIcons = ICONS.slice(0, 12);
     const visibleIcons = showAllIcons
@@ -121,16 +131,16 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
             : [...compactIcons, selectedIcon];
 
     const saveForm = (): Connection | null => {
-        if (!canSave) return null;
+        if (!canSave || !validation.ok) return null;
 
         const connectionData = buildConnectionSavePayload({
             formData,
             authMethod,
-            editingConnectionId,
+            editingConnectionId: activeEditingConnectionId,
             connections,
         }) as Connection;
 
-        if (editingConnectionId) {
+        if (activeEditingConnectionId) {
             editConnection(connectionData);
         } else {
             addConnection(connectionData);
@@ -187,7 +197,6 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
             const selected = await open({
                 multiple: false,
                 directory: false,
-                filters: [{ name: 'Key Files', extensions: ['pem', 'key', 'ppk'] }]
             });
 
             if (!selected) return;
@@ -218,7 +227,7 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
         <Modal
             isOpen={isOpen}
             onClose={onClose}
-            title={editingConnectionId ? "Edit Connection" : "New Connection"}
+            title={activeEditingConnectionId ? "Edit Connection" : "New Connection"}
             subtitle={entryMode === 'manual' ? 'Basic details, authentication, then optional advanced settings.' : undefined}
             className="w-full max-w-2xl"
             headerClassName="p-2.5"
@@ -226,7 +235,7 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
             titleClassName="text-sm"
         >
             <div className="flex flex-col h-[520px]">
-                {entryMode === 'chooser' && !editingConnectionId ? (
+                {entryMode === 'chooser' && !activeEditingConnectionId ? (
                     <div className="flex-1 flex items-center justify-center p-8">
                         <div className="w-full max-w-lg space-y-4">
                             <h4 className="text-base font-semibold text-app-text text-center tracking-tight">Choose how to create this connection</h4>
@@ -512,7 +521,7 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
                                                         </div>
                                                     )
                                                 },
-                                                ...connections.filter(c => c.id !== editingConnectionId).map(c => ({
+                                                ...connections.filter(c => c.id !== activeEditingConnectionId).map(c => ({
                                                     value: c.id,
                                                     label: c.name || c.host,
                                                     description: `${c.username}@${c.host}`,
@@ -532,17 +541,17 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
                         </div>
 
                         <div className="px-4 py-2.5 border-t border-app-border bg-app-bg/90 backdrop-blur-sm flex items-center justify-between gap-3">
-                            {!editingConnectionId ? (
+                            {!activeEditingConnectionId ? (
                                 <Button variant="ghost" size="sm" onClick={() => setEntryMode('chooser')}>
                                     Change Mode
                                 </Button>
                             ) : <div />}
                             <div className="flex items-center gap-2">
                                 <Button disabled={!canSave} onClick={handleSave}>
-                                    {editingConnectionId ? 'Save Changes' : 'Create Connection'}
+                                    {activeEditingConnectionId ? 'Save Changes' : 'Create Connection'}
                                 </Button>
                                 <Button disabled={!canSave} onClick={handleSaveAndConnect}>
-                                    {editingConnectionId ? 'Save & Open' : 'Save & Connect'}
+                                    {activeEditingConnectionId ? 'Save & Open' : 'Save & Connect'}
                                 </Button>
                             </div>
                         </div>
