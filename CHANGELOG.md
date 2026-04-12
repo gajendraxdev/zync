@@ -2,7 +2,14 @@
 
 All notable changes to Zync are documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.11.1]
+
+### Fixed
+- **Plugin Theme Payload Reliability**: Versioned the host → plugin theme payload, improved CSS variable resolution (body + root fallback), expanded rgb parsing, and fixed memoization so editor/panel plugins receive accurate theme updates. ([c87e3d7])
+
+
+- **AI Tool Path Validation Hardening**: Updated backend AI file-tool path validation to block real traversal components (`..`) while allowing valid filenames containing double dots (for example, `config..bak`). ([5d4f87f])
+- **AI Write Tool Output Capping**: Routed `write_file` tool status output through shared `cap_output()` so all AI tool outputs consistently respect truncation limits and artifact fallback behavior. ([5d4f87f])
 
 ## [2.11.0]
 
@@ -587,6 +594,9 @@ All notable changes to Zync are documented in this file. The format is based on 
 [64cb56a]: https://github.com/zync-sh/zync/commit/64cb56a
 [636db7a]: https://github.com/zync-sh/zync/commit/636db7a
 [a2dffb7]: https://github.com/zync-sh/zync/commit/a2dffb7
+[c87e3d7]: https://github.com/zync-sh/zync/commit/c87e3d7
+[5d4f87f]: https://github.com/zync-sh/zync/commit/5d4f87f
+[2.11.1]: https://github.com/zync-sh/zync/compare/v2.11.0...v2.11.1
 [2.11.0]: https://github.com/zync-sh/zync/compare/v2.10.1...v2.11.0
 [2.10.1]: https://github.com/zync-sh/zync/compare/v2.10.0...v2.10.1
 [2.10.0]: https://github.com/zync-sh/zync/compare/v2.9.2...v2.10.0
