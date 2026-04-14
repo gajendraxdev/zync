@@ -11,6 +11,22 @@ import { ContextMenu } from './ui/ContextMenu';
 import { Button } from './ui/Button';
 import { Terminal } from 'lucide-react';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
+import { InputTracker } from '../lib/ghostSuggestions/inputTracker';
+import {
+  acceptGhostCommand,
+  commitGhostCommand,
+  resolveInlineSuggestion,
+  resolvePopupCandidates,
+  resolveTabCompletionOutcome,
+  shouldPreferPathSuggestion,
+} from '../lib/ghostSuggestions/client';
+import type { GhostTabState } from '../lib/ghostSuggestions/types';
+import { createInitialGhostTabState, resetGhostTabState } from '../lib/ghostSuggestions/tabState';
+import { bindGhostTrackerRuntime } from '../lib/ghostSuggestions/runtime';
+import { handleGhostInputEvent } from '../lib/ghostSuggestions/runtime';
+import { useGhostPopupState } from '../lib/ghostSuggestions/uiState';
+import { GhostSuggestionOverlay } from './terminal/GhostSuggestionOverlay';
+import { GhostSuggestionListOverlay } from './terminal/GhostSuggestionListOverlay';
 
 // Module-level cache to preserve xterm instances across component remounts
 // This ensures terminal history is maintained during tab reordering
@@ -25,6 +41,8 @@ interface TerminalCache {
   inputFlushTimer: ReturnType<typeof window.setTimeout> | null;
   lastResize: { rows: number; cols: number } | null;
   unlisten?: UnlistenFn[];
+  ghostTracker?: InputTracker;
+  onDataDisposable?: { dispose: () => void };
 }
 const terminalCache = new Map<string, TerminalCache>();
 
@@ -59,6 +77,7 @@ export function destroyTerminalInstance(termId: string) {
   const cached = terminalCache.get(termId);
   if (cached) {
     clearPendingInput(termId);
+    cached.ghostTracker?.destroy();
     // Remove all Tauri event listeners if they exist
     if (cached.unlisten && cached.unlisten.length > 0) {
       cached.unlisten.forEach(fn => fn());
@@ -343,10 +362,19 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
   // Search State
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchText, setSearchText] = useState('');
+  const [ghostSuggestion, setGhostSuggestion] = useState('');
+  const {
+    ghostPopup,
+    ghostPopupRef,
+    closeGhostPopup,
+    openGhostPopup,
+    moveGhostPopupSelection,
+  } = useGhostPopupState();
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Context Menu State
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const ghostTabStateRef = useRef<GhostTabState>(createInitialGhostTabState());
 
   // Search handlers
   const handleNext = useCallback(() => {
@@ -375,6 +403,19 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
     }
     : undefined;
   const updateSettings = useAppStore(state => state.updateSettings);
+  const ghostSettings = settings.ghostSuggestions;
+  const ghostSettingsRef = useRef(ghostSettings);
+
+  useEffect(() => {
+    ghostSettingsRef.current = ghostSettings;
+    if (!ghostSettings.inlineEnabled) {
+      setGhostSuggestion('');
+    }
+    if (!ghostSettings.popupEnabled) {
+      closeGhostPopup();
+      ghostTabStateRef.current = resetGhostTabState();
+    }
+  }, [ghostSettings, closeGhostPopup]);
 
   // Helper for terminal settings update if needed, though usually we update global settings
   const updateTerminalSettings = (newSettings: Partial<typeof settings.terminal>) => {
@@ -383,6 +424,7 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
 
   const activeConnectionId = connectionId || globalActiveId;
   const terminalKey = activeConnectionId || 'local';
+  const ghostScope = connectionId || terminalKey;
 
   // Find connection status
   const isLocal = terminalKey === 'local';
@@ -391,6 +433,22 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
 
   // Use termId if provided, otherwise fallback to terminalKey
   const sessionId = termId || terminalKey;
+
+  const acceptGhostSuffix = useCallback((suffix: string) => {
+    if (!suffix) return;
+    const cached = terminalCache.get(sessionId);
+    cached?.ghostTracker?.appendToLineBuffer(suffix);
+    cached?.ghostTracker?.clearSuggestion();
+    queueTerminalInput(sessionId, suffix);
+    acceptGhostCommand(cached?.ghostTracker?.getLineBuffer() ?? '', ghostScope).catch(() => {});
+    closeGhostPopup();
+    setGhostSuggestion('');
+  }, [sessionId, ghostScope, closeGhostPopup]);
+
+  const truncateLabel = useCallback((label: string, max = 60) => {
+    if (label.length <= max) return label;
+    return `${label.slice(0, Math.max(0, max - 1))}…`;
+  }, []);
 
   // Apply Settings Effect
   useEffect(() => {
@@ -602,7 +660,82 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
         inputFlushTimer: null,
         lastResize: null,
       });
+
+      // Create tracker once per cached terminal; handlers are bound per mount below.
+      const ghostTracker = new InputTracker({
+        onLineChange: () => {},
+        onAccept: () => {},
+        onDismiss: () => {},
+        onHistoryCommit: () => {},
+      });
+      terminalCache.get(sessionId)!.ghostTracker = ghostTracker;
     }
+
+    // Bind ghost suggestion handlers for this mount (prevents stale React callbacks
+    // when the terminal instance survives remounts via terminalCache).
+    const cachedGhostTracker = terminalCache.get(sessionId)?.ghostTracker;
+    const unbindGhostTracker = cachedGhostTracker
+      ? bindGhostTrackerRuntime({
+        tracker: cachedGhostTracker,
+        debounceMs: 30,
+        resolveInlineSuggestion: async (line) => {
+          if (!ghostSettingsRef.current.inlineEnabled) return '';
+          const termState = useAppStore.getState().terminals[terminalKey]?.find(t => t.id === sessionId);
+          const cwd = termState?.lastKnownCwd ?? termState?.initialPath;
+          return resolveInlineSuggestion({
+            line,
+            cwd,
+            scope: ghostScope,
+            providers: ghostSettingsRef.current.providers,
+          });
+        },
+        onSuggestion: (suffix, line) => {
+          if (ghostSettingsRef.current.inlineEnabled) {
+            setGhostSuggestion(suffix);
+          } else {
+            setGhostSuggestion('');
+          }
+
+          // Always close immediately so stale results from a previous async
+          // call never remain visible while the new request is in-flight.
+          closeGhostPopup();
+
+          if (!ghostSettingsRef.current.popupEnabled || line.trim().length < 2) {
+            return;
+          }
+
+          const termState = useAppStore.getState().terminals[terminalKey]?.find(t => t.id === sessionId);
+          const cwd = termState?.lastKnownCwd ?? termState?.initialPath;
+          const preferPath = shouldPreferPathSuggestion(line);
+          void resolvePopupCandidates({
+            line,
+            cwd,
+            scope: ghostScope,
+            preferPath,
+            limit: 10,
+            providers: ghostSettingsRef.current.providers,
+          }).then((items) => {
+            if (!cachedGhostTracker || cachedGhostTracker.getLineBuffer() !== line) return;
+            if (items.length > 1) openGhostPopup(items, line);
+            else closeGhostPopup();
+          }).catch(() => {
+            closeGhostPopup();
+          });
+        },
+        onAccept: (suffix, lineAfterAccept) => {
+          queueTerminalInput(sessionId, suffix);
+          acceptGhostCommand(lineAfterAccept, ghostScope).catch(() => {});
+        },
+        onHistoryCommit: (cmd) => {
+          commitGhostCommand(cmd, ghostScope).catch(() => {});
+        },
+        onClearUI: () => {
+          setGhostSuggestion('');
+          closeGhostPopup();
+          ghostTabStateRef.current = resetGhostTabState();
+        },
+      })
+      : () => {};
 
     fitAddonRef.current = fitAddon;
     searchAddonRef.current = searchAddon;
@@ -649,9 +782,57 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
         });
     }
 
-    // Handle data from user input - only set up for new terminals
-    if (isNewTerminal) {
-      term.onData((data) => {
+    const triggerGhostPopup = async (tracker: InputTracker) => {
+      try {
+        const line = tracker.getLineBuffer();
+        if (!ghostSettingsRef.current.popupEnabled) {
+          queueTerminalInput(sessionId, '\t');
+          return;
+        }
+        const termState = useAppStore.getState().terminals[terminalKey]?.find(t => t.id === sessionId);
+        const cwd = termState?.lastKnownCwd ?? termState?.initialPath;
+        const outcome = await resolveTabCompletionOutcome({
+          line,
+          cwd,
+          scope: ghostScope,
+          previousTabState: ghostTabStateRef.current,
+          now: Date.now(),
+          limit: 24,
+          providers: ghostSettingsRef.current.providers,
+        });
+
+        if (outcome.kind === 'accept') {
+          ghostTabStateRef.current = outcome.nextState;
+          acceptGhostSuffix(outcome.suffix);
+          return;
+        }
+        if (outcome.kind === 'show_list') {
+          ghostTabStateRef.current = outcome.nextState;
+          openGhostPopup(outcome.items, line);
+          return;
+        }
+
+        closeGhostPopup();
+        ghostTabStateRef.current = resetGhostTabState();
+        // No custom candidates: fall back to shell-native tab completion.
+        queueTerminalInput(sessionId, '\t');
+      } catch (error) {
+        console.warn('[Ghost] Tab popup resolution failed:', error);
+        ghostTabStateRef.current = resetGhostTabState();
+        closeGhostPopup();
+        queueTerminalInput(sessionId, '\t');
+      }
+    };
+
+    // Rebind input handler per mount so callbacks always use current React state.
+    const cachedForInput = terminalCache.get(sessionId);
+    if (cachedForInput?.onDataDisposable) {
+      cachedForInput.onDataDisposable.dispose();
+      cachedForInput.onDataDisposable = undefined;
+    }
+
+    if (cachedForInput) {
+      cachedForInput.onDataDisposable = term.onData(async (data) => {
         const cached = terminalCache.get(sessionId);
 
         // Check if the PTY session has ended and needs restart
@@ -667,7 +848,9 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
 
           // Get shell preference for local terminals on Windows
           const isLocalTerminal = terminalKey === 'local';
-          const shellSetting = isLocalTerminal ? settings.localTerm?.windowsShell : undefined;
+          const shellSetting = isLocalTerminal
+            ? useAppStore.getState().settings.localTerm?.windowsShell
+            : undefined;
 
           // Resolve CWD for restart
           const terminals = useAppStore.getState().terminals;
@@ -688,8 +871,28 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
               term.write(`\r\n\x1b[31mFailed to restart terminal session: ${err}\x1b[0m\r\n`);
               cached.spawned = false;
             });
+          cached.ghostTracker?.reset();
+          setGhostSuggestion('');
+          closeGhostPopup();
           return; // Don't send the input that triggered restart
         }
+
+        // Ghost popup + inline suggestion routing.
+        const handledByGhost = await handleGhostInputEvent({
+          data: data,
+          popup: ghostPopupRef.current,
+          tracker: cached?.ghostTracker,
+          allowTabPopup: ghostSettingsRef.current.popupEnabled,
+          onMovePopupSelection: moveGhostPopupSelection,
+          onAcceptPopupSelection: () => {
+            const popup = ghostPopupRef.current;
+            const suffix = popup.items[popup.selectedIndex] ?? '';
+            acceptGhostSuffix(suffix);
+          },
+          onDismissPopup: closeGhostPopup,
+          onTriggerTabPopup: triggerGhostPopup,
+        });
+        if (handledByGhost) return;
 
         queueTerminalInput(sessionId, data);
       });
@@ -774,11 +977,16 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
       if (ipcResizeTimer) clearTimeout(ipcResizeTimer);
 
       const cachedForCleanup = terminalCache.get(sessionId);
+      if (cachedForCleanup?.onDataDisposable) {
+        cachedForCleanup.onDataDisposable.dispose();
+        cachedForCleanup.onDataDisposable = undefined;
+      }
       if (cachedForCleanup?.spawned) {
         flushPendingInput(sessionId);
       } else {
         clearPendingInput(sessionId);
       }
+      unbindGhostTracker();
 
       // NOTE: We do NOT dispose the terminal here!
       // The terminal instance stays in cache to preserve history.
@@ -1057,6 +1265,34 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
           y={contextMenu.y}
           onClose={() => setContextMenu(null)}
           items={[
+            ...(
+              ghostSettings.contextMenuEnabled && ghostPopup.items.length
+                ? [
+                  {
+                    label: 'Suggestions',
+                    children: ghostPopup.items.slice(0, 8).map((suffix) => ({
+                      label: truncateLabel(`${ghostPopup.anchorLine}${suffix}`),
+                      action: () => {
+                        acceptGhostSuffix(suffix);
+                      },
+                    })),
+                  },
+                  { separator: true as const },
+                ]
+                : ghostSettings.contextMenuEnabled && ghostSuggestion
+                  ? [
+                    {
+                      label: truncateLabel(
+                        `Accept suggestion: ${ghostPopup.anchorLine || (terminalCache.get(sessionId)?.ghostTracker?.getLineBuffer() ?? '')}${ghostSuggestion}`
+                      ),
+                      action: () => {
+                        acceptGhostSuffix(ghostSuggestion);
+                      },
+                    },
+                    { separator: true as const },
+                  ]
+                  : []
+            ),
             {
               label: 'Copy',
               icon: <Copy className="w-4 h-4" />,
@@ -1098,7 +1334,30 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
         "absolute inset-0 px-2 pt-2 pb-2 pointer-events-none",
         layoutTransitioning && "overflow-hidden"
       )}>
-        <div ref={containerRef} className="h-full w-full terminal-container relative pointer-events-auto" />
+        {/*
+          Wrap containerRef and the ghost overlay in a shared relative div so
+          the overlay can be positioned as a sibling (not a child) of the xterm
+          container. xterm.js owns the DOM inside containerRef via term.open() —
+          putting React children inside it causes reconciliation conflicts.
+        */}
+        <div className="relative h-full w-full">
+          <div ref={containerRef} className="h-full w-full terminal-container pointer-events-auto" />
+          {termRef.current && ghostSettings.inlineEnabled && ghostSuggestion && !ghostPopup.visible && (
+            <div className="absolute inset-0 pointer-events-none overflow-hidden">
+              <GhostSuggestionOverlay term={termRef.current} suggestion={ghostSuggestion} />
+            </div>
+          )}
+          {termRef.current && ghostSettings.popupEnabled && ghostPopup.visible && ghostPopup.items.length > 0 && (
+            <div className="absolute inset-0 pointer-events-none overflow-visible z-20">
+              <GhostSuggestionListOverlay
+                term={termRef.current}
+                items={ghostPopup.items}
+                selectedIndex={ghostPopup.selectedIndex}
+                anchorLine={ghostPopup.anchorLine}
+              />
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
