@@ -85,7 +85,9 @@ pub fn best_candidate_for_prefix<'a>(
         let score = scope.scores.get(cmd).map(|e| e.live_score()).unwrap_or(0.0);
         let cmd_len = cmd.chars().count();
         let suffix_len = cmd_len.saturating_sub(prefix_len);
-        let suffix = &cmd[prefix.len()..];
+        // Use char-boundary byte index to avoid panics on multibyte characters.
+        let byte_idx = cmd.char_indices().nth(prefix_len).map(|(i, _)| i).unwrap_or(cmd.len());
+        let suffix = &cmd[byte_idx..];
         let bonus = suffix_bonus_for_command(prefix, suffix);
 
         if score > best_score
@@ -108,6 +110,9 @@ pub fn ranked_candidates_for_prefix(
     case_insensitive: bool,
     limit: usize,
 ) -> Vec<String> {
+    if limit == 0 {
+        return Vec::new();
+    }
     let prefix_len = prefix.chars().count();
     let prefix_lower = case_insensitive.then(|| prefix.to_lowercase());
     let mut candidates: Vec<(String, f64, i32, usize, usize)> = Vec::new();
@@ -127,7 +132,9 @@ pub fn ranked_candidates_for_prefix(
         let score = scope.scores.get(cmd).map(|e| e.live_score()).unwrap_or(0.0);
         let cmd_len = cmd.chars().count();
         let suffix_len = cmd_len.saturating_sub(prefix_len);
-        let suffix = cmd[prefix.len()..].to_string();
+        // Use char-boundary byte index to avoid panics on multibyte characters.
+        let byte_idx = cmd.char_indices().nth(prefix_len).map(|(i, _)| i).unwrap_or(cmd.len());
+        let suffix = cmd[byte_idx..].to_string();
         let bonus = suffix_bonus_for_command(prefix, &suffix);
         candidates.push((suffix, score, bonus, suffix_len, idx));
     }

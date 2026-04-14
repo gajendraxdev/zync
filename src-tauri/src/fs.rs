@@ -128,10 +128,11 @@ impl FileSystem {
             let mtime = attrs.mtime.unwrap_or(0) as u64 * 1000; // ms
             let perms = attrs.permissions.unwrap_or(0);
 
-            // Check permission bits: 0o040000 = directory, 0o120000 = symlink
+            // Check file-type bits: mask to 0o170000 and compare exact constants.
+            // 0o120000 = symlink, 0o040000 = directory, anything else = regular file.
             let type_str = if (perms & 0o170000) == 0o120000 {
                 "l"
-            } else if (perms & 0o040000) != 0 {
+            } else if (perms & 0o170000) == 0o040000 {
                 "d"
             } else {
                 "-"

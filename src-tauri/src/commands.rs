@@ -3807,10 +3807,11 @@ pub async fn shell_open(app: tauri::AppHandle, path: String) -> Result<(), Strin
 pub async fn shell_get_wsl_distros() -> Result<Vec<String>, String> {
     #[cfg(target_os = "windows")]
     {
-        use std::process::Command;
+        use tokio::process::Command;
         let output = Command::new("wsl.exe")
             .args(["-l", "-q"])
             .output()
+            .await
             .map_err(|e| e.to_string())?;
 
         if !output.status.success() {

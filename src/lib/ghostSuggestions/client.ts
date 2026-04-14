@@ -1,4 +1,4 @@
-import { getPathSuggestion, getPathSuggestions } from './pathCompletion';
+import { getPathSuggestion, getPathSuggestions, getLastArg, getCommandName as getCommandNameFull } from './pathCompletion';
 import type {
   GhostCandidatesRequest,
   GhostCommitRequest,
@@ -112,14 +112,14 @@ export async function resolvePopupCandidates({
   const filesystemPromise = enabledProviders.filesystem
     ? getPathSuggestions(line, cwd, scope, limit, POPUP_FS_TIMEOUT_MS).catch(() => [])
     : Promise.resolve<string[]>([]);
-  const historyPromise = enabledProviders.history
-    ? fetchHistoryCandidates(line, scope, limit)
-    : Promise.resolve<string[]>([]);
   const filesystemItems = await filesystemPromise;
   if (directoryCommand || filesystemCommand) {
     return filesystemItems;
   }
-  const historyItems = await historyPromise;
+  // Only fetch history when needed — not for filesystem-only commands.
+  const historyItems = enabledProviders.history
+    ? await fetchHistoryCandidates(line, scope, limit)
+    : [];
 
   if (preferPath && filesystemItems.length >= 2) {
     return filesystemItems.slice(0, Math.max(1, limit));
@@ -169,21 +169,6 @@ export async function resolveTabCompletionOutcome({
   return { kind: 'fallback' };
 }
 
-function getLastShellArg(line: string): string {
-  // Lightweight parser: handles quotes but not backslash-escape grammar.
-  // If escaped-arg fidelity becomes necessary, replace with a full shell tokenizer.
-  let inSingle = false;
-  let inDouble = false;
-  let start = 0;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === "'" && !inDouble) { inSingle = !inSingle; continue; }
-    if (ch === '"' && !inSingle) { inDouble = !inDouble; continue; }
-    if (ch === ' ' && !inSingle && !inDouble) start = i + 1;
-  }
-  return line.slice(start);
-}
-
 function mergeCandidateLists(primary: string[], secondary: string[], limit: number): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -203,19 +188,12 @@ export function shouldPreferPathSuggestion(line: string): boolean {
   if (isFilesystemCommand(line)) {
     return true;
   }
-  const lastArg = getLastShellArg(line);
+  const lastArg = getLastArg(line);
   return lastArg.includes('/') || lastArg.includes('\\');
 }
 
-function getCommandName(line: string): string {
-  const trimmed = line.trimStart();
-  if (!trimmed) return '';
-  const firstSpace = trimmed.indexOf(' ');
-  return (firstSpace === -1 ? trimmed : trimmed.slice(0, firstSpace)).toLowerCase();
-}
-
 function isDirectoryCommand(line: string): boolean {
-  const command = getCommandName(line);
+  const command = getCommandNameFull(line);
   return command === 'cd' || command === 'pushd' || command === 'popd';
 }
 
@@ -226,9 +204,9 @@ const FILESYSTEM_COMMANDS = new Set([
 ]);
 
 function isFilesystemCommand(line: string): boolean {
-  return isDirectoryCommand(line) || FILESYSTEM_COMMANDS.has(getCommandName(line));
+  return isDirectoryCommand(line) || FILESYSTEM_COMMANDS.has(getCommandNameFull(line));
 }
 
 function shouldUseGhostForLine(line: string): boolean {
-  return Boolean(getCommandName(line));
+  return Boolean(getCommandNameFull(line));
 }

@@ -40,12 +40,14 @@ export class CommandHistory {
     const trimmed = prefix.trim();
     if (trimmed.length < 2) return '';
 
-    const match = this.entries.find(cmd => cmd.startsWith(trimmed) && cmd !== trimmed);
-    return match ? match.slice(trimmed.length) : '';
+    // Use the original prefix (not trimmed) for matching and slicing so that
+    // trailing spaces in the prefix are preserved and compared correctly.
+    const match = this.entries.find(cmd => cmd.startsWith(prefix) && cmd !== prefix);
+    return match ? match.slice(prefix.length) : '';
   }
 
   getEntries(): readonly string[] {
-    return this.entries;
+    return [...this.entries];
   }
 
   clear(): void {

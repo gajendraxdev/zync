@@ -20,18 +20,44 @@ export function GhostSuggestionOverlay({ term, suggestion }: Props) {
 
   useEffect(() => {
     if (!suggestion) return;
+
     let frameId = 0;
+    let prevLeft = 0;
+    let prevTop = 0;
+    let stableFrames = 0;
+    const STOP_AFTER = 5; // stop the burst after 5 consecutive unchanged frames
 
     const tick = () => {
       const next = getCursorPixelPosition(term);
-      setPos((prev) => (prev.left === next.left && prev.top === next.top ? prev : next));
+      if (next.left !== prevLeft || next.top !== prevTop) {
+        prevLeft = next.left;
+        prevTop = next.top;
+        stableFrames = 0;
+        setPos(next);
+      } else {
+        stableFrames++;
+      }
+      if (stableFrames < STOP_AFTER) {
+        frameId = window.requestAnimationFrame(tick);
+      }
+    };
+
+    // Restart a short RAF burst on any terminal input or resize event so the
+    // overlay tracks cursor movement without looping forever while idle.
+    const startBurst = () => {
+      stableFrames = 0;
+      window.cancelAnimationFrame(frameId);
       frameId = window.requestAnimationFrame(tick);
     };
 
-    tick();
+    startBurst();
+    const dataDisposable = term.onData(startBurst);
+    const resizeDisposable = term.onResize(startBurst);
 
     return () => {
       window.cancelAnimationFrame(frameId);
+      dataDisposable.dispose();
+      resizeDisposable.dispose();
     };
   }, [term, suggestion]);
 
