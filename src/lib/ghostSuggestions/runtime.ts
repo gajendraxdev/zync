@@ -114,7 +114,7 @@ export async function handleGhostInputEvent({
 }: HandleGhostInputParams): Promise<boolean> {
   const dispatch = resolveGhostInputDispatchDecision(data, popup, Boolean(tracker), allowTabPopup);
 
-  if (dispatch.moveDelta) {
+  if (typeof dispatch.moveDelta === 'number') {
     onMovePopupSelection(dispatch.moveDelta);
     return true;
   }

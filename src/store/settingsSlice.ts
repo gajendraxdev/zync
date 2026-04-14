@@ -325,15 +325,22 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
     },
 
     updateGhostSuggestionsSettings: async (updates) => {
+        // Normalize: accept both the inner fields directly or wrapped in { ghostSuggestions: {...} }
+        // so callers can pass either shape without causing double-nesting.
+        const payload = (
+            'ghostSuggestions' in updates
+                ? (updates as Record<string, unknown>)['ghostSuggestions']
+                : updates
+        ) as Partial<AppSettings['ghostSuggestions']>;
         const current = get().settings.ghostSuggestions;
         const updated = {
             ...get().settings,
             ghostSuggestions: {
                 ...current,
-                ...updates,
+                ...payload,
                 providers: {
                     ...current.providers,
-                    ...(updates.providers || {}),
+                    ...(payload.providers || {}),
                 },
             },
         };

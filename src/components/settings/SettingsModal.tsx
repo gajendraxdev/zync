@@ -42,6 +42,22 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     const updateFileManagerSettings = useAppStore(state => state.updateFileManagerSettings);
     const updateLocalTermSettings = useAppStore(state => state.updateLocalTermSettings);
     const updateKeybindings = useAppStore(state => state.updateKeybindings);
+
+    const setGhostSuggestionsField = (patch: Partial<typeof settings.ghostSuggestions>) => {
+        updateSettings({
+            ghostSuggestions: { ...settings.ghostSuggestions, ...patch },
+        });
+    };
+
+    const setGhostProviderField = (patch: Partial<typeof settings.ghostSuggestions.providers>) => {
+        updateSettings({
+            ghostSuggestions: {
+                ...settings.ghostSuggestions,
+                providers: { ...settings.ghostSuggestions?.providers, ...patch },
+            },
+        });
+    };
+
     const [activeTab, setActiveTab] = useState<Tab>('terminal');
     const [pluginTab, setPluginTab] = useState<'installed' | 'marketplace' | 'developer'>('installed');
     const [isTransitioning, setIsTransitioning] = useState(false);
@@ -928,12 +944,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                                 type="checkbox"
                                                 className="mt-0.5 accent-[var(--color-app-accent)]"
                                                 checked={settings.ghostSuggestions?.inlineEnabled ?? true}
-                                                onChange={(e) => updateSettings({
-                                                    ghostSuggestions: {
-                                                        ...settings.ghostSuggestions,
-                                                        inlineEnabled: e.target.checked,
-                                                    },
-                                                })}
+                                                onChange={(e) => setGhostSuggestionsField({ inlineEnabled: e.target.checked })}
                                             />
                                             <div>
                                                 <div className="text-sm font-medium text-[var(--color-app-text)]">Inline ghost text</div>
@@ -948,12 +959,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                                 type="checkbox"
                                                 className="mt-0.5 accent-[var(--color-app-accent)]"
                                                 checked={settings.ghostSuggestions?.popupEnabled ?? true}
-                                                onChange={(e) => updateSettings({
-                                                    ghostSuggestions: {
-                                                        ...settings.ghostSuggestions,
-                                                        popupEnabled: e.target.checked,
-                                                    },
-                                                })}
+                                                onChange={(e) => setGhostSuggestionsField({ popupEnabled: e.target.checked })}
                                             />
                                             <div>
                                                 <div className="text-sm font-medium text-[var(--color-app-text)]">Tab popup suggestions</div>
@@ -968,12 +974,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                                 type="checkbox"
                                                 className="mt-0.5 accent-[var(--color-app-accent)]"
                                                 checked={settings.ghostSuggestions?.contextMenuEnabled ?? false}
-                                                onChange={(e) => updateSettings({
-                                                    ghostSuggestions: {
-                                                        ...settings.ghostSuggestions,
-                                                        contextMenuEnabled: e.target.checked,
-                                                    },
-                                                })}
+                                                onChange={(e) => setGhostSuggestionsField({ contextMenuEnabled: e.target.checked })}
                                             />
                                             <div>
                                                 <div className="text-sm font-medium text-[var(--color-app-text)]">Context-menu suggestion actions</div>
@@ -993,15 +994,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                                         type="checkbox"
                                                         className="mt-0.5 accent-[var(--color-app-accent)]"
                                                         checked={settings.ghostSuggestions?.providers?.history ?? true}
-                                                        onChange={(e) => updateSettings({
-                                                            ghostSuggestions: {
-                                                                ...settings.ghostSuggestions,
-                                                                providers: {
-                                                                    ...settings.ghostSuggestions?.providers,
-                                                                    history: e.target.checked,
-                                                                },
-                                                            },
-                                                        })}
+                                                        onChange={(e) => setGhostProviderField({ history: e.target.checked })}
                                                     />
                                                     <div>
                                                         <div className="text-sm font-medium text-[var(--color-app-text)]">History</div>
@@ -1016,15 +1009,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                                         type="checkbox"
                                                         className="mt-0.5 accent-[var(--color-app-accent)]"
                                                         checked={settings.ghostSuggestions?.providers?.filesystem ?? true}
-                                                        onChange={(e) => updateSettings({
-                                                            ghostSuggestions: {
-                                                                ...settings.ghostSuggestions,
-                                                                providers: {
-                                                                    ...settings.ghostSuggestions?.providers,
-                                                                    filesystem: e.target.checked,
-                                                                },
-                                                            },
-                                                        })}
+                                                        onChange={(e) => setGhostProviderField({ filesystem: e.target.checked })}
                                                     />
                                                     <div>
                                                         <div className="text-sm font-medium text-[var(--color-app-text)]">Filesystem paths</div>

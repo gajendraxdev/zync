@@ -1,12 +1,15 @@
 /**
- * SuggestionEngine — orchestrates suggestion providers in priority order.
+ * SuggestionEngine — orchestrates synchronous suggestion providers in priority order.
  *
- * Phase 1: synchronous HistoryProvider only.
- * Phase 3: AiProvider will be added as a second async provider with its own debounce.
+ * All providers implement the synchronous `SyncSuggestionProvider` contract.
+ * Async providers (e.g. AI) are handled upstream via the IPC layer in `client.ts`
+ * and do not go through this engine.
  */
 
 export interface SyncSuggestionProvider {
+  /** Display name used for error reporting. */
   name: string;
+  /** Return a non-empty suffix to complete `line`, or '' when no match. */
   query(line: string): string;
 }
 
@@ -25,16 +28,20 @@ export class SuggestionEngine {
   querySync(line: string): string {
     if (line.trim().length < 2) return '';
     for (const provider of this.providers) {
-      const result = provider.query(line);
-      if (result) return result;
+      try {
+        const result = provider.query(line);
+        if (result) return result;
+      } catch (err) {
+        console.error(`[SuggestionEngine] Provider "${provider.name}" threw:`, err);
+      }
     }
     return '';
   }
 
   /**
    * Query with optional debounce. Pass debounceMs=0 (default) for immediate
-   * synchronous resolution — used in Phase 1 with history-only providers.
-   * Phase 3 async providers will pass a positive debounceMs.
+   * synchronous resolution. Pass a positive debounceMs to delay the callback
+   * (useful when called from a high-frequency input handler).
    */
   queryDebounced(
     line: string,

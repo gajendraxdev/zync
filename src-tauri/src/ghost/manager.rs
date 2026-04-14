@@ -54,16 +54,30 @@ impl GhostManager {
         }
     }
 
-    /// Serialize to disk. Called while the data lock is held by the caller
-    /// (we receive a reference to avoid a second lock).
+    /// Serialize to disk atomically: write to a temp file then rename so a
+    /// crash mid-write never leaves a partial/corrupt history file.
     async fn save_inner(&self, data: &GhostData) {
-        match serde_json::to_string(data) {
-            Ok(json) => {
-                if let Err(e) = tokio::fs::write(&self.persist_path, json).await {
-                    eprintln!("[Ghost] Failed to persist history: {}", e);
-                }
+        let json = match serde_json::to_string(data) {
+            Ok(j) => j,
+            Err(e) => {
+                eprintln!("[Ghost] Failed to serialize history: {}", e);
+                return;
             }
-            Err(e) => eprintln!("[Ghost] Failed to serialize history: {}", e),
+        };
+
+        // Temp path: same directory, unique per process to avoid collisions.
+        let tmp_path = self.persist_path.with_extension(
+            format!("tmp.{}", std::process::id()),
+        );
+
+        if let Err(e) = tokio::fs::write(&tmp_path, &json).await {
+            eprintln!("[Ghost] Failed to write tmp history: {}", e);
+            return;
+        }
+
+        if let Err(e) = tokio::fs::rename(&tmp_path, &self.persist_path).await {
+            eprintln!("[Ghost] Failed to rename tmp history: {}", e);
+            let _ = tokio::fs::remove_file(&tmp_path).await;
         }
     }
 
@@ -266,17 +280,12 @@ mod tests {
         mgr.commit("kubectl get pods".to_string(), Some("server-b"))
             .await;
 
-        let a = mgr
-            .suggest("git st".to_string(), Some("server-a"))
-            .await
-            .unwrap_or_default();
-        let b = mgr
-            .suggest("git st".to_string(), Some("server-b"))
-            .await
-            .unwrap_or_default();
+        let a = mgr.suggest("git st".to_string(), Some("server-a")).await;
+        let b = mgr.suggest("git st".to_string(), Some("server-b")).await;
 
-        assert_eq!(a, "atus");
-        assert_eq!(b, "");
+        // Assert Option directly so None and Some("") are distinguishable.
+        assert_eq!(a, Some("atus".to_string()));
+        assert_eq!(b, None);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

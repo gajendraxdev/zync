@@ -53,7 +53,7 @@ const fsListCache = new Map<string, { at: number; entries: FsEntry[] }>();
  * Extract the last shell argument from a command line.
  * Handles single- and double-quoted strings so a path with spaces works.
  */
-function getLastArg(line: string): string {
+export function getLastArg(line: string): string {
   let inSingle = false;
   let inDouble = false;
   let escaped = false;
@@ -79,7 +79,7 @@ function getLastArg(line: string): string {
   return line.slice(start);
 }
 
-function getCommandName(line: string): string {
+export function getCommandName(line: string): string {
   const trimmed = line.trimStart();
   if (!trimmed) return '';
   const wrappers = new Set(['sudo', 'env', 'time', 'nohup', 'command']);
@@ -268,12 +268,19 @@ export async function getPathSuggestions(
       entries = await invokeFsList(connectionId, apiPath, timeoutMs);
       fsListCache.set(cacheKey, { at: now, entries });
       if (fsListCache.size > 128) {
-        // bounded cleanup: remove oldest insertion-order keys
-        let removeCount = 16;
-        for (const key of fsListCache.keys()) {
-          fsListCache.delete(key);
-          removeCount -= 1;
-          if (removeCount <= 0) break;
+        // First pass: evict entries that have already expired past their TTL.
+        for (const [key, cached2] of fsListCache.entries()) {
+          if (now - cached2.at > FS_LIST_CACHE_TTL_MS) {
+            fsListCache.delete(key);
+          }
+        }
+        // Second pass: if still over limit, remove oldest insertion-order keys.
+        if (fsListCache.size > 128) {
+          let removeCount = fsListCache.size - 112;
+          for (const key of fsListCache.keys()) {
+            fsListCache.delete(key);
+            if (--removeCount <= 0) break;
+          }
         }
       }
     }

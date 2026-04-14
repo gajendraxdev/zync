@@ -117,6 +117,12 @@ pub fn extract_search_prefix(input: &str) -> Option<String> {
         i += 1;
     }
 
+    // Reject unterminated quoted contexts: an unmatched opening quote anywhere in
+    // the segment means the user is still inside a string literal.
+    if in_single || in_double {
+        return None;
+    }
+
     let segment: String = chars[segment_start..].iter().collect();
     let mut s = segment.trim_start();
     s = strip_shell_keywords_recursive(s);
@@ -166,5 +172,8 @@ mod tests {
     fn suppresses_unstable_quote_context() {
         assert_eq!(extract_search_prefix("git commit -m \""), None);
         assert_eq!(extract_search_prefix("cd /var/\\"), None);
+        // Quote is not the last char but still unterminated — must also suppress.
+        assert_eq!(extract_search_prefix("git commit -m \"foo bar"), None);
+        assert_eq!(extract_search_prefix("echo 'hello world"), None);
     }
 }

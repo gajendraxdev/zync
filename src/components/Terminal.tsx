@@ -443,6 +443,8 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
     acceptGhostCommand(cached?.ghostTracker?.getLineBuffer() ?? '', ghostScope).catch(() => {});
     closeGhostPopup();
     setGhostSuggestion('');
+    // Reset Tab-cycle state so subsequent Tab presses start a fresh cycle.
+    ghostTabStateRef.current = resetGhostTabState();
   }, [sessionId, ghostScope, closeGhostPopup]);
 
   const truncateLabel = useCallback((label: string, max = 60) => {

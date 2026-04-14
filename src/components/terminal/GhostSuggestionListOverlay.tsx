@@ -21,9 +21,9 @@ export function GhostSuggestionListOverlay({
   const [pos, setPos] = useState({ left: 0, top: 0 });
   const [panelEl, setPanelEl] = useState<HTMLDivElement | null>(null);
 
-  if (!items.length) return null;
-
+  // Hook must run unconditionally — early return comes after all hooks.
   useLayoutEffect(() => {
+    if (!items.length) return;
     let frameId = 0;
 
     const tick = () => {
@@ -42,10 +42,12 @@ export function GhostSuggestionListOverlay({
         const canRenderBelow =
           panelHeight === 0 || belowTop + panelHeight <= window.innerHeight - viewportPad;
 
-        setPos({
-          left: anchorLeft,
-          top: canRenderBelow ? belowTop : aboveTop,
-        });
+        const newLeft = anchorLeft;
+        const newTop = canRenderBelow ? belowTop : aboveTop;
+        // Only update state when position actually changes to avoid needless re-renders.
+        setPos((prev) =>
+          prev.left === newLeft && prev.top === newTop ? prev : { left: newLeft, top: newTop },
+        );
       }
 
       frameId = window.requestAnimationFrame(tick);
@@ -53,7 +55,9 @@ export function GhostSuggestionListOverlay({
 
     tick();
     return () => window.cancelAnimationFrame(frameId);
-  }, [term, panelEl]);
+  }, [term, panelEl, items.length]);
+
+  if (!items.length) return null;
 
   // xterm does not expose public cell width API in 5.x; this uses internal dimensions.
   const cellWidth = ((term as any)?._core?._renderService?.dimensions?.css?.cell?.width as number | undefined) ?? 0;
