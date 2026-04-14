@@ -10,6 +10,7 @@ mod snippets;
 pub mod plugins;
 mod ssh_parser;
 mod ai;
+mod ghost;
 
 use commands::AppState;
 use tauri::{Manager, Emitter};
@@ -218,6 +219,7 @@ pub fn run() {
             commands::sftp_cancel_transfer,
             commands::sftp_download_as_zip,
             commands::shell_open,
+            commands::shell_get_wsl_distros,
             commands::app_get_exe_dir,
             commands::app_exit,
             commands::plugins_load,
@@ -244,6 +246,10 @@ pub fn run() {
             commands::ai_agent_checkpoint_respond,
             commands::ai_agent_whitelist_command,
             commands::ai_clear_brain_sessions,
+            ghost::commands::ghost_commit,
+            ghost::commands::ghost_suggest,
+            ghost::commands::ghost_accept,
+            ghost::commands::ghost_candidates,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
