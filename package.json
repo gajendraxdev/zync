@@ -1,7 +1,7 @@
 {
   "name": "zync",
   "private": true,
-  "version": "2.11.0",
+  "version": "2.12.0",
   "type": "module",
   "repository": {
     "type": "git",
@@ -27,7 +27,9 @@
     "test:connection-tab-service": "npm run compile:agent-tests && node tests/connectionTabService.test.mjs",
     "test:connection-lifecycle-service": "npm run compile:agent-tests && node tests/connectionLifecycleService.test.mjs",
     "test:tunnel-autostart-service": "npm run compile:agent-tests && node tests/tunnelAutoStartService.test.mjs",
-    "test": "npm run compile:agent-tests && node tests/redactContext.test.mjs && node tests/requestContext.test.mjs && node tests/providerCatalog.test.mjs && node tests/sidebarSubmit.test.mjs && node tests/aiSidebarResize.test.mjs && node tests/codeMirrorHelpers.test.mjs && node tests/agentRunStore.partialize.test.mjs && node tests/connectionDomain.test.mjs && node tests/connectionFormTransforms.test.mjs && node tests/connectionService.test.mjs && node tests/connectionTabService.test.mjs && node tests/connectionLifecycleService.test.mjs && node tests/tunnelAutoStartService.test.mjs"
+    "test:ghost-helpers": "npm run compile:agent-tests && node tests/ghostSuggestionsHelpers.test.mjs",
+    "test:all-agent": "npm run compile:agent-tests && node tests/runAllAgentTests.mjs",
+    "test": "npm run test:all-agent"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.1",

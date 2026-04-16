@@ -96,6 +96,19 @@ Zync follows a layered architecture with clear separation between the native bac
 | **Rust commands** | SSH connections, PTY management, file I/O, tunnel lifecycle |
 | **Tauri plugins** | Dialog, clipboard, auto-updater, persistent store |
 
+## Terminal Ghost Suggestions
+
+Zync includes a fish-style terminal suggestion system:
+
+- Inline ghost text suffix while typing
+- Tab popup list for multiple completions
+- Per-scope history ranking (local/connection scoped)
+- Filesystem path suggestions (local + remote)
+
+For implementation details and exact file ownership, see:
+
+- [docs/TERMINAL_GHOST_SUGGESTIONS.md](docs/TERMINAL_GHOST_SUGGESTIONS.md)
+
 ## Dependencies
 
 ### Frontend (npm)
