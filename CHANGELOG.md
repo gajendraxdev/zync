@@ -4,6 +4,13 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Fixed
+- **Terminal Reload Restore Stability**: Fixed reload-time terminal restore races by passing the correct reconnect payload, guarding PTY replacement start/exit timing, and suppressing stale "session ended" flashes during reload recovery. ([d049d01])
+- **Session Persistence Snapshot Integrity**: Hardened persisted `activeTabId` and `activeTerminalIds` so saved session state cannot point to filtered tabs or terminals dropped by snapshot truncation. ([d049d01])
+
+### Added
+- **Session Persistence Test Coverage**: Added focused regression coverage for session snapshot serialization, tab filtering, terminal truncation, and active-terminal ID persistence. ([d049d01])
+
 ## [2.13.0]
 
 ### Removed
