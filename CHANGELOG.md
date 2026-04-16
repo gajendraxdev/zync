@@ -4,6 +4,23 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.12.0]
+
+### Added
+- **Ghost Suggestion System (Inline + Popup)**: Introduced fish-style inline ghost text completions and a Tab-triggered popup list for all terminal sessions. Completions are driven by frecency-scored command history (scoped per connection) and live filesystem path listing via SFTP/local. ([b4e8078])
+- **Ghost Suggestion Settings**: Added a Ghost Suggestions section in Settings with toggles for inline ghost text, Tab popup, context-menu actions, and per-provider controls (history / filesystem). ([dff03a1])
+- **Frecency History Backend (Rust)**: Added a Rust `ghost` module with `GhostManager` for frecency-scored command history, scoped per SSH connection or local session. Includes `ghost_commit`, `ghost_accept`, `ghost_suggest`, and `ghost_candidates` Tauri commands. ([a20af8c])
+- **Ghost Suggestion Test Suite**: Added `tests/ghostSuggestionsHelpers.test.mjs` covering tab behavior, popup state, input tracker, path completion, and runtime routing. ([f174726])
+
+## [2.11.1]
+
+### Fixed
+- **Plugin Theme Payload Reliability**: Versioned the host → plugin theme payload, improved CSS variable resolution (body + root fallback), expanded rgb parsing, and fixed memoization so editor/panel plugins receive accurate theme updates. ([c87e3d7])
+
+
+- **AI Tool Path Validation Hardening**: Updated backend AI file-tool path validation to block real traversal components (`..`) while allowing valid filenames containing double dots (for example, `config..bak`). ([5d4f87f])
+- **AI Write Tool Output Capping**: Routed `write_file` tool status output through shared `cap_output()` so all AI tool outputs consistently respect truncation limits and artifact fallback behavior. ([5d4f87f])
+
 ## [2.11.0]
 
 ### Added
@@ -530,7 +547,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 - Auto-updates
 - Multiple themes (Dark, Light, Dracula)
 
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.11.0...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.12.0...HEAD
 [#38]: https://github.com/zync-sh/zync/pull/38
 [f766ac2]: https://github.com/zync-sh/zync/commit/f766ac2
 [3df9766]: https://github.com/zync-sh/zync/commit/3df9766
@@ -587,6 +604,16 @@ All notable changes to Zync are documented in this file. The format is based on 
 [64cb56a]: https://github.com/zync-sh/zync/commit/64cb56a
 [636db7a]: https://github.com/zync-sh/zync/commit/636db7a
 [a2dffb7]: https://github.com/zync-sh/zync/commit/a2dffb7
+[c87e3d7]: https://github.com/zync-sh/zync/commit/c87e3d7
+[5d4f87f]: https://github.com/zync-sh/zync/commit/5d4f87f
+[b4e8078]: https://github.com/zync-sh/zync/commit/b4e8078
+[dff03a1]: https://github.com/zync-sh/zync/commit/dff03a1
+[a20af8c]: https://github.com/zync-sh/zync/commit/a20af8c
+[4e589d9]: https://github.com/zync-sh/zync/commit/4e589d9
+[f174726]: https://github.com/zync-sh/zync/commit/f174726
+[dae1856]: https://github.com/zync-sh/zync/commit/dae1856
+[2.12.0]: https://github.com/zync-sh/zync/compare/v2.11.1...v2.12.0
+[2.11.1]: https://github.com/zync-sh/zync/compare/v2.11.0...v2.11.1
 [2.11.0]: https://github.com/zync-sh/zync/compare/v2.10.1...v2.11.0
 [2.10.1]: https://github.com/zync-sh/zync/compare/v2.10.0...v2.10.1
 [2.10.0]: https://github.com/zync-sh/zync/compare/v2.9.2...v2.10.0

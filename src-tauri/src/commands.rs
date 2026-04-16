@@ -109,6 +109,8 @@ pub struct AppState {
     pub agent_checkpoints: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<bool>>>>,
     // Agent v2: per-scope command whitelist (scope = connection_id or "local")
     pub command_whitelist: Arc<Mutex<HashMap<String, std::collections::HashSet<String>>>>,
+    // Ghost suggestions: frecency-scored command history, persisted to disk.
+    pub ghost_manager: Arc<crate::ghost::GhostManager>,
 }
 
 impl AppState {
@@ -119,11 +121,12 @@ impl AppState {
             file_system: Arc::new(FileSystem::new()),
             ssh_manager: Arc::new(SshManager::new()),
             tunnel_manager: Arc::new(TunnelManager::new()),
-            snippets_manager: Arc::new(crate::snippets::SnippetsManager::new(data_dir)),
+            snippets_manager: Arc::new(crate::snippets::SnippetsManager::new(data_dir.clone())),
             transfers: Arc::new(Mutex::new(HashMap::new())),
             agent_runs: Arc::new(Mutex::new(HashMap::new())),
             agent_checkpoints: Arc::new(Mutex::new(HashMap::new())),
             command_whitelist: Arc::new(Mutex::new(HashMap::new())),
+            ghost_manager: Arc::new(crate::ghost::GhostManager::new(&data_dir)),
         }
     }
 }
@@ -3798,6 +3801,50 @@ pub async fn shell_open(app: tauri::AppHandle, path: String) -> Result<(), Strin
     app.opener()
         .open_url(path, None::<String>)
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn shell_get_wsl_distros() -> Result<Vec<String>, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use tokio::process::Command;
+        let output = match Command::new("wsl.exe").args(["-l", "-q"]).output().await {
+            Ok(o) => o,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(e.to_string()),
+        };
+
+        if !output.status.success() {
+            return Ok(Vec::new());
+        }
+
+        let bytes = &output.stdout;
+        let mut words = Vec::with_capacity(bytes.len() / 2);
+        let mut i = 0usize;
+        while i + 1 < bytes.len() {
+            words.push(u16::from_le_bytes([bytes[i], bytes[i + 1]]));
+            i += 2;
+        }
+
+        let mut decoded = String::from_utf16_lossy(&words);
+        if decoded.starts_with('\u{feff}') {
+            decoded.remove(0);
+        }
+
+        let stdout = decoded;
+        let distros = stdout
+            .lines()
+            .map(|line| line.trim())
+            .filter(|line| !line.is_empty())
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+        return Ok(distros);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(Vec::new())
+    }
 }
 
 #[tauri::command]

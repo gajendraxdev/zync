@@ -42,6 +42,18 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     const updateFileManagerSettings = useAppStore(state => state.updateFileManagerSettings);
     const updateLocalTermSettings = useAppStore(state => state.updateLocalTermSettings);
     const updateKeybindings = useAppStore(state => state.updateKeybindings);
+    const updateGhostSuggestionsSettings = useAppStore(state => state.updateGhostSuggestionsSettings);
+
+    // Use the store action so merges happen against current state, not the render snapshot.
+    const setGhostSuggestionsField = (patch: Partial<typeof settings.ghostSuggestions>) => {
+        updateGhostSuggestionsSettings(patch);
+    };
+
+    const setGhostProviderField = (patch: Partial<typeof settings.ghostSuggestions.providers>) => {
+        // The reducer merges patch into current.providers, so a partial patch is safe.
+        updateGhostSuggestionsSettings({ providers: patch as typeof settings.ghostSuggestions.providers });
+    };
+
     const [activeTab, setActiveTab] = useState<Tab>('terminal');
     const [pluginTab, setPluginTab] = useState<'installed' | 'marketplace' | 'developer'>('installed');
     const [isTransitioning, setIsTransitioning] = useState(false);
@@ -916,6 +928,49 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                                 <span className="capitalize text-sm font-medium">{style}</span>
                                             </button>
                                         ))}
+                                    </div>
+                                </Section>
+
+                                <div className="h-px bg-[var(--color-app-border)]/20 my-2" />
+
+                                <Section title="Ghost Suggestions">
+                                    <div className="space-y-1">
+                                        <Toggle
+                                            label="Inline ghost text"
+                                            description="Show faded fish-style inline completion while typing."
+                                            checked={settings.ghostSuggestions?.inlineEnabled ?? true}
+                                            onChange={(v) => setGhostSuggestionsField({ inlineEnabled: v })}
+                                        />
+                                        <Toggle
+                                            label="Tab popup suggestions"
+                                            description="Use Tab to open/navigate completion list before falling back to shell completion."
+                                            checked={settings.ghostSuggestions?.popupEnabled ?? true}
+                                            onChange={(v) => setGhostSuggestionsField({ popupEnabled: v })}
+                                        />
+                                        <Toggle
+                                            label="Context-menu suggestion actions"
+                                            description="Show suggestion actions in terminal right-click context menu."
+                                            checked={settings.ghostSuggestions?.contextMenuEnabled ?? false}
+                                            onChange={(v) => setGhostSuggestionsField({ contextMenuEnabled: v })}
+                                        />
+
+                                        <div className="rounded-lg border border-[var(--color-app-border)]/50 bg-[var(--color-app-bg)]/25 px-1 pt-3 pb-1 mt-2">
+                                            <div className="text-xs font-semibold uppercase tracking-wide text-[var(--color-app-muted)] px-3 pb-1">
+                                                Providers
+                                            </div>
+                                            <Toggle
+                                                label="History"
+                                                description="Suggest commands based on your past usage for this server/session scope."
+                                                checked={settings.ghostSuggestions?.providers?.history ?? true}
+                                                onChange={(v) => setGhostProviderField({ history: v })}
+                                            />
+                                            <Toggle
+                                                label="Filesystem paths"
+                                                description="Suggest local/remote path candidates for commands like cd."
+                                                checked={settings.ghostSuggestions?.providers?.filesystem ?? true}
+                                                onChange={(v) => setGhostProviderField({ filesystem: v })}
+                                            />
+                                        </div>
                                     </div>
                                 </Section>
                             </div>

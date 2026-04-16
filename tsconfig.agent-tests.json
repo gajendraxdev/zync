@@ -42,6 +42,12 @@
     "src/ai/store/agentRunStore.ts",
     "src/ai/types/agent.ts",
     "src/ai/lib/requestContext.ts",
-    "src/ai/lib/redactContext.ts"
+    "src/ai/lib/redactContext.ts",
+    "src/lib/ghostSuggestions/behavior.ts",
+    "src/lib/ghostSuggestions/controller.ts",
+    "src/lib/ghostSuggestions/pathCompletion.ts",
+    "src/lib/ghostSuggestions/popupState.ts",
+    "src/lib/ghostSuggestions/tabState.ts",
+    "src/lib/ghostSuggestions/runtime.ts"
   ]
 }
