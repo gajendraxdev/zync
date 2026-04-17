@@ -18,10 +18,10 @@ State is serialised to `session.json` in the app data directory after every mean
 
 - Shipped in `v2.13.0` and active in current app code.
 - Frontend restore order is enforced: connections/settings load first, then session restore.
-- Save data is dirty-checked and serialized through a pending-save chain to avoid interleaved writes.
+- Save data is dirty-checked and serialised through a pending-save chain to avoid interleaved writes.
 - `setTerminalCwd` writes are debounced (1s) to avoid frequent disk writes.
 - SSH tabs restore as metadata-only and require reconnect before PTY spawn.
-- Frontend unit coverage now exists in `tests/sessionPersistence.test.mjs` for snapshot serialization and tab-cap behavior.
+- Frontend unit coverage now exists in `tests/sessionPersistence.test.mjs` for snapshot serialisation and tab-cap behavior.
 
 ---
 
@@ -56,7 +56,7 @@ State is serialised to `session.json` in the app data directory after every mean
   - Init order: `loadConnections` + `loadSettings` → `loadSession`; `loadSession` always runs even if preceding steps fail
 
 - `tests/sessionPersistence.test.mjs`
-  - Dedicated regression coverage for snapshot serialization, terminal capping, and null active-terminal filtering
+  - Dedicated regression coverage for snapshot serialisation, terminal capping, and null active-terminal filtering
 
 ### Backend (Rust)
 
@@ -97,7 +97,7 @@ Only the following tab types are restored on launch:
 
 `settings` tabs are excluded from restore/save intent as transient UI state.
 
-`snippets` tabs are currently **not restorable** (filtered out by `restoreTabState`), even if serialized in a previous snapshot. Treat snippets tabs as transient for restore behavior.
+`snippets` tabs are currently **not restorable** (filtered out by `restoreTabState`), even if serialised in a previous snapshot. Treat snippets tabs as transient for restore behavior.
 
 The `view` field is validated against the allowed `Tab['view']` union on restore; invalid persisted values fall back to `'terminal'`.
 
