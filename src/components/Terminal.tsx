@@ -34,11 +34,9 @@ interface TerminalCache {
   term: XTerm;
   fitAddon: FitAddon;
   searchAddon: SearchAddon;
+  generation: number;
   spawned: boolean;
   starting: boolean;
-  suppressNextExitBanner: boolean;
-  /** Reserved cache flag for temporarily detached terminal instances during remount/cleanup flows. */
-  detached: boolean;
   listenerAttached: boolean;
   pendingInput: string;
   inputFlushTimer: ReturnType<typeof window.setTimeout> | null;
@@ -303,6 +301,14 @@ function flushPendingInput(termId: string | null | undefined): void {
   window.ipcRenderer.send('terminal:write', { termId, data });
 }
 
+interface TerminalLifecycleEvent {
+  generation: number;
+}
+
+interface TerminalOutputEvent extends TerminalLifecycleEvent {
+  data: number[];
+}
+
 /**
  * Queues terminal input for a short batching window while still flushing
  * immediately for control-sensitive keys and larger chunks.
@@ -416,6 +422,7 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
   const updateSettings = useAppStore(state => state.updateSettings);
   const ghostSettings = settings.ghostSuggestions;
   const ghostSettingsRef = useRef(ghostSettings);
+  const terminalSettingsRef = useRef(settings.terminal);
 
   useEffect(() => {
     ghostSettingsRef.current = ghostSettings;
@@ -429,15 +436,24 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
     }
   }, [ghostSettings, closeGhostPopup]);
 
+  useEffect(() => {
+    terminalSettingsRef.current = settings.terminal;
+  }, [settings.terminal]);
+
   // Helper for terminal settings update if needed, though usually we update global settings
   const updateTerminalSettings = (newSettings: Partial<typeof settings.terminal>) => {
-    updateSettings({ terminal: { ...settings.terminal, ...newSettings } });
+    updateSettings({ terminal: { ...terminalSettingsRef.current, ...newSettings } });
   };
 
   const activeConnectionId = connectionId || globalActiveId;
   const terminalKey = activeConnectionId || 'local';
   const ghostScope = connectionId || terminalKey;
   const windowsShell = settings.localTerm?.windowsShell;
+  const currentFontSizeRef = useRef(settings.terminal.fontSize);
+
+  useEffect(() => {
+    currentFontSizeRef.current = settings.terminal.fontSize;
+  }, [settings.terminal.fontSize]);
 
   // Find connection status
   const isLocal = terminalKey === 'local';
@@ -667,7 +683,7 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
           // Zoom In: Ctrl + = or Ctrl + +
           if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
             e.preventDefault();
-            const currentSize = settings.terminal.fontSize;
+            const currentSize = currentFontSizeRef.current;
             updateTerminalSettings({ fontSize: Math.min(currentSize + 1, 32) });
             return false;
           }
@@ -675,7 +691,7 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
           // Zoom Out: Ctrl + -
           if ((e.ctrlKey || e.metaKey) && e.key === '-') {
             e.preventDefault();
-            const currentSize = settings.terminal.fontSize;
+            const currentSize = currentFontSizeRef.current;
             updateTerminalSettings({ fontSize: Math.max(currentSize - 1, 8) });
             return false;
           }
@@ -696,11 +712,10 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
         term,
         fitAddon,
         searchAddon,
+        generation: 0,
         spawned: false,
         starting: false,
-        suppressNextExitBanner: false,
         listenerAttached: false,
-        detached: false,
         pendingInput: '',
         inputFlushTimer: null,
         lastResize: null,
@@ -800,45 +815,6 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
       console.warn('Failed to fit terminal', e);
     }
 
-    // Spawn shell via IPC - only for new terminals that haven't been spawned yet
-    const cachedEntry = terminalCache.get(sessionId);
-    if (cachedEntry && !cachedEntry.spawned) {
-      cachedEntry.spawned = true;
-      cachedEntry.starting = true;
-      cachedEntry.suppressNextExitBanner = !isNewTerminal;
-
-      // Get shell preference for local terminals on Windows
-      const isLocalTerminal = (connectionId || 'local') === 'local';
-      const shellSetting = isLocalTerminal ? settings.localTerm?.windowsShell : undefined;
-
-      // Clear any existing content from a previous session (fresh start)
-      if (!isNewTerminal) {
-        term.clear();
-        term.reset();
-      }
-
-      // Get initial/current path if any
-      const terminals = useAppStore.getState().terminals;
-      const terminalTab = terminals[terminalKey]?.find(t => t.id === sessionId);
-      const spawnCwd = terminalTab?.lastKnownCwd || terminalTab?.initialPath;
-
-      window.ipcRenderer
-        .invoke('terminal:create', {
-          termId: sessionId,
-          connectionId: connectionId || 'local',
-          rows: term.rows,
-          cols: term.cols,
-          shell: shellSetting,
-          cwd: spawnCwd,
-        })
-        .catch((err) => {
-          console.error('Failed to create terminal:', err);
-          term.write(`\r\n\x1b[31mFailed to start terminal session: ${err}\x1b[0m\r\n`);
-          cachedEntry.starting = false;
-          cachedEntry.spawned = false;
-        });
-    }
-
     const triggerGhostPopup = async (tracker: InputTracker) => {
       try {
         const line = tracker.getLineBuffer();
@@ -911,6 +887,8 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
           console.log('[Terminal] Session ended, restarting on user input');
           clearPendingInput(sessionId);
           cached.lastResize = null;
+          const generation = cached.generation + 1;
+          cached.generation = generation;
           cached.spawned = true;
           cached.starting = true;
 
@@ -938,12 +916,15 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
               cols: term.cols,
               shell: shellSetting,
               cwd: restartCwd,
+              generation,
             })
             .catch((err) => {
               console.error('Failed to restart terminal:', err);
               term.write(`\r\n\x1b[31mFailed to restart terminal session: ${err}\x1b[0m\r\n`);
-              cached.starting = false;
-              cached.spawned = false;
+              if (cached.generation === generation) {
+                cached.starting = false;
+                cached.spawned = false;
+              }
             });
           cached.ghostTracker?.reset();
           setGhostSuggestion('');
@@ -984,12 +965,12 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
       }
 
       // Listen to Tauri event for this specific terminal
-      listen<Uint8Array>(`terminal-output-${sessionId}`, (event) => {
+      listen<TerminalOutputEvent>(`terminal-output-${sessionId}`, (event) => {
         const cached = terminalCache.get(sessionId);
-        if (cached?.suppressNextExitBanner) {
-          cached.suppressNextExitBanner = false;
+        if (!cached || event.payload.generation !== cached.generation) {
+          return;
         }
-        term.write(event.payload);
+        term.write(new Uint8Array(event.payload.data));
       }).then((unlistenFn) => {
         // Store the unlisten function
         if (terminalCache.has(sessionId)) {
@@ -997,9 +978,9 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
         }
       });
 
-      listen<void>(`terminal-ready-${sessionId}`, () => {
+      listen<TerminalLifecycleEvent>(`terminal-ready-${sessionId}`, (event) => {
         const cached = terminalCache.get(sessionId);
-        if (cached) {
+        if (cached && event.payload.generation === cached.generation) {
           cached.starting = false;
           cached.spawned = true;
         }
@@ -1010,23 +991,16 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
       });
 
       // Listen for terminal exit event to reset the spawned flag
-      listen<void>(`terminal-exit-${sessionId}`, () => {
+      listen<TerminalLifecycleEvent>(`terminal-exit-${sessionId}`, (event) => {
         console.log(`[Terminal] Session ${sessionId} exited`);
         const cached = terminalCache.get(sessionId);
         if (cached) {
-          if (cached.starting) {
-            console.log(`[Terminal] Ignoring exit for ${sessionId} while replacement spawn is in flight`);
-            return;
-          }
-          if (cached.suppressNextExitBanner) {
-            console.log(`[Terminal] Suppressing one stale exit banner for ${sessionId} after terminal recreation`);
-            cached.suppressNextExitBanner = false;
-            cached.spawned = false;
-            clearPendingInput(sessionId);
-            cached.lastResize = null;
+          if (event.payload.generation !== cached.generation) {
+            console.log(`[Terminal] Ignoring stale exit for ${sessionId} from generation ${event.payload.generation}`);
             return;
           }
           // Reset spawned flag so terminal can be restarted
+          cached.starting = false;
           cached.spawned = false;
           clearPendingInput(sessionId);
           cached.lastResize = null;
@@ -1038,6 +1012,50 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
           terminalCache.get(sessionId)!.unlisten!.push(unlistenFn);
         }
       });
+    }
+
+    // Spawn shell via IPC - only after listeners are attached so we never miss
+    // same-generation ready/output/exit events from a fast PTY startup/exit.
+    const cachedEntry = terminalCache.get(sessionId);
+    if (cachedEntry && !cachedEntry.spawned) {
+      const generation = cachedEntry.generation + 1;
+      cachedEntry.generation = generation;
+      cachedEntry.spawned = true;
+      cachedEntry.starting = true;
+
+      // Get shell preference for local terminals on Windows
+      const isLocalTerminal = (connectionId || 'local') === 'local';
+      const shellSetting = isLocalTerminal ? settings.localTerm?.windowsShell : undefined;
+
+      // Clear any existing content from a previous session (fresh start)
+      if (!isNewTerminal) {
+        term.clear();
+        term.reset();
+      }
+
+      // Get initial/current path if any
+      const terminals = useAppStore.getState().terminals;
+      const terminalTab = terminals[terminalKey]?.find(t => t.id === sessionId);
+      const spawnCwd = terminalTab?.lastKnownCwd || terminalTab?.initialPath;
+
+      window.ipcRenderer
+        .invoke('terminal:create', {
+          termId: sessionId,
+          connectionId: connectionId || 'local',
+          rows: term.rows,
+          cols: term.cols,
+          shell: shellSetting,
+          cwd: spawnCwd,
+          generation,
+        })
+        .catch((err) => {
+          console.error('Failed to create terminal:', err);
+          term.write(`\r\n\x1b[31mFailed to start terminal session: ${err}\x1b[0m\r\n`);
+          if (cachedEntry.generation === generation) {
+            cachedEntry.starting = false;
+            cachedEntry.spawned = false;
+          }
+        });
     }
 
     let ipcResizeTimer: any;
@@ -1186,10 +1204,10 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
           
           clearPendingInput(sessionId);
           cached.lastResize = null;
-          
+          const generation = cached.generation + 1;
+          cached.generation = generation;
           cached.spawned = true;
           cached.starting = true;
-          cached.suppressNextExitBanner = true;
           termRef.current?.clear();
           termRef.current?.reset();
           
@@ -1207,12 +1225,15 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
               cols: termRef.current?.cols || 80,
               shell: shellSetting,
               cwd: wakeCwd,
+              generation,
             })
             .catch((err) => {
               console.error('Failed to auto-restart terminal:', err);
               termRef.current?.write(`\r\n\x1b[31mFailed to automatically restart terminal: ${err}\x1b[0m\r\n`);
-              cached.starting = false;
-              cached.spawned = false;
+              if (cached.generation === generation) {
+                cached.starting = false;
+                cached.spawned = false;
+              }
             });
         }
       }
