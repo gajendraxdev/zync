@@ -1,4 +1,4 @@
-import { useEffect, useState, memo } from "react";
+import { useEffect, useRef, useState, memo } from "react";
 import { Command } from "cmdk";
 import {
     Settings,
@@ -35,6 +35,7 @@ interface QuickPickDetail {
     pluginId: string;
 }
 
+/** Global command/search palette with command mode and plugin quick-pick support. */
 export function CommandPalette() {
     const [open, setOpen] = useState(false);
     const [search, setSearch] = useState("");
@@ -44,6 +45,12 @@ export function CommandPalette() {
     const [quickPickMode, setQuickPickMode] = useState(false);
     const [quickPickItems, setQuickPickItems] = useState<QuickPickItem[]>([]);
     const [quickPickOptions, setQuickPickOptions] = useState<{ placeHolder?: string, requestId: string, pluginId: string } | null>(null);
+
+    const openRef = useRef(open);
+    const quickPickModeRef = useRef(quickPickMode);
+
+    useEffect(() => { openRef.current = open; }, [open]);
+    useEffect(() => { quickPickModeRef.current = quickPickMode; }, [quickPickMode]);
 
     // Optimize selectors with shallow comparison
     const { connections, setAddConnectionModalOpen, openTab, openSettings } = useAppStore(
@@ -57,6 +64,11 @@ export function CommandPalette() {
 
     // Plugins
     const { commands: pluginCommands, executeCommand, plugins } = usePlugins();
+    const platform = typeof navigator !== 'undefined'
+        ? ((navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.userAgent)
+        : '';
+    const isMac = /mac/i.test(platform);
+    const modKey = isMac ? 'Cmd' : 'Ctrl';
 
     const openAddConnectionModal = () => setAddConnectionModalOpen(true);
 
@@ -78,9 +90,9 @@ export function CommandPalette() {
                     setSearch("");
                     setQuickPickMode(false); // Reset QP
                 }
-            } else if (e.key === 'Escape' && open) {
+            } else if (e.key === 'Escape' && openRef.current) {
                 setOpen(false);
-                if (quickPickMode) {
+                if (quickPickModeRef.current) {
                     // If cancelling QP, maybe we should just close it?
                     // Or notify cancellation? For MVP, just close.
                     setQuickPickMode(false);
@@ -97,13 +109,29 @@ export function CommandPalette() {
             setSearch(""); // Clear search for picking
         };
 
+        const handleOpenCommandPalette = (e: Event) => {
+            const event = e as CustomEvent<{ commandMode?: boolean }>;
+            setOpen(true);
+            if (event.detail?.commandMode) {
+                setCommandMode(true);
+                setSearch('>');
+                setQuickPickMode(false);
+                return;
+            }
+            setCommandMode(false);
+            setSearch('');
+            setQuickPickMode(false);
+        };
+
         window.addEventListener('keydown', handleKeyDown);
         window.addEventListener('zync:quick-pick', handleQuickPick as EventListener);
+        window.addEventListener('zync:open-command-palette', handleOpenCommandPalette);
         return () => {
             window.removeEventListener('keydown', handleKeyDown);
             window.removeEventListener('zync:quick-pick', handleQuickPick as EventListener);
+            window.removeEventListener('zync:open-command-palette', handleOpenCommandPalette);
         };
-    }, [open, quickPickMode]);
+    }, []);
 
     // Detect ">" in input
     const handleSearchChange = (value: string) => {
@@ -193,13 +221,13 @@ export function CommandPalette() {
                         {/* QUICK PICK MODE */}
                         {quickPickMode && (
                             <Command.Group heading={quickPickOptions?.placeHolder || "Select an option"} className="text-[10px] font-semibold text-app-muted uppercase tracking-wider mb-1 px-2">
-                                {quickPickItems.map((item: any, idx) => {
+                                {quickPickItems.map((item: QuickPickItem, idx) => {
                                     if (item.kind === 'separator') {
-                                        return <div key={idx} className="h-px bg-app-border/30 my-1.5 mx-2" />;
+                                        return <div key={item.id ?? idx} className="h-px bg-app-border/30 my-1.5 mx-2" />;
                                     }
                                     return (
                                         <Command.Item
-                                            key={idx}
+                                            key={item.id ?? idx}
                                             value={item.label}
                                             onSelect={() => handleQuickPickSelect(item)}
                                             className="relative flex cursor-pointer select-none items-center rounded-lg px-2 py-1.5 text-sm outline-none data-[selected=true]:bg-app-accent/20 data-[selected=true]:text-app-accent text-app-text transition-colors group mb-0.5"
@@ -267,7 +295,7 @@ export function CommandPalette() {
                                     >
                                         <Plus className="mr-2 h-4 w-4 opacity-70" />
                                         <span>New Connection</span>
-                                        <span className="ml-auto text-[10px] opacity-50">Cmd+N</span>
+                                        <span className="ml-auto text-[10px] opacity-50">{`${modKey}+N`}</span>
                                     </Command.Item>
 
                                     <Command.Item
@@ -286,7 +314,7 @@ export function CommandPalette() {
                                     >
                                         <Settings className="mr-2 h-4 w-4 opacity-70" />
                                         <span>Settings</span>
-                                        <span className="ml-auto text-[10px] opacity-50">Cmd+,</span>
+                                        <span className="ml-auto text-[10px] opacity-50">{`${modKey}+,`}</span>
                                     </Command.Item>
 
 
@@ -374,7 +402,7 @@ export function CommandPalette() {
 }
 
 
-
+/** Connection result row for file/history mode inside the command palette. */
 const ConnectionItem = memo(function ConnectionItem({ conn, onSelect }: { conn: Connection; onSelect: () => void }) {
     return (
         <Command.Item
