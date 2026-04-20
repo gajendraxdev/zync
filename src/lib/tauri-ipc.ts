@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { check } from '@tauri-apps/plugin-updater';
 import { getVersion } from '@tauri-apps/api/app';
+import { open as dialogOpen, save as dialogSave } from '@tauri-apps/plugin-dialog';
 
 let currentUpdate: any = null;
 
@@ -167,8 +168,7 @@ const ipcRenderer = {
     try {
       // Handle Dialog commands locally via plugin
       if (channel === 'dialog:openFile') {
-        const { open } = await import('@tauri-apps/plugin-dialog');
-        const result = await open({
+        const result = await dialogOpen({
           multiple: true,
           directory: false,
         });
@@ -179,10 +179,11 @@ const ipcRenderer = {
       }
 
       if (channel === 'dialog:openDirectory') {
-        const { open } = await import('@tauri-apps/plugin-dialog');
-        const result = await open({
+        const payload = args.length === 1 && args[0] && typeof args[0] === 'object' ? args[0] : {};
+        const result = await dialogOpen({
           multiple: false,
           directory: true,
+          defaultPath: payload.defaultPath,
         });
         if (result === null) return { filePaths: [], canceled: true };
         const paths = Array.isArray(result) ? result : [result];
@@ -191,9 +192,8 @@ const ipcRenderer = {
       }
 
       if (channel === 'dialog:saveFile') {
-        const { save } = await import('@tauri-apps/plugin-dialog');
         const payload = args.length === 1 ? args[0] : {};
-        const result = await save({
+        const result = await dialogSave({
           defaultPath: payload.defaultPath,
           filters: payload.filters,
         });

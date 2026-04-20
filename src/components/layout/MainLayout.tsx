@@ -26,7 +26,6 @@ import { ModalRoot } from '../ui/ModalRoot';
 import '../../components/modals/AddConnectionModal';
 import '../../components/modals/AddTunnelModal';
 import '../../components/modals/ImportSSHCommandModal';
-import '../../components/modals/ImportSshModal';
 
 declare global {
     interface Window {
@@ -602,6 +601,8 @@ export function MainLayout({ children }: { children: ReactNode }) {
     // Theme Application Effect
     const theme = useAppStore(state => state.settings.theme);
     const accentColor = useAppStore(state => state.settings.accentColor);
+    const globalFontFamily = useAppStore(state => state.settings.globalFontFamily);
+    const globalFontSize = useAppStore(state => state.settings.globalFontSize);
     const terminalTransparencyEnabled = useAppStore(
         state => state.settings.enableVibrancy && (state.settings.windowOpacity ?? 1) < 1
     );
@@ -650,6 +651,21 @@ export function MainLayout({ children }: { children: ReactNode }) {
             localStorage.removeItem('zync-accent-color');
         }
 
+        if (globalFontFamily?.trim()) {
+            const normalizedFont = globalFontFamily.trim();
+            document.documentElement.style.setProperty('--font-sans', normalizedFont);
+            document.body.style.setProperty('--font-sans', normalizedFont);
+        } else {
+            document.documentElement.style.removeProperty('--font-sans');
+            document.body.style.removeProperty('--font-sans');
+        }
+
+        if (Number.isFinite(globalFontSize) && globalFontSize >= 10 && globalFontSize <= 24) {
+            document.documentElement.style.fontSize = `${globalFontSize}px`;
+        } else {
+            document.documentElement.style.removeProperty('font-size');
+        }
+
         window.requestAnimationFrame(() => {
             persistBootThemeColors();
         });
@@ -666,7 +682,7 @@ export function MainLayout({ children }: { children: ReactNode }) {
             window.clearTimeout(persistTimer);
         };
 
-    }, [theme, accentColor, isLoadingSettings, persistBootThemeColors]);
+    }, [theme, accentColor, globalFontFamily, globalFontSize, isLoadingSettings, persistBootThemeColors]);
 
 
     const hideBootSplash = useCallback(() => {
