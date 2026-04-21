@@ -8,7 +8,7 @@ export interface AppSettings {
     globalFontFamily: string;
     globalFontSize: number;
     iconTheme: string;
-    accentColor?: string;
+    accentColor?: string | null;
     editor: {
         defaultProvider: string;
     };
@@ -102,7 +102,7 @@ export const defaultSettings: AppSettings = {
     globalFontFamily: "system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', Ubuntu, Cantarell, Arial, sans-serif",
     globalFontSize: 14,
     iconTheme: 'vscode-icons',
-    accentColor: undefined,
+    accentColor: null,
     editor: {
         defaultProvider: CODEMIRROR_EDITOR_ID
     },
@@ -211,7 +211,7 @@ function normalizeTerminalFontFamily(fontFamily: string | undefined): string | u
     return fontFamily;
 }
 
-async function persistSettings(settings: Partial<AppSettings>): Promise<void> {
+async function persistSettings(settings: Record<string, unknown>): Promise<void> {
     await invoke('settings_set', { settings });
 }
 
@@ -281,9 +281,9 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
         let actualSettings = { ...newSettings };
 
         // If theme is changed but accentColor is not explicitly provided in the update,
-        // reset accentColor to undefined to allow the theme's default to take over.
+        // reset accentColor to null to allow the theme's default to take over.
         if ('theme' in newSettings && !('accentColor' in newSettings)) {
-            actualSettings.accentColor = undefined;
+            actualSettings.accentColor = null;
         }
 
         const previous = get().settings;
@@ -312,7 +312,7 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
         set({ settings: updated });
         const changedKeys = Object.keys(updates) as Array<keyof AppSettings['ai']>;
         try {
-            await persistSettings({ ai: updated.ai });
+            await persistSettings({ ai: updates });
         } catch (error) {
             console.error('Failed to save AI settings:', error);
             const current = get().settings;
@@ -333,7 +333,7 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
         set({ settings: updated });
         const changedKeys = Object.keys(updates) as Array<keyof AppSettings['editor']>;
         try {
-            await persistSettings({ editor: updated.editor });
+            await persistSettings({ editor: updates });
         } catch (error) {
             console.error('Failed to save editor settings:', error);
             const current = get().settings;
@@ -354,7 +354,7 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
         set({ settings: updated });
         const changedKeys = Object.keys(updates) as Array<keyof AppSettings['terminal']>;
         try {
-            await persistSettings({ terminal: updated.terminal });
+            await persistSettings({ terminal: updates });
         } catch (error) {
             console.error('Failed to save terminal settings:', error);
             const current = get().settings;
@@ -375,7 +375,7 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
         set({ settings: updated });
         const changedKeys = Object.keys(updates) as Array<keyof AppSettings['localTerm']>;
         try {
-            await persistSettings({ localTerm: updated.localTerm });
+            await persistSettings({ localTerm: updates });
         } catch (error) {
             console.error('Failed to save local terminal settings:', error);
             const current = get().settings;
@@ -396,7 +396,7 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
         set({ settings: updated });
         const changedKeys = Object.keys(updates) as Array<keyof AppSettings['fileManager']>;
         try {
-            await persistSettings({ fileManager: updated.fileManager });
+            await persistSettings({ fileManager: updates });
         } catch (error) {
             console.error('Failed to save file manager settings:', error);
             const current = get().settings;
@@ -426,7 +426,7 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
         const changedGhostKeys = Object.keys(updates).filter((key) => key !== 'providers') as Array<Exclude<keyof AppSettings['ghostSuggestions'], 'providers'>>;
         const changedProviderKeys = Object.keys(updates.providers || {}) as Array<keyof AppSettings['ghostSuggestions']['providers']>;
         try {
-            await persistSettings({ ghostSuggestions: updated.ghostSuggestions });
+            await persistSettings({ ghostSuggestions: updates });
         } catch (error) {
             console.error('Failed to save ghost suggestion settings:', error);
             const latestSettings = get().settings;
@@ -462,7 +462,7 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
         set({ settings: updated });
         const changedKeys = Object.keys(updates) as Array<keyof AppSettings['keybindings']>;
         try {
-            await persistSettings({ keybindings: updated.keybindings });
+            await persistSettings({ keybindings: updates });
         } catch (error) {
             console.error('Failed to save keybindings:', error);
             const current = get().settings;
