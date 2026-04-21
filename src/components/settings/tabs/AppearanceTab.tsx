@@ -292,7 +292,7 @@ export function AppearanceTab({
                         </div>
                         <div className="flex gap-2 flex-wrap">
                             <button
-                                onClick={() => { void applyUpdate({ accentColor: undefined }); }}
+                                onClick={() => { void applyUpdate({ accentColor: null }); }}
                                 className={`w-8 h-8 rounded-full border-2 transition-all relative ${!settings.accentColor
                                     ? 'border-[var(--color-app-text)] scale-110 shadow-lg shadow-[var(--color-app-accent)]/20'
                                     : 'border-transparent hover:scale-110'
