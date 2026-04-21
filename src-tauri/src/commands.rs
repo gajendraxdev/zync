@@ -2540,29 +2540,47 @@ pub async fn fs_copy(
                 // If it fails (e.g. Windows), we fall back to SFTP.
                 let cmd = format!("cp -r {} {}", shell_quote(&from), shell_quote(&to));
                 println!("[FS] Attempting server-side copy: {}", cmd);
-
-                match session.lock().await.channel_open_session().await {
-                    Ok(mut channel) => {
-                        if channel.exec(true, cmd).await.is_ok() {
-                            // Wait for exit status
-                            let mut success = false;
-                            while let Some(msg) = channel.wait().await {
-                                if let russh::ChannelMsg::ExitStatus { exit_status } = msg {
-                                    if exit_status == 0 {
-                                        success = true;
+                let timeout_duration = std::time::Duration::from_secs(10);
+                let optimize_fut = async {
+                    match session.lock().await.channel_open_session().await {
+                        Ok(mut channel) => {
+                            if channel.exec(true, cmd).await.is_ok() {
+                                // Wait for exit status
+                                let mut success = false;
+                                while let Some(msg) = channel.wait().await {
+                                    if let russh::ChannelMsg::ExitStatus { exit_status } = msg {
+                                        if exit_status == 0 {
+                                            success = true;
+                                        }
+                                        break;
                                     }
-                                    break;
                                 }
-                            }
-                            if success {
-                                println!("[FS] Server-side copy successful");
-                                return Ok(());
+                                Ok::<bool, String>(success)
                             } else {
-                                println!("[FS] Server-side copy failed (non-zero exit), checking SFTP fallback...");
+                                Ok::<bool, String>(false)
                             }
                         }
+                        Err(e) => {
+                            println!("[FS] Failed to open channel for copy optimization: {}", e);
+                            Ok::<bool, String>(false)
+                        }
                     }
-                    Err(e) => println!("[FS] Failed to open channel for copy optimization: {}", e),
+                };
+
+                match tokio::time::timeout(timeout_duration, optimize_fut).await {
+                    Ok(Ok(true)) => {
+                        println!("[FS] Server-side copy successful");
+                        return Ok(());
+                    }
+                    Ok(Ok(false)) => {
+                        println!("[FS] Server-side copy failed (non-zero exit), checking SFTP fallback...");
+                    }
+                    Ok(Err(e)) => {
+                        println!("[FS] Server-side copy failed (error), checking SFTP fallback: {}", e);
+                    }
+                    Err(_) => {
+                        println!("[FS] Server-side copy optimization timed out, checking SFTP fallback...");
+                    }
                 }
             }
         }
@@ -2646,13 +2664,6 @@ pub async fn fs_copy_batch(
 
         if should_optimize && session_opt.is_some() {
             if let Some(session) = session_opt {
-                let mut channel = session
-                    .lock()
-                    .await
-                    .channel_open_session()
-                    .await
-                    .map_err(|e| format!("Failed to open channel: {}", e))?;
-
                 // Build a multi-command string: cp -r 'a' 'b' && cp -r 'c' 'd' ...
                 let cmd = operations
                     .iter()
@@ -2661,24 +2672,43 @@ pub async fn fs_copy_batch(
                     .join(" && ");
 
                 println!("[FS] Attempting batch server-side copy: {}", cmd);
-                channel
-                    .exec(true, cmd)
-                    .await
-                    .map_err(|e| format!("Exec failed: {}", e))?;
+                let timeout_duration = std::time::Duration::from_secs(10);
+                let optimize_fut = async {
+                    let mut channel = session
+                        .lock()
+                        .await
+                        .channel_open_session()
+                        .await
+                        .map_err(|e| format!("Failed to open channel: {}", e))?;
+                    channel
+                        .exec(true, cmd)
+                        .await
+                        .map_err(|e| format!("Exec failed: {}", e))?;
 
-                let mut exit_code = None;
-                while let Some(msg) = channel.wait().await {
-                    if let russh::ChannelMsg::ExitStatus { exit_status } = msg {
-                        exit_code = Some(exit_status);
-                        break;
+                    let mut exit_code = None;
+                    while let Some(msg) = channel.wait().await {
+                        if let russh::ChannelMsg::ExitStatus { exit_status } = msg {
+                            exit_code = Some(exit_status);
+                            break;
+                        }
                     }
-                }
+                    Ok::<Option<u32>, String>(exit_code)
+                };
 
-                if let Some(0) = exit_code {
-                    println!("[FS] Batch server-side copy successful");
-                    return Ok(());
-                } else {
-                    println!("[FS] Batch server-side copy failed with exit code {:?}, falling back to SFTP...", exit_code);
+                match tokio::time::timeout(timeout_duration, optimize_fut).await {
+                    Ok(Ok(Some(0))) => {
+                        println!("[FS] Batch server-side copy successful");
+                        return Ok(());
+                    }
+                    Ok(Ok(exit_code)) => {
+                        println!("[FS] Batch server-side copy failed with exit code {:?}, falling back to SFTP...", exit_code);
+                    }
+                    Ok(Err(e)) => {
+                        println!("[FS] Batch server-side copy optimization failed: {}. Falling back to SFTP...", e);
+                    }
+                    Err(_) => {
+                        println!("[FS] Batch server-side copy optimization timed out. Falling back to SFTP...");
+                    }
                 }
             }
         }

@@ -32,6 +32,9 @@ export function parseQuickConnectInput(rawInput: string): QuickConnectParseResul
     let hostPort = trimmed;
 
     if (hostPort.includes('@')) {
+        if (hostPort.indexOf('@') !== hostPort.lastIndexOf('@')) {
+            return null;
+        }
         const atIndex = hostPort.indexOf('@');
         const nextUsername = hostPort.slice(0, atIndex).trim();
         const nextHostPort = hostPort.slice(atIndex + 1).trim();
@@ -121,6 +124,8 @@ export function filterConnectionSuggestions<T extends { id: string; name?: strin
     connections: T[],
     limit = 5,
 ): T[] {
+    const normalizedLimit = Math.floor(Number(limit));
+    if (!Number.isFinite(normalizedLimit) || normalizedLimit <= 0) return [];
     const query = input.trim().toLowerCase();
     if (!query) return [];
 
@@ -130,5 +135,5 @@ export function filterConnectionSuggestions<T extends { id: string; name?: strin
             connection.host.toLowerCase().includes(query) ||
             connection.username.toLowerCase().includes(query),
         )
-        .slice(0, limit);
+        .slice(0, normalizedLimit);
 }
