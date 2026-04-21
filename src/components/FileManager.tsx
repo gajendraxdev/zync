@@ -941,9 +941,12 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
       });
       if (canceled || !filePath) return;
       const slashIndex = Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'));
-      const selectedDir = slashIndex >= 0
+      let selectedDir = slashIndex >= 0
         ? (filePath.slice(0, slashIndex) || (slashIndex === 0 ? '/' : ''))
         : '';
+      if (/^[A-Za-z]:$/.test(selectedDir)) {
+        selectedDir = `${selectedDir}\\`;
+      }
       if (selectedDir && selectedDir !== preferredDownloadDir) {
         try {
           await updateFileManagerSettings({ defaultDownloadPath: selectedDir });
