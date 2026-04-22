@@ -16,6 +16,8 @@ import {
     ensureGlobalSnippetsTab,
     ensureSingleTabByType,
     findConnectionTab,
+    GLOBAL_SNIPPETS_CONNECTION_ID,
+    LOCAL_TERMINAL_CONNECTION_ID,
 } from '../features/connections/application/tabService';
 import {
     getCloseTabPreActions,
@@ -39,6 +41,7 @@ export interface ConnectionSlice {
     tabs: Tab[];
     activeTabId: string | null;
     activeConnectionId: string | null;
+    lastRealConnectionId: string | null;
     showWelcomeScreen: boolean;
     folders: Folder[];
 
@@ -110,6 +113,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
     tabs: [],
     activeTabId: null,
     activeConnectionId: null,
+    lastRealConnectionId: null,
     showWelcomeScreen: false,
     folders: [],
     isAddConnectionModalOpen: false,
@@ -394,8 +398,8 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
 
     openTab: (connectionId, startView = 'terminal') => {
         set(state => {
-            if (connectionId === 'local') {
-                return { ...createLocalTerminalTabState(state.tabs), showWelcomeScreen: false };
+            if (connectionId === LOCAL_TERMINAL_CONNECTION_ID) {
+                return { ...createLocalTerminalTabState(state.tabs), lastRealConnectionId: LOCAL_TERMINAL_CONNECTION_ID, showWelcomeScreen: false };
             }
 
             const conn = state.connections.find(c => c.id === connectionId);
@@ -412,7 +416,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                     get().connect(conn.id);
                 }
 
-                return { ...activateExistingConnectionTab(state.tabs, existingTab, startView), showWelcomeScreen: false };
+                return { ...activateExistingConnectionTab(state.tabs, existingTab, startView), lastRealConnectionId: conn.id, showWelcomeScreen: false };
             }
 
             // Auto connect if disconnected or error
@@ -420,7 +424,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                 get().connect(conn.id);
             }
 
-            return { ...createConnectionTabState(state.tabs, conn, startView), showWelcomeScreen: false };
+            return { ...createConnectionTabState(state.tabs, conn, startView), lastRealConnectionId: conn.id, showWelcomeScreen: false };
         });
         // Dirty-checked in sessionSlice — redundant calls are harmless.
         get().saveSession();
@@ -505,7 +509,14 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
             const tab = state.tabs.find(t => t.id === tabId);
             if (!tab) return state;
             didActivate = true;
-            return { activeTabId: tabId, activeConnectionId: tab.connectionId || null, showWelcomeScreen: false };
+            const newConnId = tab.connectionId || null;
+            const isReal = newConnId !== GLOBAL_SNIPPETS_CONNECTION_ID;
+            return {
+                activeTabId: tabId,
+                activeConnectionId: newConnId,
+                showWelcomeScreen: false,
+                ...(isReal && { lastRealConnectionId: newConnId }),
+            };
         });
         if (!didActivate) return;
         // Dirty-checked in sessionSlice — redundant calls are harmless.
