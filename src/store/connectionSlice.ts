@@ -221,6 +221,47 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                 let nextConnections = [...state.connections];
                 const creates: Connection[] = [];
 
+                // Pre-pass: build importedId → existingId remap and pendingAdds set for
+                // the entire batch so jumpServerId references can be resolved even when the
+                // jump server itself is later in the list (or not in this batch at all).
+                const idRemap = new Map<string, string>();
+                // pendingAdds: imported IDs that will land as new connections — either
+                // they have no targetId, OR their targetId doesn't exist in nextConnections
+                // (target was deleted since last import). Kept as a set so resolveJumpServerId
+                // can preserve imported references for connections being added in this batch.
+                const pendingAdds = new Set<string>();
+                planItems.forEach((item) => {
+                    if (item.targetId && item.connection.id !== item.targetId) {
+                        idRemap.set(item.connection.id, item.targetId);
+                    }
+                    if (!item.targetId || !nextConnections.some(c => c.id === item.targetId)) {
+                        pendingAdds.add(item.connection.id);
+                    }
+                });
+
+                // Resolves an imported jumpServerId to a stable store ID.
+                // Two fallback semantics:
+                // - UPDATE path (existingJumpId provided): if the imported ID doesn't
+                //   resolve, fall back to the existing connection's jumpServerId so a
+                //   partial re-import doesn't silently break a working jump chain.
+                // - CREATE path (existingJumpId = undefined): if the imported ID doesn't
+                //   resolve and no existing record exists, drop it (return undefined) to
+                //   avoid persisting a dangling reference on brand-new connections.
+                const resolveJumpServerId = (
+                    importedJumpId: string | undefined,
+                    existingJumpId: string | undefined,
+                ): string | undefined => {
+                    if (!importedJumpId) return importedJumpId;
+                    // Follow the remap chain (jump server was also in this batch)
+                    const remapped = idRemap.get(importedJumpId) ?? importedJumpId;
+                    // If remapped ID exists in the store, use it
+                    if (nextConnections.some(c => c.id === remapped)) return remapped;
+                    // Jump server is being added as new in this batch — keep imported reference
+                    if (pendingAdds.has(importedJumpId)) return importedJumpId;
+                    // importedJumpId doesn't resolve → preserve the existing working reference
+                    return existingJumpId;
+                };
+
                 planItems.forEach((item) => {
                     const normalizedFolder = normalizeFolderPath(item.connection.folder || '');
                     const normalizedConnection = { ...item.connection, folder: normalizedFolder };
@@ -242,12 +283,16 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                                 ...preservedMetadata,
                                 id: existing.id,
                                 status: existing.status,
+                                jumpServerId: resolveJumpServerId(normalizedConnection.jumpServerId, existing.jumpServerId),
                             };
                             return;
                         }
                     }
 
-                    creates.push(normalizedConnection);
+                    creates.push({
+                        ...normalizedConnection,
+                        jumpServerId: resolveJumpServerId(normalizedConnection.jumpServerId, undefined),
+                    });
                 });
 
                 finalConns = creates.length > 0
@@ -317,7 +362,11 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
             if (!conn) throw new Error('Connection not found');
 
             const fullConfig = buildConnectConfig(connections, id);
-            if (!fullConfig) throw new Error('Failed to build connection config (possible cycle or missing host)');
+            if (!fullConfig) {
+                set(state => ({ connections: markConnectionStatus(state.connections, id, 'error') }));
+                get().showToast('error', `Couldn't build connection config for "${conn.name}". If this uses a jump host, re-import your SSH config to repair the reference.`, 8000);
+                return;
+            }
 
             console.log('[CONNECT] Connecting with config:', fullConfig);
 
@@ -510,7 +559,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
             if (!tab) return state;
             didActivate = true;
             const newConnId = tab.connectionId || null;
-            const isReal = newConnId !== GLOBAL_SNIPPETS_CONNECTION_ID;
+            const isReal = newConnId !== null && newConnId !== GLOBAL_SNIPPETS_CONNECTION_ID;
             return {
                 activeTabId: tabId,
                 activeConnectionId: newConnId,
@@ -634,9 +683,21 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
             const resolvedConnId =
                 resolvedTab?.connectionId ?? (activeConnectionIdValid ? activeConnectionId : null);
 
+            // When the restored active tab is the global snippets tab (a pseudo-tab with
+            // no real connection), fall back to the most recent real connection tab so
+            // SnippetsManager has a valid target even before the user switches tabs.
+            const lastConnectionTabIdFallback =
+                [...tabs].reverse().find((t: Tab) =>
+                    t.type === 'connection' && !!t.connectionId && t.connectionId !== GLOBAL_SNIPPETS_CONNECTION_ID
+                )?.connectionId ?? null;
+            const lastRealConnectionId =
+                resolvedConnId !== null && resolvedConnId !== GLOBAL_SNIPPETS_CONNECTION_ID
+                    ? resolvedConnId
+                    : lastConnectionTabIdFallback;
+
             return showWelcomeScreen
-                ? { tabs, activeTabId: null, activeConnectionId: null, showWelcomeScreen: true }
-                : { tabs, activeTabId: resolvedActiveId, activeConnectionId: resolvedConnId, showWelcomeScreen: false };
+                ? { tabs, activeTabId: null, activeConnectionId: null, lastRealConnectionId, showWelcomeScreen: true }
+                : { tabs, activeTabId: resolvedActiveId, activeConnectionId: resolvedConnId, lastRealConnectionId, showWelcomeScreen: false };
         });
     },
 
