@@ -9,6 +9,7 @@ import { TabBar } from './TabBar';
 import { ShortcutManager } from '../managers/ShortcutManager';
 import { CommandPalette } from './CommandPalette';
 import { CombinedTabBar } from './CombinedTabBar';
+import { GLOBAL_SNIPPETS_CONNECTION_ID } from '../../features/connections/application/tabService';
 import { listen } from '@tauri-apps/api/event';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
@@ -339,7 +340,7 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
             ) : (
                 <>
                     {/* Unified Tab Bar — not shown for the standalone global snippets tab */}
-                    {tab.connectionId !== 'global' && (
+                    {tab.connectionId !== GLOBAL_SNIPPETS_CONNECTION_ID && (
                         <CombinedTabBar
                             connectionId={tab.connectionId}
                             activeView={tab.view}

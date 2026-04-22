@@ -1,6 +1,7 @@
 import { Code, Plus, Trash2, Edit2, Copy } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../../store/useAppStore';
+import { GLOBAL_SNIPPETS_CONNECTION_ID, LOCAL_TERMINAL_CONNECTION_ID } from '../../features/connections/application/tabService';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Modal } from '../ui/Modal';
@@ -13,6 +14,7 @@ import type { Snippet } from '../../store/useAppStore';
 export function SnippetsManager({ connectionId }: { connectionId?: string }) {
   const showToast = useAppStore((state) => state.showToast);
   const storeActiveConnectionId = useAppStore(state => state.activeConnectionId);
+  const lastRealConnectionId = useAppStore(state => state.lastRealConnectionId);
   // Always call hook unconditionally. Use the prop if provided, otherwise fall back to the store.
   const activeConnectionId = connectionId ?? storeActiveConnectionId;
 
@@ -86,8 +88,9 @@ export function SnippetsManager({ connectionId }: { connectionId?: string }) {
   };
 
   const handleRun = (command: string) => {
-    // On the global snippets tab use whatever connection is currently active in the store.
-    const targetConnectionId = connectionId === 'global' ? storeActiveConnectionId : activeConnectionId;
+    const targetConnectionId = connectionId === GLOBAL_SNIPPETS_CONNECTION_ID
+      ? lastRealConnectionId
+      : activeConnectionId;
     if (!targetConnectionId) {
       showToast('error', 'No active connection to run command');
       return;
@@ -103,7 +106,7 @@ export function SnippetsManager({ connectionId }: { connectionId?: string }) {
   // Global snippets tab (connectionId='global'): show only truly global snippets.
   // Connection tab: show global + host-scoped snippets for that connection.
   const filteredSnippets = snippets.filter(s => {
-    if (connectionId === 'global') return !s.connectionId;
+    if (connectionId === GLOBAL_SNIPPETS_CONNECTION_ID) return !s.connectionId;
     return !s.connectionId || s.connectionId === activeConnectionId;
   });
 
@@ -126,7 +129,7 @@ export function SnippetsManager({ connectionId }: { connectionId?: string }) {
           onClick={() => {
             // On the global snippets tab, default to global scope (undefined).
             // On a real SSH connection tab, default to that connection.
-            const defaultScope = (activeConnectionId && activeConnectionId !== 'local' && activeConnectionId !== 'global') ? activeConnectionId : undefined;
+            const defaultScope = (activeConnectionId && activeConnectionId !== LOCAL_TERMINAL_CONNECTION_ID && activeConnectionId !== GLOBAL_SNIPPETS_CONNECTION_ID) ? activeConnectionId : undefined;
             setEditingSnippet({ name: '', command: '', category: '', connectionId: defaultScope });
             setIsModalOpen(true);
           }}
