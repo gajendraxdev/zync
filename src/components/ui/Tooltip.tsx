@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from 'react';
+import { isValidElement, type MouseEvent, type ReactNode, useEffect, useState } from 'react';
 import * as RadixTooltip from '@radix-ui/react-tooltip';
 import { cn } from '../../lib/utils';
 
@@ -10,10 +10,36 @@ interface TooltipProps {
   contentClassName?: string;
   disabled?: boolean;
   dismissOnClick?: boolean;
+  asChild?: boolean;
 }
 
-export function Tooltip({ content, children, position = 'top', className, contentClassName, disabled = false, dismissOnClick = true }: TooltipProps) {
+function shouldDismissTooltip(open: boolean, dismissOnClick: boolean): boolean {
+  return open && dismissOnClick;
+}
+
+export function Tooltip({
+  content,
+  children,
+  position = 'top',
+  className,
+  contentClassName,
+  disabled = false,
+  dismissOnClick = true,
+  asChild = true,
+}: TooltipProps) {
   const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (disabled) {
+      setOpen(false);
+    }
+  }, [disabled]);
+
+  const handleDismissCapture = (_event: MouseEvent<HTMLElement>) => {
+    if (!shouldDismissTooltip(open, dismissOnClick)) return;
+    setOpen(false);
+  };
+  const shouldUseAsChild = asChild && isValidElement(children);
 
   return (
     <RadixTooltip.Root
@@ -22,16 +48,12 @@ export function Tooltip({ content, children, position = 'top', className, conten
         if (!disabled) setOpen(next);
       }}
     >
-      <RadixTooltip.Trigger asChild>
-        <span
-          tabIndex={0}
-          className={cn("relative inline-flex items-center justify-center", className)}
-          onClickCapture={() => {
-            if (dismissOnClick) setOpen(false);
-          }}
-        >
-          {children}
-        </span>
+      <RadixTooltip.Trigger
+        asChild={shouldUseAsChild}
+        className={cn("relative inline-flex items-center justify-center", className)}
+        onClickCapture={handleDismissCapture}
+      >
+        {children}
       </RadixTooltip.Trigger>
 
       {!disabled && (

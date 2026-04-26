@@ -38,12 +38,52 @@ fn is_remote_windows(remote_os: Option<&str>) -> bool {
         .unwrap_or(false)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ShellKind {
+    Cmd,
+    PowerShell,
+    Pwsh,
+    Other,
+}
+
+fn classify_windows_shell(shell_label: &str) -> ShellKind {
+    let trimmed = shell_label.trim();
+    if trimmed.is_empty() {
+        return ShellKind::Other;
+    }
+
+    let token = trimmed.split_whitespace().next().unwrap_or(trimmed);
+    let base_name = std::path::Path::new(token)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(token)
+        .to_ascii_lowercase();
+
+    match base_name.as_str() {
+        "cmd" | "cmd.exe" => ShellKind::Cmd,
+        "powershell" | "powershell.exe" => ShellKind::PowerShell,
+        "pwsh" | "pwsh.exe" => ShellKind::Pwsh,
+        _ => {
+            let lc = trimmed.to_ascii_lowercase();
+            if lc == "command prompt" {
+                ShellKind::Cmd
+            } else if lc == "windows powershell" || lc == "powershell" {
+                ShellKind::PowerShell
+            } else if lc.starts_with("powershell 7") {
+                ShellKind::Pwsh
+            } else {
+                ShellKind::Other
+            }
+        }
+    }
+}
+
 fn remote_windows_shell_command(shell_override: &str) -> Option<&'static str> {
-    match shell_override.trim().to_ascii_lowercase().as_str() {
-        "powershell" | "windows powershell" => Some("powershell.exe -NoLogo"),
-        "pwsh" | "powershell 7" => Some("pwsh.exe -NoLogo"),
-        "cmd" | "command prompt" => Some("cmd.exe"),
-        _ => None,
+    match classify_windows_shell(shell_override) {
+        ShellKind::PowerShell => Some("powershell.exe -NoLogo"),
+        ShellKind::Pwsh => Some("pwsh.exe -NoLogo"),
+        ShellKind::Cmd => Some("cmd.exe"),
+        ShellKind::Other => None,
     }
 }
 
@@ -69,17 +109,15 @@ fn windows_double_quote(value: &str, batch_mode: bool) -> String {
 
 fn is_posix_interactive_shell(shell: &str) -> bool {
     let normalized = shell.trim().to_ascii_lowercase();
-    normalized.contains("/bin/")
-        || normalized.contains("bash")
-        || normalized.contains("zsh")
-        || normalized.contains("fish")
-        || normalized.contains("dash")
-        || normalized.contains("ksh")
-        || normalized.contains("tcsh")
-        || normalized.contains("csh")
-        || normalized.contains("/usr/bin/sh")
-        || normalized.ends_with("/sh")
-        || normalized.contains("git\\bin\\bash.exe")
+    let basename = normalized
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(normalized.as_str());
+    let normalized_base = basename.strip_suffix(".exe").unwrap_or(basename);
+    matches!(
+        normalized_base,
+        "bash" | "zsh" | "fish" | "dash" | "ksh" | "tcsh" | "csh" | "sh"
+    )
 }
 
 #[derive(Clone, Serialize)]
@@ -209,7 +247,11 @@ impl PtyManager {
                 Some("wsl") => ("wsl.exe".to_string(), vec![], true),
                 Some(wsl_distro) if wsl_distro.starts_with("wsl:") => {
                     let distro = wsl_distro.strip_prefix("wsl:").unwrap_or("").to_string();
-                    ("wsl.exe".to_string(), vec!["-d".to_string(), distro], true)
+                    if distro.trim().is_empty() {
+                        ("wsl.exe".to_string(), vec![], true)
+                    } else {
+                        ("wsl.exe".to_string(), vec!["-d".to_string(), distro], true)
+                    }
                 }
                 Some("pwsh") => {
                     let pwsh_paths = [
@@ -243,12 +285,20 @@ impl PtyManager {
         // WSL should open in Linux context. If we have a Linux cwd, pass it via `--cd`.
         // Otherwise force distro home (`~`) instead of inheriting host Windows cwd.
         if is_wsl_shell {
-            let wsl_cwd = cwd
-                .as_deref()
-                .map(str::trim)
-                .filter(|path| !path.is_empty() && path.starts_with('/'))
-                .unwrap_or("~")
-                .to_string();
+            let provided_cwd = cwd.as_deref().map(str::trim);
+            let linux_cwd = provided_cwd
+                .filter(|path| !path.is_empty() && path.starts_with('/'));
+            if linux_cwd.is_none() {
+                if let Some(original) = provided_cwd {
+                    eprintln!(
+                        "[PTY] WSL: provided cwd '{}' is not a Linux path, falling back to '~'",
+                        original
+                    );
+                } else {
+                    eprintln!("[PTY] WSL: no Linux cwd provided, falling back to '~'");
+                }
+            }
+            let wsl_cwd = linux_cwd.unwrap_or("~").to_string();
             args.push("--cd".to_string());
             args.push(wsl_cwd);
         }
@@ -260,7 +310,7 @@ impl PtyManager {
 
         if !is_wsl_shell {
             if let Some(path) = cwd {
-            cmd.cwd(path);
+                cmd.cwd(path);
             }
         }
 
@@ -420,50 +470,27 @@ impl PtyManager {
         let selected_shell = shell_override.as_deref().filter(|s| !s.trim().is_empty());
 
         if let Some(shell) = selected_shell {
+            let shell_trimmed = shell.trim();
             // Start explicit remote shell (path or command name) when user selected one.
             // Unix hosts use `exec` to replace the current command process with the chosen shell.
             // Windows OpenSSH hosts need native shell executables instead of POSIX `exec`.
             let launch = if remote_is_windows {
-                remote_windows_shell_command(shell)
+                remote_windows_shell_command(shell_trimmed)
                     .map(|command| command.to_string())
-                    .unwrap_or_else(|| format!("\"{}\"", windows_double_quote(shell, true)))
+                    .unwrap_or_else(|| format!("\"{}\"", windows_double_quote(shell_trimmed, true)))
             } else {
-                let escaped_shell = shell_single_quote(shell);
-                match remote_shell_login_flag(shell) {
+                let escaped_shell = shell_single_quote(shell_trimmed);
+                match remote_shell_login_flag(shell_trimmed) {
                     Some(login_flag) => format!("exec '{}' {}", escaped_shell, login_flag),
                     None => format!("exec '{}'", escaped_shell),
                 }
             };
-            if remote_is_windows {
-                let computed_payload = remote_windows_shell_command(shell)
-                    .map(|command| command.to_string())
-                    .unwrap_or_else(|| format!("\"{}\"", windows_double_quote(shell, true)));
-                eprintln!(
-                    "[PTY] Remote Windows explicit shell launch via channel.exec (remote_is_windows={}, shell='{}', payload='{}')",
-                    remote_is_windows,
-                    shell,
-                    computed_payload
-                );
-            }
-            // Note: a successful `channel.exec` acknowledgement doesn't always guarantee
-            // an actually usable interactive shell. We only fall back to request_shell
-            // on explicit exec transport errors to avoid double-launching on success.
-            match channel.exec(false, launch).await {
-                Ok(_) => {}
-                Err(e) => {
-                    eprintln!(
-                        "[PTY] Failed to launch selected remote shell '{}': {}. Falling back to default shell.",
-                        shell, e
-                    );
-                    channel
-                        .request_shell(false)
-                        .await
-                        .map_err(|fallback_err| anyhow!(
-                            "Failed to launch selected shell '{}' ({}) and failed fallback shell request: {}",
-                            shell, e, fallback_err
-                        ))?;
-                }
-            }
+            // Important: `exec` and `request_shell` are different channel request
+            // types. If `exec` fails, callers must open a fresh channel before retrying.
+            channel
+                .exec(false, launch)
+                .await
+                .map_err(|e| anyhow!("Failed to launch selected remote shell '{}': {}", shell, e))?;
         } else {
             // Default remote login shell.
             channel
@@ -475,23 +502,17 @@ impl PtyManager {
         // If cwd is provided, send a cd command immediately.
         if let Some(path) = cwd {
             let cd_cmd = if remote_is_windows {
-                match selected_shell.map(|s| s.trim().to_ascii_lowercase()) {
-                    Some(shell) if shell == "cmd" || shell == "command prompt" => {
+                match selected_shell.map(classify_windows_shell).unwrap_or(ShellKind::Other) {
+                    ShellKind::Cmd => {
                         format!("cd /d \"{}\" && cls\r", windows_double_quote(&path, false))
                     }
-                    Some(shell)
-                        if shell == "powershell"
-                            || shell == "windows powershell"
-                            || shell == "pwsh"
-                            || shell == "powershell 7" =>
-                    {
+                    ShellKind::PowerShell | ShellKind::Pwsh => {
                         format!(
                             "Set-Location -LiteralPath '{}'; Clear-Host\r",
                             powershell_single_quote(&path)
                         )
                     }
-                    Some(_) => format!("cd \"{}\" && cls\r", windows_double_quote(&path, false)),
-                    None => {
+                    ShellKind::Other => {
                         // Unknown Windows default shell. `cd \"...\"` is accepted by
                         // both cmd and PowerShell for same-drive navigation; avoid
                         // shell-specific `/d` or `Set-Location` syntax here.

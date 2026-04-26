@@ -107,7 +107,7 @@ export interface ConnectionSlice {
     loadConnections: () => Promise<void>;
 }
 
-// @ts-ignore
+const VALID_RESTORABLE_VIEWS = new Set<CoreTabView>(['terminal', 'files', 'port-forwarding', 'snippets', 'dashboard']);
 
 export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSlice> = (set, get) => ({
     connections: [],
@@ -174,6 +174,10 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
     },
 
     editConnection: (updatedConn) => {
+        const existing = get().connections.find(connection => connection.id === updatedConn.id);
+        if (existing && hasRemoteTargetChanged(existing, updatedConn)) {
+            clearRemoteShellCache(updatedConn.id);
+        }
         set(state => {
             const next = upsertConnectionInState(state, updatedConn);
             saveToMain(next.connections, next.folders);
@@ -182,11 +186,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
     },
 
     deleteConnection: (id) => {
-        try {
-            clearRemoteShellCache(id);
-        } catch (error) {
-            console.warn('[Connections] Failed to clear remote shell cache during deleteConnection:', error);
-        }
+        clearRemoteShellCache(id);
         set(state => {
             const newConns = state.connections.filter(c => c.id !== id);
             // Also close related tabs
@@ -312,6 +312,13 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                 ...connection,
                 folder: normalizeFolderPath(connection.folder || ''),
             }));
+            const existingById = new Map(state.connections.map(connection => [connection.id, connection] as const));
+            finalConns.forEach((connection) => {
+                const existing = existingById.get(connection.id);
+                if (!existing) return;
+                if (!hasRemoteTargetChanged(existing, connection)) return;
+                clearRemoteShellCache(connection.id);
+            });
             const folderMap = new Map(state.folders.map((folder) => [normalizeFolderPath(folder.name), folder] as const));
             importedFolders.forEach((folder) => {
                 const normalized = normalizeFolderPath(folder.name);
@@ -341,11 +348,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
 
     clearConnections: () => {
         get().connections.forEach(conn => {
-            try {
-                clearRemoteShellCache(conn.id);
-            } catch (error) {
-                console.warn('[Connections] Failed to clear remote shell cache during clearConnections:', error);
-            }
+            clearRemoteShellCache(conn.id);
         });
         set({
             connections: [],
@@ -664,8 +667,10 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                     return true;
                 })
                 .map(s => {
-                    const VALID_VIEWS = new Set<CoreTabView>(['terminal', 'files', 'port-forwarding', 'snippets', 'dashboard']);
-                    const view: Tab['view'] = VALID_VIEWS.has(s.view as CoreTabView) ? (s.view as CoreTabView) : 'terminal';
+                    const isPluginView = typeof s.view === 'string' && s.view.startsWith('plugin:');
+                    const view: Tab['view'] = VALID_RESTORABLE_VIEWS.has(s.view as CoreTabView) || isPluginView
+                        ? (s.view as Tab['view'])
+                        : 'terminal';
                     return {
                         id: s.id,
                         type: s.tabType as Tab['type'],
@@ -751,6 +756,15 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
 });
 
 let pendingSave: Promise<void> = Promise.resolve();
+
+function hasRemoteTargetChanged(previous: Connection, next: Connection): boolean {
+    return previous.host !== next.host
+        || previous.port !== next.port
+        || previous.username !== next.username
+        || previous.jumpServerId !== next.jumpServerId
+        || previous.privateKeyPath !== next.privateKeyPath
+        || previous.password !== next.password;
+}
 
 const saveToMain = (connections: Connection[], folders: Folder[]): Promise<void> => {
     pendingSave = pendingSave

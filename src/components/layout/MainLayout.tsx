@@ -12,7 +12,7 @@ import { CommandPalette } from './CommandPalette';
 import { CombinedTabBar } from './CombinedTabBar';
 import { useAvailableShells } from '../../hooks/useAvailableShells';
 import type { ShellEntry } from '../../lib/shells/types';
-import { GLOBAL_SNIPPETS_CONNECTION_ID } from '../../features/connections/application/tabService';
+import { GLOBAL_SNIPPETS_CONNECTION_ID, LOCAL_TERMINAL_CONNECTION_ID } from '../../features/connections/application/tabService';
 import { listen } from '@tauri-apps/api/event';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
@@ -80,10 +80,10 @@ const CORE_TAB_VIEWS = [
     'port-forwarding',
     'snippets',
     'terminal',
-] as const satisfies readonly Tab['view'][];
+] as const satisfies readonly CoreTabView[];
 
 function isCoreTabView(view: string): view is CoreTabView {
-    return CORE_TAB_VIEWS.includes(view as CoreTabView);
+    return (CORE_TAB_VIEWS as readonly string[]).includes(view);
 }
 
 /**
@@ -176,7 +176,7 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
     const closeTerminal = useAppStore(state => state.closeTerminal);
     const setActiveTerminal = useAppStore(state => state.setActiveTerminal);
 
-    const hostIsWindows = tab.connectionId === 'local' && window.electronUtils?.platform === 'win32';
+    const hostIsWindows = tab.connectionId === LOCAL_TERMINAL_CONNECTION_ID && window.electronUtils?.platform === 'win32';
     const { shells: availableShells, isLoading: shellsLoading, error: shellsError, refetch: refetchShells } = useAvailableShells({ isWindows: hostIsWindows, connectionId: tab.connectionId });
     const defaultWindowsShell = useAppStore(state => state.settings.localTerm?.windowsShell);
 
@@ -192,7 +192,7 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
 
     // Effect hooks must be unconditional
     // Ensure active view is always in openFeatures
-    const pinnedFeatures = tab.connectionId === 'local' ? (localPinnedFeatures || EMPTY_ARRAY) : (connection?.pinnedFeatures || EMPTY_ARRAY);
+    const pinnedFeatures = tab.connectionId === LOCAL_TERMINAL_CONNECTION_ID ? (localPinnedFeatures || EMPTY_ARRAY) : (connection?.pinnedFeatures || EMPTY_ARRAY);
 
     useEffect(() => {
         if (tab.view && tab.view !== 'terminal' && !pinnedFeatures.includes(tab.view)) {
@@ -299,16 +299,28 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
      *   cast only after runtime validation.
      */
     const handleTabSelect = useCallback((view: string, termId?: string) => {
-        if (!isCoreTabView(view) && !isPluginTabView(view)) {
+        const isCoreView = isCoreTabView(view);
+        const isPluginView = isPluginTabView(view);
+
+        if (!isCoreView && !isPluginView) {
             console.warn('[MainLayout] Ignoring unknown tab view:', view);
             return;
+        }
+
+        if (isPluginView) {
+            const pluginId = view.slice('plugin:'.length);
+            const pluginExists = pluginPanels.some((panel) => panel.id === pluginId);
+            if (!pluginExists) {
+                console.warn('[MainLayout] Ignoring plugin tab view without registered panel:', view);
+                return;
+            }
         }
 
         setTabView(tab.id, view);
         if (view === 'terminal' && termId && tab.connectionId) {
             setActiveTerminal(tab.connectionId, termId);
         }
-    }, [setTabView, tab.id, tab.connectionId, setActiveTerminal]);
+    }, [pluginPanels, setTabView, tab.id, tab.connectionId, setActiveTerminal]);
 
     const handleFeatureClose = useCallback((feature: string) => {
         setOpenFeatures(prev => prev.filter(f => f !== feature));
@@ -394,7 +406,7 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
                             shellsLoading={shellsLoading}
                             shellsError={shellsError}
                             onRefetchShells={refetchShells}
-                            defaultShellId={tab.connectionId === 'local' ? defaultWindowsShell : undefined}
+                                        defaultShellId={tab.connectionId === LOCAL_TERMINAL_CONNECTION_ID ? defaultWindowsShell : undefined}
                             onTabSelect={handleTabSelect}
                             onFeatureClose={handleFeatureClose}
                             onTerminalClose={handleTerminalClose}
@@ -506,7 +518,7 @@ export function MainLayout({ children }: { children: ReactNode }) {
     const [isShuttingDown, setIsShuttingDown] = useState(false);
     const connections = useAppStore(state => state.connections);
     const disconnect = useAppStore(state => state.disconnect);
-    const activeConnections = connections.filter(c => c.status === 'connected' && c.id !== 'local');
+    const activeConnections = connections.filter(c => c.status === 'connected' && c.id !== LOCAL_TERMINAL_CONNECTION_ID);
 
     const handleShutdown = useCallback(async () => {
         setIsShuttingDown(true);
@@ -529,7 +541,7 @@ export function MainLayout({ children }: { children: ReactNode }) {
         const setupShutdownListener = async () => {
             const unlisten = await listen('app:request-close', () => {
                 // Check latest state
-                const currentConnections = useAppStore.getState().connections.filter(c => c.status === 'connected' && c.id !== 'local');
+                const currentConnections = useAppStore.getState().connections.filter(c => c.status === 'connected' && c.id !== LOCAL_TERMINAL_CONNECTION_ID);
                 if (currentConnections.length > 0) {
                     setIsShutdownModalOpen(true);
                 } else {
