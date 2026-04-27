@@ -4,6 +4,11 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Fixed
+- **macOS/Linux Default Shell Sentinel Handling**: Local PTY startup now treats shell override `"default"` as "use user login shell" instead of trying to spawn a literal `default` binary. This restores expected behavior for shells configured via `chsh`.
+- **macOS Maximize Behavior**: Window maximize toggle now uses native fullscreen semantics on macOS and treats native fullscreen as a maximized state for UI layout decisions (for example, suppressing rounded corners).
+- **macOS/Linux Default Shell Icon Consistency**: Local shell discovery now pins the login shell (`$SHELL`) to the top of the detected list, and terminal-tab fallback icon resolution now prefers that first entry so default-shell tabs show the correct icon (e.g., zsh/fish instead of bash).
+
 ## [2.15.0] - 2026-04-26
 
 ### Added

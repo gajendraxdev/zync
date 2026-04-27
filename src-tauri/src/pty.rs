@@ -276,7 +276,8 @@ impl PtyManager {
         } else {
             let path = shell_override
                 .as_deref()
-                .filter(|s| !s.trim().is_empty())
+                .map(str::trim)
+                .filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("default"))
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string()));
             (path, vec![], false)
@@ -467,7 +468,10 @@ impl PtyManager {
             .map_err(|e| anyhow!("Failed to request PTY: {}", e))?;
 
         let remote_is_windows = is_remote_windows(remote_os.as_deref());
-        let selected_shell = shell_override.as_deref().filter(|s| !s.trim().is_empty());
+        let selected_shell = shell_override
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("default"));
 
         if let Some(shell) = selected_shell {
             let shell_trimmed = shell.trim();
