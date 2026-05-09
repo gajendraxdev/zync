@@ -354,7 +354,8 @@ pub fn get_data_dir(app: &AppHandle) -> std::path::PathBuf {
     let merged_settings =
         read_effective_settings(app).unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
 
-    let resolved = if let Some(data_path) = merged_settings.get("dataPath").and_then(|v| v.as_str()) {
+    let resolved = if let Some(data_path) = merged_settings.get("dataPath").and_then(|v| v.as_str())
+    {
         if !data_path.is_empty() {
             let custom_dir = std::path::PathBuf::from(data_path);
             if !custom_dir.exists() {
@@ -457,6 +458,7 @@ pub struct ConnectionHandle {
     pub sftp_session: Option<Arc<russh_sftp::client::SftpSession>>,
     pub detected_os: Option<String>,
     pub detected_shell: Option<String>,
+    pub uses_vault_auth: bool,
 }
 
 /// Internal helper: establishes a full SSH connection (session + SFTP + OS detection)
@@ -592,24 +594,92 @@ async fn reconnect_connection(
         sftp_session,
         detected_os,
         detected_shell,
+        uses_vault_auth: config_uses_vault_auth(config),
+    })
+}
+
+/// Recursively resolves every `VaultRef` auth method in `config` (and jump hosts)
+/// to a concrete `Password` or `PrivateKeyData` using the vault service.
+/// Must be called before any SSH connect/test operation.
+/// Secret for ssh-private-key items may be plain PEM or JSON {"key":"...","passphrase":"..."}.
+fn parse_key_secret(secret: &str) -> (String, Option<String>) {
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(secret) {
+        if let Some(key) = val["key"].as_str() {
+            let passphrase = val["passphrase"].as_str().map(|s| s.to_string());
+            return (key.to_string(), passphrase);
+        }
+    }
+    (secret.to_string(), None)
+}
+
+fn config_uses_vault_auth(config: &ConnectionConfig) -> bool {
+    matches!(config.auth_method, crate::types::AuthMethod::VaultRef { .. })
+        || config
+            .jump_host
+            .as_ref()
+            .map(|jump| config_uses_vault_auth(jump.as_ref()))
+            .unwrap_or(false)
+}
+
+fn resolve_vault_refs<'a>(
+    config: &'a mut ConnectionConfig,
+    vault: &'a tokio::sync::Mutex<crate::vault::store::VaultService>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+    Box::pin(async move {
+        if let crate::types::AuthMethod::VaultRef { item_id } = &config.auth_method {
+            let item_id = item_id.clone();
+            let svc = vault.lock().await;
+            let record = svc.item_get(&item_id).map_err(|e| e.to_string())?;
+            drop(svc);
+            config.auth_method = match record.kind.as_str() {
+                "ssh-password" => crate::types::AuthMethod::Password {
+                    password: record.secret.clone(),
+                },
+                "ssh-private-key" => {
+                    let (key_data, passphrase) = parse_key_secret(&record.secret);
+                    crate::types::AuthMethod::PrivateKeyData {
+                        key_data,
+                        passphrase,
+                    }
+                }
+                k => {
+                    return Err(format!(
+                        "Vault item kind '{k}' is not supported for SSH auth"
+                    ))
+                }
+            };
+        }
+        if let Some(jump) = config.jump_host.as_mut() {
+            resolve_vault_refs(jump.as_mut(), vault).await?;
+        }
+        Ok(())
     })
 }
 
 #[tauri::command]
 pub async fn ssh_connect(
-    config: ConnectionConfig,
+    mut config: ConnectionConfig,
     state: State<'_, AppState>,
+    vault: State<'_, tokio::sync::Mutex<crate::vault::store::VaultService>>,
 ) -> Result<ConnectionResponse, String> {
+    let original_config = config.clone();
+    let uses_vault_auth = config_uses_vault_auth(&original_config);
+    resolve_vault_refs(&mut config, &vault).await?;
     match reconnect_connection(&config, &state.ssh_manager, &state.tunnel_manager).await {
-        Ok(handle) => {
+        Ok(mut handle) => {
             let detected_os = handle.detected_os.clone();
+            // Do not keep decrypted vault secrets in the long-lived handle config.
+            // The handle keeps the original VaultRef config so future reconnects
+            // require the vault to be explicitly unlocked again.
+            handle.config = original_config.clone();
+            handle.uses_vault_auth = uses_vault_auth;
             let mut connections = state.connections.lock().await;
-            connections.insert(config.id.clone(), handle);
+            connections.insert(original_config.id.clone(), handle);
 
             Ok(ConnectionResponse {
                 success: true,
                 message: "Connected".to_string(),
-                term_id: Some(config.id.clone()),
+                term_id: Some(original_config.id.clone()),
                 detected_os,
             })
         }
@@ -622,9 +692,11 @@ pub async fn ssh_connect(
 
 #[tauri::command]
 pub async fn ssh_test_connection(
-    config: ConnectionConfig,
+    mut config: ConnectionConfig,
     state: State<'_, AppState>,
+    vault: State<'_, tokio::sync::Mutex<crate::vault::store::VaultService>>,
 ) -> Result<String, String> {
+    resolve_vault_refs(&mut config, &vault).await?;
     match state
         .ssh_manager
         .connect(config.clone(), Arc::new((*state.tunnel_manager).clone()))
@@ -902,6 +974,99 @@ pub async fn ssh_disconnect(id: String, state: State<'_, AppState>) -> Result<()
     // Explicit close logic if needed, but drop handles largely work.
 
     Ok(())
+}
+
+#[tauri::command]
+pub async fn ssh_disconnect_vault_backed(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    let ids = {
+        let connections = state.connections.lock().await;
+        connections
+            .iter()
+            .filter_map(|(id, handle)| handle.uses_vault_auth.then(|| id.clone()))
+            .collect::<Vec<_>>()
+    };
+
+    for id in &ids {
+        state
+            .pty_manager
+            .close_by_connection(id)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+
+    stop_tunnels_for_connections(&app, &state, &ids).await?;
+
+    let mut connections = state.connections.lock().await;
+    for id in &ids {
+        connections.remove(id);
+    }
+
+    Ok(ids)
+}
+
+async fn stop_tunnels_for_connections(
+    app: &AppHandle,
+    state: &AppState,
+    connection_ids: &[String],
+) -> Result<(), String> {
+    if connection_ids.is_empty() {
+        return Ok(());
+    }
+
+    let data_dir = get_data_dir(app);
+    let file_path = data_dir.join("tunnels.json");
+    if !file_path.exists() {
+        return Ok(());
+    }
+
+    let data = std::fs::read_to_string(file_path).map_err(|e| e.to_string())?;
+    let saved_data: SavedTunnelsData = serde_json::from_str(&data).map_err(|e| e.to_string())?;
+    let connection_id_set: HashSet<&str> = connection_ids.iter().map(String::as_str).collect();
+    let tunnels = saved_data
+        .tunnels
+        .into_iter()
+        .filter(|t| connection_id_set.contains(t.connection_id.as_str()))
+        .collect::<Vec<_>>();
+
+    for tunnel in tunnels {
+        let internal_id = tunnel_internal_id(&tunnel);
+        let session = {
+            let connections = state.connections.lock().await;
+            connections
+                .get(&tunnel.connection_id)
+                .and_then(|c| c.session.clone())
+        };
+        let result = state
+            .tunnel_manager
+            .stop_tunnel(session, internal_id, tunnel.bind_address.clone())
+            .await;
+
+        let (status, error) = match result {
+            Ok(()) => ("stopped".to_string(), None),
+            Err(error) => ("error".to_string(), Some(error.to_string())),
+        };
+        let _ = app.emit(
+            "tunnel:status-change",
+            TunnelStatusChange {
+                id: tunnel.id,
+                status,
+                error,
+            },
+        );
+    }
+
+    Ok(())
+}
+
+fn tunnel_internal_id(tunnel: &SavedTunnel) -> String {
+    if tunnel.tunnel_type == "local" {
+        format!("local:{}:{}", tunnel.local_port, tunnel.remote_port)
+    } else {
+        format!("remote:{}:{}", tunnel.remote_port, tunnel.local_port)
+    }
 }
 
 #[tauri::command]
@@ -1281,6 +1446,7 @@ fn parse_csv_connections(content: &str) -> Result<Vec<SavedConnection>, String> 
             } else {
                 Some(pinned_features)
             },
+            auth_ref: None,
         });
     }
 
@@ -1553,6 +1719,12 @@ async fn get_live_ssh_session(
             .map(|c| c.config.clone())
             .ok_or_else(|| format!("Connection config for {} not found", connection_id))?
     };
+    if config_uses_vault_auth(&config) {
+        return Err(
+            "Vault-backed connection needs an unlocked vault. Unlock Vault, then reconnect."
+                .to_string(),
+        );
+    }
     let mut new_handle =
         reconnect_connection(&config, &state.ssh_manager, &state.tunnel_manager).await?;
     let new_session = new_handle
@@ -1630,6 +1802,13 @@ async fn get_sftp_or_reconnect(
         "[SFTP] Session not found for '{}', attempting reconnect...",
         id
     );
+
+    if config_uses_vault_auth(&config) {
+        return Err(
+            "DISCONNECTED: Vault-backed connection needs an unlocked vault. Unlock Vault, then reconnect."
+                .to_string(),
+        );
+    }
 
     let timeout_duration = std::time::Duration::from_secs(12);
     let new_handle = match tokio::time::timeout(
@@ -2567,7 +2746,10 @@ pub async fn fs_copy(
                         println!("[FS] Server-side copy failed (non-zero exit), checking SFTP fallback...");
                     }
                     Ok(Err(e)) => {
-                        println!("[FS] Server-side copy failed (error), checking SFTP fallback: {}", e);
+                        println!(
+                            "[FS] Server-side copy failed (error), checking SFTP fallback: {}",
+                            e
+                        );
                     }
                     Err(_) => {
                         println!("[FS] Server-side copy optimization timed out, checking SFTP fallback...");
@@ -3677,9 +3859,7 @@ pub async fn settings_write_raw(
     } else {
         None
     };
-    let current_data_path = current_raw
-        .as_deref()
-        .and_then(data_path_from_raw_json);
+    let current_data_path = current_raw.as_deref().and_then(data_path_from_raw_json);
 
     let actual = settings_mtime_ms(&settings_path);
     if actual != expected_modified_ms {
@@ -3721,9 +3901,7 @@ pub async fn settings_restore_last_known_good(
     } else {
         None
     };
-    let current_data_path = current_raw
-        .as_deref()
-        .and_then(data_path_from_raw_json);
+    let current_data_path = current_raw.as_deref().and_then(data_path_from_raw_json);
     let backup_path = get_last_known_good_settings_path(&app)?;
     if !backup_path.exists() {
         return Err("No last-known-good settings backup found.".to_string());
@@ -4642,7 +4820,9 @@ pub enum ShellIconData {
 }
 
 fn bundled(name: &'static str) -> Option<ShellIconData> {
-    Some(ShellIconData::Bundled { name: name.to_string() })
+    Some(ShellIconData::Bundled {
+        name: name.to_string(),
+    })
 }
 
 fn wsl_bundled_icon(_distro: &str) -> Option<ShellIconData> {
@@ -4775,11 +4955,18 @@ async fn query_remote_windows_shells(
 
 #[cfg(not(target_os = "windows"))]
 fn linux_icon(path: &str) -> Option<ShellIconData> {
-    let name = if path.contains("bash") { "bash.png" }
-        else if path.contains("zsh")  { "zsh.svg"  }
-        else if path.contains("fish") { "fish.png" }
-        else                           { "terminal.png" };
-    Some(ShellIconData::Bundled { name: name.to_string() })
+    let name = if path.contains("bash") {
+        "bash.png"
+    } else if path.contains("zsh") {
+        "zsh.svg"
+    } else if path.contains("fish") {
+        "fish.png"
+    } else {
+        "terminal.png"
+    };
+    Some(ShellIconData::Bundled {
+        name: name.to_string(),
+    })
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -4790,14 +4977,20 @@ pub struct DetectedShell {
 }
 
 #[tauri::command]
-pub async fn shell_get_windows_shells(state: tauri::State<'_, AppState>) -> Result<Vec<DetectedShell>, String> {
+pub async fn shell_get_windows_shells(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<DetectedShell>, String> {
     #[cfg(target_os = "windows")]
     {
         use tokio::process::Command;
         let mut shells = Vec::new();
 
         // Windows PowerShell — always present on Win10+
-        shells.push(DetectedShell { id: "powershell".into(), label: "Windows PowerShell".into(), icon: bundled("powershell.svg") });
+        shells.push(DetectedShell {
+            id: "powershell".into(),
+            label: "Windows PowerShell".into(),
+            icon: bundled("powershell.svg"),
+        });
 
         // PowerShell 7 (pwsh) — optional install
         let pwsh_paths = [
@@ -4805,19 +4998,34 @@ pub async fn shell_get_windows_shells(state: tauri::State<'_, AppState>) -> Resu
             "C:\\Program Files\\PowerShell\\pwsh.exe",
         ];
         if pwsh_paths.iter().any(|p| std::path::Path::new(p).exists()) {
-            shells.push(DetectedShell { id: "pwsh".into(), label: "PowerShell".into(), icon: bundled("pwsh.svg") });
+            shells.push(DetectedShell {
+                id: "pwsh".into(),
+                label: "PowerShell".into(),
+                icon: bundled("pwsh.svg"),
+            });
         }
 
         // Command Prompt — always present
-        shells.push(DetectedShell { id: "cmd".into(), label: "Command Prompt".into(), icon: bundled("cmd.png") });
+        shells.push(DetectedShell {
+            id: "cmd".into(),
+            label: "Command Prompt".into(),
+            icon: bundled("cmd.png"),
+        });
 
         // Git Bash — check common install paths
         let git_bash_paths = [
             "C:\\Program Files\\Git\\bin\\bash.exe",
             "C:\\Program Files (x86)\\Git\\bin\\bash.exe",
         ];
-        if git_bash_paths.iter().any(|p| std::path::Path::new(p).exists()) {
-            shells.push(DetectedShell { id: "gitbash".into(), label: "Git Bash".into(), icon: bundled("gitbash.svg") });
+        if git_bash_paths
+            .iter()
+            .any(|p| std::path::Path::new(p).exists())
+        {
+            shells.push(DetectedShell {
+                id: "gitbash".into(),
+                label: "Git Bash".into(),
+                icon: bundled("gitbash.svg"),
+            });
         }
 
         // WSL distros — reuse the same UTF-16 decode as shell_get_wsl_distros
@@ -4831,8 +5039,11 @@ pub async fn shell_get_windows_shells(state: tauri::State<'_, AppState>) -> Resu
                     i += 2;
                 }
                 let mut decoded = String::from_utf16_lossy(&words);
-                if decoded.starts_with('\u{feff}') { decoded.remove(0); }
-                let distros: Vec<String> = decoded.lines()
+                if decoded.starts_with('\u{feff}') {
+                    decoded.remove(0);
+                }
+                let distros: Vec<String> = decoded
+                    .lines()
                     .map(|l| l.trim().to_string())
                     .filter(|l| !l.is_empty() && !l.to_lowercase().starts_with("docker-"))
                     .collect();
@@ -4856,15 +5067,23 @@ pub async fn shell_get_windows_shells(state: tauri::State<'_, AppState>) -> Resu
                             .and_then(|v| v.clone())
                             .map(|tagged| {
                                 if let Some(data) = tagged.strip_prefix("png:") {
-                                    ShellIconData::Base64Png { data: data.to_string() }
+                                    ShellIconData::Base64Png {
+                                        data: data.to_string(),
+                                    }
                                 } else if let Some(data) = tagged.strip_prefix("ico:") {
-                                    ShellIconData::Base64Icon { data: data.to_string() }
+                                    ShellIconData::Base64Icon {
+                                        data: data.to_string(),
+                                    }
                                 } else {
                                     ShellIconData::Base64Png { data: tagged }
                                 }
                             })
                             .or_else(|| wsl_bundled_icon(&distro));
-                        shells.push(DetectedShell { id: format!("wsl:{}", distro), label: distro, icon });
+                        shells.push(DetectedShell {
+                            id: format!("wsl:{}", distro),
+                            label: distro,
+                            icon,
+                        });
                     }
                 }
             }
@@ -5006,14 +5225,21 @@ pub async fn shell_get_connection_shells(
     };
 
     if let Err(err) = query_result {
-        eprintln!("[Shells] Remote query FAILED for '{}': {}", connection_id, err);
+        eprintln!(
+            "[Shells] Remote query FAILED for '{}': {}",
+            connection_id, err
+        );
         // Return Err — not Ok([]) — so the frontend keeps any cached shells
         // visible and exposes an explicit reload affordance instead of caching
         // a sticky empty result during connection-startup races.
         return Err(err);
     }
     if !stderr.trim().is_empty() {
-        eprintln!("[Shells] Remote stderr for '{}': {}", connection_id, stderr.trim());
+        eprintln!(
+            "[Shells] Remote stderr for '{}': {}",
+            connection_id,
+            stderr.trim()
+        );
     }
 
     let mut seen = HashSet::new();
@@ -5194,10 +5420,8 @@ pub async fn plugin_window_create(
                 std::fs::create_dir_all(&cache_dir)
                     .map_err(|e| format!("Failed to create plugin cache dir: {}", e))?;
             }
-            let file_path = cache_dir.join(format!(
-                "zync-plugin-window-{}.html",
-                uuid::Uuid::new_v4()
-            ));
+            let file_path =
+                cache_dir.join(format!("zync-plugin-window-{}.html", uuid::Uuid::new_v4()));
             std::fs::write(&file_path, h)
                 .map_err(|e| format!("Failed to write temporary plugin HTML file: {}", e))?;
             temp_html_path = Some(file_path.clone());

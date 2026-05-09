@@ -21,6 +21,18 @@ pub enum AuthMethod {
         key_path: String,
         passphrase: Option<String>,
     },
+    /// Sent by the frontend when the connection uses a vault credential.
+    /// The backend resolves this to Password or PrivateKeyData before authenticating.
+    VaultRef {
+        item_id: String,
+    },
+    /// Internal only — constructed by the backend after vault resolution.
+    /// Never accepted from IPC input; VaultRef is the on-wire form.
+    #[serde(skip_deserializing, skip_serializing)]
+    PrivateKeyData {
+        key_data: String,
+        passphrase: Option<String>,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -29,6 +41,41 @@ pub struct ConnectionResponse {
     pub message: String,
     pub term_id: Option<String>,
     pub detected_os: Option<String>,
+}
+
+/// A reference to a vault item used as SSH credentials.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialRef {
+    pub vault_id: String,
+    pub item_id: String,
+    pub item_kind: CredentialItemKind,
+    pub purpose: CredentialPurpose,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CredentialItemKind {
+    SshPassword,
+    SshPrivateKey,
+    SshAgentKey,
+}
+
+impl CredentialItemKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::SshPassword => "ssh-password",
+            Self::SshPrivateKey => "ssh-private-key",
+            Self::SshAgentKey => "ssh-agent-key",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
+pub enum CredentialPurpose {
+    SshAuth,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +97,8 @@ pub struct SavedConnection {
     pub created_at: Option<u64>,
     pub is_favorite: Option<bool>,
     pub pinned_features: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auth_ref: Option<CredentialRef>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
