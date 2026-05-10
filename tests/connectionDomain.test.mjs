@@ -20,6 +20,10 @@ import {
   buildConnectConfig,
 } from '../.tmp-agent-tests/src/features/connections/domain/connectionConfig.js';
 import {
+  assignCredentialToConnections,
+  syncCredentialAssignments,
+} from '../.tmp-agent-tests/src/features/connections/domain/credentialAssignments.js';
+import {
   hasRequiredHostAndUsername,
   getCredentialHealthChecks,
 } from '../.tmp-agent-tests/src/features/connections/domain/validation.js';
@@ -406,6 +410,122 @@ runTest('buildConnectConfig builds jump-host chain and rejects simple cycle', ()
   ];
   const cyclicConfig = buildConnectConfig(cyclic, 'a');
   assert.equal(cyclicConfig, null);
+});
+
+runTest('buildConnectConfig includes stable credential id for vault auth', () => {
+  const connections = [{
+    id: 'vaulted',
+    name: 'Vaulted',
+    host: 'prod',
+    port: 22,
+    username: 'root',
+    status: 'disconnected',
+    authRef: {
+      vaultId: 'vault-1',
+      credentialId: 'cred-1',
+      itemId: 'item-1',
+      itemKind: 'ssh-private-key',
+      purpose: 'ssh-auth',
+    },
+  }];
+
+  const config = buildConnectConfig(connections, 'vaulted');
+
+  assert.equal(config?.auth_method.type, 'VaultRef');
+  assert.equal(config?.auth_method.item_id, 'item-1');
+  assert.equal(config?.auth_method.credential_id, 'cred-1');
+});
+
+runTest('assignCredentialToConnections clears plaintext fields and preserves untouched hosts', () => {
+  const authRef = {
+    vaultId: 'vault-1',
+    credentialId: 'cred-1',
+    itemId: 'item-1',
+    itemKind: 'ssh-private-key',
+    purpose: 'ssh-auth',
+  };
+  const connections = [
+    {
+      id: 'a',
+      name: 'web',
+      host: 'prod',
+      username: 'root',
+      port: 22,
+      status: 'disconnected',
+      password: 'plaintext',
+      privateKeyPath: '/tmp/key.pem',
+    },
+    {
+      id: 'b',
+      name: 'db',
+      host: 'db',
+      username: 'postgres',
+      port: 22,
+      status: 'disconnected',
+      password: 'keep-me',
+    },
+  ];
+
+  const assigned = assignCredentialToConnections(connections, ['a'], authRef);
+
+  assert.deepEqual(assigned[0].authRef, authRef);
+  assert.equal(assigned[0].password, undefined);
+  assert.equal(assigned[0].privateKeyPath, undefined);
+  assert.equal(assigned[1].authRef, undefined);
+  assert.equal(assigned[1].password, 'keep-me');
+});
+
+runTest('syncCredentialAssignments assigns selected hosts and unassigns deselected hosts using same credential', () => {
+  const authRef = {
+    vaultId: 'vault-1',
+    credentialId: 'cred-1',
+    itemId: 'item-1',
+    itemKind: 'ssh-private-key',
+    purpose: 'ssh-auth',
+  };
+  const otherAuthRef = {
+    vaultId: 'vault-1',
+    credentialId: 'cred-2',
+    itemId: 'item-2',
+    itemKind: 'ssh-password',
+    purpose: 'ssh-auth',
+  };
+  const connections = [
+    {
+      id: 'a',
+      name: 'web',
+      host: 'prod',
+      username: 'root',
+      port: 22,
+      status: 'disconnected',
+      authRef,
+    },
+    {
+      id: 'b',
+      name: 'api',
+      host: 'prod-api',
+      username: 'root',
+      port: 22,
+      status: 'disconnected',
+      password: 'plaintext',
+    },
+    {
+      id: 'c',
+      name: 'db',
+      host: 'db',
+      username: 'postgres',
+      port: 22,
+      status: 'disconnected',
+      authRef: otherAuthRef,
+    },
+  ];
+
+  const synced = syncCredentialAssignments(connections, ['b'], authRef);
+
+  assert.equal(synced[0].authRef, undefined);
+  assert.deepEqual(synced[1].authRef, authRef);
+  assert.equal(synced[1].password, undefined);
+  assert.deepEqual(synced[2].authRef, otherAuthRef);
 });
 
 console.log('Connection domain tests passed.');

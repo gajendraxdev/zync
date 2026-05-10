@@ -12,6 +12,7 @@ export interface AuthMethodPrivateKey {
 export interface AuthMethodVaultRef {
     type: 'VaultRef';
     item_id: string;
+    credential_id?: string;
 }
 
 export type AuthMethodPayload = AuthMethodPassword | AuthMethodPrivateKey | AuthMethodVaultRef;

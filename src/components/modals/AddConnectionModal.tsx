@@ -242,7 +242,7 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
             importConnections(mappedConnections, imported.folders || []);
             const plaintextCount = mappedConnections.filter(c => !c.authRef && (c.password || c.privateKeyPath)).length;
             if (plaintextCount > 0 && vaultStatus?.status !== 'uninitialized') {
-                showToast('success', `Imported ${mappedConnections.length} connection(s) — ${plaintextCount} have plaintext credentials. Open Vault tab to migrate.`);
+                showToast('success', `Imported ${mappedConnections.length} connection(s) — ${plaintextCount} have plaintext credentials. Open Vault tab to secure them to vault.`);
             } else {
                 showToast('success', `Imported ${mappedConnections.length} connection(s) from file.`);
             }
@@ -299,7 +299,7 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
                                         <div className="flex min-w-0 flex-1 flex-col">
                                             <span className="text-sm font-semibold text-app-text">Import File</span>
                                             <span className="mt-0.5 text-xs text-app-muted leading-relaxed">Load connections from Zync, JSON, or CSV export files</span>
-                                            <span className="mt-2 text-[11px] font-medium text-app-accent/90">Best for bulk migration</span>
+                                            <span className="mt-2 text-[11px] font-medium text-app-accent/90">Best for bulk secure-to-vault cleanup</span>
                                         </div>
                                     </div>
                                 </button>
@@ -619,7 +619,7 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
                                         <label className="text-xs font-semibold text-app-muted uppercase tracking-wider block">Vault Credential</label>
                                         {vaultItems.length === 0 ? (
                                             <p className="text-xs text-app-muted rounded-lg border border-app-border bg-app-bg/50 px-3 py-2.5">
-                                                No items in vault. Migrate existing connections to populate.
+                                                No items in vault. Secure existing connections to vault to populate it.
                                             </p>
                                         ) : (
                                             <Select
@@ -631,7 +631,13 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
                                                     const vaultId = vaultStatus.vaultId;
                                                     setFormData({
                                                         ...formData,
-                                                        authRef: { vaultId, itemId: item.id, itemKind: item.kind as NonNullable<Connection['authRef']>['itemKind'], purpose: 'ssh-auth' },
+                                                        authRef: {
+                                                            vaultId,
+                                                            credentialId: item.logicalId,
+                                                            itemId: item.id,
+                                                            itemKind: item.kind as NonNullable<Connection['authRef']>['itemKind'],
+                                                            purpose: 'ssh-auth',
+                                                        },
                                                     });
                                                 }}
                                                 options={vaultItems.map(item => ({
@@ -819,7 +825,7 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
                                 : '';
                             const count = lastImportPlaintextCountRef.current;
                             const migrationSuffix = count > 0 && vaultStatus?.status !== 'uninitialized'
-                                ? ` — ${count} have plaintext credentials. Open Vault tab to migrate.`
+                                ? ` — ${count} have plaintext credentials. Open Vault tab to secure them to vault.`
                                 : '.';
                             showToast(
                                 'success',

@@ -14,7 +14,7 @@ interface ToBackendConfig {
     auth_method:
         | { type: 'Password'; password: string }
         | { type: 'PrivateKey'; key_path: string; passphrase: null }
-        | { type: 'VaultRef'; item_id: string };
+        | { type: 'VaultRef'; item_id: string; credential_id?: string };
     jump_host: ToBackendConfig | null;
 }
 
@@ -45,7 +45,7 @@ const resolveAuthMethod = (
             const authRef = (candidate as Connection).authRef;
             const itemId = authRef?.itemId;
             if (!itemId) throw new Error('No vault credential selected.');
-            return { type: 'VaultRef', item_id: itemId };
+            return { type: 'VaultRef', item_id: itemId, credential_id: authRef?.credentialId };
         }
         const normalizedKeyPath = normalizeText(keyPath);
         if (!normalizedKeyPath) throw new Error('Private key path is required for key auth.');
@@ -55,7 +55,11 @@ const resolveAuthMethod = (
     // Use authRef as highest-priority discriminator for existing connections.
     const itemId = (candidate as Connection).authRef?.itemId;
     if (itemId) {
-        return { type: 'VaultRef', item_id: itemId };
+        return {
+            type: 'VaultRef',
+            item_id: itemId,
+            credential_id: (candidate as Connection).authRef?.credentialId,
+        };
     }
     if (candidate.privateKeyPath) {
         const normalizedKeyPath = normalizeText(candidate.privateKeyPath);
