@@ -1,18 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Shield, Lock, Unlock, Trash2, RefreshCw, ArrowRight, KeyRound, Download, Upload, Cloud, LogOut, Search } from 'lucide-react';
+import { RefreshCw, ArrowRight, KeyRound, Download, Upload } from 'lucide-react';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { useVaultStore } from '../../../vault/useVaultStore';
-import { vaultIpc, type MigrationPreview } from '../../../vault/ipc';
+import { vaultIpc, type SecureToVaultPreview } from '../../../vault/ipc';
 import { notifySyncStatusChanged, syncIpc, type SyncProviderStatus } from '../../../vault/syncIpc';
 import { VaultUnlockModal } from '../../vault/VaultUnlockModal';
 import { RecoveryKeyModal } from '../../vault/RecoveryKeyModal';
 import { Button } from '../../ui/Button';
 import { useAppStore } from '../../../store/useAppStore';
-import { cn } from '../../../lib/utils';
 import { DEFAULT_VAULT_PROFILE_ID, type VaultProfileId } from '../../../vault/profileTypes';
 import { resolveVaultFocusProfile } from './vaultFocus';
 import { disconnectVaultBackedIpc } from '../../../features/connections/infrastructure/connectionIpc';
 import type { Connection } from '../../../features/connections/domain/types';
+import { syncCredentialAssignments } from '../../../features/connections/domain';
+import { saveConnectionsIpc } from '../../../features/connections/infrastructure/connectionPersistence';
+import { VaultStatusCard } from './vault/VaultStatusCard';
+import { VaultSyncCard } from './vault/VaultSyncCard';
+import { VaultItemsPanel } from './vault/VaultItemsPanel';
+import { AddCredentialModal } from './vault/AddCredentialModal';
+import { ManageAssignmentsModal } from './vault/ManageAssignmentsModal';
+import { RotateCredentialModal } from './vault/RotateCredentialModal';
 
 interface VaultTabProps {
   focusedProfileId?: VaultProfileId;
@@ -41,12 +48,13 @@ export function VaultTab({
   const showToast = useAppStore((state) => state.showToast);
   const showConfirmDialog = useAppStore((state) => state.showConfirmDialog);
   const connections = useAppStore((state) => state.connections);
+  const folders = useAppStore((state) => state.folders);
   const tabs = useAppStore((state) => state.tabs);
   const disconnectConnection = useAppStore((state) => state.disconnect);
   const loadConnections = useAppStore((state) => state.loadConnections);
 
   const [isUnlockModalOpen, setIsUnlockModalOpen] = useState(false);
-  const [migrationPreview, setMigrationPreview] = useState<MigrationPreview | null>(null);
+  const [securePreview, setSecurePreview] = useState<SecureToVaultPreview | null>(null);
   const [isMigrating, setIsMigrating] = useState(false);
   const [isDeduplicating, setIsDeduplicating] = useState(false);
   const [recoveryKey, setRecoveryKey] = useState('');
@@ -55,21 +63,40 @@ export function VaultTab({
   const [googleSync, setGoogleSync] = useState<SyncProviderStatus | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [itemSearch, setItemSearch] = useState('');
+  const [isAddCredentialOpen, setIsAddCredentialOpen] = useState(false);
+  const [newCredentialKind, setNewCredentialKind] = useState<'ssh-private-key' | 'ssh-password'>('ssh-private-key');
+  const [newCredentialLabel, setNewCredentialLabel] = useState('');
+  const [newCredentialSecret, setNewCredentialSecret] = useState('');
+  const [newCredentialPassphrase, setNewCredentialPassphrase] = useState('');
+  const [newCredentialNotes, setNewCredentialNotes] = useState('');
+  const [isCreatingCredential, setIsCreatingCredential] = useState(false);
+  const [isRepairingRefs, setIsRepairingRefs] = useState(false);
+  const [assignItemId, setAssignItemId] = useState<string | null>(null);
+  const [assignSearch, setAssignSearch] = useState('');
+  const [selectedAssignConnectionIds, setSelectedAssignConnectionIds] = useState<string[]>([]);
+  const [isAssigningCredential, setIsAssigningCredential] = useState(false);
+  const [rotateItemId, setRotateItemId] = useState<string | null>(null);
+  const [rotateLabel, setRotateLabel] = useState('');
+  const [rotateSecret, setRotateSecret] = useState('');
+  const [rotatePassphrase, setRotatePassphrase] = useState('');
+  const [rotateNotes, setRotateNotes] = useState('');
+  const [isRotateLoading, setIsRotateLoading] = useState(false);
+  const backfilledVaultIdsRef = useRef<Set<string>>(new Set());
   const localSectionRef = useRef<HTMLDivElement | null>(null);
   const googleSectionRef = useRef<HTMLDivElement | null>(null);
 
-  const isMigrableCandidate = useCallback(
-    (candidate: { migrationKind: string }) =>
-      candidate.migrationKind === 'ssh-password' || candidate.migrationKind === 'ssh-private-key',
+  const isSecureCandidate = useCallback(
+    (candidate: { secureKind: string }) =>
+      candidate.secureKind === 'ssh-password' || candidate.secureKind === 'ssh-private-key',
     []
   );
 
-  const loadMigrationPreview = useCallback(async () => {
+  const loadSecurePreview = useCallback(async () => {
     try {
-      const preview = await vaultIpc.migrationPreview();
-      setMigrationPreview(preview);
+      const preview = await vaultIpc.secureToVaultPreview();
+      setSecurePreview(preview);
     } catch (error) {
-      console.warn('[Vault] Failed to load migration preview:', error);
+      console.warn('[Vault] Failed to load secure-to-vault preview:', error);
     }
   }, []);
 
@@ -97,12 +124,39 @@ export function VaultTab({
       void refreshItems().catch(error => {
         console.warn('[Vault] Failed to refresh vault items:', error);
       });
-      loadMigrationPreview();
+      loadSecurePreview();
       vaultIpc.hasRecoveryKey().then(setHasRecoveryKey).catch((error) => {
         console.warn('[Vault] Failed to load recovery-key status:', error);
       });
+
+      if (!backfilledVaultIdsRef.current.has(status.vaultId)) {
+        backfilledVaultIdsRef.current.add(status.vaultId);
+        vaultIpc.backfillConnectionRefs()
+          .then(async (result) => {
+            if (result.updated > 0) {
+              await loadConnections();
+              showToast(
+                'info',
+                `Backfilled stable credential IDs for ${result.updated} connection${result.updated > 1 ? 's' : ''}.`,
+              );
+            }
+          })
+          .catch((error) => {
+            console.warn('[Vault] Failed to backfill credential ids:', error);
+          });
+      }
     }
-  }, [loadMigrationPreview, refreshItems, status?.status]);
+  }, [loadConnections, loadSecurePreview, refreshItems, showToast, status]);
+
+  const assignItem = useMemo(
+    () => items.find(item => item.id === assignItemId) ?? null,
+    [assignItemId, items]
+  );
+
+  const rotateItem = useMemo(
+    () => items.find(item => item.id === rotateItemId) ?? null,
+    [items, rotateItemId]
+  );
 
   const handleLock = async () => {
     try {
@@ -149,28 +203,28 @@ export function VaultTab({
     }
   };
 
-  const handleMigrate = async () => {
-    const migrableCount = migrationPreview?.candidates.filter(isMigrableCandidate).length ?? 0;
+  const handleSecureToVault = async () => {
+    const securableCount = securePreview?.candidates.filter(isSecureCandidate).length ?? 0;
 
     const confirmed = await showConfirmDialog({
       title: 'Secure Credentials in Vault',
-      message: `Secure ${migrableCount} connection credential(s) in the encrypted vault. A backup will be saved first.`,
+      message: `Secure ${securableCount} connection credential(s) in the encrypted vault. A backup will be saved first.`,
       confirmText: 'Secure Keys',
     });
     if (!confirmed) return;
 
     setIsMigrating(true);
     try {
-      const result = await vaultIpc.migrateExistingSecrets();
-      showToast('success', `Secured ${result.migrated} credential(s).${result.backupPath ? ' Backup saved.' : ''}`);
+      const result = await vaultIpc.secureToVault();
+      showToast('success', `Secured ${result.secured} credential(s).${result.backupPath ? ' Backup saved.' : ''}`);
       await loadConnections();
       await refresh();
-      await loadMigrationPreview();
+      await loadSecurePreview();
     } catch (e: unknown) {
       const msg = e && typeof e === 'object' && 'message' in e
         ? String((e as { message: unknown }).message)
         : String(e);
-      showToast('error', `Migration failed: ${msg}`);
+      showToast('error', `Secure to vault failed: ${msg}`);
     } finally {
       setIsMigrating(false);
     }
@@ -340,9 +394,262 @@ export function VaultTab({
     }
   };
 
-  const migrableCandidates = useMemo(
-    () => migrationPreview?.candidates.filter(isMigrableCandidate) ?? [],
-    [isMigrableCandidate, migrationPreview?.candidates]
+  const promptDisconnectAffectedConnections = async (
+    affectedConnectionIds: string[],
+    actionLabel: string,
+  ) => {
+    const activeIds = affectedConnectionIds.filter((id) => {
+      const connection = connections.find((entry) => entry.id === id);
+      return connection && (connection.status === 'connected' || connection.status === 'connecting');
+    });
+    if (activeIds.length === 0) return;
+
+    const confirmed = await showConfirmDialog({
+      title: 'Reconnect Affected Sessions?',
+      message: `${actionLabel} updated credentials used by ${activeIds.length} active session${activeIds.length === 1 ? '' : 's'}. Disconnect them now so the next connect uses the latest secret?`,
+      confirmText: 'Disconnect Now',
+      variant: 'danger',
+    });
+    if (!confirmed) {
+      showToast(
+        'info',
+        `Active sessions keep their current authentication until they reconnect.`,
+      );
+      return;
+    }
+
+    const results = await Promise.allSettled(activeIds.map((id) => disconnectConnection(id)));
+    const failed = results.filter((result) => result.status === 'rejected').length;
+    if (failed > 0) {
+      showToast('error', `Disconnected ${activeIds.length - failed} session(s); ${failed} failed.`);
+      return;
+    }
+    showToast('info', `Disconnected ${activeIds.length} active session${activeIds.length === 1 ? '' : 's'} to apply updated credentials.`);
+  };
+
+  const resetAddCredentialForm = () => {
+    setNewCredentialKind('ssh-private-key');
+    setNewCredentialLabel('');
+    setNewCredentialSecret('');
+    setNewCredentialPassphrase('');
+    setNewCredentialNotes('');
+  };
+
+  const closeAddCredentialModal = () => {
+    if (isCreatingCredential) return;
+    setIsAddCredentialOpen(false);
+    resetAddCredentialForm();
+  };
+
+  const handleCreateCredential = async () => {
+    if (status?.status !== 'unlocked') {
+      showToast('error', 'Unlock the vault before adding credentials.');
+      return;
+    }
+
+    const label = newCredentialLabel.trim();
+    const secret = newCredentialKind === 'ssh-private-key'
+      ? newCredentialSecret.trim()
+      : newCredentialSecret;
+    if (!label) {
+      showToast('error', 'Credential label is required.');
+      return;
+    }
+    if (!secret.trim()) {
+      showToast('error', 'Credential secret is required.');
+      return;
+    }
+
+    const secretToSave = newCredentialKind === 'ssh-private-key' && newCredentialPassphrase.trim()
+      ? JSON.stringify({ key: secret, passphrase: newCredentialPassphrase })
+      : secret;
+
+    setIsCreatingCredential(true);
+    try {
+      const item = await vaultIpc.itemCreate(
+        label,
+        newCredentialKind,
+        secretToSave,
+        newCredentialNotes.trim() || undefined,
+      );
+      await refreshItems();
+      setIsAddCredentialOpen(false);
+      resetAddCredentialForm();
+      showToast('success', `Added "${item.label}" to Vault. You can now assign it to hosts.`);
+    } catch (e: unknown) {
+      const msg = e && typeof e === 'object' && 'message' in e ? String((e as { message: unknown }).message) : String(e);
+      showToast('error', `Failed to add credential: ${msg}`);
+    } finally {
+      setIsCreatingCredential(false);
+    }
+  };
+
+  const openAssignModal = (itemId: string) => {
+    const item = items.find(entry => entry.id === itemId);
+    if (!item) return;
+    setAssignItemId(item.id);
+    setAssignSearch('');
+    setSelectedAssignConnectionIds(
+      connections
+        .filter(connection =>
+          connection.id !== 'local'
+          && (
+            connection.authRef?.credentialId === item.logicalId
+            || connection.authRef?.itemId === item.id
+          ))
+        .map(connection => connection.id),
+    );
+  };
+
+  const closeAssignModal = () => {
+    if (isAssigningCredential) return;
+    setAssignItemId(null);
+    setAssignSearch('');
+    setSelectedAssignConnectionIds([]);
+  };
+
+  const toggleAssignConnection = (connectionId: string) => {
+    setSelectedAssignConnectionIds((current) =>
+      current.includes(connectionId)
+        ? current.filter(id => id !== connectionId)
+        : [...current, connectionId]
+    );
+  };
+
+  const handleSyncAssignments = async () => {
+    if (!assignItem || status?.status !== 'unlocked') {
+      showToast('error', 'Unlock the vault before assigning credentials.');
+      return;
+    }
+
+    setIsAssigningCredential(true);
+    try {
+      const previouslyAssignedIds = connections
+        .filter(connection =>
+          connection.authRef?.credentialId === assignItem.logicalId
+          || connection.authRef?.itemId === assignItem.id,
+        )
+        .map(connection => connection.id);
+      const affectedConnectionIds = [...new Set([...previouslyAssignedIds, ...selectedAssignConnectionIds])];
+      const nextConnections = syncCredentialAssignments(
+        connections,
+        selectedAssignConnectionIds,
+        {
+          vaultId: status.vaultId,
+          credentialId: assignItem.logicalId,
+          itemId: assignItem.id,
+          itemKind: assignItem.kind as NonNullable<Connection['authRef']>['itemKind'],
+          purpose: 'ssh-auth',
+        },
+      );
+      await saveConnectionsIpc(nextConnections, folders);
+      await loadConnections();
+      closeAssignModal();
+      showToast(
+        'success',
+        `Updated assignments for "${assignItem.label}" across ${affectedConnectionIds.length} host${affectedConnectionIds.length === 1 ? '' : 's'}.`,
+      );
+      await promptDisconnectAffectedConnections(affectedConnectionIds, `Updating assignments for "${assignItem.label}"`);
+    } catch (e: unknown) {
+      const msg = e && typeof e === 'object' && 'message' in e ? String((e as { message: unknown }).message) : String(e);
+      showToast('error', `Failed to assign credential: ${msg}`);
+    } finally {
+      setIsAssigningCredential(false);
+    }
+  };
+
+  const handleRepairRefs = async () => {
+    if (status?.status !== 'unlocked') {
+      showToast('error', 'Unlock the vault before repairing references.');
+      return;
+    }
+    setIsRepairingRefs(true);
+    try {
+      const result = await vaultIpc.backfillConnectionRefs();
+      await loadConnections();
+      const parts: string[] = [];
+      if (result.updated > 0) parts.push(`${result.updated} credential ID backfilled`);
+      if (result.relinkedItemIds > 0) parts.push(`${result.relinkedItemIds} item reference relinked`);
+      if (result.skippedMissingItems > 0) parts.push(`${result.skippedMissingItems} still missing`);
+      showToast('success', parts.length > 0 ? `Vault repair complete: ${parts.join(' · ')}.` : 'Vault repair complete. No changes were needed.');
+    } catch (e: unknown) {
+      const msg = e && typeof e === 'object' && 'message' in e ? String((e as { message: unknown }).message) : String(e);
+      showToast('error', `Vault repair failed: ${msg}`);
+    } finally {
+      setIsRepairingRefs(false);
+    }
+  };
+
+  const openRotateModal = async (itemId: string) => {
+    const item = items.find(entry => entry.id === itemId);
+    if (!item) return;
+    setRotateItemId(item.id);
+    setRotateLabel(item.label);
+    setRotateSecret('');
+    setRotatePassphrase('');
+    setRotateNotes('');
+    try {
+      const secret = await vaultIpc.itemGet(item.id);
+      setRotateNotes(secret.notes || '');
+    } catch (error) {
+      console.warn('[Vault] Failed to load item for rotation:', error);
+    }
+  };
+
+  const closeRotateModal = () => {
+    if (isRotateLoading) return;
+    setRotateItemId(null);
+    setRotateLabel('');
+    setRotateSecret('');
+    setRotatePassphrase('');
+    setRotateNotes('');
+  };
+
+  const handleRotateCredential = async () => {
+    if (!rotateItem) return;
+    const label = rotateLabel.trim();
+    const baseSecret = rotateItem.kind === 'ssh-private-key' ? rotateSecret.trim() : rotateSecret;
+    if (!label) {
+      showToast('error', 'Credential label is required.');
+      return;
+    }
+    if (!baseSecret.trim()) {
+      showToast('error', 'New credential secret is required.');
+      return;
+    }
+
+    const secretToSave = rotateItem.kind === 'ssh-private-key' && rotatePassphrase.trim()
+      ? JSON.stringify({ key: baseSecret, passphrase: rotatePassphrase })
+      : baseSecret;
+
+    setIsRotateLoading(true);
+    try {
+      const affectedConnectionIds = connections
+        .filter(connection => connection.authRef?.credentialId === rotateItem.logicalId)
+        .map(connection => connection.id);
+      await vaultIpc.itemUpdate(
+        rotateItem.id,
+        label,
+        rotateItem.kind,
+        secretToSave,
+        rotateNotes.trim() || undefined,
+      );
+      await refreshItems();
+      await loadSecurePreview();
+      closeRotateModal();
+      showToast('success', `Rotated "${label}". Hosts keep the same credential identity.`);
+      await promptDisconnectAffectedConnections(affectedConnectionIds, `Rotating "${label}"`);
+    } catch (e: unknown) {
+      const msg = e && typeof e === 'object' && 'message' in e ? String((e as { message: unknown }).message) : String(e);
+      showToast('error', `Failed to rotate credential: ${msg}`);
+    } finally {
+      setIsRotateLoading(false);
+    }
+  };
+
+  const securableCandidates = useMemo(
+    () => securePreview?.candidates.filter(isSecureCandidate) ?? [],
+    [isSecureCandidate, securePreview?.candidates]
   );
 
   const duplicateCount = useMemo(() => {
@@ -355,6 +662,17 @@ export function VaultTab({
     }
     return count;
   }, [items]);
+
+  const filteredAssignableConnections = useMemo(() => {
+    const search = assignSearch.trim().toLowerCase();
+    const assignable = connections.filter(connection => connection.id !== 'local');
+    if (!search) return assignable;
+    return assignable.filter(connection =>
+      connection.name.toLowerCase().includes(search)
+      || connection.host.toLowerCase().includes(search)
+      || connection.username.toLowerCase().includes(search)
+    );
+  }, [assignSearch, connections]);
 
   const filteredItems = useMemo(() => {
     const search = itemSearch.trim().toLowerCase();
@@ -371,6 +689,12 @@ export function VaultTab({
     if (!confirmed) return;
 
     const referencedIds = new Set(connections.map(c => c.authRef?.itemId).filter(Boolean));
+    const referencedCredentialIds = new Set(connections.map(c => c.authRef?.credentialId).filter(Boolean));
+    for (const item of items) {
+      if (referencedCredentialIds.has(item.logicalId)) {
+        referencedIds.add(item.id);
+      }
+    }
     const toDelete: string[] = [];
     const groups = new Map<string, typeof items>();
 
@@ -415,80 +739,43 @@ export function VaultTab({
 
   const isUnlocked = status?.status === 'unlocked';
   const hasVaultConfigured = status?.status === 'locked' || status?.status === 'unlocked';
-  const unlockedStatus = isUnlocked ? status : null;
-  const googleStatusLabel = googleSync?.connected ? 'Connected' : 'Not connected';
-  const googleStatusTone = googleSync?.connected
-    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-    : 'bg-[var(--color-app-surface)] text-[var(--color-app-muted)] border-[var(--color-app-border)]/60';
 
   return (
     <div className="space-y-5 animate-in fade-in duration-300">
       {/* Status card */}
-      <div ref={localSectionRef} className="rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/25 p-4">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className={cn(
-              'w-10 h-10 rounded-lg flex items-center justify-center shrink-0',
-              isUnlocked
-                ? 'bg-emerald-500/15 text-emerald-400'
-                : status?.status === 'locked'
-                  ? 'bg-amber-500/15 text-amber-400'
-                  : 'bg-[var(--color-app-surface)] text-[var(--color-app-muted)]'
-            )}>
-              <Shield size={18} />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-[var(--color-app-text)]">
-                {isUnlocked ? 'Vault Unlocked'
-                  : status?.status === 'locked' ? 'Vault Locked'
-                    : 'Vault Not Set Up'}
-              </p>
-              <p className="text-xs text-[var(--color-app-muted)] mt-0.5">
-                {isUnlocked
-                  ? `${unlockedStatus?.itemCount ?? 0} item(s) · XChaCha20-Poly1305 encrypted`
-                  : status?.status === 'locked'
-                    ? 'Unlock to access and manage credentials'
-                    : 'Create a vault to store SSH credentials securely'}
-              </p>
-            </div>
-          </div>
-
-          {isUnlocked ? (
-            <Button variant="secondary" size="sm" onClick={handleLock} className="gap-1.5 shrink-0">
-              <Lock size={13} />
-              Lock
-            </Button>
-          ) : (
-            <Button size="sm" onClick={() => setIsUnlockModalOpen(true)} className="gap-1.5 shrink-0">
-              {status?.status === 'locked' ? <Unlock size={13} /> : <Shield size={13} />}
-              {status?.status === 'locked' ? 'Unlock' : 'Set Up Vault'}
-            </Button>
-          )}
-        </div>
+      <div ref={localSectionRef}>
+        <VaultStatusCard
+          status={status}
+          isUnlocked={isUnlocked}
+          isRepairingRefs={isRepairingRefs}
+          onRepairRefs={handleRepairRefs}
+          onLock={handleLock}
+          onOpenUnlock={() => setIsUnlockModalOpen(true)}
+        />
       </div>
 
-      {/* Migration banner */}
-      {isUnlocked && migrableCandidates.length > 0 && (
+      {/* Secure-to-vault banner */}
+      {isUnlocked && securableCandidates.length > 0 && (
         <div className="rounded-xl border border-amber-500/30 bg-amber-500/8 p-4">
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-sm font-semibold text-amber-300">Unsecured credentials detected</p>
               <p className="text-xs text-amber-300/70 mt-1 leading-relaxed">
-                {migrableCandidates.length} connection{migrableCandidates.length > 1 ? 's have' : ' has'} credentials
+                {securableCandidates.length} connection{securableCandidates.length > 1 ? 's have' : ' has'} credentials
                 stored in plaintext. Secure them with vault encryption at rest.
               </p>
-              {(migrationPreview?.alreadyMigrated ?? 0) > 0 || (migrationPreview?.skippedNoFile ?? 0) > 0 ? (
+              {(securePreview?.alreadySecured ?? 0) > 0 || (securePreview?.skippedNoFile ?? 0) > 0 ? (
                 <p className="text-[11px] text-amber-300/60 mt-1.5 leading-relaxed">
-                  {migrationPreview?.alreadyMigrated ?? 0} already use vault auth
-                  {(migrationPreview?.skippedNoFile ?? 0) > 0
-                    ? ` · ${migrationPreview?.skippedNoFile ?? 0} skipped (key file missing)`
+                  {securePreview?.alreadySecured ?? 0} already use vault auth
+                  {(securePreview?.skippedNoFile ?? 0) > 0
+                    ? ` · ${securePreview?.skippedNoFile ?? 0} skipped (key file missing)`
                     : ''}
                 </p>
               ) : null}
             </div>
             <Button
               size="sm"
-              onClick={handleMigrate}
+              onClick={handleSecureToVault}
               disabled={isMigrating}
               className="shrink-0 gap-1.5"
             >
@@ -545,197 +832,33 @@ export function VaultTab({
       )}
 
       {/* Cloud Sync */}
-      <div ref={googleSectionRef} className="space-y-2">
-
-        <h4 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-app-muted)] px-1">
-          Cloud Sync
-        </h4>
-        <div className="rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/25 p-4 space-y-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-start gap-3 min-w-0">
-              <div className={cn(
-                'w-9 h-9 rounded-lg flex items-center justify-center shrink-0',
-                googleSync?.connected
-                  ? 'bg-blue-500/15 text-blue-400'
-                  : 'bg-[var(--color-app-surface)] text-[var(--color-app-muted)]'
-              )}>
-                <Cloud size={16} />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-[var(--color-app-text)]">Google Drive</p>
-                <div className="mt-1 flex items-center gap-2">
-                  <span className={cn(
-                    'inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
-                    googleStatusTone
-                  )}>
-                    {googleStatusLabel}
-                  </span>
-                  {googleSync?.email && (
-                    <span className="text-xs text-[var(--color-app-muted)] truncate">
-                      {googleSync.email}
-                    </span>
-                  )}
-                </div>
-                {!googleSync?.connected && (
-                  <p className="text-xs text-[var(--color-app-muted)] mt-1">
-                    Syncs to your Drive appdata folder (encrypted).
-                  </p>
-                )}
-              </div>
-            </div>
-            {googleSync?.connected ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleGoogleDisconnect}
-                className="gap-1.5 shrink-0 text-[var(--color-app-muted)] hover:text-red-400"
-              >
-                <LogOut size={13} />
-                Disconnect
-              </Button>
-            ) : (
-              <Button
-                size="sm"
-                onClick={handleGoogleConnect}
-                disabled={isSyncing}
-                className="gap-1.5 shrink-0"
-              >
-                {isSyncing ? <RefreshCw size={13} className="animate-spin" /> : <Cloud size={13} />}
-                Connect
-              </Button>
-            )}
-          </div>
-
-          {googleSync?.connected && (
-            <div className="rounded-lg border border-[var(--color-app-border)]/50 bg-[var(--color-app-bg)]/25 p-2.5">
-              <div className="flex items-center gap-2">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={handleSyncUpload}
-                disabled={isSyncing || !hasVaultConfigured}
-                className="gap-1.5"
-              >
-                {isSyncing ? <RefreshCw size={13} className="animate-spin" /> : <Upload size={13} />}
-                Backup to Drive
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={handleSyncDownload}
-                disabled={isSyncing || !hasVaultConfigured}
-                className="gap-1.5"
-              >
-                <Download size={13} />
-                Restore from Drive
-              </Button>
-              {googleSync.lastSync && (
-                <span className="text-[11px] text-[var(--color-app-muted)] ml-auto whitespace-nowrap">
-                  Last sync: {new Date(googleSync.lastSync * 1000).toLocaleString()}
-                </span>
-              )}
-              </div>
-              {!hasVaultConfigured && (
-                <p className="mt-2 text-[11px] text-amber-400/85">
-                  Create or unlock a vault first, then use Backup/Restore.
-                </p>
-              )}
-            </div>
-          )}
-
-          <p className="text-[11px] text-[var(--color-app-muted)]/70 leading-relaxed">
-            The vault is always encrypted before upload. Zync never uploads plaintext data.
-          </p>
-          <div className="inline-flex items-center gap-2 rounded-md border border-[var(--color-app-accent)]/25 bg-[var(--color-app-accent)]/8 px-2.5 py-1.5">
-            <img
-              src="/icon.png"
-              alt="Zync"
-              className="w-4 h-4 rounded-sm ring-1 ring-[var(--color-app-border)]/60"
-            />
-            <span className="text-[11px] font-medium text-[var(--color-app-text)]/90">
-              Powered by Zync Vault encryption
-            </span>
-          </div>
-          {!googleSync?.connected && (
-            <p className="text-[11px] text-amber-400/75 leading-relaxed">
-              Tip: on the Google sign-in screen, make sure to check the Drive checkbox; Google requires explicit consent for storage access.
-            </p>
-          )}
-        </div>
+      <div ref={googleSectionRef}>
+        <VaultSyncCard
+          googleSync={googleSync}
+          isSyncing={isSyncing}
+          hasVaultConfigured={hasVaultConfigured}
+          onConnect={handleGoogleConnect}
+          onDisconnect={handleGoogleDisconnect}
+          onUpload={handleSyncUpload}
+          onDownload={handleSyncDownload}
+        />
       </div>
 
       {/* Items list */}
       {isUnlocked && (
-        <div className="space-y-2">
-          <div className="flex items-center justify-between px-1">
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-app-muted">
-                Stored Items
-                <span className="ml-2 normal-case font-normal text-app-muted/60">
-                  {itemSearch
-                    ? `${filteredItems.length} of ${items.length}`
-                    : items.length}
-                </span>
-            </h4>
-            {duplicateCount > 0 && (
-              <button
-                onClick={handleDeduplicateItems}
-                disabled={isDeduplicating}
-                className="flex items-center gap-1 text-[11px] text-amber-400/80 hover:text-amber-300 transition-colors disabled:opacity-50"
-              >
-                {isDeduplicating ? <RefreshCw size={11} className="animate-spin" /> : null}
-                {duplicateCount} duplicate{duplicateCount > 1 ? 's' : ''} — clean up
-              </button>
-            )}
-          </div>
-          {items.length === 0 ? (
-            <div className="rounded-xl border border-[var(--color-app-border)]/40 bg-[var(--color-app-surface)]/15 py-8 text-center">
-              <p className="text-sm text-[var(--color-app-muted)]">No items in vault</p>
-              <p className="text-xs text-[var(--color-app-muted)]/60 mt-1">
-                Items are added when you migrate connection credentials.
-              </p>
-            </div>
-          ) : (
-            <>
-              <div className="relative">
-                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-app-muted/50 pointer-events-none" />
-                <input
-                  type="text"
-                  placeholder="Search items…"
-                  value={itemSearch}
-                  onChange={e => setItemSearch(e.target.value)}
-                  className="w-full rounded-lg border border-app-border/60 bg-app-surface/25 pl-8 pr-3 py-2 text-xs text-app-text placeholder:text-app-muted/50 focus:outline-none focus:ring-1 focus:ring-app-accent/50"
-                />
-              </div>
-              <div className="rounded-xl border border-app-border/60 bg-app-surface/25 divide-y divide-app-border/30">
-                {filteredItems.length === 0 ? (
-                  <div className="py-6 text-center">
-                    <p className="text-xs text-app-muted">No items match &quot;{itemSearch}&quot;</p>
-                  </div>
-                ) : (
-                  filteredItems
-                    .map((item) => (
-                      <div key={item.id} className="flex items-center justify-between px-4 py-3 group">
-                        <div className="min-w-0">
-                          <p className="text-sm text-app-text font-medium truncate">{item.label}</p>
-                          <p className="text-xs text-app-muted">
-                            {item.kind} · {item.id.slice(0, 8)}
-                          </p>
-                        </div>
-                        <button
-                          onClick={() => handleDeleteItem(item.id, item.label)}
-                          className="opacity-0 group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 focus:outline-none focus:ring-2 focus:ring-red-400/40 p-1.5 rounded-md text-[var(--color-app-muted)] hover:text-red-400 hover:bg-red-400/10 transition-all"
-                          title="Delete item"
-                          aria-label={`Delete ${item.label}`}
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    ))
-                )}
-              </div>
-            </>
-          )}
-        </div>
+        <VaultItemsPanel
+          items={items}
+          filteredItems={filteredItems}
+          itemSearch={itemSearch}
+          duplicateCount={duplicateCount}
+          isDeduplicating={isDeduplicating}
+          onItemSearchChange={setItemSearch}
+          onDeduplicate={handleDeduplicateItems}
+          onAddCredential={() => setIsAddCredentialOpen(true)}
+          onAssign={openAssignModal}
+          onRotate={(itemId) => void openRotateModal(itemId)}
+          onDelete={handleDeleteItem}
+        />
       )}
 
       <RecoveryKeyModal
@@ -747,6 +870,37 @@ export function VaultTab({
         }}
       />
 
+      <ManageAssignmentsModal
+        isOpen={Boolean(assignItem)}
+        itemLabel={assignItem?.label ?? null}
+        assignSearch={assignSearch}
+        selectedAssignConnectionIds={selectedAssignConnectionIds}
+        filteredConnections={filteredAssignableConnections}
+        isAssigning={isAssigningCredential}
+        onClose={closeAssignModal}
+        onSearchChange={setAssignSearch}
+        onToggleConnection={toggleAssignConnection}
+        onSelectAll={() => setSelectedAssignConnectionIds(filteredAssignableConnections.map(connection => connection.id))}
+        onClear={() => setSelectedAssignConnectionIds([])}
+        onSubmit={handleSyncAssignments}
+      />
+
+      <RotateCredentialModal
+        isOpen={Boolean(rotateItem)}
+        item={rotateItem}
+        label={rotateLabel}
+        secret={rotateSecret}
+        passphrase={rotatePassphrase}
+        notes={rotateNotes}
+        isLoading={isRotateLoading}
+        onClose={closeRotateModal}
+        onLabelChange={setRotateLabel}
+        onSecretChange={setRotateSecret}
+        onPassphraseChange={setRotatePassphrase}
+        onNotesChange={setRotateNotes}
+        onSubmit={handleRotateCredential}
+      />
+
       <VaultUnlockModal
         isOpen={isUnlockModalOpen}
         onClose={() => {
@@ -755,6 +909,23 @@ export function VaultTab({
             console.warn('[Vault] Failed to refresh vault after unlock modal close:', error);
           });
         }}
+      />
+
+      <AddCredentialModal
+        isOpen={isAddCredentialOpen}
+        kind={newCredentialKind}
+        label={newCredentialLabel}
+        secret={newCredentialSecret}
+        passphrase={newCredentialPassphrase}
+        notes={newCredentialNotes}
+        isCreating={isCreatingCredential}
+        onClose={closeAddCredentialModal}
+        onKindChange={setNewCredentialKind}
+        onLabelChange={setNewCredentialLabel}
+        onSecretChange={setNewCredentialSecret}
+        onPassphraseChange={setNewCredentialPassphrase}
+        onNotesChange={setNewCredentialNotes}
+        onSubmit={handleCreateCredential}
       />
     </div>
   );

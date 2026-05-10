@@ -15,6 +15,7 @@ export interface ConnectAuthMethodPrivateKey {
 export interface ConnectAuthMethodVaultRef {
     type: 'VaultRef';
     item_id: string;
+    credential_id?: string;
 }
 
 export type ConnectAuthMethod =
@@ -46,7 +47,11 @@ export const buildConnectConfig = (
     if (!connection) return null;
 
     const auth_method: ConnectAuthMethod = connection.authRef
-        ? { type: 'VaultRef', item_id: connection.authRef.itemId }
+        ? {
+            type: 'VaultRef',
+            item_id: connection.authRef.itemId,
+            credential_id: connection.authRef.credentialId,
+        }
         : connection.privateKeyPath
           ? { type: 'PrivateKey', key_path: connection.privateKeyPath, passphrase: connection.password || null }
           : { type: 'Password', password: connection.password || '' };

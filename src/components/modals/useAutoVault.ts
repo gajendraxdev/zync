@@ -93,7 +93,16 @@ export function useAutoVault({
         deleteOldAuthItem();
         setPastedKeyText('');
         setPastedPassphrase('');
-        return { ...formData, authRef: { vaultId: unlockedVault.vaultId, itemId: item.id, itemKind: 'ssh-private-key', purpose: 'ssh-auth' } };
+        return {
+            ...formData,
+            authRef: {
+                vaultId: unlockedVault.vaultId,
+                credentialId: item.logicalId,
+                itemId: item.id,
+                itemKind: 'ssh-private-key',
+                purpose: 'ssh-auth',
+            },
+        };
     };
 
     const autoVaultPassword = async (): Promise<Partial<Connection> | null> => {
@@ -105,7 +114,13 @@ export function useAutoVault({
         return {
             ...formData,
             password: '',
-            authRef: { vaultId: vaultStatus.vaultId, itemId: item.id, itemKind: 'ssh-password', purpose: 'ssh-auth' },
+            authRef: {
+                vaultId: vaultStatus.vaultId,
+                credentialId: item.logicalId,
+                itemId: item.id,
+                itemKind: 'ssh-password',
+                purpose: 'ssh-auth',
+            },
         };
     };
 
@@ -127,7 +142,13 @@ export function useAutoVault({
         return {
             ...formData,
             privateKeyPath: '',
-            authRef: { vaultId: vaultStatus.vaultId, itemId: item.id, itemKind: 'ssh-private-key', purpose: 'ssh-auth' },
+            authRef: {
+                vaultId: vaultStatus.vaultId,
+                credentialId: item.logicalId,
+                itemId: item.id,
+                itemKind: 'ssh-private-key',
+                purpose: 'ssh-auth',
+            },
         };
     };
 

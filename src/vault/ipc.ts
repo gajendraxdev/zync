@@ -7,6 +7,7 @@ export type VaultStatus =
 
 export interface VaultItem {
   id: string;
+  logicalId: string;
   kind: string;
   label: string;
   secretFingerprint: string;
@@ -17,6 +18,7 @@ export interface VaultItem {
 
 export interface VaultItemSecret {
   id: string;
+  logicalId?: string;
   kind: string;
   label: string;
   secret: string;
@@ -26,21 +28,27 @@ export interface VaultItemSecret {
   updatedAt: number;
 }
 
-export interface MigrationCandidate {
+export interface VaultBackfillResult {
+  updated: number;
+  relinkedItemIds: number;
+  skippedMissingItems: number;
+}
+
+export interface SecureToVaultCandidate {
   connectionId: string;
   connectionName: string;
   host: string;
-  migrationKind: string;
+  secureKind: string;
 }
 
-export interface MigrationPreview {
-  candidates: MigrationCandidate[];
-  alreadyMigrated: number;
+export interface SecureToVaultPreview {
+  candidates: SecureToVaultCandidate[];
+  alreadySecured: number;
   skippedNoFile: number;
 }
 
-export interface MigrationResult {
-  migrated: number;
+export interface SecureToVaultResult {
+  secured: number;
   skipped: number;
   alreadyDone: number;
   backupPath?: string;
@@ -65,20 +73,42 @@ export const vaultIpc = {
   itemGet: (itemId: string): Promise<VaultItemSecret> =>
     invoke('vault_item_get', { args: { item_id: itemId } }),
 
-  itemCreate: (label: string, kind: string, secret: string, notes?: string): Promise<VaultItem> => {
-    const args: { label: string; kind: string; secret: string; notes?: string } = { label, kind, secret };
+  itemUpdate: (
+    itemId: string,
+    label: string,
+    kind: string,
+    secret: string,
+    notes?: string,
+  ): Promise<VaultItem> => {
+    const args: {
+      item_id: string;
+      label: string;
+      kind: string;
+      secret: string;
+      notes?: string;
+    } = { item_id: itemId, label, kind, secret };
     if (notes !== undefined) args.notes = notes;
+    return invoke('vault_item_update', { args });
+  },
+
+  itemCreate: (label: string, kind: string, secret: string, notes?: string, credentialId?: string): Promise<VaultItem> => {
+    const args: { label: string; kind: string; secret: string; notes?: string; credential_id?: string } = { label, kind, secret };
+    if (notes !== undefined) args.notes = notes;
+    if (credentialId !== undefined) args.credential_id = credentialId;
     return invoke('vault_item_create', { args });
   },
 
   itemDelete: (itemId: string): Promise<void> =>
     invoke('vault_item_delete', { args: { item_id: itemId } }),
 
-  migrationPreview: (): Promise<MigrationPreview> =>
-    invoke('vault_migration_preview'),
+  secureToVaultPreview: (): Promise<SecureToVaultPreview> =>
+    invoke('vault_secure_to_vault_preview'),
 
-  migrateExistingSecrets: (): Promise<MigrationResult> =>
-    invoke('vault_migrate_existing_secrets'),
+  secureToVault: (): Promise<SecureToVaultResult> =>
+    invoke('vault_secure_to_vault'),
+
+  backfillConnectionRefs: (): Promise<VaultBackfillResult> =>
+    invoke('vault_backfill_connection_refs'),
 
   generateRecoveryKey: (): Promise<string> =>
     invoke('vault_generate_recovery_key'),

@@ -9,6 +9,8 @@ export type CredentialPurpose = 'ssh-auth';
 
 export interface CredentialRef {
     vaultId: string;
+    /** Stable logical credential identity; itemId is the current physical vault record. */
+    credentialId?: string;
     itemId: string;
     itemKind: CredentialItemKind;
     purpose: CredentialPurpose;
