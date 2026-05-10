@@ -90,6 +90,10 @@ UI (Sidebar Vaults + Vault tabs + Sync status)
 
 ## 6) Domain Model
 
+For the detailed durable credential identity model that supports key-first vault UX,
+host assignment, rotation, and stale-reference repair, see
+[`VAULT_CREDENTIAL_IDENTITY_MODEL.md`](./VAULT_CREDENTIAL_IDENTITY_MODEL.md).
+
 ### Core entities
 - `Vault`
   - id, type (`local`, `team`), state (`uninitialized|locked|unlocked`)
@@ -137,6 +141,27 @@ trait VaultProviderV1 {
     async fn get_cursor(&self, req: CursorRequest) -> Result<ProviderCursor>;
 }
 ```
+
+```rust
+struct WriteRequest {
+    path: String,
+    payload: Vec<u8>,
+    idempotency_key: Option<String>,
+    if_match: Option<String>,
+}
+
+struct DeleteRequest {
+    path: String,
+    idempotency_key: Option<String>,
+    expected_revision: Option<String>,
+}
+```
+
+Provider contract notes:
+- `list` and `read` must be safe to retry.
+- `write` and `delete` may be retried; callers should provide `idempotency_key`.
+- Providers must honor `if_match` / `expected_revision` preconditions when supplied.
+- Providers must normalize failed preconditions to `conflict_precondition_failed` so conflict handling is provider-agnostic.
 
 ### Capability flags
 - `supports_autosync`
