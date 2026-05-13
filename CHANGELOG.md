@@ -8,12 +8,13 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Global Vault Workspace**: Introduced Vault as a first-class sidebar/workspace surface with profile-based navigation for Local Vault and Google Vault Sync. Added dedicated vault workspace UI, unlock/recovery flows, and vault-focused panels. ([6e8dd42], [d9d3663])
 - **Vault Core Backend Foundation**: Added backend vault modules for crypto, schema, storage, lifecycle commands, and migration scaffolding to support encrypted credential storage and recovery workflows. ([6e8dd42])
 - **Google Drive Vault Sync Module**: Added sync command module and IPC surface for connect/disconnect/backup/restore flows dedicated to vault data sync. ([8cdb20d])
-- **Vault Credential Identity Model**: Added durable `credentialId`-based vault credential identity, key-first credential creation/assignment flows, self-healing auth-ref relinking/backfill, and dedicated docs for future rotation/history work. ([1d865ed], [bdbd81b], [bf01457])
+- **Vault Credential Identity Model**: Added durable `credentialId`-based vault credential identity, key-first credential creation/assignment flows, self-healing auth-ref relinking/backfill, and dedicated docs for future vault lifecycle work. ([1d865ed], [bdbd81b], [bf01457])
+- **Vault Credential Revision History**: Added credential revision snapshots and restore flow across the vault backend, IPC layer, and Vault workspace UI so rotated credentials can be reviewed and restored safely. ([e0409f4])
 
 ### Changed
 - **Settings Information Architecture**: Removed Vault from Settings navigation; vault management now lives in the dedicated Vault workspace flow. Updated related UX copy from “Settings → Vault” to “Vault tab/workspace” guidance. ([d9d3663])
 - **Sync Status UX Resilience**: Sync IPC status events now use canonical post-operation status refresh and last-known-state fallback behavior to avoid false disconnected states when status refresh fails. ([8cdb20d])
-- **Vault Credential Lifecycle UX**: Refined vault flows around secure-to-vault naming, modular vault panels/modals, bulk host assignment/unassignment, rotation prompts, repair actions, and reset tooling for clean vault test states. ([1d865ed], [bdbd81b], [bf01457])
+- **Vault Credential Lifecycle UX**: Refined vault flows around secure-to-vault naming, modular vault panels/modals, bulk host assignment/unassignment, rotation/history prompts, repair actions, and reset tooling for clean vault test states. ([1d865ed], [bdbd81b], [bf01457], [e0409f4])
 
 ### Fixed
 - **Command Palette Vault Icon Semantics**: Corrected icon mapping so Local Vault and Google Vault Sync entries use appropriate visual semantics. ([d9d3663])
