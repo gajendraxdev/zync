@@ -25,6 +25,9 @@ impl From<VaultError> for VaultCommandError {
             VaultError::AlreadyInitialized => ("already_initialized", e.to_string()),
             VaultError::Locked => ("locked", e.to_string()),
             VaultError::WrongPassphrase => ("wrong_passphrase", e.to_string()),
+            VaultError::InvalidPassphraseLength { .. } => {
+                ("invalid_passphrase_length", e.to_string())
+            }
             VaultError::RecordNotFound(_) => ("not_found", e.to_string()),
             _ => ("error", e.to_string()),
         };

@@ -452,6 +452,8 @@ const ipcRenderer = {
         payload = { request: args[0] };
       } else if (tauriCommand === 'ssh_migrate_all_keys') {
         payload = {};
+      } else if (tauriCommand === 'ssh_disconnect_vault_backed') {
+        payload = {};
       } else if (tauriCommand === 'connections_export_to_file' || tauriCommand === 'connections_import_from_file') {
         payload = { request: args[0] };
       }

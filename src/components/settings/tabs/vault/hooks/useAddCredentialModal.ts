@@ -74,7 +74,7 @@ export function useAddCredentialModal({
       reset();
       showToast('success', `Added "${item.label}" to Vault. You can now assign it to hosts.`);
     } catch (e: unknown) {
-      const msg = String((e as { message?: unknown } | null | undefined)?.message ?? e);
+      const msg = e instanceof Error ? e.message : String(e);
       showToast('error', `Failed to add credential: ${msg}`);
     } finally {
       setIsCreating(false);

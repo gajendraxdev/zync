@@ -142,14 +142,24 @@ export function useVaultPanelActions({
           );
         }
       });
+      const disconnectedCount = disconnectResults.filter(r => r.status === 'fulfilled').length;
+      const failedDisconnectIds = disconnectResults
+        .map((result, index) => (result.status === 'rejected' ? vaultBackedIds[index] : null))
+        .filter((id): id is string => Boolean(id));
 
       await onLocked();
       showToast('info', 'Vault locked.');
-      if (vaultBackedConnectionIds.size > 0) {
+      if (vaultBackedIds.length > 0) {
         showToast(
           'info',
-          `Disconnected ${vaultBackedConnectionIds.size} vault-backed connection${vaultBackedConnectionIds.size > 1 ? 's' : ''} for security.`,
+          `Disconnected ${disconnectedCount} vault-backed connection${disconnectedCount === 1 ? '' : 's'} for security.`,
         );
+        if (failedDisconnectIds.length > 0) {
+          showToast(
+            'error',
+            `Could not disconnect ${failedDisconnectIds.length} connection${failedDisconnectIds.length === 1 ? '' : 's'}: ${failedDisconnectIds.join(', ')}`,
+          );
+        }
       }
     } catch (e: unknown) {
       const msg = extractErrorMessage(e);
@@ -459,9 +469,9 @@ export function useVaultPanelActions({
   const runBackfillIfNeeded = useCallback(
     async (vaultId: string) => {
       if (backfilledVaultIdsRef.current.has(vaultId)) return;
-      backfilledVaultIdsRef.current.add(vaultId);
       try {
         const result = await vaultIpc.backfillConnectionRefs();
+        backfilledVaultIdsRef.current.add(vaultId);
         if (result.updated > 0) {
           await onLoadConnections();
           showToast(

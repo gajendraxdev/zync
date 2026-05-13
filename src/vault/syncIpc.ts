@@ -52,12 +52,17 @@ export const syncIpc = {
    */
   connect: async (provider: SyncProvider): Promise<SyncProviderStatus> => {
     try {
-      await invoke<void>('sync_connect', { provider });
+      const connectStatus = await invoke<SyncProviderStatus>('sync_connect', { provider });
       let latestStatus: SyncProviderStatus;
-      try {
-        latestStatus = await syncIpc.status(provider);
-      } catch (error) {
-        latestStatus = fallbackStatus(provider, { connected: true }, error);
+      if (typeof connectStatus?.connected === 'boolean') {
+        latestStatus = connectStatus;
+        lastKnownStatusByProvider[provider] = latestStatus;
+      } else {
+        try {
+          latestStatus = await syncIpc.status(provider);
+        } catch (error) {
+          latestStatus = fallbackStatus(provider, { connected: true }, error);
+        }
       }
       notifySyncStatusChanged(provider, latestStatus);
       return latestStatus;

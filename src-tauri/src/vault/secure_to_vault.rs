@@ -130,13 +130,13 @@ pub fn secure(data_dir: &Path, vault: &VaultService) -> Result<SecureToVaultResu
                 }
             };
             let label = format!("{} key ({}@{})", conn.name, conn.username, conn.host);
-            let secret = conn.password
+            let passphrase = conn
+                .password
                 .as_deref()
                 .filter(|p| !p.is_empty())
-                .map(|passphrase| {
-                    serde_json::json!({ "key": key_content, "passphrase": passphrase }).to_string()
-                })
-                .unwrap_or(key_content);
+                .map(|p| p.to_string());
+            let secret =
+                serde_json::json!({ "key": key_content, "passphrase": passphrase }).to_string();
             prepared.push(PreparedSecureItem {
                 index,
                 label,
