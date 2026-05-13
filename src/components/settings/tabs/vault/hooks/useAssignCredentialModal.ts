@@ -119,17 +119,31 @@ export function useAssignCredentialModal({
         },
       );
 
-      await saveConnectionsIpc(nextConnections, folders);
-      await onAssigned();
-      close();
-      showToast(
-        'success',
-        `Updated assignments for "${item.label}" across ${affectedConnectionIds.length} host${affectedConnectionIds.length === 1 ? '' : 's'}.`,
-      );
-      await onPromptDisconnect(
-        affectedConnectionIds,
-        `Updating assignments for "${item.label}"`,
-      );
+      try {
+        await saveConnectionsIpc(nextConnections, folders);
+      } catch (e: unknown) {
+        const msg = String((e as { message?: unknown } | null | undefined)?.message ?? e);
+        showToast('error', `Failed to save credential assignments: ${msg}`);
+        setIsAssigning(false);
+        return;
+      }
+
+      try {
+        await onAssigned();
+        setIsAssigning(false);
+        close();
+        showToast(
+          'success',
+          `Updated assignments for "${item.label}" across ${affectedConnectionIds.length} host${affectedConnectionIds.length === 1 ? '' : 's'}.`,
+        );
+        await onPromptDisconnect(
+          affectedConnectionIds,
+          `Updating assignments for "${item.label}"`,
+        );
+      } catch (e: unknown) {
+        const msg = String((e as { message?: unknown } | null | undefined)?.message ?? e);
+        showToast('error', `Assignments saved, but follow-up actions failed: ${msg}`);
+      }
     } catch (e: unknown) {
       const msg = String((e as { message?: unknown } | null | undefined)?.message ?? e);
       showToast('error', `Failed to assign credential: ${msg}`);

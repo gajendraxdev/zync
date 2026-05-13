@@ -21,6 +21,7 @@ use crate::vault::types::{
 const CRYPTO_SUITE: &str = "xchacha20poly1305-argon2id-v1";
 const AAD_VERSION: u32 = 1;
 const SCHEMA_VERSION: u32 = 1;
+pub const PASSPHRASE_MIN_LENGTH: usize = 12;
 
 // ── Service ───────────────────────────────────────────────────────────────────
 
@@ -118,6 +119,11 @@ impl VaultService {
     // ── Initialize ────────────────────────────────────────────────────────────
 
     pub fn initialize(&mut self, passphrase: &str) -> Result<VaultStatus, VaultError> {
+        if passphrase.len() < PASSPHRASE_MIN_LENGTH {
+            return Err(VaultError::InvalidPassphraseLength {
+                min: PASSPHRASE_MIN_LENGTH,
+            });
+        }
         let path = self.vault_path();
         if path.exists() {
             return Err(VaultError::AlreadyInitialized);
@@ -1070,6 +1076,17 @@ mod tests {
             .initialize("correct horse battery staple")
             .expect("initialize vault");
         vault
+    }
+
+    #[test]
+    fn initialize_rejects_short_passphrase() {
+        let mut vault = TestVault::new();
+        let err = vault.service.initialize("short").unwrap_err();
+        assert!(matches!(
+            err,
+            VaultError::InvalidPassphraseLength { min }
+            if min == PASSPHRASE_MIN_LENGTH
+        ));
     }
 
     #[test]

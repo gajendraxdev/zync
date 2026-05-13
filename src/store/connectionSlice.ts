@@ -691,9 +691,11 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                         type: s.tabType as Tab['type'],
                         title: s.title,
                         connectionId: s.connectionId,
-                        vaultProfileId: isVaultProfileId(s.vaultProfileId)
-                            ? s.vaultProfileId
-                            : s.tabType === 'vault' ? DEFAULT_VAULT_PROFILE_ID : undefined,
+                        vaultProfileId: s.tabType === 'vault'
+                            ? (isVaultProfileId(s.vaultProfileId)
+                                ? s.vaultProfileId
+                                : DEFAULT_VAULT_PROFILE_ID)
+                            : undefined,
                         view,
                     };
                 });

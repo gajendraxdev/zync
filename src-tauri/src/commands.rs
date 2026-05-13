@@ -607,8 +607,11 @@ async fn reconnect_connection(
 fn parse_key_secret(secret: &str) -> (String, Option<String>) {
     if let Ok(val) = serde_json::from_str::<serde_json::Value>(secret) {
         if let Some(key) = val["key"].as_str() {
-            let passphrase = val["passphrase"].as_str().map(|s| s.to_string());
-            return (key.to_string(), passphrase);
+        let passphrase = val["passphrase"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        return (key.to_string(), passphrase);
         }
     }
     (secret.to_string(), None)

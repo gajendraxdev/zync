@@ -11,6 +11,9 @@ interface UseRotateCredentialModalOptions {
   onPromptDisconnect: (affectedIds: string[], actionLabel: string) => Promise<void>;
 }
 
+const extractErrorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
 export function useRotateCredentialModal({
   items,
   connections,
@@ -43,7 +46,7 @@ export function useRotateCredentialModal({
       setNotes(full.notes || '');
     } catch (error: unknown) {
       console.warn('[Vault] Failed to load item for rotation:', error);
-      const msg = String((error as { message?: unknown } | null | undefined)?.message ?? error);
+      const msg = extractErrorMessage(error);
       showToast('error', `Failed to load vault item notes: ${msg}`);
     }
   };
@@ -63,7 +66,7 @@ export function useRotateCredentialModal({
 
     const trimmedLabel = label.trim();
     const trimmedSecret = secret.trim();
-    const baseSecret = item.kind === 'ssh-private-key' ? trimmedSecret : secret;
+    const baseSecret = trimmedSecret;
     const trimmedPassphrase = passphrase.trim();
 
     if (!trimmedLabel) {
@@ -101,10 +104,7 @@ export function useRotateCredentialModal({
       showToast('success', `Rotated "${trimmedLabel}". Hosts keep the same credential identity.`);
       await onPromptDisconnect(affectedConnectionIds, `Rotating "${trimmedLabel}"`);
     } catch (e: unknown) {
-      const msg =
-        e && typeof e === 'object' && 'message' in e
-          ? String((e as { message: unknown }).message)
-          : String(e);
+      const msg = extractErrorMessage(e);
       showToast('error', `Failed to rotate credential: ${msg}`);
     } finally {
       setIsLoading(false);
