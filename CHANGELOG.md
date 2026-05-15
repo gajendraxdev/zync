@@ -15,10 +15,20 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Settings Information Architecture**: Removed Vault from Settings navigation; vault management now lives in the dedicated Vault workspace flow. Updated related UX copy from “Settings → Vault” to “Vault tab/workspace” guidance. ([d9d3663])
 - **Sync Status UX Resilience**: Sync IPC status events now use canonical post-operation status refresh and last-known-state fallback behavior to avoid false disconnected states when status refresh fails. ([8cdb20d])
 - **Vault Credential Lifecycle UX**: Refined vault flows around secure-to-vault naming, modular vault panels/modals, bulk host assignment/unassignment, rotation/history prompts, repair actions, and reset tooling for clean vault test states. ([1d865ed], [bdbd81b], [bf01457], [e0409f4])
+- **Vault Sync UI Modularity**: Extracted sync-collection management into a focused `CollectionManagementSection` and reduced inline conditional complexity in `VaultSyncCard`.
+- **Vault Recovery Modal State Model**: Consolidated recovery-key modal metadata into a single structured state object in vault panel actions for safer, atomic updates.
+- **Vault Accessibility Semantics**: Updated mode switch interaction semantics to radiogroup/radio patterns and improved assistive-state signaling across unlock/sync controls.
+- **Reset Script Preview Clarity**: Reset scripts now show expanded file matches (or explicit no-match output) for pattern-based vault/sync cleanup previews.
 
 ### Fixed
 - **Command Palette Vault Icon Semantics**: Corrected icon mapping so Local Vault and Google Vault Sync entries use appropriate visual semantics. ([d9d3663])
 - **Pasted Key Vaulting Consistency**: Converted pasted private-key flow to controlled state handling and centralized private-key marker validation logic to keep save/validation behavior consistent. ([d9d3663])
+- **Sync Profile Lock Robustness**: Added stale-lock metadata/recovery behavior and safer lock cleanup/documented race handling in profile lock lifecycle.
+- **Sync Temp Artifact Cleanup**: Added temp-file cleanup on manifest/profile finalize failure paths to avoid leftover sync artifacts.
+- **Sync Unlock Timestamp Consistency**: Collection unlock flows now use a single timestamp value for both cache-unlock and updated-at fields.
+- **Google Provider Status Identity**: Provider status now returns persisted connected-account email from stored tokens.
+- **Sync Error Parsing Consistency**: Unified parsed error object shape (explicit `code`) and improved empty/nullish/multiline parsing behavior.
+- **Parser/Test Reliability**: Improved JSX tag-name resolution in unlock modal consistency tests and expanded sync error parser edge-case coverage.
 
 ## [2.15.1] - 2026-04-27
 

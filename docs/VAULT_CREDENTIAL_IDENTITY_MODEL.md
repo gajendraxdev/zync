@@ -331,6 +331,8 @@ flowchart TD
 ## 8) Sync and Provider Behavior
 
 Providers store encrypted objects. They should not decide credential identity.
+Provider sync key policy, passphrase choices, and per-provider restore semantics are defined in
+[`VAULT_PROVIDER_SYNC_KEY_MODEL.md`](./VAULT_PROVIDER_SYNC_KEY_MODEL.md).
 
 Provider records should include encrypted payload plus safe metadata:
 
@@ -354,6 +356,8 @@ Sync conflict rules:
 - Same `logicalId`, divergent same revision: conflict.
 - Same keyed fingerprint, different `logicalId`: duplicate warning, not automatic merge.
 - Missing physical `itemId`, present `logicalId`: relink if matching vault item exists.
+- Remote per-provider records use `logicalId` / `credentialId` as stable identity so credentials
+  can be restored into a new local vault without preserving old physical `itemId`s.
 
 ---
 

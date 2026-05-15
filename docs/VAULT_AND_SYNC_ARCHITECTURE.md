@@ -61,6 +61,8 @@ UI (Sidebar Vaults + Vault tabs + Sync status)
 ### Mandatory Boundary
 - Vault Core never imports provider-specific code.
 - Provider adapters never access plaintext keys directly unless explicitly required by domain contract.
+- Provider sync encryption policy is defined separately in
+  [`VAULT_PROVIDER_SYNC_KEY_MODEL.md`](./VAULT_PROVIDER_SYNC_KEY_MODEL.md).
 
 ---
 
@@ -178,6 +180,7 @@ Provider contract notes:
 ### 8.1 Local-first semantics
 - Local store is immediately updated.
 - Sync engine asynchronously reconciles with each enabled profile.
+- Future normal sync is per-credential provider records, not full `vault.redb` replacement.
 
 ### 8.2 Per-profile state machine
 - `idle -> syncing -> success|conflict|retrying|error`
@@ -230,10 +233,16 @@ Provider contract notes:
 - Introduce `VaultProviderV1` interface.
 - Wrap existing Google Drive implementation as first provider adapter.
 - Introduce `SyncProfile` persistence.
+- Define provider sync key policy and manifest/object shape in
+  [`VAULT_PROVIDER_SYNC_KEY_MODEL.md`](./VAULT_PROVIDER_SYNC_KEY_MODEL.md).
+- Current implementation includes a provider contract validator and Google adapter conformance
+  coverage for capability invariants. New providers must pass the same `VaultProviderV1` gate.
 
 ### Phase 3 — Robust sync behavior
 - Add state machine, retries, conflict objects, conflict badge center.
 - Add autosync policies (manual, periodic, on-change, on-exit).
+- Replace normal cloud sync with per-credential encrypted provider records; keep full-file
+  `vault.redb` backup/restore only as legacy disaster recovery.
 
 ### Phase 4 — Multi-provider & future domains
 - Add second provider (e.g., GitHub blob store) to validate abstraction.
