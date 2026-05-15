@@ -52,6 +52,7 @@ function Get-CandidateDataDirs {
 
     if ($env:LOCALAPPDATA) {
         $candidates += (Join-Path $env:LOCALAPPDATA 'Zync\User')
+        $candidates += (Join-Path $env:LOCALAPPDATA 'Programs\zync')
         $candidates += (Join-Path $env:LOCALAPPDATA 'com.zync.desktop')
         $candidates += (Join-Path $env:LOCALAPPDATA 'zync')
     }
@@ -131,7 +132,12 @@ $targets = @(
     'vault.redb.sync-tmp',
     'vault.redb.download-tmp',
     'sync-google.json',
-    'sync-google-tokens.json'
+    'sync-google-tokens.json',
+    'sync-profiles.json'
+)
+
+$targetPatterns = @(
+    'sync-collection-*.json'
 )
 
 $connectionsBackup = Join-Path $resolvedDataDir 'connections.json.pre-secure-to-vault'
@@ -145,6 +151,16 @@ Write-Host ''
 Write-Host 'This script will remove vault-related local test data:'
 foreach ($name in $targets) {
     Write-Host " - $(Join-Path $resolvedDataDir $name)"
+}
+foreach ($pattern in $targetPatterns) {
+    $matchedFiles = Get-ChildItem -LiteralPath $resolvedDataDir -Filter $pattern -File -ErrorAction SilentlyContinue
+    if ($matchedFiles) {
+        foreach ($match in $matchedFiles) {
+            Write-Host " - $($match.FullName)"
+        }
+    } else {
+        Write-Host " - $(Join-Path $resolvedDataDir $pattern) (no matches)"
+    }
 }
 if ($DeleteConnectionsBackup) {
     Write-Host " - $connectionsBackup"
@@ -181,6 +197,11 @@ foreach ($name in $targets) {
     Remove-IfExists -PathToDelete (Join-Path $resolvedDataDir $name)
 }
 
+foreach ($pattern in $targetPatterns) {
+    Get-ChildItem -LiteralPath $resolvedDataDir -Filter $pattern -File -ErrorAction SilentlyContinue |
+        ForEach-Object { Remove-IfExists -PathToDelete $_.FullName }
+}
+
 switch ($Mode) {
     'restore-pre-vault' {
         if (Test-Path -LiteralPath $connectionsBackup) {
@@ -198,9 +219,13 @@ switch ($Mode) {
         # cannot silently keep connecting through an old PEM path or password.
         Rewrite-ConnectionsJson -ConnectionsFile $connectionsPath -SuccessMessage 'Stripped authRef/privateKeyPath/password from live connections.json.' -Transform {
             param($connection)
-            $connection.authRef = $null
-            $connection.privateKeyPath = $null
-            $connection.password = $null
+            foreach ($name in @('authRef', 'privateKeyPath', 'password')) {
+                if ($connection.PSObject.Properties.Name -contains $name) {
+                    $connection.$name = $null
+                } else {
+                    Add-Member -InputObject $connection -NotePropertyName $name -NotePropertyValue $null
+                }
+            }
         }
     }
 }
