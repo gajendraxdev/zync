@@ -1,4 +1,4 @@
-import { X, Settings as SettingsIcon, PanelLeft, Network, Gift, Plus, Laptop, FolderPlus, Sparkles, Home, Shield, UserRound, ChevronDown, LogOut } from 'lucide-react';
+import { X, Settings as SettingsIcon, PanelLeft, Network, Gift, Plus, Laptop, FolderPlus, Sparkles, Home, Shield, UserRound, ChevronDown, LogOut, Cloud } from 'lucide-react';
 import { OSIcon } from '../icons/OSIcon';
 import { useAppStore, Tab, Connection } from '../../store/useAppStore'; // Updated Import
 import { cn } from '../../lib/utils';
@@ -34,10 +34,31 @@ function getIconForTab(tab: Tab, connections: Connection[], size: 12 | 13 = 12) 
     if (tab.type === 'settings') return <SettingsIcon size={size} />;
     if (tab.type === 'release-notes') return <Gift size={size} className="text-[var(--color-app-accent)]" />;
     if (tab.type === 'vault') return <Shield size={size} />;
+    if (tab.type === 'sync') return <Cloud size={size} />;
 
     const conn = connections.find((c: Connection) => c.id === tab.connectionId);
     const iconClassName = size === 13 ? "w-[13px] h-[13px]" : "w-[12px] h-[12px]";
     return <OSIcon icon={conn?.icon || 'Server'} className={iconClassName} />;
+}
+
+function googleConnectErrorMessage(error: unknown): string {
+    const raw = (error instanceof Error ? error.message : String(error ?? 'Unknown error')).trim();
+    const normalized = raw.toLowerCase();
+
+    if (normalized.includes('access_denied') || normalized.includes('oauth denied') || normalized.includes('user denied')) {
+        return 'Google sign-in was cancelled or access was denied. Retry and approve Drive access on the Google consent screen.';
+    }
+    if (normalized.includes('popup') && normalized.includes('block')) {
+        return 'Google sign-in did not open. Allow the browser window or popup, then retry Connect Google Sync.';
+    }
+    if (normalized.includes('timed out') || normalized.includes('timeout')) {
+        return 'Google sign-in timed out. Check your network and retry Connect Google Sync.';
+    }
+    if (normalized.includes('network') || normalized.includes('dns') || normalized.includes('connection refused')) {
+        return 'Google sync could not reach the network. Check connectivity, proxy, or firewall settings and retry.';
+    }
+
+    return raw;
 }
 
 // Extract SortableTab component
@@ -120,6 +141,7 @@ export function TabBar() {
     const updateSettings = useAppStore(state => state.updateSettings);
     const openSettings = useAppStore(state => state.openSettings);
     const openVaultTab = useAppStore(state => state.openVaultTab);
+    const openSyncBackupTab = useAppStore(state => state.openSyncBackupTab);
     const setAddConnectionModalOpen = useAppStore(state => state.setAddConnectionModalOpen);
     const toggleAiSidebar = useAppStore(state => state.toggleAiSidebar);
     const isAiSidebarOpen = useAppStore(state => state.isAiSidebarOpen);
@@ -134,6 +156,7 @@ export function TabBar() {
     const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
     const profileMenuRef = useRef<HTMLDivElement>(null);
     const [googleSync, setGoogleSync] = useState<SyncProviderStatus | null>(null);
+    const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
 
     // Click outside to close the Add menu
     useEffect(() => {
@@ -254,6 +277,10 @@ export function TabBar() {
     const platform = window.electronUtils?.platform || 'linux';
     const isMac = platform === 'darwin';
     const profileInitial = (googleSync?.email?.trim()?.[0] || 'U').toUpperCase();
+
+    useEffect(() => {
+        setAvatarLoadFailed(false);
+    }, [googleSync?.avatarUrl]);
 
     return (
         <>
@@ -421,12 +448,13 @@ export function TabBar() {
                                         aria-label="Profile and sync menu"
                                     >
                                         <span className="relative inline-flex h-5 w-5 items-center justify-center rounded-full bg-app-accent/20 border border-app-accent/40 text-[10px] font-bold text-app-text overflow-hidden shadow-sm">
-                                            {googleSync?.avatarUrl ? (
+                                            {googleSync?.avatarUrl && !avatarLoadFailed ? (
                                                 <img
                                                     src={googleSync.avatarUrl}
                                                     alt="Profile"
                                                     className="h-full w-full object-cover"
                                                     referrerPolicy="no-referrer"
+                                                    onError={() => setAvatarLoadFailed(true)}
                                                 />
                                             ) : googleSync?.email ? profileInitial : <UserRound size={10} />}
                                         </span>
@@ -453,13 +481,23 @@ export function TabBar() {
                                         </button>
                                         <button
                                             onClick={() => {
-                                                openVaultTab('google');
+                                                openSyncBackupTab();
+                                                setIsProfileMenuOpen(false);
+                                            }}
+                                            className="w-full text-left px-3 py-2 text-xs font-medium text-app-text hover:bg-black/5 dark:hover:bg-white/10 rounded-lg flex items-center gap-2 transition-colors"
+                                        >
+                                            <Cloud size={13} className="text-app-muted" />
+                                            <span>Sync & Backup</span>
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                openVaultTab('local');
                                                 setIsProfileMenuOpen(false);
                                             }}
                                             className="w-full text-left px-3 py-2 text-xs font-medium text-app-text hover:bg-black/5 dark:hover:bg-white/10 rounded-lg flex items-center gap-2 transition-colors"
                                         >
                                             <Shield size={13} className="text-app-muted" />
-                                            <span>Manage Vault & Sync</span>
+                                            <span>Vault Credentials</span>
                                         </button>
                                         {!googleSync?.connected && (
                                             <button
@@ -468,7 +506,7 @@ export function TabBar() {
                                                         await syncIpc.connect('google');
                                                         showToast('success', 'Google sync connected');
                                                     } catch (error) {
-                                                        showToast('error', error instanceof Error ? error.message : String(error));
+                                                        showToast('error', googleConnectErrorMessage(error));
                                                     } finally {
                                                         setIsProfileMenuOpen(false);
                                                     }

@@ -13,6 +13,10 @@ pub struct Snippet {
     // alias allows loading old snippets saved with snake_case key
     #[serde(alias = "connection_id")]
     pub connection_id: Option<String>, // if scoped to a specific connection, or global
+    #[serde(default)]
+    pub created_at: Option<u64>,
+    #[serde(default)]
+    pub updated_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,11 +45,21 @@ impl SnippetsManager {
 
     pub async fn save(&self, snippet: Snippet) -> Result<(), String> {
         let mut snippets = self.list().await?;
+        let now = current_unix_secs();
 
         if let Some(pos) = snippets.iter().position(|s| s.id == snippet.id) {
-            snippets[pos] = snippet;
+            let created_at = snippets[pos].created_at.or(snippet.created_at).or(Some(now));
+            snippets[pos] = Snippet {
+                created_at,
+                updated_at: Some(now),
+                ..snippet
+            };
         } else {
-            snippets.push(snippet);
+            snippets.push(Snippet {
+                created_at: snippet.created_at.or(Some(now)),
+                updated_at: snippet.updated_at.or(Some(now)),
+                ..snippet
+            });
         }
 
         self.save_to_disk(snippets).await
@@ -62,4 +76,11 @@ impl SnippetsManager {
         let json = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
         fs::write(&self.file_path, json).map_err(|e| e.to_string())
     }
+}
+
+fn current_unix_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }

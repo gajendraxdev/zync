@@ -32,19 +32,21 @@ export function SyncCollectionSetupModal({
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!isOpen) {
-      setMode(initialMode);
-      setPassphrase('');
-      setConfirmPassphrase('');
-      setShowPassphrase(false);
-      setHasRecoveryKey(true);
-      setError('');
-      return;
-    }
+    if (isOpen) return;
+    setMode(initialMode);
+    setPassphrase('');
+    setConfirmPassphrase('');
+    setShowPassphrase(false);
+    setHasRecoveryKey(true);
+    setError('');
+  }, [initialMode, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
     if (!hasLocalVaultConfigured && mode === 'local-passphrase') {
       setMode('custom-passphrase');
     }
-  }, [hasLocalVaultConfigured, initialMode, isOpen, mode]);
+  }, [hasLocalVaultConfigured, isOpen]);
 
   const canSubmit = useMemo(() => {
     return (
@@ -61,7 +63,7 @@ export function SyncCollectionSetupModal({
 
     if (passphrase.length < SYNC_PASSPHRASE_MIN_LENGTH) {
       setError(
-        `${mode === 'local-passphrase' ? 'Local Vault passphrase' : 'Sync passphrase'} must be at least ${SYNC_PASSPHRASE_MIN_LENGTH} characters.`,
+        `${mode === 'local-passphrase' ? 'Local Vault passphrase' : 'Google encryption passphrase'} must be at least ${SYNC_PASSPHRASE_MIN_LENGTH} characters.`,
       );
       return;
     }
@@ -92,8 +94,8 @@ export function SyncCollectionSetupModal({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Set up Google Sync Key"
-      subtitle="Configure how Google provider credentials are encrypted for cloud sync."
+      title="Set up Google Encryption"
+      subtitle="Create the local encryption key used for Google Drive sync records."
       width="max-w-md"
     >
       <form onSubmit={handleSubmit} className="space-y-4">
@@ -114,25 +116,25 @@ export function SyncCollectionSetupModal({
 
         {mode === 'local-passphrase' && (
           <p className="text-xs text-[var(--color-app-muted)]">
-            Recommended: reuses your local vault passphrase for Google sync key unlock.
+            Recommended: use your Local Vault passphrase to unlock Google encryption on this device.
           </p>
         )}
         {!hasLocalVaultConfigured && (
           <p className="text-xs text-amber-300/85 leading-relaxed">
-            Local vault is not set up yet, so Google app-data sync will use a separate sync passphrase.
+            Local Vault is not set up yet, so Google app-data sync will use a separate encryption passphrase.
             You can still sync hosts, tunnels, snippets, and settings. Vault credentials remain disabled until the local vault exists.
           </p>
         )}
 
         <Input
-          label={mode === 'local-passphrase' ? 'Local Vault passphrase' : 'Sync passphrase'}
+          label={mode === 'local-passphrase' ? 'Local Vault passphrase' : 'Google encryption passphrase'}
           type={showPassphrase ? 'text' : 'password'}
           value={passphrase}
           onChange={(e) => setPassphrase(e.target.value)}
           placeholder={
             mode === 'local-passphrase'
               ? 'Enter your local vault passphrase'
-              : 'Create sync passphrase'
+              : 'Create Google encryption passphrase'
           }
           rightElement={
             <button
@@ -146,14 +148,14 @@ export function SyncCollectionSetupModal({
           }
         />
         <Input
-          label={mode === 'local-passphrase' ? 'Confirm local passphrase' : 'Confirm sync passphrase'}
+          label={mode === 'local-passphrase' ? 'Confirm local passphrase' : 'Confirm Google encryption passphrase'}
           type={showPassphrase ? 'text' : 'password'}
           value={confirmPassphrase}
           onChange={(e) => setConfirmPassphrase(e.target.value)}
           placeholder={
             mode === 'local-passphrase'
               ? 'Repeat local vault passphrase'
-            : 'Repeat sync passphrase'
+            : 'Repeat Google encryption passphrase'
           }
         />
 
@@ -169,7 +171,7 @@ export function SyncCollectionSetupModal({
             className="mt-0.5"
           />
           <span>
-            Generate a provider sync recovery key (recommended).
+            Generate a Google encryption recovery key (recommended).
           </span>
         </label>
 
@@ -178,7 +180,7 @@ export function SyncCollectionSetupModal({
             <Shield size={12} />
             Security note
           </div>
-          Cloud providers only store encrypted domain records and sync metadata. Passphrases are not uploaded.
+          Google Drive only stores encrypted domain records and sync metadata. Passphrases and recovery keys are not uploaded.
         </div>
 
         {error && (
@@ -190,7 +192,7 @@ export function SyncCollectionSetupModal({
             Cancel
           </Button>
           <Button type="submit" className="flex-1" disabled={!canSubmit}>
-            {isSubmitting ? 'Setting up…' : 'Set up Sync Key'}
+            {isSubmitting ? 'Setting up…' : 'Set up Encryption'}
           </Button>
         </div>
       </form>

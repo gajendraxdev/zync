@@ -12,6 +12,8 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Vault Credential Revision History**: Added credential revision snapshots and restore flow across the vault backend, IPC layer, and Vault workspace UI so rotated credentials can be reviewed and restored safely. ([e0409f4])
 - **Provider App-Data Sync Groundwork**: Added manual Google-backed sync domains for hosts, tunnels, snippets, and settings, including provider domain status, policy metadata, and reusable frontend IPC helpers.
 - **Selective Sync Architecture Docs**: Added Phase 3/Phase 4 sync planning docs and a typed vault credential model covering future credential categories beyond SSH keys/passwords.
+- **Provider Host Inventory**: Added read-only Google host inventory in Sync & Backup so remote provider hosts can be inspected before local restore/materialization. ([22256fb])
+- **Full Local Reset Test Mode**: Added `full-local-reset` reset-script mode to wipe local hosts/folders plus vault/sync state for true restore-path validation. ([22256fb])
 
 ### Changed
 - **Settings Information Architecture**: Removed Vault from Settings navigation; vault management now lives in the dedicated Vault workspace flow. Updated related UX copy from “Settings → Vault” to “Vault tab/workspace” guidance. ([d9d3663])
@@ -22,6 +24,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Vault Recovery Modal State Model**: Consolidated recovery-key modal metadata into a single structured state object in vault panel actions for safer, atomic updates.
 - **Vault Accessibility Semantics**: Updated mode switch interaction semantics to radiogroup/radio patterns and improved assistive-state signaling across unlock/sync controls.
 - **Reset Script Preview Clarity**: Reset scripts now show expanded file matches (or explicit no-match output) for pattern-based vault/sync cleanup previews.
+- **Selective Provider Sync Direction**: Documented provider inventory vs explicit local restore/materialization more explicitly, including Google host inventory status and deferred provider-performance follow-up. ([22256fb], [7b8e5a6])
 
 ### Fixed
 - **Command Palette Vault Icon Semantics**: Corrected icon mapping so Local Vault and Google Vault Sync entries use appropriate visual semantics. ([d9d3663])
@@ -36,6 +39,9 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Windows Sync File Finalization**: Sync manifest/profile writes now handle replace-on-rename cases on Windows with safer finalize retry/cleanup behavior. ([2df515d])
 - **Sync Expiry Arithmetic Safety**: Google token expiry computation now uses saturating skew subtraction to avoid underflow on short `expires_in` responses. ([2df515d])
 - **Vault/Sync Modal/Input Robustness**: Vault unlock submit gating now trims recovery-key input, reset scripts avoid unsafe path targeting/glob expansion pitfalls, and secret toggle controls expose pressed state for assistive tech. ([2df515d])
+- **Host Restore and Vault-Backed Reconnect Reliability**: Improved host restore/relink flow, added runtime connection diagnostics, and made vault-ref relink persistence non-fatal during SSH connect so successful auth is not blocked by local metadata writes. ([22256fb], [7b8e5a6])
+- **Sync Metadata Integrity**: Snippet and tunnel sync records now preserve real timestamps and stable fallback IDs so restore/sync convergence no longer depends on placeholder values or unrelated fields. ([7b8e5a6])
+- **Sync/Profile UI Resilience**: Fixed restore timestamp display for missing values, added Google avatar fallback handling, improved Google connect error messaging, and removed fragile tunnel reload timeout chains in favor of direct refresh after operations. ([7b8e5a6])
 
 ## [2.15.1] - 2026-04-27
 
@@ -808,3 +814,5 @@ All notable changes to Zync are documented in this file. The format is based on 
 [bdbd81b]: https://github.com/zync-sh/zync/commit/bdbd81b
 [bf01457]: https://github.com/zync-sh/zync/commit/bf01457
 [2df515d]: https://github.com/zync-sh/zync/commit/2df515d
+[22256fb]: https://github.com/zync-sh/zync/commit/22256fb
+[7b8e5a6]: https://github.com/zync-sh/zync/commit/7b8e5a6

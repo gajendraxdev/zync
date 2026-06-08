@@ -61,6 +61,7 @@ pub fn load_tunnel_sync_records(data_dir: &Path) -> SyncResult<Vec<TunnelSyncRec
 }
 
 fn map_tunnel(tunnel: SavedTunnel, logical_id: String) -> TunnelSyncRecord {
+    let updated_at = tunnel.updated_at.or(tunnel.created_at).unwrap_or(0);
     TunnelSyncRecord {
         logical_id,
         connection_id: tunnel.connection_id,
@@ -73,7 +74,7 @@ fn map_tunnel(tunnel: SavedTunnel, logical_id: String) -> TunnelSyncRecord {
         bind_to_any: tunnel.bind_to_any.unwrap_or(false),
         auto_start: tunnel.auto_start.unwrap_or(false),
         group: tunnel.group.filter(|v| !v.trim().is_empty()),
-        updated_at: tunnel.original_port.map(|v| v as u64).unwrap_or(0),
+        updated_at,
     }
 }
 
@@ -114,6 +115,8 @@ pub fn apply_tunnel_restore_records(data_dir: &Path, records: &[TunnelSyncRecord
             status: None,
             original_port: None,
             group: record.group.clone(),
+            created_at: Some(record.updated_at),
+            updated_at: Some(record.updated_at),
         });
         restored = restored.saturating_add(1);
     }
@@ -211,6 +214,8 @@ mod tests {
                 status: None,
                 original_port: None,
                 group: None,
+                created_at: Some(10),
+                updated_at: Some(11),
             }],
         };
         let path = dir.join("tunnels.json");
@@ -250,5 +255,31 @@ mod tests {
         assert_eq!(restored, 1);
         assert_eq!(updated, 1);
         std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[test]
+    fn map_tunnel_uses_saved_timestamps() {
+        let record = map_tunnel(
+            SavedTunnel {
+                id: "tun-1".into(),
+                connection_id: "conn-1".into(),
+                name: "API".into(),
+                tunnel_type: "local".into(),
+                local_port: 8080,
+                remote_host: "127.0.0.1".into(),
+                remote_port: 80,
+                bind_address: None,
+                bind_to_any: Some(false),
+                auto_start: Some(false),
+                status: None,
+                original_port: Some(9999),
+                group: None,
+                created_at: Some(12),
+                updated_at: Some(55),
+            },
+            "tun-1".into(),
+        );
+
+        assert_eq!(record.updated_at, 55);
     }
 }

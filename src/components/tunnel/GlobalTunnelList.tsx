@@ -177,7 +177,7 @@ export function GlobalTunnelList() {
                         };
                         await saveTunnel(revertedTunnel);
                         showToast('success', `Port reverted to ${tunnel.originalPort}`);
-                        setTimeout(() => loadTunnels(), 200); // Refresh UI
+                        await loadTunnels();
                     } catch (revertError: any) {
                         showToast('error', `Failed to revert port: ${revertError.message || revertError}`);
                     }
@@ -221,7 +221,7 @@ export function GlobalTunnelList() {
                     );
                 }
                 showToast('success', `Forwarding started`);
-                loadTunnels(); // Refresh UI
+                await loadTunnels();
             }
         } catch (error: any) {
             const errorMsg = error.message || error || 'Unknown error';
@@ -274,11 +274,7 @@ export function GlobalTunnelList() {
                 );
             }
             showToast('success', `Switched to port ${port}`);
-
-            // Force reload to show the new tunnel
-            setTimeout(() => loadTunnels(), 100);
-            setTimeout(() => loadTunnels(), 500);
-            setTimeout(() => loadTunnels(), 1000);
+            await loadTunnels();
         } catch (error: any) {
             showToast('error', `Failed to start on port ${port}: ${error.message || error}`);
         }
