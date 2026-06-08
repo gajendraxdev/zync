@@ -411,6 +411,28 @@ Google provider upload lookup still has a deferred optimization:
 This is intentionally deferred because restore correctness, host/credential relink stability,
 and selective provider materialization are higher-value priorities than this API-call reduction.
 
+### Deferred Code Review Follow-up
+
+The following review items are intentionally left as tracked follow-up work after the current
+vault/sync milestone and hardening commits:
+
+- typed credential zeroization hardening:
+  remove `#[zeroize(skip)]` from `PlaintextRecord.credential` only after `CredentialEnvelope`
+  and nested typed credential structs derive/implement `Zeroize` safely
+- tunnel UI refresh cleanup:
+  remove remaining fire-and-forget / delayed `loadTunnels()` refresh paths in `TunnelManager`
+  once the event-driven refresh path is unified across tunnel surfaces
+- vault credential module cleanup:
+  replace broad module-level `#![allow(dead_code)]` in `src-tauri/src/vault/credential.rs`
+  with item-level allowances only where still justified
+- optional Google provider performance polish:
+  batch existing-file lookup across multiple collection prefixes when provider upload lookup
+  becomes a measurable bottleneck
+
+These are not blocked by current restore correctness or provider inventory behavior, so they
+should not be mixed back into the main selective-sync/product flow unless that work is being
+re-opened intentionally.
+
 ---
 
 ## Design Rule to Preserve

@@ -137,7 +137,13 @@ where
             skipped += 1;
             continue;
         }
-        let envelope = super::commands::decode_sync_hosts_envelope(&encrypted)?;
+        let envelope = match super::commands::decode_sync_hosts_envelope(&encrypted) {
+            Ok(v) => v,
+            Err(_) => {
+                failed += 1;
+                continue;
+            }
+        };
         let plaintext = match decrypt_record(secret_key, &envelope, encrypted.aad.as_bytes()) {
             Ok(v) => v,
             Err(_) => {
@@ -162,4 +168,3 @@ where
         records,
     })
 }
-

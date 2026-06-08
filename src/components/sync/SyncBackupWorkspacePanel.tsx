@@ -231,7 +231,7 @@ export default function SyncBackupWorkspacePanel() {
           isSyncingSettings={panel.isSyncingSettings}
           isRestoringSettings={panel.isRestoringSettings}
           hostsSyncEnabled={panel.hostsSyncEnabled}
-          isUpdatingHostsPolicy={panel.isUpdatingHostsPolicy}
+          isUpdatingDomainPolicy={panel.isUpdatingDomainPolicy}
           domainPolicies={panel.domainPolicies}
           isSettingUpCollection={panel.isSettingUpCollection}
           isUnlockingCollection={panel.isUnlockingCollection}
