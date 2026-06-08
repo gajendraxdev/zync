@@ -3209,6 +3209,7 @@ mod tests {
                 host: "example.com".to_string(),
                 port: 22,
                 username: "app".to_string(),
+                jump_server_id: None,
                 folder: None,
                 tags: Vec::new(),
                 is_favorite: false,

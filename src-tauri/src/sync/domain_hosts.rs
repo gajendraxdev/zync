@@ -16,6 +16,8 @@ pub struct HostSyncRecord {
     pub host: String,
     pub port: u16,
     pub username: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jump_server_id: Option<String>,
     pub folder: Option<String>,
     pub tags: Vec<String>,
     pub is_favorite: bool,
@@ -78,6 +80,7 @@ fn map_saved_connection_to_sync_record(conn: SavedConnection, logical_id: String
         host: conn.host,
         port: conn.port,
         username: conn.username,
+        jump_server_id: conn.jump_server_id.filter(|v| !v.trim().is_empty()),
         folder: conn.folder.filter(|v| !v.trim().is_empty()),
         tags: conn.tags.unwrap_or_default(),
         is_favorite: conn.is_favorite.unwrap_or(false),
@@ -121,6 +124,7 @@ pub fn apply_hosts_restore_records(
             existing.host = record.host.clone();
             existing.port = record.port;
             existing.username = record.username.clone();
+            existing.jump_server_id = record.jump_server_id.clone();
             existing.folder = record.folder.clone();
             existing.tags = if record.tags.is_empty() {
                 None
@@ -146,7 +150,7 @@ pub fn apply_hosts_restore_records(
             username: record.username.clone(),
             password: None,
             private_key_path: None,
-            jump_server_id: None,
+            jump_server_id: record.jump_server_id.clone(),
             last_connected: Some(record.updated_at),
             icon: None,
             folder: record.folder.clone(),
@@ -367,6 +371,7 @@ mod tests {
             host: "example.com".into(),
             port: 22,
             username: "app".into(),
+            jump_server_id: Some("jump-1".into()),
             folder: None,
             tags: Vec::new(),
             is_favorite: false,
@@ -381,6 +386,7 @@ mod tests {
         let saved: SavedData = serde_json::from_str(&raw).expect("parse saved hosts");
         let restored = saved.connections.first().expect("restored host");
         assert_eq!(restored.auth_ref, Some(test_auth_ref()));
+        assert_eq!(restored.jump_server_id.as_deref(), Some("jump-1"));
         assert_eq!(restored.password, None);
         assert_eq!(restored.private_key_path, None);
 
@@ -394,6 +400,7 @@ mod tests {
         let mut existing = test_connection("host-1");
         existing.password = Some("old-password".into());
         existing.private_key_path = Some("C:\\Users\\me\\.ssh\\old.pem".into());
+        existing.jump_server_id = Some("old-jump".into());
         let initial = SavedData {
             connections: vec![existing],
             folders: Vec::new(),
@@ -410,6 +417,7 @@ mod tests {
             host: "example.com".into(),
             port: 2222,
             username: "app".into(),
+            jump_server_id: Some("jump-2".into()),
             folder: Some("prod".into()),
             tags: vec!["prod".into()],
             is_favorite: true,
@@ -424,6 +432,7 @@ mod tests {
         let saved: SavedData = serde_json::from_str(&raw).expect("parse saved hosts");
         let updated = saved.connections.first().expect("updated host");
         assert_eq!(updated.auth_ref, Some(test_auth_ref()));
+        assert_eq!(updated.jump_server_id.as_deref(), Some("jump-2"));
         assert_eq!(updated.password, None);
         assert_eq!(updated.private_key_path, None);
         assert_eq!(updated.port, 2222);
