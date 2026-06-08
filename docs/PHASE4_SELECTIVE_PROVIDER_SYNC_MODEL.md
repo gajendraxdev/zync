@@ -28,6 +28,7 @@ Zync currently has:
   - settings allowlist
 - Vault credentials can be backed up/restored manually when the local vault exists.
 - Credential restore has preview/conflict selection.
+- Hosts can be listed from Google Drive as a read-only remote inventory before restore.
 - Provider status exposes per-domain status:
   - enabled/disabled
   - last sync
@@ -42,8 +43,18 @@ Current Google sync is **manual**, not automatic:
 - Setting up the sync key does not sync data automatically.
 - Turning a domain on/off only changes policy; it does not sync by itself.
 - Hosts/tunnels/snippets/settings restore currently uses deterministic keyed upsert, not a full conflict-resolution UI.
-- There is no remote catalog browser yet for provider-only hosts or credentials.
+- There is no selected host import/use-on-device flow yet for remote-only hosts.
+- There is no remote credential catalog browser yet for provider-only credentials.
 - There is no bulk “sync all enabled domains” flow yet.
+
+### Current host behavior
+
+For hosts, the current behavior is intentionally split:
+
+- `Google Drive Hosts` can be listed without restoring them locally.
+- `Restore hosts` is still the explicit materialization path into local `connections.json`.
+- Host restore is expected to restore/relink referenced vault credentials first when those refs exist.
+- The current inventory view is read-only; it does not yet support `Use on this device` or `Restore selected`.
 
 ---
 
@@ -112,6 +123,10 @@ Available from Git
 ```
 
 Remote provider hosts can be browsed without immediately importing every host into local storage.
+
+Current implementation note:
+- A read-only Google host inventory now exists in the Sync & Backup workspace.
+- Selected import/use-on-device remains the next implementation step.
 
 #### Vault Credentials
 
@@ -372,7 +387,9 @@ Recommended sequence:
 1. Create a dedicated **Sync & Backup** page reachable from the top bar profile/sync menu.
 2. Move provider setup/status out of the Vault-only mental model.
 3. Add a provider catalog/index API for hosts and credentials.
+   Status: host inventory API and Google host listing are now implemented.
 4. Add “Available from provider” sections without importing all remote records.
+   Status: read-only Google host listing is implemented; selected host actions remain next.
 5. Introduce typed credential envelopes before adding non-SSH credential UI.
 6. Add item-level actions:
    - Use on this device
@@ -382,6 +399,17 @@ Recommended sequence:
 7. Add “Sync now” for enabled app-profile domains.
 8. Add auto-sync engine for low-risk app profile data.
 9. Keep vault credential restore manual/preview-first until explicit opt-in exists.
+
+### Deferred provider-performance follow-up
+
+Google provider upload lookup still has a deferred optimization:
+
+- current behavior is correct and has a safe per-file fallback
+- current implementation does not yet batch existing-file lookups across multiple collection prefixes
+- if provider sync starts spending noticeable time on repeated object-existence checks, update the Google provider upload path to group records by collection prefix and batch-list each prefix before falling back to per-file lookup
+
+This is intentionally deferred because restore correctness, host/credential relink stability,
+and selective provider materialization are higher-value priorities than this API-call reduction.
 
 ---
 

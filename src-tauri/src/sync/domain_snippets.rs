@@ -2,6 +2,7 @@
 
 use super::types::{SyncError, SyncResult};
 use crate::snippets::{Snippet, SnippetsData};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::io::ErrorKind;
 use std::path::Path;
@@ -40,7 +41,7 @@ pub fn load_snippet_sync_records(data_dir: &Path) -> SyncResult<Vec<SnippetSyncR
     let mut dedup: BTreeMap<String, SnippetSyncRecord> = BTreeMap::new();
     for snip in data.snippets {
         let logical_id = if snip.id.trim().is_empty() {
-            format!("{}:{}", snip.name.trim().to_ascii_lowercase(), snip.command.len())
+            snippet_fallback_logical_id(&snip)
         } else {
             snip.id.trim().to_string()
         };
@@ -50,6 +51,7 @@ pub fn load_snippet_sync_records(data_dir: &Path) -> SyncResult<Vec<SnippetSyncR
 }
 
 fn map_snippet(snip: Snippet, logical_id: String) -> SnippetSyncRecord {
+    let updated_at = snip.updated_at.or(snip.created_at).unwrap_or(0);
     SnippetSyncRecord {
         logical_id,
         name: snip.name,
@@ -57,8 +59,20 @@ fn map_snippet(snip: Snippet, logical_id: String) -> SnippetSyncRecord {
         category: snip.category.filter(|v| !v.trim().is_empty()),
         tags: snip.tags.unwrap_or_default(),
         connection_id: snip.connection_id.filter(|v| !v.trim().is_empty()),
-        updated_at: 0,
+        updated_at,
     }
+}
+
+fn snippet_fallback_logical_id(snip: &Snippet) -> String {
+    let label = snip.name.trim().to_ascii_lowercase();
+    let mut hasher = Sha256::new();
+    hasher.update(snip.command.as_bytes());
+    let digest = hasher.finalize();
+    let short_hash = digest[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("{label}:{short_hash}")
 }
 
 pub fn apply_snippet_restore_records(data_dir: &Path, records: &[SnippetSyncRecord]) -> SyncResult<(u64, u64)> {
@@ -86,6 +100,8 @@ pub fn apply_snippet_restore_records(data_dir: &Path, records: &[SnippetSyncReco
             category: record.category.clone(),
             tags: if record.tags.is_empty() { None } else { Some(record.tags.clone()) },
             connection_id: record.connection_id.clone(),
+            created_at: Some(record.updated_at),
+            updated_at: Some(record.updated_at),
         });
         restored = restored.saturating_add(1);
     }
@@ -176,6 +192,8 @@ mod tests {
                 category: None,
                 tags: None,
                 connection_id: None,
+                created_at: Some(10),
+                updated_at: Some(11),
             }],
         };
         let path = dir.join("snippets.json");
@@ -205,5 +223,47 @@ mod tests {
         assert_eq!(restored, 1);
         assert_eq!(updated, 1);
         std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[test]
+    fn snippet_fallback_logical_id_uses_command_hash() {
+        let first = Snippet {
+            id: String::new(),
+            name: "Deploy".into(),
+            command: "echo first".into(),
+            category: None,
+            tags: None,
+            connection_id: None,
+            created_at: None,
+            updated_at: None,
+        };
+        let second = Snippet {
+            command: "echo second".into(),
+            ..first.clone()
+        };
+
+        assert_ne!(
+            snippet_fallback_logical_id(&first),
+            snippet_fallback_logical_id(&second)
+        );
+    }
+
+    #[test]
+    fn map_snippet_uses_real_timestamps() {
+        let record = map_snippet(
+            Snippet {
+                id: "snip-1".into(),
+                name: "Deploy".into(),
+                command: "echo deploy".into(),
+                category: None,
+                tags: None,
+                connection_id: None,
+                created_at: Some(42),
+                updated_at: Some(77),
+            },
+            "snip-1".into(),
+        );
+
+        assert_eq!(record.updated_at, 77);
     }
 }

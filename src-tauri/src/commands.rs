@@ -631,6 +631,7 @@ struct RelinkedVaultRefUpdate {
     connection_id: String,
     credential_id: String,
     item_id: String,
+    vault_id: Option<String>,
 }
 
 fn resolve_vault_refs<'a>(
@@ -690,6 +691,7 @@ fn resolve_vault_refs<'a>(
                         connection_id: config.id.clone(),
                         credential_id: credential_id.to_string(),
                         item_id: record.id.clone(),
+                        vault_id: svc.vault_id(),
                     });
                     record
                 }
@@ -757,6 +759,12 @@ fn persist_relinked_vault_refs(
                     auth_ref.item_id = update.item_id.clone();
                     changed = true;
                 }
+                if let Some(vault_id) = update.vault_id.as_deref() {
+                    if auth_ref.vault_id != vault_id {
+                        auth_ref.vault_id = vault_id.to_string();
+                        changed = true;
+                    }
+                }
             }
         }
     }
@@ -779,7 +787,27 @@ pub async fn ssh_connect(
     let original_config = config.clone();
     let uses_vault_auth = config_uses_vault_auth(&original_config);
     let relinked = resolve_vault_refs(&mut config, &vault).await?;
-    persist_relinked_vault_refs(&app, &relinked)?;
+    if !relinked.is_empty() {
+        let app_handle = app.clone();
+        tauri::async_runtime::spawn(async move {
+            let persist_result = tokio::task::spawn_blocking(move || {
+                persist_relinked_vault_refs(&app_handle, &relinked)
+            })
+            .await;
+
+            match persist_result {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    eprintln!("[VaultAuth] Failed to persist relinked vault refs: {error}");
+                }
+                Err(join_error) => {
+                    eprintln!(
+                        "[VaultAuth] Failed to persist relinked vault refs: task join error: {join_error}"
+                    );
+                }
+            }
+        });
+    }
     match reconnect_connection(&config, &state.ssh_manager, &state.tunnel_manager).await {
         Ok(mut handle) => {
             let detected_os = handle.detected_os.clone();
@@ -3470,7 +3498,7 @@ pub async fn tunnel_list(
 
 #[tauri::command]
 pub async fn tunnel_save(app: AppHandle, tunnel_val: serde_json::Value) -> Result<(), String> {
-    let tunnel: SavedTunnel = serde_json::from_value(tunnel_val).map_err(|e| e.to_string())?;
+    let mut tunnel: SavedTunnel = serde_json::from_value(tunnel_val).map_err(|e| e.to_string())?;
     let data_dir = get_data_dir(&app);
     if !data_dir.exists() {
         std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
@@ -3485,9 +3513,18 @@ pub async fn tunnel_save(app: AppHandle, tunnel_val: serde_json::Value) -> Resul
         vec![]
     };
 
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
     if let Some(idx) = tunnels.iter().position(|t| t.id == tunnel.id) {
+        tunnel.created_at = tunnels[idx].created_at.or(tunnel.created_at).or(Some(now));
+        tunnel.updated_at = Some(now);
         tunnels[idx] = tunnel;
     } else {
+        tunnel.created_at = tunnel.created_at.or(Some(now));
+        tunnel.updated_at = Some(now);
         tunnels.push(tunnel);
     }
 

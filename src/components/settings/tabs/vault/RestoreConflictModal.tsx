@@ -26,7 +26,7 @@ const PREVIEW_METRICS: Array<{ key: keyof SyncRestorePreviewResult; label: strin
 ];
 
 function formatTimestamp(unixSecs: number): string {
-  if (!Number.isFinite(unixSecs) || unixSecs < 0) return '-';
+  if (!Number.isFinite(unixSecs) || unixSecs <= 0) return '-';
   return new Date(unixSecs * 1000).toLocaleString();
 }
 
