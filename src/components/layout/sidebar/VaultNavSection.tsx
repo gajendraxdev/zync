@@ -22,8 +22,10 @@ export function VaultNavSection() {
     const settings = useAppStore(state => state.settings);
     const updateSidebarSectionsSettings = useAppStore(state => state.updateSidebarSectionsSettings);
     const openVaultTab = useAppStore(state => state.openVaultTab);
-    const activeVaultProfileId = useAppStore(state => {
+    const openSyncBackupTab = useAppStore(state => state.openSyncBackupTab);
+    const activeVaultSurface = useAppStore(state => {
         const activeTab = state.tabs.find(tab => tab.id === state.activeTabId);
+        if (activeTab?.type === 'sync') return 'google';
         if (activeTab?.type === 'vault') return activeTab.vaultProfileId ?? DEFAULT_VAULT_PROFILE_ID;
 
         return state.tabs.find(tab => tab.type === 'vault')?.vaultProfileId ?? DEFAULT_VAULT_PROFILE_ID;
@@ -113,10 +115,16 @@ export function VaultNavSection() {
                             <SidebarActionButton
                                 key={item.id}
                                 nested
-                                active={activeVaultProfileId === item.id}
+                                active={activeVaultSurface === item.id}
                                 icon={<Icon size={12} />}
                                 label={item.label}
-                                onClick={() => openVaultTab(item.id)}
+                                onClick={() => {
+                                    if (item.id === 'google') {
+                                        openSyncBackupTab();
+                                        return;
+                                    }
+                                    openVaultTab(item.id);
+                                }}
                                 trailing={<StatusDot className={resolvedStatus.className} title={resolvedStatus.title} />}
                             />
                         );

@@ -40,6 +40,7 @@ Each domain has:
 
 Current implementation notes:
 - Hosts: snapshot/upload/restore available
+- Hosts: Google remote inventory/listing is available without local restore
 - Tunnels: snapshot/upload/restore available
 - Snippets: snapshot/upload/restore available
 - Settings: upload/restore available with strict allowlist only
@@ -102,6 +103,7 @@ In Sync UI:
 Current implementation notes:
 - The Vault tab shows a single domain table for vault credentials, hosts, tunnels, snippets, and settings.
 - Each row has its own enable/disable state, operation buttons, and status text from `domainStatuses[]`.
+- The Sync & Backup workspace also exposes a read-only `Google Drive Hosts` inventory so provider host records can be inspected before restore.
 
 ### 4) Restore UX
 Support:
@@ -112,6 +114,9 @@ Support:
 Current implementation notes:
 - Credential restore has a review modal with scanned/new/update/delete/unchanged/failed counts before applying.
 - Credential conflicts are shown in the same modal with per-item remote-apply selection.
+- Hosts now have two distinct flows:
+  - provider inventory/listing without local restore
+  - explicit host restore into local app state
 - Non-vault app-data domains currently expose per-domain restore actions; all-enabled bulk restore remains a later UX layer.
 
 ---
@@ -177,8 +182,8 @@ Phase 3 is complete when:
 - Automated tests cover core convergence/conflict scenarios.
 
 Current closure status:
-- Implemented: hosts/tunnels/snippets/settings upload + restore, profile dropdown entry point, per-domain controls/status, credential restore preview/conflict selection.
-- Remaining before declaring fully shippable: final end-to-end manual matrix across a clean profile and a populated Google sync collection, plus any CodeRabbit/CI follow-up.
+- Implemented: hosts/tunnels/snippets/settings upload + restore, profile dropdown entry point, per-domain controls/status, credential restore preview/conflict selection, Google host inventory/listing without restore.
+- Remaining before declaring fully shippable: final end-to-end manual matrix across a clean profile and a populated Google sync collection, host restore verification from a true empty-local state, selected host restore/use-on-device flow, plus any CodeRabbit/CI follow-up.
 
 ---
 

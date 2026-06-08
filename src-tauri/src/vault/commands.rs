@@ -454,14 +454,21 @@ pub fn repair_connection_refs(
         let Some(auth_ref) = connection.auth_ref.as_mut() else {
             continue;
         };
-        if auth_ref.vault_id != active_vault_id {
-            skipped_missing_items = skipped_missing_items.saturating_add(1);
-            continue;
-        }
 
-        match vault.item_get(&auth_ref.item_id) {
+        let item_lookup = if auth_ref.vault_id == active_vault_id {
+            vault.item_get(&auth_ref.item_id)
+        } else {
+            Err(VaultError::RecordNotFound(auth_ref.item_id.clone()))
+        };
+
+        match item_lookup {
             Ok(record) => {
                 let logical_id = VaultService::record_logical_id(&record);
+                if auth_ref.vault_id != active_vault_id {
+                    auth_ref.vault_id = active_vault_id.clone();
+                    updated = updated.saturating_add(1);
+                    changed = true;
+                }
                 if auth_ref.credential_id.as_deref() != Some(logical_id.as_str()) {
                     auth_ref.credential_id = Some(logical_id);
                     updated = updated.saturating_add(1);
@@ -475,6 +482,11 @@ pub fn repair_connection_refs(
                 };
                 match vault.item_get_by_logical_id(credential_id) {
                     Ok(record) => {
+                        if auth_ref.vault_id != active_vault_id {
+                            auth_ref.vault_id = active_vault_id.clone();
+                            updated = updated.saturating_add(1);
+                            changed = true;
+                        }
                         if auth_ref.item_id != record.id {
                             auth_ref.item_id = record.id.clone();
                             relinked_item_ids = relinked_item_ids.saturating_add(1);

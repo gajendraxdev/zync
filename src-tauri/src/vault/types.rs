@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
+use super::credential::CredentialEnvelope;
+
 /// Stored in redb vault_meta table under key "meta".
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VaultMeta {
@@ -41,6 +43,11 @@ pub struct PlaintextRecord {
     pub label: String,
     pub secret: String,
     pub notes: Option<String>,
+    /// Typed credential envelope persisted with the record. Legacy vault
+    /// records may not contain this field and are hydrated at read time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[zeroize(skip)]
+    pub credential: Option<CredentialEnvelope>,
     pub revision: u64,
     pub created_at: u64,
     pub updated_at: u64,
@@ -134,6 +141,7 @@ mod tests {
             label: "test".to_string(),
             secret: "s3cr3t".to_string(),
             notes: None,
+            credential: None,
             revision: 1,
             created_at: 1,
             updated_at: 1,

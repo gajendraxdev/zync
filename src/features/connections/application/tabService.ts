@@ -149,3 +149,28 @@ export const ensureVaultTabState = (
         activeConnectionId: null,
     };
 };
+
+export const ensureSyncBackupTabState = (
+    tabs: Tab[],
+): { tabs?: Tab[]; activeTabId: string; activeConnectionId: null } => {
+    const existing = tabs.find((tab) => tab.type === 'sync');
+    if (existing) {
+        return {
+            activeTabId: existing.id,
+            activeConnectionId: null,
+        };
+    }
+
+    const newTab: Tab = {
+        id: crypto.randomUUID(),
+        type: 'sync',
+        title: 'Sync & Backup',
+        view: 'terminal',
+    };
+
+    return {
+        tabs: [...tabs, newTab],
+        activeTabId: newTab.id,
+        activeConnectionId: null,
+    };
+};

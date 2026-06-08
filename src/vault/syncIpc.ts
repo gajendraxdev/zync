@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import type { CredentialRef } from '../features/connections/domain/types';
 import { parseSyncInvokeError } from './syncError';
 
 export type SyncProvider = 'google';
@@ -79,6 +80,13 @@ export interface SyncUploadCredentialResult {
   syncedAt: number;
 }
 
+export interface SyncUploadCredentialsResult {
+  provider: SyncProvider;
+  uploaded: number;
+  skipped: number;
+  syncedAt: number;
+}
+
 export interface SyncRestoreCredentialsArgs {
   logicalIds?: string[];
   resolveConflictLogicalIds?: string[];
@@ -129,6 +137,7 @@ export interface SyncHostRecord {
   tags: string[];
   isFavorite: boolean;
   updatedAt: number;
+  authRef?: CredentialRef;
 }
 
 export interface SyncHostsSnapshotResult {
@@ -152,6 +161,7 @@ export interface SyncHostsChangesResult {
 export interface SyncHostsUploadResult {
   domain: string;
   uploaded: number;
+  credentialsUploaded: number;
   skipped: number;
   syncedAt: number;
 }
@@ -165,9 +175,43 @@ export interface SyncHostsRestoreResult {
   scanned: number;
   restored: number;
   updated: number;
+  credentialsScanned: number;
+  credentialsRestored: number;
+  credentialsUpdated: number;
+  credentialsSkipped: number;
+  credentialsConflicts: number;
+  credentialsFailed: number;
+  credentialRefsRelinked: number;
   skipped: number;
   failed: number;
   syncedAt: number;
+}
+
+export interface SyncRemoteHostInventoryItem {
+  provider: SyncProvider;
+  collectionId: string;
+  logicalId: string;
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  folder?: string;
+  tags: string[];
+  isFavorite: boolean;
+  updatedAt: number;
+  revision: number;
+  hasAuthRef: boolean;
+  credentialId?: string;
+  localExists: boolean;
+}
+
+export interface SyncHostsRemoteInventoryResult {
+  provider: SyncProvider;
+  collectionId: string;
+  scanned: number;
+  hosts: SyncRemoteHostInventoryItem[];
+  skipped: number;
+  failed: number;
 }
 
 export interface SyncTunnelsSnapshotResult {
@@ -344,6 +388,11 @@ export const syncIpc = {
   ): Promise<SyncHostsUploadResult> =>
     invokeCore<SyncHostsUploadResult>('sync_hosts_upload', { provider, args }),
 
+  hostsRemoteInventory: async (
+    provider: SyncProvider,
+  ): Promise<SyncHostsRemoteInventoryResult> =>
+    invokeCore<SyncHostsRemoteInventoryResult>('sync_hosts_remote_inventory', { provider }),
+
   hostsRestore: async (
     provider: SyncProvider,
     args: SyncHostsRestoreArgs = {},
@@ -455,6 +504,25 @@ export const syncIpc = {
   ): Promise<SyncUploadCredentialResult> => {
     try {
       const result = await invokeCore<SyncUploadCredentialResult>('sync_upload_credential', { provider, args });
+      let providerStatus: SyncProviderStatus;
+      try {
+        providerStatus = await syncIpc.status(provider);
+      } catch (error) {
+        providerStatus = fallbackStatus(provider, { connected: true, lastSync: result.syncedAt }, error);
+      }
+      notifySyncStatusChanged(provider, providerStatus);
+      return result;
+    } catch (error) {
+      notifySyncStatusChanged(provider, fallbackStatus(provider, { connected: true }, error));
+      throw error;
+    }
+  },
+
+  uploadCredentials: async (
+    provider: SyncProvider,
+  ): Promise<SyncUploadCredentialsResult> => {
+    try {
+      const result = await invokeCore<SyncUploadCredentialsResult>('sync_upload_credentials', { provider });
       let providerStatus: SyncProviderStatus;
       try {
         providerStatus = await syncIpc.status(provider);

@@ -1,5 +1,5 @@
 use super::super::profiles::now_secs;
-use super::super::provider::VaultProviderV1;
+use super::super::provider::{ProviderUploadRecord, VaultProviderV1};
 use super::super::types::{
     EncryptionMode, ProviderCapabilities, ProviderCredentialObject, ProviderIdentity,
     ProviderStatusSnapshot, SyncError, SyncProviderKind, SyncResult,
@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -288,7 +289,8 @@ fn delete_refresh_token(key: &str) {
 
 fn tokens_for_disk(tokens: &StoredTokens) -> StoredTokens {
     let mut safe = tokens.clone();
-    safe.access_token = None;
+    // Keep the short-lived access token so a fresh connect can sync immediately
+    // without forcing an unnecessary refresh-token round trip.
     safe.refresh_token = None;
     if tokens.refresh_token.is_some() {
         safe.has_refresh_token = true;
@@ -510,9 +512,17 @@ async fn find_files_by_name_prefix(
             .await
             .map_err(|e| sync_err("provider_http_failed", e.to_string()))?;
 
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "[sync][google] list files prefix='{}' page={} returned {} raw file(s)",
+            prefix,
+            page_token.as_deref().unwrap_or("<first>"),
+            resp.files.len()
+        );
+
         results.extend(resp.files.into_iter().filter_map(|file| {
             let name = file.name?;
-            if !name.starts_with(prefix) || !name.ends_with(".zcred") {
+            if !name.starts_with(prefix) {
                 return None;
             }
             Some(ProviderCredentialObject {
@@ -531,7 +541,96 @@ async fn find_files_by_name_prefix(
         }
     }
 
+    #[cfg(debug_assertions)]
+    {
+        let names = results
+            .iter()
+            .take(12)
+            .map(|object| object.object_name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        eprintln!(
+            "[sync][google] list files prefix='{}' matched {} object(s) [{}{}]",
+            prefix,
+            results.len(),
+            names,
+            if results.len() > 12 { ", ..." } else { "" }
+        );
+    }
+
     Ok(results)
+}
+
+fn provider_collection_prefix_from_object_name(object_name: &str) -> Option<String> {
+    for marker in [
+        "-credential-",
+        "-hosts-",
+        "-tunnels-",
+        "-snippets-",
+        "-settings-",
+    ] {
+        if let Some(idx) = object_name.find(marker) {
+            return Some(object_name[..idx + 1].to_string());
+        }
+    }
+    None
+}
+
+fn provider_collection_id_from_object_name(object_name: &str) -> Option<String> {
+    let prefix = provider_collection_prefix_from_object_name(object_name)?;
+    prefix
+        .strip_prefix("zync-sync-")
+        .and_then(|value| value.strip_suffix('-'))
+        .map(str::to_string)
+}
+
+async fn existing_file_ids_for_upload(
+    token: &str,
+    records: &[ProviderUploadRecord],
+) -> SyncResult<HashMap<String, String>> {
+    let target_names: HashSet<String> = records
+        .iter()
+        .map(|record| record.object_name.clone())
+        .collect();
+    let prefixes: HashSet<String> = records
+        .iter()
+        .filter_map(|record| provider_collection_prefix_from_object_name(&record.object_name))
+        .collect();
+
+    if prefixes.len() == 1 {
+        let prefix = prefixes.iter().next().expect("single prefix");
+        match find_files_by_name_prefix(token, prefix).await {
+            Ok(objects) => {
+                let mut result = HashMap::new();
+                for object in objects {
+                    if !target_names.contains(&object.object_name) {
+                        continue;
+                    }
+                    if let Some(id) = object.object_id {
+                        // Drive results are sorted newest-first; keep the first id if
+                        // older duplicate names exist from previous interrupted writes.
+                        result.entry(object.object_name).or_insert(id);
+                    }
+                }
+                return Ok(result);
+            }
+            Err(error) => {
+                #[cfg(debug_assertions)]
+                eprintln!(
+                    "[sync] Prefix listing failed for upload lookup; falling back to per-file lookup: {}",
+                    error.message
+                );
+            }
+        }
+    }
+
+    let mut result = HashMap::new();
+    for name in target_names {
+        if let Some(id) = find_file_by_name(token, &name).await? {
+            result.insert(name, id);
+        }
+    }
+    Ok(result)
 }
 
 async fn revoke_google_token(token: &str) -> SyncResult<()> {
@@ -896,6 +995,33 @@ impl VaultProviderV1 for GoogleVaultProvider {
         Ok(ts)
     }
 
+    async fn upload_credential_records(
+        &self,
+        app: &tauri::AppHandle,
+        records: Vec<ProviderUploadRecord>,
+    ) -> SyncResult<u64> {
+        if records.is_empty() {
+            return Ok(0);
+        }
+
+        let provider_data_dir = data_dir(app);
+        let token = get_valid_google_token(&provider_data_dir).await?;
+        let existing_ids = existing_file_ids_for_upload(&token, &records).await?;
+        let mut latest_synced_at = 0;
+
+        for record in records {
+            let existing_id = existing_ids.get(&record.object_name).cloned();
+            upload_named_bytes(&token, &record.object_name, record.payload, existing_id).await?;
+            latest_synced_at = now_secs();
+        }
+
+        if let Some(mut tokens) = load_tokens(&provider_data_dir, GOOGLE_TOKENS_KEY) {
+            tokens.last_sync = Some(latest_synced_at);
+            save_tokens(&provider_data_dir, GOOGLE_TOKENS_KEY, &tokens).await?;
+        }
+        Ok(latest_synced_at)
+    }
+
     async fn list_credential_records(
         &self,
         app: &tauri::AppHandle,
@@ -903,8 +1029,34 @@ impl VaultProviderV1 for GoogleVaultProvider {
     ) -> SyncResult<Vec<ProviderCredentialObject>> {
         let provider_data_dir = data_dir(app);
         let token = get_valid_google_token(&provider_data_dir).await?;
-        let prefix = format!("zync-sync-{sync_collection_id}-credential-");
+        let prefix = format!("zync-sync-{sync_collection_id}-");
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "[sync][google] list_credential_records collection_id='{}' prefix='{}'",
+            sync_collection_id, prefix
+        );
         find_files_by_name_prefix(&token, &prefix).await
+    }
+
+    async fn discover_sync_collection_ids(
+        &self,
+        app: &tauri::AppHandle,
+    ) -> SyncResult<Vec<String>> {
+        let provider_data_dir = data_dir(app);
+        let token = get_valid_google_token(&provider_data_dir).await?;
+        let mut ids = find_files_by_name_prefix(&token, "zync-sync-")
+            .await?
+            .into_iter()
+            .filter_map(|object| provider_collection_id_from_object_name(&object.object_name))
+            .collect::<Vec<_>>();
+        ids.sort();
+        ids.dedup();
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "[sync][google] discovered remote sync collection ids: {:?}",
+            ids
+        );
+        Ok(ids)
     }
 
     async fn read_credential_record(
@@ -934,7 +1086,7 @@ mod tests {
     use crate::sync::provider::validate_provider_contract;
 
     #[test]
-    fn tokens_for_disk_strips_access_and_refresh_tokens() {
+    fn tokens_for_disk_keeps_access_token_but_strips_refresh_token() {
         let tokens = StoredTokens {
             access_token: Some("access-abc".into()),
             refresh_token: Some("refresh-xyz".into()),
@@ -947,13 +1099,13 @@ mod tests {
 
         let safe = tokens_for_disk(&tokens);
         let on_disk = serde_json::to_string(&safe).expect("token file json should serialize");
-        assert!(!on_disk.contains("access-abc"), "access_token must not be persisted");
+        assert!(on_disk.contains("access-abc"), "access_token should remain available for immediate sync");
         assert!(
             !on_disk.contains("refresh-xyz"),
             "refresh_token must not be persisted in plaintext"
         );
 
-        assert!(safe.access_token.is_none());
+        assert_eq!(safe.access_token.as_deref(), Some("access-abc"));
         assert!(safe.refresh_token.is_none());
         assert!(safe.has_refresh_token);
         assert_eq!(safe.expires_at, 123);
@@ -977,5 +1129,42 @@ mod tests {
     fn google_provider_conforms_to_v1_contract() {
         let provider = GoogleVaultProvider;
         validate_provider_contract(&provider).expect("google provider contract should validate");
+    }
+
+    #[test]
+    fn provider_collection_prefix_handles_domain_object_names() {
+        assert_eq!(
+            provider_collection_prefix_from_object_name(
+                "zync-sync-123e4567-e89b-12d3-a456-426614174000-hosts-host1.zhost",
+            ),
+            Some("zync-sync-123e4567-e89b-12d3-a456-426614174000-".to_string()),
+        );
+        assert_eq!(
+            provider_collection_prefix_from_object_name(
+                "zync-sync-123e4567-e89b-12d3-a456-426614174000-credential-key1.zcred",
+            ),
+            Some("zync-sync-123e4567-e89b-12d3-a456-426614174000-".to_string()),
+        );
+        assert_eq!(
+            provider_collection_prefix_from_object_name("vault.redb"),
+            None,
+        );
+    }
+
+    #[test]
+    fn provider_collection_id_extracts_collection_id_from_domain_object_names() {
+        assert_eq!(
+            provider_collection_id_from_object_name(
+                "zync-sync-123e4567-e89b-12d3-a456-426614174000-hosts-host1.zhost",
+            ),
+            Some("123e4567-e89b-12d3-a456-426614174000".to_string()),
+        );
+        assert_eq!(
+            provider_collection_id_from_object_name(
+                "zync-sync-123e4567-e89b-12d3-a456-426614174000-credential-key1.zcred",
+            ),
+            Some("123e4567-e89b-12d3-a456-426614174000".to_string()),
+        );
+        assert_eq!(provider_collection_id_from_object_name("vault.redb"), None);
     }
 }

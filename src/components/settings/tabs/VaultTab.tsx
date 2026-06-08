@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { RefreshCw, ArrowRight, KeyRound, Download, Upload } from 'lucide-react';
+import { RefreshCw, ArrowRight, KeyRound, Download, Upload, Cloud } from 'lucide-react';
 import { useVaultStore } from '../../../vault/useVaultStore';
 import { VaultUnlockModal } from '../../vault/VaultUnlockModal';
 import { RecoveryKeyModal } from '../../vault/RecoveryKeyModal';
@@ -8,11 +8,7 @@ import { useAppStore } from '../../../store/useAppStore';
 import { DEFAULT_VAULT_PROFILE_ID, type VaultProfileId } from '../../../vault/profileTypes';
 import { resolveVaultFocusProfile } from './vaultFocus';
 import { VaultStatusCard } from './vault/VaultStatusCard';
-import { VaultSyncCard } from './vault/VaultSyncCard';
-import { SyncCollectionSetupModal } from './vault/SyncCollectionSetupModal';
-import { SyncCollectionUnlockModal } from './vault/SyncCollectionUnlockModal';
 import { VaultItemsPanel } from './vault/VaultItemsPanel';
-import { RestoreConflictModal } from './vault/RestoreConflictModal';
 import { AddCredentialModal } from './vault/AddCredentialModal';
 import { ManageAssignmentsModal } from './vault/ManageAssignmentsModal';
 import { RotateCredentialModal } from './vault/RotateCredentialModal';
@@ -36,16 +32,14 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
   const tabs = useAppStore(state => state.tabs);
   const disconnectConnection = useAppStore(state => state.disconnect);
   const loadConnections = useAppStore(state => state.loadConnections);
+  const openSyncBackupTab = useAppStore(state => state.openSyncBackupTab);
 
   const [isUnlockModalOpen, setIsUnlockModalOpen] = useState(false);
-  const [isSyncCollectionSetupOpen, setIsSyncCollectionSetupOpen] = useState(false);
-  const [isSyncCollectionUnlockOpen, setIsSyncCollectionUnlockOpen] = useState(false);
 
   const localSectionRef = useRef<HTMLDivElement | null>(null);
-  const googleSectionRef = useRef<HTMLDivElement | null>(null);
+  const syncHandoffRef = useRef<HTMLDivElement | null>(null);
 
   const isUnlocked = status?.status === 'unlocked';
-  const hasVaultConfigured = status?.status === 'locked' || status?.status === 'unlocked';
   const vaultId = status?.status === 'unlocked' ? status.vaultId : null;
 
   // ── Shared helper: prompt to disconnect affected sessions ─────────────────
@@ -152,7 +146,7 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
   useEffect(() => {
     const targetProfile = resolveVaultFocusProfile(focusedProfileId);
     const target =
-      targetProfile === 'google' ? googleSectionRef.current : localSectionRef.current;
+      targetProfile === 'google' ? syncHandoffRef.current : localSectionRef.current;
     if (!target) return;
     requestAnimationFrame(() => {
       target.scrollIntoView({ block: 'start', behavior: 'smooth' });
@@ -207,6 +201,13 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
     && panel.googleCollection?.configured
     && panel.googleCollection?.keyCached,
   );
+  const syncStatusLabel = !panel.googleSync?.connected
+    ? 'Google Drive not connected'
+    : panel.googleCollection?.configured
+      ? panel.googleCollection.keyCached
+        ? 'Google encryption ready'
+        : 'Google encryption locked'
+      : 'Google encryption not set up';
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -325,50 +326,44 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
         </div>
       )}
 
-      {/* Cloud Sync */}
-      <div ref={googleSectionRef}>
-        <VaultSyncCard
-          googleSync={panel.googleSync}
-          googleCollection={panel.googleCollection}
-          isSyncing={panel.isSyncing}
-          isSyncingHosts={panel.isSyncingHosts}
-          isRestoringHosts={panel.isRestoringHosts}
-          isSyncingTunnels={panel.isSyncingTunnels}
-          isRestoringTunnels={panel.isRestoringTunnels}
-          isSyncingSnippets={panel.isSyncingSnippets}
-          isRestoringSnippets={panel.isRestoringSnippets}
-          isSyncingSettings={panel.isSyncingSettings}
-          isRestoringSettings={panel.isRestoringSettings}
-          hostsSyncEnabled={panel.hostsSyncEnabled}
-          isUpdatingHostsPolicy={panel.isUpdatingHostsPolicy}
-          domainPolicies={panel.domainPolicies}
-          isSettingUpCollection={panel.isSettingUpCollection}
-          isUnlockingCollection={panel.isUnlockingCollection}
-          isLockingCollection={panel.isLockingCollection}
-          isRegeneratingCollectionRecoveryKey={panel.isRegeneratingCollectionRecoveryKey}
-          hasVaultConfigured={hasVaultConfigured}
-          isVaultUnlocked={isUnlocked}
-          onConnect={panel.handleGoogleConnect}
-          onDisconnect={panel.handleGoogleDisconnect}
-          onSetupCollection={() => setIsSyncCollectionSetupOpen(true)}
-          onUnlockCollection={() => setIsSyncCollectionUnlockOpen(true)}
-          onLockCollection={panel.handleLockGoogleCollection}
-          onRegenerateCollectionRecoveryKey={panel.handleRegenerateGoogleCollectionRecoveryKey}
-          onUpload={panel.handleSyncUpload}
-          onDownload={panel.handleSyncDownload}
-          onSyncHosts={() => void panel.handleSyncHosts()}
-          onRestoreHosts={() => void panel.handleRestoreHosts()}
-          onSetHostsSyncEnabled={enabled => void panel.handleSetHostsSyncEnabled(enabled)}
-          onSetDomainPolicyEnabled={(domain, enabled) =>
-            void panel.handleSetDomainPolicyEnabled(domain, enabled)
-          }
-          onSyncTunnels={() => void panel.handleSyncTunnels()}
-          onRestoreTunnels={() => void panel.handleRestoreTunnels()}
-          onSyncSnippets={() => void panel.handleSyncSnippets()}
-          onRestoreSnippets={() => void panel.handleRestoreSnippets()}
-          onSyncSettings={() => void panel.handleSyncSettings()}
-          onRestoreSettings={() => void panel.handleRestoreSettings()}
-        />
+      {/* Sync handoff */}
+      <div ref={syncHandoffRef} className="space-y-2">
+        <h4 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-app-muted)] px-1">
+          Sync & Backup
+        </h4>
+        <div className="rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/25 p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-start gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-500/15 text-blue-300">
+                <Cloud size={16} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-[var(--color-app-text)]">
+                  Provider sync lives in Sync & Backup
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-[var(--color-app-muted)]">
+                  {syncStatusLabel}. Use the dedicated sync workspace to connect providers,
+                  set up Google encryption, and sync hosts, tunnels, snippets, settings,
+                  or vault credential backups.
+                </p>
+                {canSyncItemsToGoogle && (
+                  <p className="mt-1 text-[11px] text-emerald-300/80">
+                    Individual credential backup is available from the credential list below.
+                  </p>
+                )}
+              </div>
+            </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={openSyncBackupTab}
+              className="gap-1.5 shrink-0"
+            >
+              <Cloud size={13} />
+              Open Sync & Backup
+            </Button>
+          </div>
+        </div>
       </div>
 
       {/* Items list */}
@@ -453,35 +448,6 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
             console.warn('[Vault] Failed to refresh vault after unlock modal close:', error);
           });
         }}
-      />
-
-      <SyncCollectionSetupModal
-        isOpen={isSyncCollectionSetupOpen}
-        isSubmitting={panel.isSettingUpCollection}
-        hasLocalVaultConfigured={hasVaultConfigured}
-        onClose={() => setIsSyncCollectionSetupOpen(false)}
-        onSubmit={panel.handleSetupGoogleCollection}
-      />
-
-      <SyncCollectionUnlockModal
-        isOpen={isSyncCollectionUnlockOpen}
-        isSubmitting={panel.isUnlockingCollection}
-        hasRecoveryKey={Boolean(panel.googleCollection?.hasRecoveryKey)}
-        onClose={() => setIsSyncCollectionUnlockOpen(false)}
-        onSubmit={panel.handleUnlockGoogleCollection}
-      />
-
-      <RestoreConflictModal
-        isOpen={panel.isRestoreConflictModalOpen}
-        isSubmitting={panel.isSyncing}
-        preview={panel.restorePreview}
-        conflicts={panel.restoreConflictItems}
-        selectedLogicalIds={panel.selectedConflictLogicalIds}
-        onClose={panel.closeRestoreConflictModal}
-        onToggleLogicalId={panel.toggleConflictLogicalId}
-        onSelectAll={panel.selectAllConflictLogicalIds}
-        onClearAll={panel.clearConflictLogicalIds}
-        onConfirmRestore={panel.confirmRestoreWithConflictSelection}
       />
 
       <AddCredentialModal

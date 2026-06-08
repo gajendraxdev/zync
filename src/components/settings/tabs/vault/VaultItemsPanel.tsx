@@ -1,5 +1,9 @@
 import { History, Plus, Search, Trash2, Upload } from 'lucide-react';
 import type { VaultItem } from '../../../../vault/ipc';
+import {
+  getCredentialKindLabel,
+  isHostAssignableCredentialKind,
+} from '../../../../vault/credentialTypes';
 import { Button } from '../../../ui/Button';
 
 interface VaultItemsPanelProps {
@@ -99,11 +103,11 @@ export function VaultItemsPanel({
                   <div className="min-w-0">
                     <p className="text-sm text-app-text font-medium truncate">{item.label}</p>
                     <p className="text-xs text-app-muted">
-                      {item.kind} · {item.logicalId.slice(0, 8)} · {item.id.slice(0, 8)}
+                      {getCredentialKindLabel(item.kind)} · {item.logicalId.slice(0, 8)} · {item.id.slice(0, 8)}
                     </p>
                   </div>
                   <div className="flex items-center gap-1 md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-                    {(item.kind === 'ssh-private-key' || item.kind === 'ssh-password' || item.kind === 'ssh-agent-key') && (
+                    {isHostAssignableCredentialKind(item.kind) && (
                       <Button
                         variant="ghost"
                         size="sm"
@@ -124,7 +128,7 @@ export function VaultItemsPanel({
                           ? 'Syncing to cloud provider'
                           : canSyncItems
                             ? 'Sync credential to cloud provider'
-                            : 'Connect provider + set up sync collection first'
+                            : 'Connect provider + set up Google encryption first'
                       }
                       aria-label={syncingItemId === item.id ? `Syncing ${item.label}` : `Sync ${item.label}`}
                     >

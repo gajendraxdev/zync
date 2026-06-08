@@ -6,6 +6,7 @@ use redb::{Database, ReadTransaction, ReadableTable};
 use uuid::Uuid;
 use zeroize::{Zeroize, Zeroizing};
 
+use crate::vault::credential::{normalize_record_credential, CredentialEnvelope};
 use crate::vault::crypto::{
     decrypt_record, derive_kek, derive_record_key, derive_secret_fingerprint, encrypt_record,
     generate_salt, generate_vek, EncryptedEnvelope, KdfParams, SecretKey,
@@ -240,14 +241,91 @@ impl VaultService {
         self.vek = Some(SecretKey::from_bytes(vek_arr));
         vek_arr.zeroize();
         self.meta = Some(meta);
+        drop(ks);
+        drop(vm);
+        drop(read_txn);
+
+        // One-time compatibility migration: persist typed credential envelopes for
+        // legacy records that only had the secret payload.
+        self.migrate_live_records_to_typed_storage()?;
 
         // Count existing records for the returned status
+        let read_txn = db.begin_read()?;
         let item_count = live_record_count(&read_txn)?;
 
         Ok(VaultStatus::Unlocked {
             vault_id,
             item_count,
         })
+    }
+
+    fn migrate_live_records_to_typed_storage(&self) -> Result<u64, VaultError> {
+        let vek = self.vek.as_ref().ok_or(VaultError::Locked)?;
+        let db = self.db.as_ref().ok_or(VaultError::NotInitialized)?;
+        let meta = self.meta.as_ref().ok_or(VaultError::Locked)?;
+
+        let read_txn = db.begin_read()?;
+        let records = match read_txn.open_table(RECORDS) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(0),
+            Err(error) => return Err(VaultError::from(error)),
+        };
+
+        let mut rewrites: Vec<(String, StoredEnvelope)> = Vec::new();
+        for entry in records.iter()? {
+            let (key, value): (redb::AccessGuard<&str>, redb::AccessGuard<&[u8]>) = entry?;
+            let item_id = key.value().to_string();
+            let stored: StoredEnvelope = serde_json::from_slice(value.value())?;
+            if stored.deleted {
+                continue;
+            }
+
+            let record_key = derive_record_key(
+                vek,
+                record_info_bytes(&stored.id, stored.revision).as_bytes(),
+            )?;
+            let envelope = parse_envelope(&stored)?;
+            let aad = record_aad_string(&meta.vault_id, &stored.id, stored.revision);
+            let plaintext = decrypt_record(&record_key, &envelope, aad.as_bytes())?;
+            let mut record: PlaintextRecord = serde_json::from_slice(&plaintext)?;
+            if record.credential.is_some() {
+                continue;
+            }
+
+            normalize_record_credential(&mut record);
+            let rewritten_plaintext = serde_json::to_vec(&record)?;
+            let rewritten_envelope =
+                encrypt_record(&record_key, &rewritten_plaintext, aad.as_bytes())?;
+            rewrites.push((
+                item_id,
+                StoredEnvelope {
+                    id: stored.id.clone(),
+                    kind: stored.kind.clone(),
+                    revision: stored.revision,
+                    deleted: stored.deleted,
+                    crypto_suite: CRYPTO_SUITE.into(),
+                    aad_version: AAD_VERSION,
+                    nonce: STANDARD.encode(rewritten_envelope.nonce),
+                    ciphertext: STANDARD.encode(&rewritten_envelope.ciphertext),
+                },
+            ));
+        }
+        drop(records);
+        drop(read_txn);
+
+        if rewrites.is_empty() {
+            return Ok(0);
+        }
+
+        let write_txn = db.begin_write()?;
+        {
+            let mut records = write_txn.open_table(RECORDS)?;
+            for (item_id, stored) in &rewrites {
+                records.insert(item_id.as_str(), serde_json::to_vec(stored)?.as_slice())?;
+            }
+        }
+        write_txn.commit()?;
+        Ok(rewrites.len() as u64)
     }
 
     // ── Lock ──────────────────────────────────────────────────────────────────
@@ -324,17 +402,19 @@ impl VaultService {
         let now = Self::now_secs();
         let revision = 1u64;
 
-        let record = PlaintextRecord {
+        let mut record = PlaintextRecord {
             id: id.clone(),
             logical_id: Some(logical_id),
             kind: kind.to_string(),
             label: label.to_string(),
             secret: secret.to_string(),
             notes: notes.map(str::to_string),
+            credential: None,
             revision,
             created_at: now,
             updated_at: now,
         };
+        normalize_record_credential(&mut record);
 
         let plaintext = serde_json::to_vec(&record)?;
         let record_key = derive_record_key(vek, record_info_bytes(&id, revision).as_bytes())?;
@@ -395,6 +475,7 @@ impl VaultService {
         kind: &str,
         secret: &str,
         notes: Option<&str>,
+        credential: Option<&CredentialEnvelope>,
         logical_id: &str,
         revision: u64,
         updated_at: u64,
@@ -413,17 +494,19 @@ impl VaultService {
         let revision = revision.max(1);
         let created_at = updated_at;
 
-        let record = PlaintextRecord {
+        let mut record = PlaintextRecord {
             id: id.clone(),
             logical_id: Some(logical_id.to_string()),
             kind: kind.to_string(),
             label: label.to_string(),
             secret: secret.to_string(),
             notes: notes.map(str::to_string),
+            credential: credential.cloned(),
             revision,
             created_at,
             updated_at,
         };
+        normalize_record_credential(&mut record);
 
         let plaintext = serde_json::to_vec(&record)?;
         let record_key = derive_record_key(vek, record_info_bytes(&id, revision).as_bytes())?;
@@ -536,17 +619,19 @@ impl VaultService {
 
         let revision = existing.revision.saturating_add(1);
         let now = Self::now_secs();
-        let record = PlaintextRecord {
+        let mut record = PlaintextRecord {
             id: existing.id.clone(),
             logical_id: Some(Self::record_logical_id(&existing)),
             kind: kind.to_string(),
             label: label.to_string(),
             secret: secret.to_string(),
             notes: notes.map(str::to_string),
+            credential: existing.credential.clone(),
             revision,
             created_at: existing.created_at,
             updated_at: now,
         };
+        normalize_record_credential(&mut record);
 
         let plaintext = serde_json::to_vec(&record)?;
         let record_key = derive_record_key(vek, record_info_bytes(item_id, revision).as_bytes())?;
@@ -615,6 +700,7 @@ impl VaultService {
         kind: &str,
         secret: &str,
         notes: Option<&str>,
+        credential: Option<&CredentialEnvelope>,
         revision: u64,
         updated_at: u64,
     ) -> Result<PlaintextRecord, VaultError> {
@@ -631,17 +717,19 @@ impl VaultService {
         }
 
         let revision = revision.max(1);
-        let record = PlaintextRecord {
+        let mut record = PlaintextRecord {
             id: existing.id.clone(),
             logical_id: Some(logical_id.to_string()),
             kind: kind.to_string(),
             label: label.to_string(),
             secret: secret.to_string(),
             notes: notes.map(str::to_string),
+            credential: credential.cloned().or_else(|| existing.credential.clone()),
             revision,
             created_at: existing.created_at,
             updated_at,
         };
+        normalize_record_credential(&mut record);
 
         let plaintext = serde_json::to_vec(&record)?;
         let record_key = derive_record_key(vek, record_info_bytes(item_id, revision).as_bytes())?;
@@ -1163,7 +1251,9 @@ fn decrypt_stored(
     let envelope = parse_envelope(stored)?;
     let aad = record_aad_string(vault_id, &stored.id, stored.revision);
     let plaintext = decrypt_record(&record_key, &envelope, aad.as_bytes())?;
-    Ok(serde_json::from_slice(&plaintext)?)
+    let mut record: PlaintextRecord = serde_json::from_slice(&plaintext)?;
+    normalize_record_credential(&mut record);
+    Ok(record)
 }
 
 fn validate_vault_database(path: &Path) -> Result<(), VaultError> {
