@@ -11,7 +11,7 @@ export const SYNC_DOMAIN_DEFINITIONS: Record<SyncDomain, SyncDomainDefinition> =
   vault: {
     domain: 'vault',
     label: 'Vault credentials',
-    description: 'Encrypted vault backup and credential restore.',
+    description: 'Encrypted credential records and credential restore.',
     defaultEnabled: true,
   },
   hosts: {
@@ -24,19 +24,19 @@ export const SYNC_DOMAIN_DEFINITIONS: Record<SyncDomain, SyncDomainDefinition> =
     domain: 'tunnels',
     label: 'Tunnels',
     description: 'Global/local port forwarding definitions.',
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
   snippets: {
     domain: 'snippets',
     label: 'Snippets',
     description: 'Reusable command snippets.',
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
   settings: {
     domain: 'settings',
     label: 'Settings',
     description: 'Allowlisted theme/editor/terminal preferences only.',
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
 };
 

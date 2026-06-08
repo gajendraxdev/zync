@@ -181,6 +181,8 @@ Provider contract notes:
 - Local store is immediately updated.
 - Sync engine asynchronously reconciles with each enabled profile.
 - Future normal sync is per-credential provider records, not full `vault.redb` replacement.
+- Provider-backed domains may be browsed as remote inventory before local materialization.
+  Current example: Google host records can be listed without restoring them into local host storage.
 
 ### 8.2 Per-profile state machine
 - `idle -> syncing -> success|conflict|retrying|error`

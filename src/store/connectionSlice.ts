@@ -14,6 +14,7 @@ import {
     createConnectionTabState,
     createLocalTerminalTabState,
     ensureVaultTabState,
+    ensureSyncBackupTabState,
     ensureGlobalSnippetsTab,
     ensureSingleTabByType,
     findConnectionTab,
@@ -73,6 +74,7 @@ export interface ConnectionSlice {
     openReleaseNotesTab: () => void;
     openSettingsJsonTab: () => void;
     openVaultTab: (profileId?: VaultProfileId) => void;
+    openSyncBackupTab: () => void;
     closeTab: (tabId: string) => void;
     activateTab: (tabId: string) => void;
     /** Deactivate all tabs and show the welcome screen without closing anything. */
@@ -111,9 +113,17 @@ export interface ConnectionSlice {
 }
 
 const VALID_RESTORABLE_VIEWS = new Set<CoreTabView>(['terminal', 'files', 'port-forwarding', 'snippets', 'dashboard']);
-const RESTORABLE_TAB_TYPES = new Set(['connection', 'port-forwarding', 'release-notes', 'snippets', 'settings', 'vault']);
+const RESTORABLE_TAB_TYPES = new Set(['connection', 'port-forwarding', 'release-notes', 'snippets', 'settings', 'vault', 'sync']);
 
 type PersistedConnection = Omit<Connection, 'status'> & Partial<Pick<Connection, 'status'>>;
+
+const connectionErrorMessage = (error: unknown): string => {
+    const raw = error instanceof Error ? error.message : String(error ?? 'Unknown error');
+    return raw
+        .replace(/-----BEGIN[\s\S]*?-----END [^-]+-----/g, '[redacted private key]')
+        .replace(/\b(password|passphrase|token|secret)\b\s*[:=]\s*([^\s,;]+)/gi, '$1=[redacted]')
+        .slice(0, 500);
+};
 
 export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSlice> = (set, get) => ({
     connections: [],
@@ -442,9 +452,11 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
             }
         } catch (error) {
             console.error('Connection failed:', error);
+            const message = connectionErrorMessage(error);
+            get().showToast('error', `Connection failed: ${message}`, 10000);
             // Only update to error state if not already in error to prevent loops
             set(state => {
-                const nextConnections = markConnectionErrorIfNeeded(state.connections, id);
+                const nextConnections = markConnectionErrorIfNeeded(state.connections, id, message);
                 if (nextConnections === state.connections) return state;
                 return { connections: nextConnections };
             });
@@ -550,6 +562,14 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                 showWelcomeScreen: false,
             };
         });
+        get().saveSession();
+    },
+
+    openSyncBackupTab: () => {
+        set(state => ({
+            ...ensureSyncBackupTabState(state.tabs),
+            showWelcomeScreen: false,
+        }));
         get().saveSession();
     },
 

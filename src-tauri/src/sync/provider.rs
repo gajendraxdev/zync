@@ -4,6 +4,12 @@ use super::types::{
 };
 use async_trait::async_trait;
 
+#[derive(Debug)]
+pub struct ProviderUploadRecord {
+    pub object_name: String,
+    pub payload: Vec<u8>,
+}
+
 #[async_trait]
 pub trait VaultProviderV1: Send + Sync {
     fn kind(&self) -> SyncProviderKind;
@@ -21,11 +27,31 @@ pub trait VaultProviderV1: Send + Sync {
         object_name: &str,
         payload: Vec<u8>,
     ) -> SyncResult<u64>;
+    async fn upload_credential_records(
+        &self,
+        app: &tauri::AppHandle,
+        records: Vec<ProviderUploadRecord>,
+    ) -> SyncResult<u64> {
+        let mut latest_synced_at = 0;
+        for record in records {
+            let synced_at = self
+                .upload_credential_record(app, &record.object_name, record.payload)
+                .await?;
+            latest_synced_at = latest_synced_at.max(synced_at);
+        }
+        Ok(latest_synced_at)
+    }
     async fn list_credential_records(
         &self,
         app: &tauri::AppHandle,
         sync_collection_id: &str,
     ) -> SyncResult<Vec<ProviderCredentialObject>>;
+    async fn discover_sync_collection_ids(
+        &self,
+        _app: &tauri::AppHandle,
+    ) -> SyncResult<Vec<String>> {
+        Ok(Vec::new())
+    }
     async fn read_credential_record(
         &self,
         app: &tauri::AppHandle,

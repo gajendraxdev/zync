@@ -33,6 +33,49 @@ export interface ConnectConfig {
     jump_host: ConnectConfig | null;
 }
 
+type ConnectionWithLegacyAuthFields = Connection & {
+    private_key_path?: string | null;
+    auth_ref?: Connection['authRef'] | null;
+};
+
+const normalizeOptionalText = (value: unknown): string | undefined => {
+    if (typeof value !== 'string') return undefined;
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+};
+
+const getConnectionAuthRef = (connection: ConnectionWithLegacyAuthFields): Connection['authRef'] | undefined =>
+    connection.authRef ?? connection.auth_ref ?? undefined;
+
+const getConnectionPrivateKeyPath = (connection: ConnectionWithLegacyAuthFields): string | undefined =>
+    normalizeOptionalText(connection.privateKeyPath) ?? normalizeOptionalText(connection.private_key_path);
+
+const getConnectionPassword = (connection: ConnectionWithLegacyAuthFields): string | undefined =>
+    normalizeOptionalText(connection.password);
+
+const buildAuthMethod = (connection: ConnectionWithLegacyAuthFields): ConnectAuthMethod | null => {
+    const authRef = getConnectionAuthRef(connection);
+    if (authRef?.itemId) {
+        return {
+            type: 'VaultRef',
+            item_id: authRef.itemId,
+            credential_id: authRef.credentialId,
+        };
+    }
+
+    const privateKeyPath = getConnectionPrivateKeyPath(connection);
+    if (privateKeyPath) {
+        return {
+            type: 'PrivateKey',
+            key_path: privateKeyPath,
+            passphrase: getConnectionPassword(connection) ?? null,
+        };
+    }
+
+    const password = getConnectionPassword(connection);
+    return password ? { type: 'Password', password } : null;
+};
+
 export const buildConnectConfig = (
     connections: Connection[],
     connectionId: string,
@@ -46,15 +89,8 @@ export const buildConnectConfig = (
     const connection = connections.find((item) => item.id === connectionId);
     if (!connection) return null;
 
-    const auth_method: ConnectAuthMethod = connection.authRef
-        ? {
-            type: 'VaultRef',
-            item_id: connection.authRef.itemId,
-            credential_id: connection.authRef.credentialId,
-        }
-        : connection.privateKeyPath
-          ? { type: 'PrivateKey', key_path: connection.privateKeyPath, passphrase: connection.password || null }
-          : { type: 'Password', password: connection.password || '' };
+    const auth_method = buildAuthMethod(connection);
+    if (!auth_method) return null;
 
     const config: ConnectConfig = {
         id: connection.id,

@@ -60,11 +60,11 @@ export function SyncCollectionUnlockModal({
 
     const trimmed = secret.trim();
     if (mode === 'passphrase' && trimmed.length < SYNC_PASSPHRASE_MIN_LENGTH) {
-      setError(`Sync passphrase must be at least ${SYNC_PASSPHRASE_MIN_LENGTH} characters.`);
+      setError(`Google encryption passphrase must be at least ${SYNC_PASSPHRASE_MIN_LENGTH} characters.`);
       return;
     }
     if (mode === 'recovery-key' && !trimmed) {
-      setError('Enter the provider sync recovery key.');
+      setError('Enter the Google encryption recovery key.');
       return;
     }
 
@@ -85,8 +85,8 @@ export function SyncCollectionUnlockModal({
     <UnlockModalShell
       isOpen={isOpen}
       onClose={handleClose}
-      title="Unlock Google Sync Key"
-      subtitle="Restore access to the cached provider sync key for this device."
+      title="Unlock Google Encryption"
+      subtitle="Unlock this device's Google encryption key for sync and restore."
       mode={mode}
       modeOptions={[
         { value: 'passphrase', label: 'Passphrase' },
@@ -97,7 +97,7 @@ export function SyncCollectionUnlockModal({
         mode === 'passphrase' && hasRecoveryKey
           ? <>Forgot passphrase? Switch to <span className="text-[var(--color-app-text)] font-medium">Recovery Key</span>.</>
           : !hasRecoveryKey && mode === 'passphrase'
-            ? 'Recovery key is not configured for this Google sync collection.'
+            ? 'Recovery key is not configured for Google encryption.'
             : undefined
       }
       details={(
@@ -106,7 +106,7 @@ export function SyncCollectionUnlockModal({
             <KeyRound size={12} />
             Security note
           </div>
-          This unlocks only the provider sync key cache on this device. It does not upload your passphrase or recovery key.
+          This unlocks only Google encryption on this device. It does not upload your passphrase or recovery key.
         </div>
       )}
       error={error}

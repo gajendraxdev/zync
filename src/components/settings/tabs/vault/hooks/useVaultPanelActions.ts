@@ -10,6 +10,7 @@ import {
   type SyncCollectionUnlockArgs,
   type SyncRestoreConflictItem,
   type SyncRestorePreviewResult,
+  type SyncHostsRemoteInventoryResult,
   type SyncProviderStatus,
 } from '../../../../../vault/syncIpc';
 import { parseSyncInvokeError } from '../../../../../vault/syncError';
@@ -288,6 +289,9 @@ export function useVaultPanelActions({
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSyncingHosts, setIsSyncingHosts] = useState(false);
   const [isRestoringHosts, setIsRestoringHosts] = useState(false);
+  const [isLoadingRemoteHosts, setIsLoadingRemoteHosts] = useState(false);
+  const [remoteHostsInventory, setRemoteHostsInventory] =
+    useState<SyncHostsRemoteInventoryResult | null>(null);
   const [isSyncingTunnels, setIsSyncingTunnels] = useState(false);
   const [isRestoringTunnels, setIsRestoringTunnels] = useState(false);
   const [isSyncingSnippets, setIsSyncingSnippets] = useState(false);
@@ -305,6 +309,8 @@ export function useVaultPanelActions({
   const [restorePreview, setRestorePreview] = useState<SyncRestorePreviewResult | null>(null);
   const [restoreConflictItems, setRestoreConflictItems] = useState<SyncRestoreConflictItem[]>([]);
   const [selectedConflictLogicalIds, setSelectedConflictLogicalIds] = useState<string[]>([]);
+  const hostsPolicy = domainPolicies.find(policy => policy.domain === 'hosts');
+  const hostsSyncEnabled = hostsPolicy ? hostsPolicy.enabled : true;
 
   const loadGoogleSync = useCallback(async () => {
     try {
@@ -320,7 +326,7 @@ export function useVaultPanelActions({
       const status = await syncIpc.collectionStatus('google');
       setGoogleCollection(status);
     } catch (error) {
-      console.warn('[Vault] Failed to load Google sync collection status:', error);
+      console.warn('[Vault] Failed to load Google encryption status:', error);
     }
   }, []);
 
@@ -332,10 +338,10 @@ export function useVaultPanelActions({
       if (result.recoveryKey) {
         setRecoveryState({
           key: result.recoveryKey,
-          title: 'Google Sync Recovery Key',
-          subtitle: 'Save this key somewhere safe. It can unlock credentials stored in Google Drive if you forget the provider sync passphrase.',
-          fileTitle: 'Zync Google Sync Recovery Key',
-          fileDescription: 'This key can unlock your encrypted Google Drive sync collection if you forget the provider sync passphrase.',
+          title: 'Google Encryption Recovery Key',
+          subtitle: 'Save this key somewhere safe. It can unlock Google-encrypted sync records if you forget the encryption passphrase.',
+          fileTitle: 'Zync Google Encryption Recovery Key',
+          fileDescription: 'This key can unlock your encrypted Google Drive records if you forget the encryption passphrase.',
           downloadFileName: 'zync-google-sync-recovery-key.txt',
         });
         setIsRecoveryModalOpen(true);
@@ -343,12 +349,12 @@ export function useVaultPanelActions({
       showToast(
         'success',
         args.keyPolicyMode === 'local-passphrase'
-          ? 'Google sync collection configured (Local Vault passphrase policy).'
-          : 'Google sync collection configured (custom provider sync passphrase policy).',
+          ? 'Google encryption configured (Local Vault passphrase policy).'
+          : 'Google encryption configured (custom passphrase policy).',
       );
     } catch (e: unknown) {
       const msg = extractErrorMessage(e);
-      showToast('error', `Failed to set up Google sync collection: ${msg}`);
+      showToast('error', `Failed to set up Google encryption: ${msg}`);
       throw new Error(msg);
     } finally {
       setIsSettingUpCollection(false);
@@ -363,18 +369,18 @@ export function useVaultPanelActions({
       if (result.recoveryKey) {
         setRecoveryState({
           key: result.recoveryKey,
-          title: 'Google Sync Recovery Key',
-          subtitle: 'Recovery key regenerated. Save this new key safely — older Google Sync recovery keys no longer unlock this sync collection.',
-          fileTitle: 'Zync Google Sync Recovery Key',
-          fileDescription: 'This key can unlock your encrypted Google Drive sync collection if you forget the provider sync passphrase.',
+          title: 'Google Encryption Recovery Key',
+          subtitle: 'Recovery key regenerated. Save this new key safely — older Google encryption recovery keys no longer unlock Google sync records.',
+          fileTitle: 'Zync Google Encryption Recovery Key',
+          fileDescription: 'This key can unlock your encrypted Google Drive records if you forget the encryption passphrase.',
           downloadFileName: 'zync-google-sync-recovery-key.txt',
         });
         setIsRecoveryModalOpen(true);
       }
-      showToast('success', 'Google Sync Recovery Key regenerated.');
+      showToast('success', 'Google encryption recovery key regenerated.');
     } catch (e: unknown) {
       const msg = extractErrorMessage(e);
-      showToast('error', `Failed to regenerate Google Sync Recovery Key: ${msg}`);
+      showToast('error', `Failed to regenerate Google encryption recovery key: ${msg}`);
     } finally {
       setIsRegeneratingCollectionRecoveryKey(false);
     }
@@ -385,10 +391,10 @@ export function useVaultPanelActions({
     try {
       const result = await syncIpc.collectionLock('google');
       setGoogleCollection(result);
-      showToast('success', 'Google Sync Key locked on this device.');
+      showToast('success', 'Google encryption locked on this device.');
     } catch (e: unknown) {
       const msg = extractErrorMessage(e);
-      showToast('error', `Failed to lock Google Sync Key: ${msg}`);
+      showToast('error', `Failed to lock Google encryption: ${msg}`);
     } finally {
       setIsLockingCollection(false);
     }
@@ -400,10 +406,10 @@ export function useVaultPanelActions({
     try {
       const result = await syncIpc.collectionUnlock('google', args);
       setGoogleCollection(result);
-      showToast('success', 'Google sync key unlocked on this device.');
+      showToast('success', 'Google encryption unlocked on this device.');
     } catch (e: unknown) {
       const msg = parseSyncInvokeError(e).message;
-      showToast('error', `Failed to unlock Google sync key: ${msg}`);
+      showToast('error', `Failed to unlock Google encryption: ${msg}`);
       throw new Error(msg);
     } finally {
       setIsUnlockingCollection(false);
@@ -425,7 +431,7 @@ export function useVaultPanelActions({
       if (!collection.configured) {
         showToast(
           'info',
-          'Set up Google sync collection before using Backup/Restore.',
+          'Set up Google encryption before using Sync or Restore.',
         );
       }
     } catch (e: unknown) {
@@ -465,13 +471,18 @@ export function useVaultPanelActions({
   const handleSyncUpload = async () => {
     setIsSyncing(true);
     try {
-      const ts = await syncIpc.upload('google');
-      setGoogleSync(prev => (prev ? { ...prev, lastSync: ts } : prev));
+      const result = await syncIpc.uploadCredentials('google');
+      setGoogleSync(prev => (prev ? { ...prev, lastSync: result.syncedAt } : prev));
       await loadGoogleSync();
-      showToast('success', 'Vault uploaded to Google Drive.');
+      showToast(
+        result.uploaded > 0 ? 'success' : 'info',
+        result.uploaded > 0
+          ? `Synced ${result.uploaded} vault credential${result.uploaded === 1 ? '' : 's'} to Google Drive.`
+          : 'No vault credentials to sync.',
+      );
     } catch (e: unknown) {
       const msg = parseSyncInvokeError(e).message;
-      showToast('error', `Upload failed: ${msg}`);
+      showToast('error', `Credential sync failed: ${msg}`);
     } finally {
       setIsSyncing(false);
     }
@@ -580,7 +591,7 @@ export function useVaultPanelActions({
       return;
     }
     if (!googleCollection?.configured) {
-      showToast('error', 'Set up Google sync collection before syncing credentials.');
+      showToast('error', 'Set up Google encryption before syncing credentials.');
       return;
     }
     setSyncingItemId(itemId);
@@ -601,6 +612,8 @@ export function useVaultPanelActions({
     }
   };
 
+  // Delta by default. The first host sync still uploads all records because the
+  // backend has no Hosts-domain watermark yet; later clicks upload changed hosts.
   const handleSyncHosts = async (includeAll = false) => {
     if (!hostsSyncEnabled) {
       showToast('error', 'Hosts sync is disabled. Enable hosts domain sync first.');
@@ -611,11 +624,11 @@ export function useVaultPanelActions({
       return;
     }
     if (!googleCollection?.configured) {
-      showToast('error', 'Set up Google sync collection before syncing hosts.');
+      showToast('error', 'Set up Google encryption before syncing hosts.');
       return;
     }
     if (!googleCollection?.keyCached) {
-      showToast('error', 'Unlock Google sync key before syncing hosts.');
+      showToast('error', 'Unlock Google encryption before syncing hosts.');
       return;
     }
 
@@ -634,11 +647,16 @@ export function useVaultPanelActions({
       );
       await onLoadConnections();
       await loadGoogleSync();
+      await loadRemoteHostsInventory();
       const syncedCount = result.uploaded;
+      const syncedCredentials = result.credentialsUploaded;
       const skippedCount = result.skipped;
+      const credentialSuffix = syncedCredentials > 0
+        ? ` and ${syncedCredentials} referenced credential${syncedCredentials === 1 ? '' : 's'}`
+        : '';
       showToast(
         'success',
-        `Synced ${syncedCount} host${syncedCount === 1 ? '' : 's'} to Google${skippedCount > 0 ? ` (${skippedCount} skipped)` : ''}.`,
+        `Synced ${syncedCount} host${syncedCount === 1 ? '' : 's'}${credentialSuffix} to Google${skippedCount > 0 ? ` (${skippedCount} skipped)` : ''}.`,
       );
     } catch (error) {
       const msg = parseSyncInvokeError(error).message;
@@ -647,6 +665,33 @@ export function useVaultPanelActions({
       setIsSyncingHosts(false);
     }
   };
+
+  const loadRemoteHostsInventory = useCallback(async () => {
+    if (!hostsSyncEnabled || !googleSync?.connected || !googleCollection?.configured || !googleCollection?.keyCached) {
+      setRemoteHostsInventory(null);
+      return null;
+    }
+
+    setIsLoadingRemoteHosts(true);
+    try {
+      const result = await syncIpc.hostsRemoteInventory('google');
+      setRemoteHostsInventory(result);
+      return result;
+    } catch (error) {
+      const msg = parseSyncInvokeError(error).message;
+      setRemoteHostsInventory(null);
+      showToast('error', `Remote host inventory failed: ${msg}`);
+      return null;
+    } finally {
+      setIsLoadingRemoteHosts(false);
+    }
+  }, [
+    googleCollection?.configured,
+    googleCollection?.keyCached,
+    googleSync?.connected,
+    hostsSyncEnabled,
+    showToast,
+  ]);
 
   const handleRestoreHosts = async () => {
     if (!hostsSyncEnabled) {
@@ -658,18 +703,18 @@ export function useVaultPanelActions({
       return;
     }
     if (!googleCollection?.configured) {
-      showToast('error', 'Set up Google sync collection before restoring hosts.');
+      showToast('error', 'Set up Google encryption before restoring hosts.');
       return;
     }
     if (!googleCollection?.keyCached) {
-      showToast('error', 'Unlock Google sync key before restoring hosts.');
+      showToast('error', 'Unlock Google encryption before restoring hosts.');
       return;
     }
 
     const confirmed = await showConfirmDialog({
       title: 'Restore Hosts from Drive',
       message:
-        'Restore synced host metadata from Google Drive into local hosts list. Existing matching hosts will be updated.',
+        'Restore synced host metadata from Google Drive into local hosts list. Referenced vault credentials will be restored first so vault-backed hosts can connect.',
       confirmText: 'Restore Hosts',
     });
     if (!confirmed) return;
@@ -684,15 +729,23 @@ export function useVaultPanelActions({
       );
       await onLoadConnections();
       await loadGoogleSync();
+      await loadRemoteHostsInventory();
       const changed = result.restored + result.updated;
+      const credentialChanged = result.credentialsRestored + result.credentialsUpdated;
       showToast(
         changed > 0 ? 'success' : 'info',
         changed > 0
-          ? `Restored ${changed} host${changed === 1 ? '' : 's'} from Google (${result.restored} new, ${result.updated} updated).`
+          ? `Restored ${changed} host${changed === 1 ? '' : 's'} from Google (${result.restored} new, ${result.updated} updated${credentialChanged > 0 ? `; ${credentialChanged} credential${credentialChanged === 1 ? '' : 's'} restored` : ''}).`
           : 'No host changes restored from Google.',
       );
       if (result.failed > 0) {
         showToast('error', `${result.failed} host record(s) failed to parse/decrypt.`);
+      }
+      if (result.credentialsFailed > 0 || result.credentialsConflicts > 0) {
+        showToast(
+          'error',
+          `${result.credentialsFailed + result.credentialsConflicts} referenced credential record(s) need attention before some hosts can connect.`,
+        );
       }
     } catch (error) {
       const msg = parseSyncInvokeError(error).message;
@@ -716,11 +769,11 @@ export function useVaultPanelActions({
       return;
     }
     if (!googleCollection?.configured) {
-      showToast('error', `Set up Google sync collection before syncing ${domain}.`);
+      showToast('error', `Set up Google encryption before syncing ${domain}.`);
       return;
     }
     if (!googleCollection?.keyCached) {
-      showToast('error', `Unlock Google sync key before syncing ${domain}.`);
+      showToast('error', `Unlock Google encryption before syncing ${domain}.`);
       return;
     }
 
@@ -764,11 +817,11 @@ export function useVaultPanelActions({
       return;
     }
     if (!googleCollection?.configured) {
-      showToast('error', `Set up Google sync collection before restoring ${domain}.`);
+      showToast('error', `Set up Google encryption before restoring ${domain}.`);
       return;
     }
     if (!googleCollection?.keyCached) {
-      showToast('error', `Unlock Google sync key before restoring ${domain}.`);
+      showToast('error', `Unlock Google encryption before restoring ${domain}.`);
       return;
     }
     setLoading(true);
@@ -815,9 +868,6 @@ export function useVaultPanelActions({
       console.warn('[Vault] Failed to load sync domain policies:', error);
     }
   }, []);
-
-  const hostsPolicy = domainPolicies.find(policy => policy.domain === 'hosts');
-  const hostsSyncEnabled = hostsPolicy ? hostsPolicy.enabled : true;
 
   const handleSetDomainPolicyEnabled = async (domain: SyncDomainPolicy['domain'], enabled: boolean) => {
     setIsUpdatingHostsPolicy(true);
@@ -1022,6 +1072,8 @@ export function useVaultPanelActions({
     syncingItemId,
     isSyncingHosts,
     isRestoringHosts,
+    isLoadingRemoteHosts,
+    remoteHostsInventory,
     isSyncingTunnels,
     isRestoringTunnels,
     isSyncingSnippets,
@@ -1050,6 +1102,7 @@ export function useVaultPanelActions({
     confirmRestoreWithConflictSelection,
     handleSyncCredentialItem,
     handleSyncHosts,
+    loadRemoteHostsInventory,
     handleRestoreHosts,
     handleSyncTunnels,
     handleRestoreTunnels,

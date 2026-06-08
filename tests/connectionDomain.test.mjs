@@ -436,6 +436,37 @@ runTest('buildConnectConfig includes stable credential id for vault auth', () =>
   assert.equal(config?.auth_method.credential_id, 'cred-1');
 });
 
+runTest('buildConnectConfig rejects missing auth instead of sending empty password', () => {
+  const connections = [{
+    id: 'empty-auth',
+    name: 'Empty Auth',
+    host: 'prod',
+    port: 22,
+    username: 'root',
+    status: 'disconnected',
+    password: '',
+  }];
+
+  assert.equal(buildConnectConfig(connections, 'empty-auth'), null);
+});
+
+runTest('buildConnectConfig accepts legacy snake_case private key records', () => {
+  const connections = [{
+    id: 'legacy-key',
+    name: 'Legacy Key',
+    host: 'prod',
+    port: 22,
+    username: 'root',
+    status: 'disconnected',
+    private_key_path: '/tmp/id_rsa',
+  }];
+
+  const config = buildConnectConfig(connections, 'legacy-key');
+
+  assert.equal(config?.auth_method.type, 'PrivateKey');
+  assert.equal(config?.auth_method.key_path, '/tmp/id_rsa');
+});
+
 runTest('assignCredentialToConnections clears plaintext fields and preserves untouched hosts', () => {
   const authRef = {
     vaultId: 'vault-1',

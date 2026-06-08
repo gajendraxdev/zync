@@ -129,6 +129,7 @@ pub fn setup_manifest(
     key_policy_mode: SyncKeyPolicyMode,
     passphrase: &str,
     has_recovery_key: bool,
+    preferred_sync_collection_id: Option<String>,
 ) -> SyncResult<SyncCollectionSetupOutcome> {
     let current = load_manifest(data_dir, provider)?;
     let existing_manifest = current.is_some();
@@ -145,7 +146,12 @@ pub fn setup_manifest(
         None => SyncCollectionManifest {
             version: SYNC_COLLECTION_VERSION,
             provider: provider.as_str().to_string(),
-            sync_collection_id: Uuid::new_v4().to_string(),
+            sync_collection_id: preferred_sync_collection_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| Uuid::new_v4().to_string()),
             key_policy_mode,
             key_wrap_salt: None,
             key_wrap_nonce: None,
@@ -800,6 +806,7 @@ mod tests {
             SyncKeyPolicyMode::LocalPassphrase,
             "local-passphrase-for-sync",
             false,
+            None,
         )
         .expect("create manifest");
         let created = created.manifest;
@@ -814,6 +821,7 @@ mod tests {
             SyncKeyPolicyMode::CustomPassphrase,
             "custom-passphrase-for-sync",
             true,
+            None,
         )
         .expect("update manifest");
         assert!(updated.recovery_key.is_some());
@@ -861,6 +869,7 @@ mod tests {
             SyncKeyPolicyMode::CustomPassphrase,
             passphrase,
             false,
+            None,
         )
         .expect("setup manifest");
         let manifest = manifest.manifest;
@@ -900,6 +909,7 @@ mod tests {
             SyncKeyPolicyMode::CustomPassphrase,
             "provider-sync-passphrase-v1",
             true,
+            None,
         )
         .expect("setup manifest with recovery");
         let recovery_key = outcome.recovery_key.expect("recovery key is generated");
@@ -965,10 +975,38 @@ mod tests {
             SyncKeyPolicyMode::LocalPassphrase,
             "local-passphrase-for-sync",
             false,
+            None,
         )
         .expect_err("missing key material should fail");
 
         assert_eq!(err.code, "sync_collection_key_missing");
+        let _ = std::fs::remove_dir_all(&data_dir_path);
+    }
+
+    #[test]
+    fn setup_manifest_uses_preferred_collection_id_on_first_setup() {
+        let unique = format!(
+            "zync-sync-collection-preferred-id-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        );
+        let data_dir_path = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&data_dir_path).expect("create temp test dir");
+
+        let outcome = setup_manifest(
+            &data_dir_path,
+            SyncProviderKind::Google,
+            SyncKeyPolicyMode::CustomPassphrase,
+            "provider-sync-passphrase-v1",
+            false,
+            Some("collection-from-provider".to_string()),
+        )
+        .expect("setup manifest");
+
+        assert_eq!(outcome.manifest.sync_collection_id, "collection-from-provider");
+
         let _ = std::fs::remove_dir_all(&data_dir_path);
     }
 }

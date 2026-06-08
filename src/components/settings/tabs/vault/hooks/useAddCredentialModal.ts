@@ -1,6 +1,10 @@
 import { useState } from 'react';
 import { vaultIpc } from '../../../../../vault/ipc';
 import type { ToastType } from '../../../../../store/toastSlice';
+import {
+  isSupportedCreateCredentialKind,
+  type SupportedCreateCredentialKind,
+} from '../../../../../vault/credentialTypes';
 
 interface UseAddCredentialModalOptions {
   isUnlocked: boolean;
@@ -14,7 +18,7 @@ export function useAddCredentialModal({
   onCreated,
 }: UseAddCredentialModalOptions) {
   const [isOpen, setIsOpen] = useState(false);
-  const [kind, setKind] = useState<'ssh-private-key' | 'ssh-password'>('ssh-private-key');
+  const [kind, setKind] = useState<SupportedCreateCredentialKind>('ssh-private-key');
   const [label, setLabel] = useState('');
   const [secret, setSecret] = useState('');
   const [passphrase, setPassphrase] = useState('');
@@ -46,6 +50,11 @@ export function useAddCredentialModal({
     const trimmedLabel = label.trim();
     const trimmedSecret = secret.trim();
     const trimmedPassphrase = passphrase.trim();
+
+    if (!isSupportedCreateCredentialKind(kind)) {
+      showToast('error', 'This credential type is not ready yet.');
+      return;
+    }
 
     if (!trimmedLabel) {
       showToast('error', 'Credential label is required.');

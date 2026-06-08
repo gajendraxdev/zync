@@ -310,6 +310,15 @@ pub struct SyncUploadCredentialResult {
     pub synced_at: u64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncUploadCredentialsResult {
+    pub provider: String,
+    pub uploaded: u64,
+    pub skipped: u64,
+    pub synced_at: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncRestoreCredentialsArgs {

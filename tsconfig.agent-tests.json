@@ -61,6 +61,7 @@
         "src/lib/ghostSuggestions/runtime.ts",
         "src/lib/ghostSuggestions/tabState.ts",
         "src/store/sessionPersistence.ts",
+        "src/vault/credentialTypes.ts",
         "src/vault/profileTypes.ts",
         "src/vault/syncError.ts"
     ]
