@@ -276,7 +276,7 @@ export function TabBar() {
 
     const platform = window.electronUtils?.platform || 'linux';
     const isMac = platform === 'darwin';
-    const profileInitial = (googleSync?.email?.trim()?.[0] || 'U').toUpperCase();
+    const profileInitial = (googleSync?.email?.trim().charAt(0) || 'U').toUpperCase();
 
     useEffect(() => {
         setAvatarLoadFailed(false);
@@ -524,7 +524,7 @@ export function TabBar() {
                                                         await syncIpc.disconnect('google');
                                                         showToast('success', 'Google sync disconnected');
                                                     } catch (error) {
-                                                        showToast('error', error instanceof Error ? error.message : String(error));
+                                                        showToast('error', googleConnectErrorMessage(error));
                                                     } finally {
                                                         setIsProfileMenuOpen(false);
                                                     }

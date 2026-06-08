@@ -90,6 +90,7 @@ pub fn apply_snippet_restore_records(data_dir: &Path, records: &[SnippetSyncReco
             existing.category = record.category.clone();
             existing.tags = if record.tags.is_empty() { None } else { Some(record.tags.clone()) };
             existing.connection_id = record.connection_id.clone();
+            existing.updated_at = Some(record.updated_at);
             updated = updated.saturating_add(1);
             continue;
         }

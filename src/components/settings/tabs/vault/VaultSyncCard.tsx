@@ -23,7 +23,7 @@ interface VaultSyncCardProps {
   isSyncingSettings: boolean;
   isRestoringSettings: boolean;
   hostsSyncEnabled: boolean;
-  isUpdatingHostsPolicy: boolean;
+  isUpdatingDomainPolicy: boolean;
   domainPolicies: SyncDomainPolicy[];
   isSettingUpCollection: boolean;
   isUnlockingCollection: boolean;
@@ -213,7 +213,7 @@ export function VaultSyncCard({
   isSyncingSettings,
   isRestoringSettings,
   hostsSyncEnabled,
-  isUpdatingHostsPolicy,
+  isUpdatingDomainPolicy,
   domainPolicies,
   isSettingUpCollection,
   isUnlockingCollection,
@@ -491,10 +491,10 @@ export function VaultSyncCard({
                           variant={row.enabled ? 'secondary' : 'ghost'}
                           size="sm"
                           onClick={row.onToggle}
-                          disabled={isUpdatingHostsPolicy || isCollectionActionBlocked}
+                          disabled={isUpdatingDomainPolicy || isCollectionActionBlocked}
                           className="h-7 min-w-[72px] shrink-0 gap-1.5 px-2"
                         >
-                          {isUpdatingHostsPolicy ? <RefreshCw size={13} className="animate-spin" /> : <Shield size={13} />}
+                          {isUpdatingDomainPolicy ? <RefreshCw size={13} className="animate-spin" /> : <Shield size={13} />}
                           {row.enabled ? 'Enabled' : 'Disabled'}
                         </Button>
                       </div>

@@ -16,7 +16,9 @@ interface RestoreConflictModalProps {
   onConfirmRestore: () => void;
 }
 
-const PREVIEW_METRICS: Array<{ key: keyof SyncRestorePreviewResult; label: string }> = [
+type PreviewMetricKey = 'scanned' | 'restorable' | 'updatable' | 'tombstoned' | 'stale' | 'failed';
+
+const PREVIEW_METRICS: Array<{ key: PreviewMetricKey; label: string }> = [
   { key: 'scanned', label: 'Scanned' },
   { key: 'restorable', label: 'New' },
   { key: 'updatable', label: 'Updates' },
@@ -65,7 +67,7 @@ export function RestoreConflictModal({
                   {metric.label}
                 </p>
                 <p className="mt-1 text-sm font-semibold text-app-text">
-                  {Number(preview[metric.key] ?? 0)}
+                  {preview[metric.key] ?? 0}
                 </p>
               </div>
             ))}

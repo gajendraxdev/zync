@@ -299,7 +299,7 @@ export function useVaultPanelActions({
   const [isSyncingSettings, setIsSyncingSettings] = useState(false);
   const [isRestoringSettings, setIsRestoringSettings] = useState(false);
   const [domainPolicies, setDomainPolicies] = useState<SyncDomainPolicy[]>([]);
-  const [isUpdatingHostsPolicy, setIsUpdatingHostsPolicy] = useState(false);
+  const [isUpdatingDomainPolicy, setIsUpdatingDomainPolicy] = useState(false);
   const [isSettingUpCollection, setIsSettingUpCollection] = useState(false);
   const [isUnlockingCollection, setIsUnlockingCollection] = useState(false);
   const [isLockingCollection, setIsLockingCollection] = useState(false);
@@ -870,7 +870,7 @@ export function useVaultPanelActions({
   }, []);
 
   const handleSetDomainPolicyEnabled = async (domain: SyncDomainPolicy['domain'], enabled: boolean) => {
-    setIsUpdatingHostsPolicy(true);
+    setIsUpdatingDomainPolicy(true);
     try {
       const existing = domainPolicies.find(policy => policy.domain === domain);
       const result = await syncIpc.domainPolicySet('google', {
@@ -884,7 +884,7 @@ export function useVaultPanelActions({
       const msg = parseSyncInvokeError(error).message;
       showToast('error', `Failed to update ${domain} sync policy: ${msg}`);
     } finally {
-      setIsUpdatingHostsPolicy(false);
+      setIsUpdatingDomainPolicy(false);
     }
   };
 
@@ -1112,7 +1112,7 @@ export function useVaultPanelActions({
     handleRestoreSettings,
     domainPolicies,
     hostsSyncEnabled,
-    isUpdatingHostsPolicy,
+    isUpdatingDomainPolicy,
     handleSetDomainPolicyEnabled,
     handleSetHostsSyncEnabled,
     // repair

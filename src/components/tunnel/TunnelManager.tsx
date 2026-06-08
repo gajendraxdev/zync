@@ -126,7 +126,7 @@ export function TunnelManager({ connectionId }: { connectionId?: string }) {
             };
             await window.ipcRenderer.invoke('tunnel:save', revertedTunnel);
             showToast('success', `Port reverted to ${tunnel.originalPort}`);
-            setTimeout(() => loadTunnels(), 200); // Refresh UI
+            await loadTunnels();
           } catch (revertError: any) {
             showToast('error', `Failed to revert port: ${revertError.message || revertError}`);
           }
@@ -150,7 +150,7 @@ export function TunnelManager({ connectionId }: { connectionId?: string }) {
         showToast('success', 'Forwarding started');
       }
       // Optimistic update or wait for event? Event will handle it.
-      loadTunnels(); // Refresh to be safe
+      await loadTunnels();
     } catch (error: any) {
       const errorMsg = error.message || error.toString();
 
@@ -209,11 +209,7 @@ export function TunnelManager({ connectionId }: { connectionId?: string }) {
         );
       }
       showToast('success', `Switched to port ${port}`);
-
-      // Force reload to show the new tunnel - use multiple attempts
-      setTimeout(() => loadTunnels(), 100);
-      setTimeout(() => loadTunnels(), 500);
-      setTimeout(() => loadTunnels(), 1000);
+      await loadTunnels();
     } catch (error: any) {
       showToast('error', `Failed to start on port ${port}: ${error.message || error}`);
     }
@@ -227,7 +223,7 @@ export function TunnelManager({ connectionId }: { connectionId?: string }) {
     try {
       await window.ipcRenderer.invoke('tunnel:delete', id);
       showToast('success', 'Forward deleted');
-      loadTunnels();
+      await loadTunnels();
     } catch (error: any) {
       showToast('error', `Failed to delete: ${error.message || error}`);
     }
@@ -579,7 +575,7 @@ export function TunnelManager({ connectionId }: { connectionId?: string }) {
         onClose={() => {
           setIsAddModalOpen(false);
           setEditingTunnel(null);
-          loadTunnels();
+          void loadTunnels();
         }}
       />
 
@@ -589,7 +585,7 @@ export function TunnelManager({ connectionId }: { connectionId?: string }) {
         connectionId={activeConnectionId} // Pass the active connection ID
         onImport={() => {
           // Refresh list after import
-          setTimeout(() => loadTunnels(), 500);
+          void loadTunnels();
         }}
       />
     </div>

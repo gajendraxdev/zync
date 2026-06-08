@@ -471,6 +471,7 @@ impl std::fmt::Debug for SyncProviderStatus {
             .field("last_sync", &self.last_sync)
             .field("last_error", &self.last_error)
             .field("last_error_code", &self.last_error_code)
+            .field("domain_statuses", &self.domain_statuses)
             .field("capabilities", &self.capabilities)
             .finish()
     }
@@ -486,6 +487,8 @@ impl std::fmt::Debug for SyncProfile {
             .field("last_sync", &self.last_sync)
             .field("last_error", &self.last_error)
             .field("last_error_code", &self.last_error_code)
+            .field("domain_policies", &self.domain_policies)
+            .field("domain_statuses", &self.domain_statuses)
             .field("updated_at", &self.updated_at)
             .finish()
     }

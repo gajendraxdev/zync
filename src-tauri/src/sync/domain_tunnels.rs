@@ -98,6 +98,7 @@ pub fn apply_tunnel_restore_records(data_dir: &Path, records: &[TunnelSyncRecord
             existing.bind_to_any = Some(record.bind_to_any);
             existing.auto_start = Some(record.auto_start);
             existing.group = record.group.clone();
+            existing.updated_at = Some(record.updated_at);
             updated = updated.saturating_add(1);
             continue;
         }

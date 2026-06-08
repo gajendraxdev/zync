@@ -23,7 +23,9 @@ pub const SETTINGS_ALLOWLIST_KEYS: &[&str] = &[
 pub async fn load_allowlisted_settings(app: &tauri::AppHandle) -> Result<SettingsSyncRecord, String> {
     let settings: serde_json::Value = crate::commands::settings_get(app.clone()).await?;
     let mut payload = serde_json::Map::new();
-    let obj = settings.as_object().cloned().unwrap_or_default();
+    let obj = settings
+        .as_object()
+        .ok_or_else(|| "[sync_settings_invalid] settings_get returned non-object JSON".to_string())?;
     for key in SETTINGS_ALLOWLIST_KEYS {
         if let Some(value) = obj.get(*key) {
             payload.insert((*key).to_string(), value.clone());
@@ -35,4 +37,3 @@ pub async fn load_allowlisted_settings(app: &tauri::AppHandle) -> Result<Setting
         updated_at: now_secs(),
     })
 }
-
