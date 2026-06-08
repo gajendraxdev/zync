@@ -133,6 +133,7 @@ export interface SyncHostRecord {
   host: string;
   port: number;
   username: string;
+  jumpServerId?: string;
   folder?: string;
   tags: string[];
   isFavorite: boolean;
