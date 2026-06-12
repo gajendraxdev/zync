@@ -425,7 +425,7 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
                     )}
                     {connection?.authRef && (
                         <div className="text-[11px] text-[var(--color-app-muted)]">
-                            Vault credential: {connection.authRef.credentialId?.slice(0, 8) ?? connection.authRef.itemId.slice(0, 8)}
+                            Vault credential: {connection.authRef.credentialId?.slice(0, 8) ?? connection.authRef.itemId?.slice(0, 8) ?? '<no-id>'}
                         </div>
                     )}
                     <button

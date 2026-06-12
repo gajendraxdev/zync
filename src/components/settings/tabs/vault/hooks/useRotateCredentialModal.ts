@@ -66,7 +66,6 @@ export function useRotateCredentialModal({
 
     const trimmedLabel = label.trim();
     const trimmedSecret = secret.trim();
-    const baseSecret = trimmedSecret;
     const trimmedPassphrase = passphrase.trim();
 
     if (!trimmedLabel) {
@@ -78,10 +77,13 @@ export function useRotateCredentialModal({
       return;
     }
 
-    const secretToSave =
-      item.kind === 'ssh-private-key' && trimmedPassphrase
-        ? JSON.stringify({ key: baseSecret, passphrase: trimmedPassphrase })
-        : baseSecret;
+    const secretValues: Record<string, string> =
+      item.kind === 'ssh-private-key'
+        ? {
+            privateKey: trimmedSecret,
+            ...(trimmedPassphrase ? { passphrase: trimmedPassphrase } : {}),
+          }
+        : { password: trimmedSecret };
 
     setIsLoading(true);
     try {
@@ -96,7 +98,7 @@ export function useRotateCredentialModal({
         item.id,
         trimmedLabel,
         item.kind,
-        secretToSave,
+        secretValues,
         notes.trim() || undefined,
       );
       await onRotated();

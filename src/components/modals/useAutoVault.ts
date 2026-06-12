@@ -91,10 +91,11 @@ export function useAutoVault({
             return null;
         }
         setPastedKeyError('');
-        const secret = pastedPassphrase.trim()
-            ? JSON.stringify({ key: keyText, passphrase: pastedPassphrase })
-            : keyText;
-        const item = await vaultIpc.itemCreate(effectiveKeyVaultLabel, 'ssh-private-key', secret);
+        const passphrase = pastedPassphrase.trim();
+        const item = await vaultIpc.itemCreate(effectiveKeyVaultLabel, 'ssh-private-key', {
+            privateKey: keyText,
+            ...(passphrase ? { passphrase } : {}),
+        });
         deleteOldAuthItem();
         setPastedKeyText('');
         setPastedPassphrase('');
@@ -114,7 +115,7 @@ export function useAutoVault({
         if (vaultStatus?.status !== 'unlocked' || authMethod !== 'password') return null;
         const password = (formData.password || '').trim();
         if (!password) return null;
-        const item = await vaultIpc.itemCreate(effectiveVaultLabel, 'ssh-password', password);
+        const item = await vaultIpc.itemCreate(effectiveVaultLabel, 'ssh-password', { password });
         deleteOldAuthItem();
         return {
             ...formData,
@@ -142,7 +143,9 @@ export function useAutoVault({
         if (!isValidPrivateKeyFormat(keyContent)) {
             throw new Error('Selected file does not appear to be a valid private key.');
         }
-        const item = await vaultIpc.itemCreate(effectiveKeyVaultLabel, 'ssh-private-key', keyContent);
+        const item = await vaultIpc.itemCreate(effectiveKeyVaultLabel, 'ssh-private-key', {
+            privateKey: keyContent,
+        });
         deleteOldAuthItem();
         return {
             ...formData,

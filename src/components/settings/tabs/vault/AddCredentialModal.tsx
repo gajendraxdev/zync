@@ -66,14 +66,17 @@ export function AddCredentialModal({
           <div className="grid gap-2 sm:grid-cols-2">
             {CREDENTIAL_KIND_OPTIONS.map((option) => {
               const isSelected = kind === option.kind;
-              const isSelectable = option.enabled && isSupportedCreateCredentialKind(option.kind);
+              const selectableKind = isSupportedCreateCredentialKind(option.kind)
+                ? option.kind
+                : null;
+              const isSelectable = option.enabled && selectableKind !== null;
               return (
                 <button
                   key={option.kind}
                   type="button"
                   onClick={() => {
-                    if (!isCreating && isSupportedCreateCredentialKind(option.kind)) {
-                      onKindChange(option.kind);
+                    if (!isCreating && isSelectable && selectableKind) {
+                      onKindChange(selectableKind);
                     }
                   }}
                   disabled={isCreating || !isSelectable}

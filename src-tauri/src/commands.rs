@@ -603,20 +603,6 @@ async fn reconnect_connection(
 /// Recursively resolves every `VaultRef` auth method in `config` (and jump hosts)
 /// to a concrete `Password` or `PrivateKeyData` using the vault service.
 /// Must be called before any SSH connect/test operation.
-/// Secret for ssh-private-key items may be plain PEM or JSON {"key":"...","passphrase":"..."}.
-fn parse_key_secret(secret: &str) -> (String, Option<String>) {
-    if let Ok(val) = serde_json::from_str::<serde_json::Value>(secret) {
-        if let Some(key) = val["key"].as_str() {
-        let passphrase = val["passphrase"]
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string());
-        return (key.to_string(), passphrase);
-        }
-    }
-    (secret.to_string(), None)
-}
-
 fn config_uses_vault_auth(config: &ConnectionConfig) -> bool {
     matches!(config.auth_method, crate::types::AuthMethod::VaultRef { .. })
         || config
@@ -699,13 +685,18 @@ fn resolve_vault_refs<'a>(
             drop(svc);
             config.auth_method = match record.kind.as_str() {
                 "ssh-password" => crate::types::AuthMethod::Password {
-                    password: record.secret.clone(),
+                    password: crate::vault::credential::primary_secret_value(&record)
+                        .ok_or_else(|| "Vault password credential has no password value".to_string())?
+                        .to_string(),
                 },
                 "ssh-private-key" => {
-                    let (key_data, passphrase) = parse_key_secret(&record.secret);
+                    let (key_data, passphrase) =
+                        crate::vault::credential::private_key_auth_values(&record).ok_or_else(
+                            || "Vault private-key credential has no private key value".to_string(),
+                        )?;
                     crate::types::AuthMethod::PrivateKeyData {
-                        key_data,
-                        passphrase,
+                        key_data: key_data.to_string(),
+                        passphrase: passphrase.map(str::to_string),
                     }
                 }
                 k => {
@@ -3505,32 +3496,29 @@ pub async fn tunnel_save(app: AppHandle, tunnel_val: serde_json::Value) -> Resul
     }
     let file_path = data_dir.join("tunnels.json");
 
-    let mut tunnels = if file_path.exists() {
-        let data = std::fs::read_to_string(&file_path).map_err(|e| e.to_string())?;
-        let saved: SavedTunnelsData = serde_json::from_str(&data).map_err(|e| e.to_string())?;
-        saved.tunnels
-    } else {
-        vec![]
-    };
+    let _guard = crate::sync::domain_tunnels::TUNNELS_MUTATION_LOCK
+        .lock()
+        .map_err(|error| error.to_string())?;
+    let mut saved = crate::sync::domain_tunnels::load_saved_tunnels(&file_path)
+        .map_err(|error| error.to_string())?;
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
 
-    if let Some(idx) = tunnels.iter().position(|t| t.id == tunnel.id) {
-        tunnel.created_at = tunnels[idx].created_at.or(tunnel.created_at).or(Some(now));
+    if let Some(idx) = saved.tunnels.iter().position(|t| t.id == tunnel.id) {
+        tunnel.created_at = saved.tunnels[idx].created_at.or(tunnel.created_at).or(Some(now));
         tunnel.updated_at = Some(now);
-        tunnels[idx] = tunnel;
+        saved.tunnels[idx] = tunnel;
     } else {
         tunnel.created_at = tunnel.created_at.or(Some(now));
         tunnel.updated_at = Some(now);
-        tunnels.push(tunnel);
+        saved.tunnels.push(tunnel);
     }
 
-    let json =
-        serde_json::to_string_pretty(&SavedTunnelsData { tunnels }).map_err(|e| e.to_string())?;
-    std::fs::write(file_path, json).map_err(|e| e.to_string())?;
+    crate::sync::domain_tunnels::write_saved_tunnels_atomic(&file_path, &saved)
+        .map_err(|error| error.to_string())?;
 
     Ok(())
 }
@@ -3544,13 +3532,16 @@ pub async fn tunnel_delete(app: AppHandle, id: String) -> Result<(), String> {
         return Ok(());
     }
 
-    let data = std::fs::read_to_string(&file_path).map_err(|e| e.to_string())?;
-    let mut saved: SavedTunnelsData = serde_json::from_str(&data).map_err(|e| e.to_string())?;
+    let _guard = crate::sync::domain_tunnels::TUNNELS_MUTATION_LOCK
+        .lock()
+        .map_err(|error| error.to_string())?;
+    let mut saved = crate::sync::domain_tunnels::load_saved_tunnels(&file_path)
+        .map_err(|error| error.to_string())?;
 
     saved.tunnels.retain(|t| t.id != id);
 
-    let json = serde_json::to_string_pretty(&saved).map_err(|e| e.to_string())?;
-    std::fs::write(file_path, json).map_err(|e| e.to_string())?;
+    crate::sync::domain_tunnels::write_saved_tunnels_atomic(&file_path, &saved)
+        .map_err(|error| error.to_string())?;
 
     Ok(())
 }

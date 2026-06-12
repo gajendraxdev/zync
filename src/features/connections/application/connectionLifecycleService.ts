@@ -68,7 +68,7 @@ export const markConnectionErrorIfNeeded = (
 ): Connection[] => {
     const current = connections.find((connection) => connection.id === connectionId);
     if (!current) return connections;
-    if (current?.status === 'error' && current.lastError === error) return connections;
+    if (current.status === 'error' && current.lastError === error) return connections;
 
     return connections.map((connection) =>
         connection.id === connectionId

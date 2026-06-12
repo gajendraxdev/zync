@@ -16,12 +16,11 @@ export interface VaultItem {
   updatedAt: number;
 }
 
-export interface VaultItemSecret {
+export interface VaultItemDetail {
   id: string;
-  logicalId?: string;
+  logicalId: string;
   kind: string;
   label: string;
-  secret: string;
   notes?: string;
   revision: number;
   createdAt: number;
@@ -80,29 +79,29 @@ export const vaultIpc = {
   itemList: (): Promise<VaultItem[]> =>
     invoke('vault_item_list'),
 
-  itemGet: (itemId: string): Promise<VaultItemSecret> =>
+  itemGet: (itemId: string): Promise<VaultItemDetail> =>
     invoke('vault_item_get', { args: { item_id: itemId } }),
 
   itemUpdate: (
     itemId: string,
     label: string,
     kind: string,
-    secret: string,
+    secretValues: Record<string, string>,
     notes?: string,
   ): Promise<VaultItem> => {
     const args: {
       item_id: string;
       label: string;
       kind: string;
-      secret: string;
+      secret_values: Record<string, string>;
       notes?: string;
-    } = { item_id: itemId, label, kind, secret };
+    } = { item_id: itemId, label, kind, secret_values: secretValues };
     if (notes !== undefined) args.notes = notes;
     return invoke('vault_item_update', { args });
   },
 
-  itemCreate: (label: string, kind: string, secret: string, notes?: string, credentialId?: string): Promise<VaultItem> => {
-    const args: { label: string; kind: string; secret: string; notes?: string; credential_id?: string } = { label, kind, secret };
+  itemCreate: (label: string, kind: string, secretValues: Record<string, string>, notes?: string, credentialId?: string): Promise<VaultItem> => {
+    const args: { label: string; kind: string; secret_values: Record<string, string>; notes?: string; credential_id?: string } = { label, kind, secret_values: secretValues };
     if (notes !== undefined) args.notes = notes;
     if (credentialId !== undefined) args.credential_id = credentialId;
     return invoke('vault_item_create', { args });

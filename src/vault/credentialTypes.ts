@@ -1,11 +1,10 @@
-import type { VaultItem, VaultItemSecret } from './ipc';
+import type { VaultItem, VaultItemDetail } from './ipc';
 
-export const CURRENT_CREDENTIAL_SCHEMA_VERSION = 1;
+export const CURRENT_CREDENTIAL_SCHEMA_VERSION = 2;
 
 export const KNOWN_CREDENTIAL_KINDS = [
   'ssh-private-key',
   'ssh-password',
-  'ssh-key-with-passphrase',
   'ssh-certificate',
   'username-password',
   'api-token',
@@ -132,6 +131,7 @@ export const CREDENTIAL_KIND_OPTIONS: CredentialKindOption[] = [
 
 const LEGACY_KIND_MAP: Record<string, CredentialKind> = {
   'ssh-private-key': 'ssh-private-key',
+  'ssh-key-with-passphrase': 'ssh-private-key',
   'ssh-password': 'ssh-password',
   'ssh-agent-key': 'external-keychain-reference',
   'api-key': 'api-token',
@@ -174,13 +174,12 @@ export function isHostAssignableCredentialKind(kind: string): boolean {
   return (
     normalizedKind === 'ssh-private-key'
     || normalizedKind === 'ssh-password'
-    || normalizedKind === 'ssh-key-with-passphrase'
     || normalizedKind === 'ssh-certificate'
     || normalizedKind === 'external-keychain-reference'
   );
 }
 
-export function vaultItemToCredentialEnvelope(item: VaultItem | VaultItemSecret): CredentialEnvelope {
+export function vaultItemToCredentialEnvelope(item: VaultItem | VaultItemDetail): CredentialEnvelope {
   const kind = normalizeCredentialKind(item.kind);
   return {
     credentialId: item.logicalId || item.id,
@@ -200,12 +199,10 @@ export function vaultItemToCredentialEnvelope(item: VaultItem | VaultItemSecret)
 }
 
 export function vaultItemSecretReferenceField(
-  item: Pick<VaultItem | VaultItemSecret, 'id' | 'kind'>,
+  item: Pick<VaultItem | VaultItemDetail, 'id' | 'kind'>,
   kind = normalizeCredentialKind(item.kind),
 ): CredentialField {
-  const valueRef = `legacy:${item.id}:secret`;
-
-  if (kind === 'ssh-private-key' || kind === 'ssh-key-with-passphrase') {
+  if (kind === 'ssh-private-key') {
     return {
       name: 'privateKey',
       label: 'Private Key',
@@ -213,7 +210,7 @@ export function vaultItemSecretReferenceField(
       required: true,
       format: 'private-key',
       encoding: 'pem',
-      valueRef,
+      valueRef: 'secret:privateKey',
     };
   }
   if (kind === 'ssh-password' || kind === 'username-password') {
@@ -223,7 +220,7 @@ export function vaultItemSecretReferenceField(
       secret: true,
       required: true,
       format: 'password',
-      valueRef,
+      valueRef: 'secret:password',
     };
   }
   if (kind === 'api-token') {
@@ -233,7 +230,7 @@ export function vaultItemSecretReferenceField(
       secret: true,
       required: true,
       format: 'token',
-      valueRef,
+      valueRef: 'secret:token',
     };
   }
   return {
@@ -242,6 +239,6 @@ export function vaultItemSecretReferenceField(
     secret: true,
     required: true,
     format: 'text',
-    valueRef,
+    valueRef: 'secret:secret',
   };
 }

@@ -22,6 +22,8 @@ pub(crate) struct DomainCollectResult<T> {
     pub records: Vec<T>,
 }
 
+/// Domain records do not have independent monotonic revisions yet, so their
+/// upload revision is derived from `updated_at` and reserves zero as unset.
 pub(crate) fn default_revision(updated_at: u64) -> u64 {
     if updated_at == 0 { 1 } else { updated_at }
 }

@@ -19,14 +19,16 @@ use super::types::{
     SyncRestoreCredentialsArgs, SyncRestoreCredentialsResult, SyncRestorePreviewResult,
     SyncUploadCredentialArgs, SyncUploadCredentialResult, SyncUploadCredentialsResult,
 };
-use crate::vault::credential::CredentialEnvelope;
+use crate::vault::credential::{
+    normalize_record_credential, secret_values_from_legacy, CredentialEnvelope,
+};
 use crate::vault::crypto::{decrypt_record, encrypt_record, EncryptedEnvelope, SecretKey};
 use crate::vault::types::PlaintextRecord;
 use crate::vault::store::VaultService;
 use crate::vault::types::VaultStatus;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 use tauri::State;
 use tokio::sync::Mutex;
@@ -516,7 +518,10 @@ struct SyncCredentialPlaintextV1 {
     logical_id: String,
     kind: String,
     label: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     secret: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    secret_values: BTreeMap<String, String>,
     notes: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     credential: Option<CredentialEnvelope>,
@@ -591,6 +596,8 @@ fn domain_aad(sync_collection_id: &str, domain: &str, logical_id: &str, revision
     )
 }
 
+/// App-data domains currently derive their upload revision from `updated_at`;
+/// vault credential revisions remain independent monotonic counters.
 fn default_revision(updated_at: u64) -> u64 {
     if updated_at == 0 { 1 } else { updated_at }
 }
@@ -749,6 +756,29 @@ where
         failed,
         records,
     })
+}
+
+impl SyncCredentialPlaintextV1 {
+    fn normalize(&mut self) {
+        let mut record = PlaintextRecord {
+            id: self.logical_id.clone(),
+            logical_id: Some(self.logical_id.clone()),
+            kind: self.kind.clone(),
+            label: self.label.clone(),
+            secret: self.secret.clone(),
+            secret_values: self.secret_values.clone(),
+            notes: self.notes.clone(),
+            credential: self.credential.clone(),
+            revision: self.revision,
+            created_at: self.updated_at,
+            updated_at: self.updated_at,
+        };
+        normalize_record_credential(&mut record);
+        self.kind = record.kind.clone();
+        self.secret.clear();
+        self.secret_values = record.secret_values.clone();
+        self.credential = record.credential.clone();
+    }
 }
 
 struct RemoteHostCollectResult {
@@ -919,7 +949,7 @@ enum RestoreDecision {
 fn same_payload(existing: &PlaintextRecord, remote: &SyncCredentialPlaintextV1) -> bool {
     existing.kind == remote.kind
         && existing.label == remote.label
-        && existing.secret == remote.secret
+        && existing.secret_values == remote.secret_values
         && existing.notes == remote.notes
         && existing.credential == remote.credential
 }
@@ -995,6 +1025,7 @@ fn parse_remote_sync_record(
         .map_err(|e| format!("[sync_decrypt_failed] Failed to decrypt provider record: {e}"))?;
     let mut plaintext = serde_json::from_slice::<SyncCredentialPlaintextV1>(&plaintext_bytes)
         .map_err(|e| format!("[sync_parse_failed] Failed to parse decrypted payload: {e}"))?;
+    plaintext.normalize();
     if plaintext.logical_id.trim().is_empty() {
         plaintext.logical_id = logical_id.clone();
     }
@@ -1015,7 +1046,8 @@ fn build_credential_provider_record(
         logical_id: logical_id.clone(),
         kind: record.kind.clone(),
         label: record.label.clone(),
-        secret: record.secret.clone(),
+        secret: String::new(),
+        secret_values: record.secret_values.clone(),
         notes: record.notes.clone(),
         credential: record.credential.clone(),
         revision: record.revision,
@@ -1169,7 +1201,7 @@ async fn restore_credentials_from_provider_records(
                                 &logical_id,
                                 &plaintext.label,
                                 &plaintext.kind,
-                                &plaintext.secret,
+                                &plaintext.secret_values,
                                 plaintext.notes.as_deref(),
                                 plaintext.credential.as_ref(),
                                 plaintext.revision,
@@ -1189,7 +1221,7 @@ async fn restore_credentials_from_provider_records(
                                 &logical_id,
                                 &plaintext.label,
                                 &plaintext.kind,
-                                &plaintext.secret,
+                                &plaintext.secret_values,
                                 plaintext.notes.as_deref(),
                                 plaintext.credential.as_ref(),
                                 plaintext.revision,
@@ -1208,7 +1240,7 @@ async fn restore_credentials_from_provider_records(
                             .item_create_from_sync(
                                 &plaintext.label,
                                 &plaintext.kind,
-                                &plaintext.secret,
+                                &plaintext.secret_values,
                                 plaintext.notes.as_deref(),
                                 plaintext.credential.as_ref(),
                                 &logical_id,
@@ -2865,7 +2897,8 @@ mod tests {
             logical_id: Some(logical_id.to_string()),
             kind: "ssh-private-key".to_string(),
             label: "test".to_string(),
-            secret: secret.to_string(),
+            secret: String::new(),
+            secret_values: secret_values_from_legacy("ssh-private-key", secret),
             notes: None,
             credential: None,
             revision,
@@ -2885,7 +2918,8 @@ mod tests {
             logical_id: logical_id.to_string(),
             kind: "ssh-private-key".to_string(),
             label: "test".to_string(),
-            secret: secret.to_string(),
+            secret: String::new(),
+            secret_values: secret_values_from_legacy("ssh-private-key", secret),
             notes: None,
             credential: None,
             revision,
@@ -3156,6 +3190,46 @@ mod tests {
     }
 
     #[test]
+    fn legacy_sync_private_key_payload_normalizes_to_named_secrets() {
+        let mut record = SyncCredentialPlaintextV1 {
+            logical_id: "credential-legacy-key".to_string(),
+            kind: "ssh-key-with-passphrase".to_string(),
+            label: "legacy key".to_string(),
+            secret: serde_json::json!({
+                "key": "private-key-data",
+                "passphrase": "key-passphrase"
+            })
+            .to_string(),
+            secret_values: BTreeMap::new(),
+            notes: None,
+            credential: None,
+            revision: 1,
+            updated_at: 1,
+            deleted: false,
+        };
+
+        record.normalize();
+
+        assert_eq!(record.kind, "ssh-private-key");
+        assert!(record.secret.is_empty());
+        assert_eq!(
+            record.secret_values.get("privateKey").map(String::as_str),
+            Some("private-key-data")
+        );
+        assert_eq!(
+            record.secret_values.get("passphrase").map(String::as_str),
+            Some("key-passphrase")
+        );
+        assert_eq!(
+            record
+                .credential
+                .as_ref()
+                .map(|credential| credential.schema_version),
+            Some(crate::vault::credential::CURRENT_CREDENTIAL_SCHEMA_VERSION)
+        );
+    }
+
+    #[test]
     fn build_credential_provider_record_roundtrips_logical_id_and_payload() {
         let manifest = SyncCollectionManifest {
             version: 1,
@@ -3194,7 +3268,10 @@ mod tests {
         assert_eq!(logical_id, "cred-roundtrip");
         assert_eq!(parsed_logical_id, "cred-roundtrip");
         assert_eq!(upload_record.object_name, "zync-sync-collection-1-credential-cred-roundtrip.zcred");
-        assert_eq!(parsed.secret, "secret-key-data");
+        assert_eq!(
+            parsed.secret_values.get("privateKey").map(String::as_str),
+            Some("secret-key-data")
+        );
         assert_eq!(parsed.revision, 7);
         assert_eq!(parsed.updated_at, 11);
     }
