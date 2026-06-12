@@ -101,6 +101,9 @@ pub struct VaultItemMeta {
     /// Stable keyed fingerprint of the decrypted secret for equality-only UI workflows.
     /// The plaintext secret is never serialized by the list API.
     pub secret_fingerprint: String,
+    pub schema_version: u32,
+    pub secret_field_count: u32,
+    pub has_passphrase_field: bool,
     pub revision: u64,
     pub created_at: u64,
     pub updated_at: u64,

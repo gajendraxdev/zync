@@ -372,12 +372,19 @@ impl VaultService {
     }
 
     pub fn item_meta(&self, record: &PlaintextRecord) -> Result<VaultItemMeta, VaultError> {
+        let credential = record.credential.as_ref();
+        let fields = credential.map(|value| value.fields.as_slice()).unwrap_or(&[]);
         Ok(VaultItemMeta {
             id: record.id.clone(),
             logical_id: Self::record_logical_id(record),
             kind: record.kind.clone(),
             label: record.label.clone(),
             secret_fingerprint: self.record_secret_fingerprint(record)?,
+            schema_version: credential
+                .map(|value| value.schema_version)
+                .unwrap_or(CURRENT_CREDENTIAL_SCHEMA_VERSION),
+            secret_field_count: fields.iter().filter(|field| field.secret).count() as u32,
+            has_passphrase_field: fields.iter().any(|field| field.name == "passphrase"),
             revision: record.revision,
             created_at: record.created_at,
             updated_at: record.updated_at,

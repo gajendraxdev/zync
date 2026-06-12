@@ -1,5 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 
+import type { CredentialEnvelope } from './credentialTypes';
+
 export type VaultStatus =
   | { status: 'uninitialized' }
   | { status: 'locked'; vaultId: string; itemCount: number }
@@ -11,6 +13,9 @@ export interface VaultItem {
   kind: string;
   label: string;
   secretFingerprint: string;
+  schemaVersion: number;
+  secretFieldCount: number;
+  hasPassphraseField: boolean;
   revision: number;
   createdAt: number;
   updatedAt: number;
@@ -22,6 +27,7 @@ export interface VaultItemDetail {
   kind: string;
   label: string;
   notes?: string;
+  credential?: CredentialEnvelope;
   revision: number;
   createdAt: number;
   updatedAt: number;
