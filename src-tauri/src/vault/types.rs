@@ -209,8 +209,8 @@ mod tests {
 
         let json = serde_json::to_string(&record).expect("serialize PlaintextRecord");
         assert!(
-            !json.contains("logical_id"),
-            "logical_id must not appear in JSON when None, got: {json}"
+            !json.contains("logicalId"),
+            "logicalId must not appear in JSON when None, got: {json}"
         );
     }
 }

@@ -64,9 +64,22 @@ fn map_snippet(snip: Snippet, logical_id: String) -> SnippetSyncRecord {
 }
 
 fn snippet_fallback_logical_id(snip: &Snippet) -> String {
-    let label = snip.name.trim().to_ascii_lowercase();
+    snippet_content_logical_id(&snip.name, &snip.command)
+}
+
+fn snippet_record_logical_id(record: &SnippetSyncRecord) -> String {
+    let logical_id = record.logical_id.trim();
+    if logical_id.is_empty() {
+        snippet_content_logical_id(&record.name, &record.command)
+    } else {
+        logical_id.to_string()
+    }
+}
+
+fn snippet_content_logical_id(name: &str, command: &str) -> String {
+    let label = name.trim().to_ascii_lowercase();
     let mut hasher = Sha256::new();
-    hasher.update(snip.command.as_bytes());
+    hasher.update(command.as_bytes());
     let digest = hasher.finalize();
     let short_hash = digest[..8]
         .iter()
@@ -84,7 +97,13 @@ pub fn apply_snippet_restore_records(data_dir: &Path, records: &[SnippetSyncReco
     let mut restored = 0u64;
     let mut updated = 0u64;
     for record in records {
-        if let Some(existing) = saved.snippets.iter_mut().find(|s| s.id == record.logical_id) {
+        let logical_id = snippet_record_logical_id(record);
+        if let Some(existing) = saved.snippets.iter_mut().find(|snippet| {
+            snippet.id == logical_id
+                || (snippet.id.trim().is_empty()
+                    && snippet_fallback_logical_id(snippet) == logical_id)
+        }) {
+            existing.id = logical_id;
             existing.name = record.name.clone();
             existing.command = record.command.clone();
             existing.category = record.category.clone();
@@ -95,7 +114,7 @@ pub fn apply_snippet_restore_records(data_dir: &Path, records: &[SnippetSyncReco
             continue;
         }
         saved.snippets.push(Snippet {
-            id: record.logical_id.clone(),
+            id: logical_id,
             name: record.name.clone(),
             command: record.command.clone(),
             category: record.category.clone(),
@@ -264,6 +283,54 @@ mod tests {
             snippet_fallback_logical_id(&first),
             snippet_fallback_logical_id(&second)
         );
+    }
+
+    #[test]
+    fn restore_blank_logical_id_matches_existing_fallback_record() {
+        let dir = std::env::temp_dir().join(format!(
+            "zync-sync-snippets-blank-id-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let existing = Snippet {
+            id: String::new(),
+            name: "Deploy".into(),
+            command: "echo deploy".into(),
+            category: None,
+            tags: None,
+            connection_id: None,
+            created_at: Some(1),
+            updated_at: Some(1),
+        };
+        let fallback_id = snippet_fallback_logical_id(&existing);
+        std::fs::write(
+            dir.join(SNIPPETS_FILE),
+            serde_json::to_string_pretty(&SnippetsData {
+                snippets: vec![existing],
+            })
+            .expect("serialize"),
+        )
+        .expect("write");
+
+        let record = SnippetSyncRecord {
+            logical_id: String::new(),
+            name: "Deploy".into(),
+            command: "echo deploy".into(),
+            category: Some("ops".into()),
+            tags: vec![],
+            connection_id: None,
+            updated_at: 9,
+        };
+        let (restored, updated) = apply_snippet_restore_records(&dir, &[record]).expect("apply");
+        assert_eq!((restored, updated), (0, 1));
+        let saved = load_saved(&dir.join(SNIPPETS_FILE)).expect("read");
+        assert_eq!(saved.snippets.len(), 1);
+        assert_eq!(saved.snippets[0].id, fallback_id);
+        assert_eq!(saved.snippets[0].updated_at, Some(9));
+        std::fs::remove_dir_all(&dir).expect("cleanup");
     }
 
     #[test]

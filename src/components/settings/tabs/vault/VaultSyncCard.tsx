@@ -104,7 +104,7 @@ function CollectionManagementSection({
           variant="secondary"
           size="sm"
           onClick={onSetupCollection}
-          disabled={isSettingUpCollection}
+          disabled={isSettingUpCollection || isActionBlocked}
           className="gap-1.5"
         >
           {isSettingUpCollection ? (

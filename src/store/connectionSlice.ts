@@ -390,8 +390,11 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
 
             const fullConfig = buildConnectConfig(connections, id);
             if (!fullConfig) {
-                set(state => ({ connections: markConnectionStatus(state.connections, id, 'error') }));
-                get().showToast('error', `Couldn't build connection config for "${conn.name}". If this uses a jump host, re-import your SSH config to repair the reference.`, 8000);
+                const message = `Couldn't build connection config for "${conn.name}". If this uses a jump host, re-import your SSH config to repair the reference.`;
+                set(state => ({
+                    connections: markConnectionErrorIfNeeded(state.connections, id, message),
+                }));
+                get().showToast('error', message, 8000);
                 return;
             }
 

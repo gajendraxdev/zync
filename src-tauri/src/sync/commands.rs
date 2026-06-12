@@ -731,7 +731,13 @@ where
                 continue;
             }
         };
-        let plaintext = match decrypt_record(secret_key, &envelope, encrypted.aad.as_bytes()) {
+        let expected_aad = domain_aad(
+            &manifest.sync_collection_id,
+            domain,
+            &encrypted.logical_id,
+            encrypted.revision,
+        );
+        let plaintext = match decrypt_record(secret_key, &envelope, expected_aad.as_bytes()) {
             Ok(v) => v,
             Err(_) => {
                 failed += 1;
@@ -851,7 +857,12 @@ async fn collect_remote_host_records(
                 continue;
             }
         };
-        let plaintext = match decrypt_record(secret_key, &envelope, encrypted.aad.as_bytes()) {
+        let expected_aad = hosts_aad(
+            &manifest.sync_collection_id,
+            &encrypted.logical_id,
+            encrypted.revision,
+        );
+        let plaintext = match decrypt_record(secret_key, &envelope, expected_aad.as_bytes()) {
             Ok(bytes) => bytes,
             Err(_) => {
                 failed = failed.saturating_add(1);
@@ -1019,7 +1030,8 @@ fn parse_remote_sync_record(
     }
 
     let envelope = decode_sync_envelope(&encrypted)?;
-    let plaintext_bytes = decrypt_record(secret_key, &envelope, encrypted.aad.as_bytes())
+    let expected_aad = credential_aad(expected_collection_id, &logical_id, encrypted.revision);
+    let plaintext_bytes = decrypt_record(secret_key, &envelope, expected_aad.as_bytes())
         .map_err(|e| format!("[sync_decrypt_failed] Failed to decrypt provider record: {e}"))?;
     let mut plaintext = serde_json::from_slice::<SyncCredentialPlaintextV1>(&plaintext_bytes)
         .map_err(|e| format!("[sync_parse_failed] Failed to parse decrypted payload: {e}"))?;
@@ -3108,6 +3120,33 @@ mod tests {
         let envelope = decode_sync_envelope(&record).expect("envelope should decode");
         assert_eq!(envelope.nonce, nonce);
         assert_eq!(envelope.ciphertext, ciphertext);
+    }
+
+    #[test]
+    fn parse_remote_sync_record_reconstructs_aad_from_trusted_metadata() {
+        let secret_key = SecretKey::from_bytes([7u8; 32]);
+        let plaintext = remote_record("cred-1", 2, 10, "secret", false);
+        let plaintext_bytes = serde_json::to_vec(&plaintext).expect("serialize plaintext");
+        let expected_aad = credential_aad("collection-1", "cred-1", 2);
+        let envelope =
+            encrypt_record(&secret_key, &plaintext_bytes, expected_aad.as_bytes()).expect("encrypt");
+        let encrypted = SyncCredentialEncryptedV1 {
+            version: 1,
+            provider: "google".to_string(),
+            sync_collection_id: "collection-1".to_string(),
+            logical_id: "cred-1".to_string(),
+            revision: 2,
+            updated_at: 10,
+            aad: "provider-controlled-aad".to_string(),
+            nonce: base64::engine::general_purpose::STANDARD.encode(envelope.nonce),
+            ciphertext: base64::engine::general_purpose::STANDARD.encode(envelope.ciphertext),
+        };
+
+        let payload = serde_json::to_vec(&encrypted).expect("serialize encrypted record");
+        let (logical_id, parsed) =
+            parse_remote_sync_record(&payload, "collection-1", &secret_key).expect("parse");
+        assert_eq!(logical_id, "cred-1");
+        assert_eq!(parsed.revision, 2);
     }
 
     #[test]

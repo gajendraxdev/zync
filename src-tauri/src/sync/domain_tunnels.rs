@@ -48,7 +48,13 @@ pub fn load_tunnel_sync_records(data_dir: &Path) -> SyncResult<Vec<TunnelSyncRec
     let mut dedup: BTreeMap<String, TunnelSyncRecord> = BTreeMap::new();
     for tunnel in data.tunnels {
         let logical_id = tunnel_logical_id(&tunnel);
-        dedup.insert(logical_id.clone(), map_tunnel(tunnel, logical_id));
+        let record = map_tunnel(tunnel, logical_id.clone());
+        match dedup.get(&logical_id) {
+            Some(existing) if existing.updated_at >= record.updated_at => {}
+            _ => {
+                dedup.insert(logical_id, record);
+            }
+        }
     }
     Ok(dedup.into_values().collect())
 }
@@ -232,7 +238,25 @@ pub fn apply_tunnel_restore_records(data_dir: &Path, records: &[TunnelSyncRecord
 
 pub(crate) fn load_saved_tunnels(path: &Path) -> SyncResult<SavedTunnelsData> {
     if !path.exists() {
-        return Ok(SavedTunnelsData { tunnels: Vec::new() });
+        let temp_path = path.with_extension("tmp");
+        let backup_path = path.with_extension("bak");
+        if temp_path.exists() {
+            std::fs::rename(&temp_path, path).map_err(|e| {
+                SyncError::new(
+                    "sync_tunnels_read_failed",
+                    format!("Failed to recover pending tunnels temp file: {e}"),
+                )
+            })?;
+        } else if backup_path.exists() {
+            std::fs::rename(&backup_path, path).map_err(|e| {
+                SyncError::new(
+                    "sync_tunnels_read_failed",
+                    format!("Failed to restore tunnels backup file: {e}"),
+                )
+            })?;
+        } else {
+            return Ok(SavedTunnelsData { tunnels: Vec::new() });
+        }
     }
     let raw = std::fs::read_to_string(path).map_err(|e| {
         SyncError::new("sync_tunnels_read_failed", format!("Failed to read tunnels file: {e}"))
@@ -308,6 +332,51 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("create temp dir");
         let records = load_tunnel_sync_records(&dir).expect("load records");
         assert!(records.is_empty());
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[test]
+    fn load_saved_tunnels_recovers_backup_when_primary_is_missing() {
+        let dir = std::env::temp_dir().join(format!(
+            "zync-sync-tunnels-backup-recovery-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let path = dir.join(TUNNELS_FILE);
+        let backup_path = path.with_extension("bak");
+        let data = SavedTunnelsData {
+            tunnels: vec![SavedTunnel {
+                id: "tun-1".into(),
+                connection_id: "conn-1".into(),
+                name: "Recovered".into(),
+                tunnel_type: "local".into(),
+                local_port: 8080,
+                remote_host: "localhost".into(),
+                remote_port: 80,
+                bind_address: None,
+                bind_to_any: Some(false),
+                auto_start: Some(false),
+                status: None,
+                original_port: None,
+                group: None,
+                created_at: Some(1),
+                updated_at: Some(1),
+            }],
+        };
+        std::fs::write(
+            &backup_path,
+            serde_json::to_string_pretty(&data).expect("serialize"),
+        )
+        .expect("write backup");
+
+        let loaded = load_saved_tunnels(&path).expect("recover backup");
+        assert_eq!(loaded.tunnels.len(), 1);
+        assert_eq!(loaded.tunnels[0].name, "Recovered");
+        assert!(path.exists());
+        assert!(!backup_path.exists());
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }
 
@@ -404,6 +473,56 @@ mod tests {
         );
 
         assert_eq!(record.updated_at, 55);
+    }
+
+    #[test]
+    fn load_tunnel_sync_records_keeps_newest_duplicate() {
+        let dir = std::env::temp_dir().join(format!(
+            "zync-sync-tunnels-newest-dedup-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let base = SavedTunnel {
+            id: "tun-1".into(),
+            connection_id: "conn-1".into(),
+            name: "Newer".into(),
+            tunnel_type: "local".into(),
+            local_port: 8080,
+            remote_host: "localhost".into(),
+            remote_port: 80,
+            bind_address: None,
+            bind_to_any: Some(false),
+            auto_start: Some(false),
+            status: None,
+            original_port: None,
+            group: None,
+            created_at: Some(1),
+            updated_at: Some(20),
+        };
+        std::fs::write(
+            dir.join(TUNNELS_FILE),
+            serde_json::to_string_pretty(&SavedTunnelsData {
+                tunnels: vec![
+                    base.clone(),
+                    SavedTunnel {
+                        name: "Older".into(),
+                        updated_at: Some(10),
+                        ..base
+                    },
+                ],
+            })
+            .expect("serialize"),
+        )
+        .expect("write");
+
+        let records = load_tunnel_sync_records(&dir).expect("load records");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].name, "Newer");
+        assert_eq!(records[0].updated_at, 20);
+        std::fs::remove_dir_all(&dir).expect("cleanup");
     }
 
     #[test]

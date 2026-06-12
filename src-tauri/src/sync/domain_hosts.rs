@@ -140,7 +140,9 @@ pub fn apply_hosts_restore_records(
                 Some(record.tags.clone())
             };
             existing.is_favorite = Some(record.is_favorite);
-            existing.last_connected = Some(host_timestamp_from_sync(record.updated_at));
+            let restored_timestamp = host_timestamp_from_sync(record.updated_at);
+            existing.created_at = Some(restored_timestamp);
+            existing.last_connected = Some(restored_timestamp);
             if let Some(auth_ref) = &record.auth_ref {
                 existing.auth_ref = Some(auth_ref.clone());
                 existing.password = None;
@@ -446,6 +448,8 @@ mod tests {
         assert_eq!(updated.password, None);
         assert_eq!(updated.private_key_path, None);
         assert_eq!(updated.port, 2222);
+        assert_eq!(updated.created_at, Some(9_000));
+        assert_eq!(updated.last_connected, Some(9_000));
 
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }
