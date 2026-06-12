@@ -19,9 +19,7 @@ use super::types::{
     SyncRestoreCredentialsArgs, SyncRestoreCredentialsResult, SyncRestorePreviewResult,
     SyncUploadCredentialArgs, SyncUploadCredentialResult, SyncUploadCredentialsResult,
 };
-use crate::vault::credential::{
-    normalize_record_credential, secret_values_from_legacy, CredentialEnvelope,
-};
+use crate::vault::credential::{normalize_record_credential, CredentialEnvelope};
 use crate::vault::crypto::{decrypt_record, encrypt_record, EncryptedEnvelope, SecretKey};
 use crate::vault::types::PlaintextRecord;
 use crate::vault::store::VaultService;

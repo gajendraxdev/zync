@@ -15,6 +15,7 @@ interface VaultItemsPanelProps {
   onItemSearchChange: (value: string) => void;
   onDeduplicate: () => void;
   onAddCredential: () => void;
+  onInspect: (itemId: string) => void;
   onAssign: (itemId: string) => void;
   onRotate: (itemId: string) => void;
   onHistory: (itemId: string) => void;
@@ -22,6 +23,7 @@ interface VaultItemsPanelProps {
   onSyncItem: (itemId: string, label: string) => void;
   canSyncItems: boolean;
   syncingItemId?: string | null;
+  assignedHostCounts: Record<string, number>;
 }
 
 export function VaultItemsPanel({
@@ -33,6 +35,7 @@ export function VaultItemsPanel({
   onItemSearchChange,
   onDeduplicate,
   onAddCredential,
+  onInspect,
   onAssign,
   onRotate,
   onHistory,
@@ -40,6 +43,7 @@ export function VaultItemsPanel({
   onSyncItem,
   canSyncItems,
   syncingItemId,
+  assignedHostCounts,
 }: VaultItemsPanelProps) {
   return (
     <div className="space-y-2">
@@ -99,12 +103,43 @@ export function VaultItemsPanel({
               </div>
             ) : (
               filteredItems.map((item) => (
-                <div key={item.id} className="flex items-center justify-between px-4 py-3 group">
+                <div
+                  key={item.id}
+                  className="flex items-center justify-between px-4 py-3 group transition-colors hover:bg-app-surface/20"
+                >
                   <div className="min-w-0">
-                    <p className="text-sm text-app-text font-medium truncate">{item.label}</p>
-                    <p className="text-xs text-app-muted">
-                      {getCredentialKindLabel(item.kind)} · {item.logicalId.slice(0, 8)} · {item.id.slice(0, 8)}
-                    </p>
+                    <button
+                      type="button"
+                      onClick={() => onInspect(item.id)}
+                      aria-label={`Inspect ${item.label}`}
+                      title={`Inspect ${item.label}`}
+                      className="block min-w-0 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-accent/40 focus-visible:ring-offset-2 focus-visible:ring-offset-app-panel"
+                    >
+                      <p className="text-sm text-app-text font-medium truncate hover:text-app-accent transition-colors">
+                        {item.label}
+                      </p>
+                    </button>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                      <span className="text-xs text-app-muted">
+                        {getCredentialKindLabel(item.kind)}
+                      </span>
+                      {item.hasPassphraseField && (
+                        <span className="rounded-full border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-300">
+                          Passphrase attached
+                        </span>
+                      )}
+                      {item.secretFieldCount > 1 && (
+                        <span className="rounded-full border border-sky-500/25 bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-300">
+                          {item.secretFieldCount} secret fields
+                        </span>
+                      )}
+                      <span className="rounded-full border border-app-border/50 bg-app-surface/20 px-1.5 py-0.5 text-[10px] text-app-muted">
+                        {assignedHostCounts[item.logicalId] ?? 0} host{(assignedHostCounts[item.logicalId] ?? 0) === 1 ? '' : 's'}
+                      </span>
+                      <span className="rounded-full border border-app-border/50 bg-app-surface/20 px-1.5 py-0.5 text-[10px] text-app-muted">
+                        rev {item.revision}
+                      </span>
+                    </div>
                   </div>
                   <div className="flex items-center gap-1 md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
                     {isHostAssignableCredentialKind(item.kind) && (

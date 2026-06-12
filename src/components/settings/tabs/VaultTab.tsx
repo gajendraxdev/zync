@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RefreshCw, ArrowRight, KeyRound, Download, Upload, Cloud } from 'lucide-react';
 import { useVaultStore } from '../../../vault/useVaultStore';
+import { vaultIpc, type VaultItemDetail } from '../../../vault/ipc';
 import { VaultUnlockModal } from '../../vault/VaultUnlockModal';
 import { RecoveryKeyModal } from '../../vault/RecoveryKeyModal';
 import { Button } from '../../ui/Button';
@@ -9,6 +10,7 @@ import { DEFAULT_VAULT_PROFILE_ID, type VaultProfileId } from '../../../vault/pr
 import { resolveVaultFocusProfile } from './vaultFocus';
 import { VaultStatusCard } from './vault/VaultStatusCard';
 import { VaultItemsPanel } from './vault/VaultItemsPanel';
+import { VaultCredentialDetailModal } from './vault/VaultCredentialDetailModal';
 import { AddCredentialModal } from './vault/AddCredentialModal';
 import { ManageAssignmentsModal } from './vault/ManageAssignmentsModal';
 import { RotateCredentialModal } from './vault/RotateCredentialModal';
@@ -35,6 +37,10 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
   const openSyncBackupTab = useAppStore(state => state.openSyncBackupTab);
 
   const [isUnlockModalOpen, setIsUnlockModalOpen] = useState(false);
+  const [detailItemId, setDetailItemId] = useState<string | null>(null);
+  const [detailItem, setDetailItem] = useState<VaultItemDetail | null>(null);
+  const [isDetailLoading, setIsDetailLoading] = useState(false);
+  const detailRequestRef = useRef<string | null>(null);
 
   const localSectionRef = useRef<HTMLDivElement | null>(null);
   const syncHandoffRef = useRef<HTMLDivElement | null>(null);
@@ -192,10 +198,59 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
     return count;
   }, [items]);
 
+  const assignedHostCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const connection of connections) {
+      const logicalId = connection.authRef?.credentialId;
+      if (!logicalId) continue;
+      counts[logicalId] = (counts[logicalId] ?? 0) + 1;
+    }
+    return counts;
+  }, [connections]);
+
+  const detailAssignedConnections = useMemo(() => {
+    if (!detailItem) return [];
+    return connections.filter(connection => connection.authRef?.credentialId === detailItem.logicalId);
+  }, [connections, detailItem]);
+
   const filteredItems = useMemo(() => {
     const q = panel.itemSearch.trim().toLowerCase();
     return q ? items.filter(item => item.label.toLowerCase().includes(q)) : items;
   }, [items, panel.itemSearch]);
+
+  const openCredentialDetails = useCallback(async (itemId: string) => {
+    const requestToken = `${itemId}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+    detailRequestRef.current = requestToken;
+    setDetailItemId(itemId);
+    setIsDetailLoading(true);
+    try {
+      const full = await vaultIpc.itemGet(itemId);
+      if (detailRequestRef.current === requestToken) {
+        setDetailItemId(itemId);
+        setDetailItem(full);
+      }
+    } catch (error) {
+      console.warn('[Vault] Failed to load credential detail:', error);
+      const message = error instanceof Error ? error.message : String(error);
+      if (detailRequestRef.current === requestToken) {
+        showToast('error', `Failed to load credential details: ${message}`);
+        setDetailItemId(null);
+        setDetailItem(null);
+      }
+    } finally {
+      if (detailRequestRef.current === requestToken) {
+        detailRequestRef.current = null;
+        setIsDetailLoading(false);
+      }
+    }
+  }, [showToast]);
+
+  const closeCredentialDetails = useCallback(() => {
+    detailRequestRef.current = null;
+    setDetailItemId(null);
+    setDetailItem(null);
+    setIsDetailLoading(false);
+  }, []);
   const canSyncItemsToGoogle = Boolean(
     panel.googleSync?.connected
     && panel.googleCollection?.configured
@@ -377,6 +432,7 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
           onItemSearchChange={panel.setItemSearch}
           onDeduplicate={panel.handleDeduplicateItems}
           onAddCredential={addCredential.open}
+          onInspect={id => void openCredentialDetails(id)}
           onAssign={assignCredential.open}
           onRotate={id => void rotateCredential.open(id)}
           onHistory={id => void history.open(id)}
@@ -384,6 +440,7 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
           onSyncItem={panel.handleSyncCredentialItem}
           canSyncItems={canSyncItemsToGoogle}
           syncingItemId={panel.syncingItemId}
+          assignedHostCounts={assignedHostCounts}
         />
       )}
 
@@ -438,6 +495,14 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
         isRestoring={history.isRestoring}
         onClose={history.close}
         onRestore={history.restore}
+      />
+
+      <VaultCredentialDetailModal
+        isOpen={detailItemId !== null}
+        item={detailItem}
+        assignedConnections={detailAssignedConnections}
+        isLoading={isDetailLoading}
+        onClose={closeCredentialDetails}
       />
 
       <VaultUnlockModal
