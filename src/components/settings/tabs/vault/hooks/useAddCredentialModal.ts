@@ -65,17 +65,20 @@ export function useAddCredentialModal({
       return;
     }
 
-    const secretToSave =
-      kind === 'ssh-private-key' && trimmedPassphrase
-        ? JSON.stringify({ key: trimmedSecret, passphrase: trimmedPassphrase })
-        : trimmedSecret;
+    const secretValues: Record<string, string> =
+      kind === 'ssh-private-key'
+        ? {
+            privateKey: trimmedSecret,
+            ...(trimmedPassphrase ? { passphrase: trimmedPassphrase } : {}),
+          }
+        : { password: trimmedSecret };
 
     setIsCreating(true);
     try {
       const item = await vaultIpc.itemCreate(
         trimmedLabel,
         kind,
-        secretToSave,
+        secretValues,
         notes.trim() || undefined,
       );
       await onCreated();

@@ -32,6 +32,9 @@ import {
   normalizePort,
   normalizeTags,
 } from '../.tmp-agent-tests/src/features/connections/domain/normalization.js';
+import {
+  connectionErrorMessage,
+} from '../.tmp-agent-tests/src/features/connections/domain/errorSanitization.js';
 
 function runTest(name, fn) {
   try {
@@ -48,6 +51,17 @@ function runTest(name, fn) {
     throw error;
   }
 }
+
+runTest('connection error sanitization redacts JSON and quoted secret values', () => {
+  const message = connectionErrorMessage(
+    'failed {"password":"json secret"} token="quoted token" passphrase=\'single quoted secret\'',
+  );
+
+  assert.equal(message.includes('json secret'), false);
+  assert.equal(message.includes('quoted token'), false);
+  assert.equal(message.includes('single quoted secret'), false);
+  assert.match(message, /"password":"\[redacted\]"/);
+});
 
 runTest('normalize helpers keep expected defaults', () => {
   assert.equal(normalizePort('abc'), 22);

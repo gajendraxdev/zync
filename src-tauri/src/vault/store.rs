@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -6,7 +7,10 @@ use redb::{Database, ReadTransaction, ReadableTable};
 use uuid::Uuid;
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::vault::credential::{normalize_record_credential, CredentialEnvelope};
+use crate::vault::credential::{
+    normalize_record_credential, primary_secret_value, secret_values_from_legacy,
+    CredentialEnvelope, CURRENT_CREDENTIAL_SCHEMA_VERSION,
+};
 use crate::vault::crypto::{
     decrypt_record, derive_kek, derive_record_key, derive_secret_fingerprint, encrypt_record,
     generate_salt, generate_vek, EncryptedEnvelope, KdfParams, SecretKey,
@@ -245,9 +249,9 @@ impl VaultService {
         drop(vm);
         drop(read_txn);
 
-        // One-time compatibility migration: persist typed credential envelopes for
-        // legacy records that only had the secret payload.
-        self.migrate_live_records_to_typed_storage()?;
+        // Idempotent compatibility migration: persist typed envelopes, named
+        // secret values, canonical kinds, and the current credential schema.
+        self.migrate_live_records_to_current_schema()?;
 
         // Count existing records for the returned status
         let read_txn = db.begin_read()?;
@@ -259,7 +263,7 @@ impl VaultService {
         })
     }
 
-    fn migrate_live_records_to_typed_storage(&self) -> Result<u64, VaultError> {
+    fn migrate_live_records_to_current_schema(&self) -> Result<u64, VaultError> {
         let vek = self.vek.as_ref().ok_or(VaultError::Locked)?;
         let db = self.db.as_ref().ok_or(VaultError::NotInitialized)?;
         let meta = self.meta.as_ref().ok_or(VaultError::Locked)?;
@@ -288,7 +292,17 @@ impl VaultService {
             let aad = record_aad_string(&meta.vault_id, &stored.id, stored.revision);
             let plaintext = decrypt_record(&record_key, &envelope, aad.as_bytes())?;
             let mut record: PlaintextRecord = serde_json::from_slice(&plaintext)?;
-            if record.credential.is_some() {
+            let needs_rewrite = record.credential.is_none()
+                || record
+                    .credential
+                    .as_ref()
+                    .is_some_and(|credential| {
+                        credential.schema_version < CURRENT_CREDENTIAL_SCHEMA_VERSION
+                    })
+                || record.secret_values.is_empty()
+                || !record.secret.is_empty()
+                || record.kind == "ssh-key-with-passphrase";
+            if !needs_rewrite {
                 continue;
             }
 
@@ -346,13 +360,24 @@ impl VaultService {
         derive_secret_fingerprint(vek, secret).map_err(VaultError::from)
     }
 
+    pub fn record_secret_fingerprint(&self, record: &PlaintextRecord) -> Result<String, VaultError> {
+        if record.secret_values.is_empty() {
+            return self.secret_fingerprint(primary_secret_value(record).unwrap_or_default());
+        }
+
+        // Fingerprint the full named secret set so auxiliary secret changes
+        // such as passphrase rotation are visible to dedupe/history logic.
+        let serialized = serde_json::to_string(&record.secret_values)?;
+        self.secret_fingerprint(&serialized)
+    }
+
     pub fn item_meta(&self, record: &PlaintextRecord) -> Result<VaultItemMeta, VaultError> {
         Ok(VaultItemMeta {
             id: record.id.clone(),
             logical_id: Self::record_logical_id(record),
             kind: record.kind.clone(),
             label: record.label.clone(),
-            secret_fingerprint: self.secret_fingerprint(&record.secret)?,
+            secret_fingerprint: self.record_secret_fingerprint(record)?,
             revision: record.revision,
             created_at: record.created_at,
             updated_at: record.updated_at,
@@ -388,6 +413,18 @@ impl VaultService {
         notes: Option<&str>,
         logical_id: Option<&str>,
     ) -> Result<PlaintextRecord, VaultError> {
+        let secret_values = secret_values_from_legacy(kind, secret);
+        self.item_create_with_secret_values(label, kind, &secret_values, notes, logical_id)
+    }
+
+    pub fn item_create_with_secret_values(
+        &self,
+        label: &str,
+        kind: &str,
+        secret_values: &BTreeMap<String, String>,
+        notes: Option<&str>,
+        logical_id: Option<&str>,
+    ) -> Result<PlaintextRecord, VaultError> {
         let vek = self.vek.as_ref().ok_or(VaultError::Locked)?;
         let db = self.db.as_ref().ok_or(VaultError::NotInitialized)?;
         let meta = self.meta.as_ref().ok_or(VaultError::Locked)?;
@@ -407,7 +444,8 @@ impl VaultService {
             logical_id: Some(logical_id),
             kind: kind.to_string(),
             label: label.to_string(),
-            secret: secret.to_string(),
+            secret: String::new(),
+            secret_values: secret_values.clone(),
             notes: notes.map(str::to_string),
             credential: None,
             revision,
@@ -473,7 +511,7 @@ impl VaultService {
         &self,
         label: &str,
         kind: &str,
-        secret: &str,
+        secret_values: &BTreeMap<String, String>,
         notes: Option<&str>,
         credential: Option<&CredentialEnvelope>,
         logical_id: &str,
@@ -499,7 +537,8 @@ impl VaultService {
             logical_id: Some(logical_id.to_string()),
             kind: kind.to_string(),
             label: label.to_string(),
-            secret: secret.to_string(),
+            secret: String::new(),
+            secret_values: secret_values.clone(),
             notes: notes.map(str::to_string),
             credential: credential.cloned(),
             revision,
@@ -612,6 +651,19 @@ impl VaultService {
         secret: &str,
         notes: Option<&str>,
     ) -> Result<PlaintextRecord, VaultError> {
+        let secret_values = secret_values_from_legacy(kind, secret);
+        self.item_update_with_secret_values(item_id, label, kind, &secret_values, notes, None)
+    }
+
+    pub fn item_update_with_secret_values(
+        &self,
+        item_id: &str,
+        label: &str,
+        kind: &str,
+        secret_values: &BTreeMap<String, String>,
+        notes: Option<&str>,
+        credential: Option<&CredentialEnvelope>,
+    ) -> Result<PlaintextRecord, VaultError> {
         let existing = self.item_get(item_id)?;
         let vek = self.vek.as_ref().ok_or(VaultError::Locked)?;
         let db = self.db.as_ref().ok_or(VaultError::NotInitialized)?;
@@ -624,9 +676,10 @@ impl VaultService {
             logical_id: Some(Self::record_logical_id(&existing)),
             kind: kind.to_string(),
             label: label.to_string(),
-            secret: secret.to_string(),
+            secret: String::new(),
+            secret_values: secret_values.clone(),
             notes: notes.map(str::to_string),
-            credential: existing.credential.clone(),
+            credential: credential.cloned().or_else(|| existing.credential.clone()),
             revision,
             created_at: existing.created_at,
             updated_at: now,
@@ -698,7 +751,7 @@ impl VaultService {
         logical_id: &str,
         label: &str,
         kind: &str,
-        secret: &str,
+        secret_values: &BTreeMap<String, String>,
         notes: Option<&str>,
         credential: Option<&CredentialEnvelope>,
         revision: u64,
@@ -722,7 +775,8 @@ impl VaultService {
             logical_id: Some(logical_id.to_string()),
             kind: kind.to_string(),
             label: label.to_string(),
-            secret: secret.to_string(),
+            secret: String::new(),
+            secret_values: secret_values.clone(),
             notes: notes.map(str::to_string),
             credential: credential.cloned().or_else(|| existing.credential.clone()),
             revision,
@@ -894,8 +948,7 @@ impl VaultService {
             let value = entry?;
             let stored: StoredEnvelope = serde_json::from_slice(value.value())?;
             let record = decrypt_stored(vek, &meta.vault_id, &stored)?;
-            let fingerprint = derive_secret_fingerprint(vek, &record.secret)
-                .map_err(VaultError::from)?;
+            let fingerprint = self.record_secret_fingerprint(&record)?;
             snapshots.push(RevisionMeta {
                 item_id: item_id.to_string(),
                 revision: record.revision,
@@ -954,12 +1007,13 @@ impl VaultService {
 
         // Use item_update to write the restored secret — this automatically
         // snapshots the current live record into history and increments revision.
-        self.item_update(
+        self.item_update_with_secret_values(
             item_id,
             &target.label,
             &target.kind,
-            &target.secret,
+            &target.secret_values,
             target.notes.as_deref(),
+            target.credential.as_ref(),
         )
     }
 
@@ -1051,6 +1105,15 @@ impl VaultService {
         vek_arr.zeroize();
         self.meta = Some(meta);
 
+        drop(slot_bytes);
+        drop(ks);
+        drop(meta_bytes);
+        drop(vm);
+        drop(read_txn);
+
+        self.migrate_live_records_to_current_schema()?;
+
+        let read_txn = db.begin_read()?;
         let item_count = live_record_count(&read_txn)?;
 
         Ok(VaultStatus::Unlocked {
@@ -1415,15 +1478,101 @@ mod tests {
             .expect("load revision history");
 
         assert_eq!(live.revision, 2);
-        assert_eq!(live.secret, "secret-v2");
+        assert_eq!(primary_secret_value(&live), Some("secret-v2"));
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].revision, 1);
         assert_eq!(history[0].label, "prod key");
         assert_eq!(history[0].kind, "ssh-private-key");
         assert_ne!(
             history[0].secret_fingerprint,
-            vault.service.secret_fingerprint(&live.secret).unwrap()
+            vault.service.record_secret_fingerprint(&live).unwrap()
         );
+    }
+
+    #[test]
+    fn named_private_key_secrets_persist_and_restore_without_legacy_secret_blob() {
+        use crate::vault::credential::{PASSPHRASE_FIELD, PRIVATE_KEY_FIELD};
+
+        let vault = initialized_test_vault();
+        let secret_values = BTreeMap::from([
+            (PRIVATE_KEY_FIELD.to_string(), "private-key-data".to_string()),
+            (PASSPHRASE_FIELD.to_string(), "key-passphrase".to_string()),
+        ]);
+        let item = vault
+            .service
+            .item_create_with_secret_values(
+                "prod key",
+                "ssh-private-key",
+                &secret_values,
+                None,
+                Some("credential-prod-key"),
+            )
+            .expect("create named-secret credential");
+        let loaded = vault.service.item_get(&item.id).expect("load credential");
+
+        assert!(loaded.secret.is_empty());
+        assert_eq!(loaded.secret_values, secret_values);
+        assert_eq!(
+            loaded
+                .credential
+                .as_ref()
+                .expect("typed credential")
+                .fields
+                .iter()
+                .map(|field| field.value_ref.as_deref())
+                .collect::<Vec<_>>(),
+            vec![Some("secret:privateKey"), Some("secret:passphrase")]
+        );
+    }
+
+    #[test]
+    fn record_secret_fingerprint_changes_when_secondary_secret_changes() {
+        use crate::vault::credential::{PASSPHRASE_FIELD, PRIVATE_KEY_FIELD};
+
+        let vault = initialized_test_vault();
+        let first = PlaintextRecord {
+            id: "item-1".to_string(),
+            logical_id: Some("cred-1".to_string()),
+            kind: "ssh-private-key".to_string(),
+            label: "prod key".to_string(),
+            secret: String::new(),
+            secret_values: BTreeMap::from([
+                (PRIVATE_KEY_FIELD.to_string(), "private-key-data".to_string()),
+                (PASSPHRASE_FIELD.to_string(), "passphrase-a".to_string()),
+            ]),
+            notes: None,
+            credential: None,
+            revision: 1,
+            created_at: 1,
+            updated_at: 1,
+        };
+        let second = PlaintextRecord {
+            id: "item-1".to_string(),
+            logical_id: Some("cred-1".to_string()),
+            kind: "ssh-private-key".to_string(),
+            label: "prod key".to_string(),
+            secret: String::new(),
+            secret_values: BTreeMap::from([
+                (PRIVATE_KEY_FIELD.to_string(), "private-key-data".to_string()),
+                (PASSPHRASE_FIELD.to_string(), "passphrase-b".to_string()),
+            ]),
+            notes: None,
+            credential: None,
+            revision: 1,
+            created_at: 1,
+            updated_at: 1,
+        };
+
+        let first_fp = vault
+            .service
+            .record_secret_fingerprint(&first)
+            .expect("fingerprint first secret set");
+        let second_fp = vault
+            .service
+            .record_secret_fingerprint(&second)
+            .expect("fingerprint second secret set");
+
+        assert_ne!(first_fp, second_fp);
     }
 
     #[test]
@@ -1478,12 +1627,83 @@ mod tests {
         assert_eq!(restored.id, item.id);
         assert_eq!(restored.revision, 4);
         assert_eq!(restored.logical_id.as_deref(), Some("credential-prod-password"));
-        assert_eq!(live.secret, "secret-v1");
+        assert_eq!(primary_secret_value(&live), Some("secret-v1"));
         assert_eq!(live.label, "prod password");
         assert_eq!(live.notes.as_deref(), Some("first"));
         assert_eq!(relinked.id, item.id);
 
         let revisions: Vec<u64> = history.iter().map(|revision| revision.revision).collect();
         assert_eq!(revisions, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn item_restore_revision_restores_historical_typed_credential() {
+        use crate::vault::credential::{CredentialKind, CredentialMetadata};
+
+        let vault = initialized_test_vault();
+        let item = vault
+            .service
+            .item_create_with_logical_id(
+                "prod key",
+                "ssh-private-key",
+                "secret-v1",
+                None,
+                Some("credential-prod-key"),
+            )
+            .expect("create item");
+        let mut replacement = item.credential.clone().expect("typed credential");
+        replacement.kind = CredentialKind::PluginDefined;
+        replacement.metadata = CredentialMetadata {
+            plugin_id: Some("com.example.current".into()),
+            ..CredentialMetadata::default()
+        };
+
+        vault
+            .service
+            .item_apply_sync_restore(
+                &item.id,
+                "credential-prod-key",
+                "prod key current",
+                "plugin-defined",
+                &secret_values_from_legacy("plugin-defined", "secret-v2"),
+                None,
+                Some(&replacement),
+                2,
+                item.updated_at.saturating_add(1),
+            )
+            .expect("apply current typed credential");
+
+        let restored = vault
+            .service
+            .item_restore_revision(&item.id, 1)
+            .expect("restore historical revision");
+        let restored_credential = restored.credential.as_ref().expect("restored credential");
+
+        assert_eq!(restored_credential.kind, CredentialKind::SshPrivateKey);
+        assert_eq!(restored_credential.metadata.plugin_id, None);
+    }
+
+    #[test]
+    fn recovery_key_unlock_runs_compatibility_migration_without_transaction_conflict() {
+        let mut vault = initialized_test_vault();
+        vault
+            .service
+            .item_create("prod password", "ssh-password", "secret", None)
+            .expect("create item");
+        let recovery_key = vault
+            .service
+            .generate_recovery_key()
+            .expect("generate recovery key");
+
+        vault.service.lock();
+        let status = vault
+            .service
+            .unlock_with_recovery_key(&recovery_key)
+            .expect("unlock with recovery key");
+
+        assert!(matches!(
+            status,
+            VaultStatus::Unlocked { item_count: 1, .. }
+        ));
     }
 }

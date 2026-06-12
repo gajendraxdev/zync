@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -30,7 +32,7 @@ pub enum VaultStatus {
 }
 
 /// Plaintext record payload — only exists in memory after decryption.
-#[derive(Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaintextRecord {
     pub id: String,
@@ -41,17 +43,50 @@ pub struct PlaintextRecord {
     /// e.g. "ssh-password", "ssh-private-key", "api-key", "secure-note"
     pub kind: String,
     pub label: String,
+    /// Legacy single-secret payload. It is accepted while reading old vaults
+    /// and IPC compatibility calls, then migrated into `secret_values`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub secret: String,
+    /// Canonical named secret values for this credential. BTreeMap provides a
+    /// deterministic serialized form for sync comparisons and fingerprints.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub secret_values: BTreeMap<String, String>,
     pub notes: Option<String>,
     /// Typed credential envelope persisted with the record. Legacy vault
     /// records may not contain this field and are hydrated at read time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[zeroize(skip)]
     pub credential: Option<CredentialEnvelope>,
     pub revision: u64,
     pub created_at: u64,
     pub updated_at: u64,
 }
+
+impl Zeroize for PlaintextRecord {
+    fn zeroize(&mut self) {
+        self.id.zeroize();
+        self.logical_id.zeroize();
+        self.kind.zeroize();
+        self.label.zeroize();
+        self.secret.zeroize();
+        for (mut name, mut value) in std::mem::take(&mut self.secret_values) {
+            name.zeroize();
+            value.zeroize();
+        }
+        self.notes.zeroize();
+        self.credential = None;
+        self.revision.zeroize();
+        self.created_at.zeroize();
+        self.updated_at.zeroize();
+    }
+}
+
+impl Drop for PlaintextRecord {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for PlaintextRecord {}
 
 /// Metadata-only vault item DTO for renderer list views.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,6 +101,22 @@ pub struct VaultItemMeta {
     /// Stable keyed fingerprint of the decrypted secret for equality-only UI workflows.
     /// The plaintext secret is never serialized by the list API.
     pub secret_fingerprint: String,
+    pub revision: u64,
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+/// Non-secret detail DTO for renderer edit/history views. Normal secret use
+/// remains inside trusted Rust adapters rather than crossing IPC.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VaultItemDetail {
+    pub id: String,
+    pub logical_id: String,
+    pub kind: String,
+    pub label: String,
+    pub notes: Option<String>,
+    pub credential: Option<CredentialEnvelope>,
     pub revision: u64,
     pub created_at: u64,
     pub updated_at: u64,
@@ -112,6 +163,8 @@ pub struct RevisionMeta {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::PlaintextRecord;
 
     #[test]
@@ -140,6 +193,7 @@ mod tests {
             kind: "ssh-password".to_string(),
             label: "test".to_string(),
             secret: "s3cr3t".to_string(),
+            secret_values: BTreeMap::new(),
             notes: None,
             credential: None,
             revision: 1,

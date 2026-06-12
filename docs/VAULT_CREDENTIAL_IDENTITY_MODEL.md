@@ -20,6 +20,11 @@ Host -> credentialId -> Vault credential record -> encrypted secret
 
 Hosts must not own secrets. Hosts should reference a stable credential identity. Vault providers should only store encrypted credential records and sync metadata.
 
+Credential kinds describe runtime behavior, not every combination of optional
+secret fields. A passphrase-protected key remains an `ssh-private-key`
+credential containing `privateKey` and optional `passphrase` named secret
+values.
+
 This supports both product flows:
 
 1. **Host-first:** user creates/imports a host with credentials, then Zync stores the credential in the vault and attaches it to the host.
@@ -43,6 +48,8 @@ Current phase-1 vault work already has:
 - Google Drive vault backup/restore
 - keyed secret fingerprint for duplicate detection
 - migration from plaintext host credentials into vault items
+- credential record schema v2 with named secret fields and idempotent
+  legacy-record migration on unlock
 
 Current phase-1 work does **not yet** fully implement:
 

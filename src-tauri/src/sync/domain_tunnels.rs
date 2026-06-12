@@ -5,8 +5,11 @@ use crate::types::{SavedTunnel, SavedTunnelsData};
 use std::collections::BTreeMap;
 use std::io::ErrorKind;
 use std::path::Path;
+use std::sync::{LazyLock, Mutex};
 
 const TUNNELS_FILE: &str = "tunnels.json";
+pub(crate) static TUNNELS_MUTATION_LOCK: LazyLock<Mutex<()>> =
+    LazyLock::new(|| Mutex::new(()));
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -44,20 +47,115 @@ pub fn load_tunnel_sync_records(data_dir: &Path) -> SyncResult<Vec<TunnelSyncRec
     })?;
     let mut dedup: BTreeMap<String, TunnelSyncRecord> = BTreeMap::new();
     for tunnel in data.tunnels {
-        let logical_id = if tunnel.id.trim().is_empty() {
-            format!(
-                "{}:{}:{}:{}",
-                tunnel.connection_id.trim().to_ascii_lowercase(),
-                tunnel.local_port,
-                tunnel.remote_host.trim().to_ascii_lowercase(),
-                tunnel.remote_port
-            )
-        } else {
-            tunnel.id.trim().to_string()
-        };
+        let logical_id = tunnel_logical_id(&tunnel);
         dedup.insert(logical_id.clone(), map_tunnel(tunnel, logical_id));
     }
     Ok(dedup.into_values().collect())
+}
+
+fn tunnel_logical_id(tunnel: &SavedTunnel) -> String {
+    if !tunnel.id.trim().is_empty() {
+        return tunnel.id.trim().to_string();
+    }
+    tunnel_fallback_logical_id(
+        &tunnel.connection_id,
+        &tunnel.tunnel_type,
+        tunnel.local_port,
+        &tunnel.remote_host,
+        tunnel.remote_port,
+        tunnel.bind_address.as_deref(),
+        tunnel.bind_to_any.unwrap_or(false),
+    )
+}
+
+fn tunnel_fallback_logical_id(
+    connection_id: &str,
+    tunnel_type: &str,
+    local_port: u16,
+    remote_host: &str,
+    remote_port: u16,
+    bind_address: Option<&str>,
+    bind_to_any: bool,
+) -> String {
+    format!(
+        "{}:{}:{}:{}:{}:{}:{}",
+        connection_id.trim().to_ascii_lowercase(),
+        tunnel_type.trim().to_ascii_lowercase(),
+        local_port,
+        remote_host.trim().to_ascii_lowercase(),
+        remote_port,
+        bind_address.unwrap_or_default().trim().to_ascii_lowercase(),
+        bind_to_any
+    )
+}
+
+fn legacy_tunnel_fallback_logical_id(
+    connection_id: &str,
+    local_port: u16,
+    remote_host: &str,
+    remote_port: u16,
+) -> String {
+    format!(
+        "{}:{}:{}:{}",
+        connection_id.trim().to_ascii_lowercase(),
+        local_port,
+        remote_host.trim().to_ascii_lowercase(),
+        remote_port
+    )
+}
+
+fn tunnel_matches_record(tunnel: &SavedTunnel, record: &TunnelSyncRecord) -> bool {
+    if tunnel.id == record.logical_id {
+        return true;
+    }
+    let current_fallback = tunnel_fallback_logical_id(
+        &record.connection_id,
+        &record.tunnel_type,
+        record.local_port,
+        &record.remote_host,
+        record.remote_port,
+        record.bind_address.as_deref(),
+        record.bind_to_any,
+    );
+    let legacy_fallback = legacy_tunnel_fallback_logical_id(
+        &record.connection_id,
+        record.local_port,
+        &record.remote_host,
+        record.remote_port,
+    );
+    if record.logical_id != current_fallback && record.logical_id != legacy_fallback {
+        return false;
+    }
+    let tunnel_current_fallback = tunnel_fallback_logical_id(
+        &tunnel.connection_id,
+        &tunnel.tunnel_type,
+        tunnel.local_port,
+        &tunnel.remote_host,
+        tunnel.remote_port,
+        tunnel.bind_address.as_deref(),
+        tunnel.bind_to_any.unwrap_or(false),
+    );
+    let tunnel_legacy_fallback = legacy_tunnel_fallback_logical_id(
+        &tunnel.connection_id,
+        tunnel.local_port,
+        &tunnel.remote_host,
+        tunnel.remote_port,
+    );
+    if !tunnel.id.trim().is_empty()
+        && tunnel.id != tunnel_current_fallback
+        && tunnel.id != tunnel_legacy_fallback
+    {
+        return false;
+    }
+    tunnel.connection_id.trim().eq_ignore_ascii_case(record.connection_id.trim())
+        && tunnel.tunnel_type.trim().eq_ignore_ascii_case(record.tunnel_type.trim())
+        && tunnel.local_port == record.local_port
+        && tunnel.remote_host.trim().eq_ignore_ascii_case(record.remote_host.trim())
+        && tunnel.remote_port == record.remote_port
+        && tunnel.bind_address.as_deref().unwrap_or_default().trim().eq_ignore_ascii_case(
+            record.bind_address.as_deref().unwrap_or_default().trim(),
+        )
+        && tunnel.bind_to_any.unwrap_or(false) == record.bind_to_any
 }
 
 fn map_tunnel(tunnel: SavedTunnel, logical_id: String) -> TunnelSyncRecord {
@@ -83,11 +181,18 @@ pub fn apply_tunnel_restore_records(data_dir: &Path, records: &[TunnelSyncRecord
         return Ok((0, 0));
     }
     let path = data_dir.join(TUNNELS_FILE);
-    let mut saved = load_saved(path.as_path())?;
+    let _guard = TUNNELS_MUTATION_LOCK
+        .lock()
+        .map_err(|error| SyncError::new("sync_tunnels_lock_failed", error.to_string()))?;
+    let mut saved = load_saved_tunnels(path.as_path())?;
     let mut restored = 0u64;
     let mut updated = 0u64;
     for record in records {
-        if let Some(existing) = saved.tunnels.iter_mut().find(|t| t.id == record.logical_id) {
+        if let Some(existing) = saved
+            .tunnels
+            .iter_mut()
+            .find(|t| tunnel_matches_record(t, record))
+        {
             existing.connection_id = record.connection_id.clone();
             existing.name = record.name.clone();
             existing.tunnel_type = record.tunnel_type.clone();
@@ -121,11 +226,11 @@ pub fn apply_tunnel_restore_records(data_dir: &Path, records: &[TunnelSyncRecord
         });
         restored = restored.saturating_add(1);
     }
-    save_saved_atomic(path.as_path(), &saved)?;
+    write_saved_tunnels_atomic(path.as_path(), &saved)?;
     Ok((restored, updated))
 }
 
-fn load_saved(path: &Path) -> SyncResult<SavedTunnelsData> {
+pub(crate) fn load_saved_tunnels(path: &Path) -> SyncResult<SavedTunnelsData> {
     if !path.exists() {
         return Ok(SavedTunnelsData { tunnels: Vec::new() });
     }
@@ -137,7 +242,7 @@ fn load_saved(path: &Path) -> SyncResult<SavedTunnelsData> {
     })
 }
 
-fn save_saved_atomic(path: &Path, data: &SavedTunnelsData) -> SyncResult<()> {
+pub(crate) fn write_saved_tunnels_atomic(path: &Path, data: &SavedTunnelsData) -> SyncResult<()> {
     let parent = path
         .parent()
         .ok_or_else(|| SyncError::new("sync_tunnels_write_failed", "Invalid tunnels file path"))?;
@@ -282,5 +387,202 @@ mod tests {
         );
 
         assert_eq!(record.updated_at, 55);
+    }
+
+    #[test]
+    fn legacy_logical_id_distinguishes_tunnel_type_and_bind_address() {
+        let mut first = SavedTunnel {
+            id: String::new(),
+            connection_id: "Conn-1".into(),
+            name: "API".into(),
+            tunnel_type: "local".into(),
+            local_port: 8080,
+            remote_host: "DB.INTERNAL".into(),
+            remote_port: 80,
+            bind_address: Some("127.0.0.1".into()),
+            bind_to_any: Some(false),
+            auto_start: Some(false),
+            status: None,
+            original_port: None,
+            group: None,
+            created_at: Some(1),
+            updated_at: Some(1),
+        };
+        let first_id = tunnel_logical_id(&first);
+        first.tunnel_type = "remote".into();
+        assert_ne!(first_id, tunnel_logical_id(&first));
+        first.tunnel_type = "local".into();
+        first.bind_address = Some("0.0.0.0".into());
+        assert_ne!(first_id, tunnel_logical_id(&first));
+    }
+
+    #[test]
+    fn restore_matches_existing_tunnel_by_legacy_fallback_logical_id() {
+        let dir = std::env::temp_dir().join(format!(
+            "zync-sync-tunnels-legacy-restore-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let existing = SavedTunnel {
+            id: String::new(),
+            connection_id: "conn-1".into(),
+            name: "Old".into(),
+            tunnel_type: "local".into(),
+            local_port: 8080,
+            remote_host: "db.internal".into(),
+            remote_port: 80,
+            bind_address: Some("127.0.0.1".into()),
+            bind_to_any: Some(false),
+            auto_start: Some(false),
+            status: None,
+            original_port: None,
+            group: None,
+            created_at: Some(1),
+            updated_at: Some(1),
+        };
+        let logical_id = tunnel_logical_id(&existing);
+        let initial = SavedTunnelsData {
+            tunnels: vec![existing],
+        };
+        std::fs::write(
+            dir.join(TUNNELS_FILE),
+            serde_json::to_string_pretty(&initial).expect("serialize"),
+        )
+        .expect("write");
+
+        let record = TunnelSyncRecord {
+            logical_id,
+            connection_id: "conn-1".into(),
+            name: "Updated".into(),
+            tunnel_type: "local".into(),
+            local_port: 8080,
+            remote_host: "db.internal".into(),
+            remote_port: 80,
+            bind_address: Some("127.0.0.1".into()),
+            bind_to_any: false,
+            auto_start: true,
+            group: None,
+            updated_at: 9,
+        };
+        let (restored, updated) = apply_tunnel_restore_records(&dir, &[record]).expect("apply");
+        assert_eq!((restored, updated), (0, 1));
+        let saved = load_saved_tunnels(&dir.join(TUNNELS_FILE)).expect("read");
+        assert_eq!(saved.tunnels.len(), 1);
+        assert_eq!(saved.tunnels[0].name, "Updated");
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[test]
+    fn restore_matches_preexisting_legacy_v1_fallback_id() {
+        let dir = std::env::temp_dir().join(format!(
+            "zync-sync-tunnels-v1-restore-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let existing = SavedTunnel {
+            id: String::new(),
+            connection_id: "conn-1".into(),
+            name: "Old".into(),
+            tunnel_type: "local".into(),
+            local_port: 8080,
+            remote_host: "db.internal".into(),
+            remote_port: 80,
+            bind_address: Some("127.0.0.1".into()),
+            bind_to_any: Some(false),
+            auto_start: Some(false),
+            status: None,
+            original_port: None,
+            group: None,
+            created_at: Some(1),
+            updated_at: Some(1),
+        };
+        let legacy_id = legacy_tunnel_fallback_logical_id(
+            &existing.connection_id,
+            existing.local_port,
+            &existing.remote_host,
+            existing.remote_port,
+        );
+        std::fs::write(
+            dir.join(TUNNELS_FILE),
+            serde_json::to_string_pretty(&SavedTunnelsData {
+                tunnels: vec![existing],
+            })
+            .expect("serialize"),
+        )
+        .expect("write");
+
+        let record = TunnelSyncRecord {
+            logical_id: legacy_id,
+            connection_id: "conn-1".into(),
+            name: "Updated".into(),
+            tunnel_type: "local".into(),
+            local_port: 8080,
+            remote_host: "db.internal".into(),
+            remote_port: 80,
+            bind_address: Some("127.0.0.1".into()),
+            bind_to_any: false,
+            auto_start: true,
+            group: None,
+            updated_at: 9,
+        };
+
+        let (restored, updated) = apply_tunnel_restore_records(&dir, &[record]).expect("apply");
+        assert_eq!((restored, updated), (0, 1));
+        let saved = load_saved_tunnels(&dir.join(TUNNELS_FILE)).expect("read");
+        assert_eq!(saved.tunnels.len(), 1);
+        assert_eq!(saved.tunnels[0].name, "Updated");
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[test]
+    fn fallback_restore_does_not_merge_explicitly_identified_tunnel() {
+        let explicit = SavedTunnel {
+            id: "explicit-tunnel".into(),
+            connection_id: "conn-1".into(),
+            name: "Explicit".into(),
+            tunnel_type: "local".into(),
+            local_port: 8080,
+            remote_host: "db.internal".into(),
+            remote_port: 80,
+            bind_address: Some("127.0.0.1".into()),
+            bind_to_any: Some(false),
+            auto_start: Some(false),
+            status: None,
+            original_port: None,
+            group: None,
+            created_at: Some(1),
+            updated_at: Some(1),
+        };
+        let fallback = tunnel_fallback_logical_id(
+            &explicit.connection_id,
+            &explicit.tunnel_type,
+            explicit.local_port,
+            &explicit.remote_host,
+            explicit.remote_port,
+            explicit.bind_address.as_deref(),
+            explicit.bind_to_any.unwrap_or(false),
+        );
+        let record = TunnelSyncRecord {
+            logical_id: fallback,
+            connection_id: explicit.connection_id.clone(),
+            name: "Remote fallback".into(),
+            tunnel_type: explicit.tunnel_type.clone(),
+            local_port: explicit.local_port,
+            remote_host: explicit.remote_host.clone(),
+            remote_port: explicit.remote_port,
+            bind_address: explicit.bind_address.clone(),
+            bind_to_any: false,
+            auto_start: false,
+            group: None,
+            updated_at: 2,
+        };
+
+        assert!(!tunnel_matches_record(&explicit, &record));
     }
 }

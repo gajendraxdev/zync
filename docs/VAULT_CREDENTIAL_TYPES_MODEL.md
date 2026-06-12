@@ -22,6 +22,10 @@ Today Zync is SSH-focused:
 - the vault stores SSH private keys and password-like secrets
 - secure-to-vault migrates connection auth material out of host records
 - provider sync moves encrypted vault records by stable credential identity
+- credential record schema v2 stores named encrypted secret values instead of
+  one opaque secret string
+- `ssh-private-key` is the canonical kind; an optional `passphrase` is a named
+  field of that credential rather than a separate credential kind
 
 That is the right foundation, but the UI and data model should keep saying
 **credential** instead of assuming every vault item is a **key**.
@@ -95,6 +99,11 @@ interface CredentialEntity {
   schemaVersion: number;
 }
 
+interface EncryptedCredentialPayload {
+  // Stored only inside the per-record encrypted payload.
+  secretValues: Record<string, string>;
+}
+
 interface CredentialField {
   name: string;
   label: string;
@@ -135,6 +144,10 @@ interface CredentialMetadata {
 ### Field rules
 
 - Secret fields use `valueRef` / encrypted vault storage.
+- Canonical secret references use `secret:<fieldName>`, for example
+  `secret:privateKey`, `secret:passphrase`, and `secret:password`.
+- Normal item-detail IPC returns typed metadata and field references only; it
+  does not return `secretValues` to the renderer.
 - Non-secret fields may use `value` for labels, usernames, service names, URLs,
   and search-friendly metadata.
 - Never log secret field values.
@@ -151,7 +164,6 @@ Suggested storage enum:
 ```text
 ssh-private-key
 ssh-password
-ssh-key-with-passphrase
 ssh-certificate
 username-password
 api-token
@@ -170,6 +182,8 @@ plugin-defined
 Rules:
 
 - Keep kinds stable and migration-friendly.
+- Model optional secret material as fields, not kind variants. A private key
+  with a passphrase remains `ssh-private-key`.
 - Do not overload one kind with unrelated schemas.
 - Prefer a generic kind (`username-password`) when a service does not need
   special runtime behavior.
@@ -219,7 +233,7 @@ Rules:
 ```json
 {
   "credentialId": "cred_prod_ssh_key",
-  "kind": "ssh-key-with-passphrase",
+  "kind": "ssh-private-key",
   "label": "Production SSH key",
   "fields": [
     {
@@ -228,14 +242,14 @@ Rules:
       "secret": true,
       "format": "private-key",
       "encoding": "pem",
-      "valueRef": "field_private_key"
+      "valueRef": "secret:privateKey"
     },
     {
       "name": "passphrase",
       "label": "Passphrase",
       "secret": true,
       "format": "password",
-      "valueRef": "field_passphrase"
+      "valueRef": "secret:passphrase"
     }
   ],
   "metadata": {
@@ -334,7 +348,7 @@ Host
   authRef: cred_prod_ssh_key
 
 Vault Credential
-  kind: ssh-key-with-passphrase
+  kind: ssh-private-key
   fields: privateKey, passphrase
 
 SSH adapter
@@ -463,21 +477,23 @@ Current SSH-key-focused records can evolve without breaking existing hosts.
 Migration strategy:
 
 1. Preserve current `credentialId` / logical identity.
-2. Wrap existing SSH vault records in typed credential envelopes.
-3. Map current `kind` values into stable credential kinds.
-4. Store existing encrypted secret payloads as typed secret fields.
-5. Add usernames/service/URL/tags as metadata or non-secret fields.
-6. Keep backward-compatible readers until old records are fully migrated.
-7. Add type-specific UI one credential kind at a time.
+2. On unlock, run idempotent record migration before returning vault status.
+3. Wrap legacy SSH vault records in typed credential envelopes.
+4. Split legacy raw/JSON private-key payloads into named `privateKey` and
+   optional `passphrase` secret values.
+5. Canonicalize legacy `ssh-key-with-passphrase` records to `ssh-private-key`.
+6. Clear the legacy single-secret field before rewriting the encrypted record.
+7. Keep backward-compatible readers for legacy local/provider records.
+8. Add usernames/service/URL/tags as metadata or non-secret fields.
+9. Add type-specific UI one credential kind at a time.
 
 Recommended implementation order:
 
 ```text
-V1: SSH-focused VaultItem remains supported
-V2: typed envelope adapter over existing SSH records
-V3: field-based credential schema storage
-V4: username/password + certificate UI
-V5: Jenkins/plugin-defined schema support
+V1: SSH-focused single-secret VaultItem (legacy read compatibility)
+V2: typed envelope + named secret-value storage (implemented)
+V3: username/password + certificate UI
+V4: Jenkins/plugin-defined schema support
 ```
 
 ---

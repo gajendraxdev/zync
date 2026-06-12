@@ -33,6 +33,7 @@ import {
     startAutoStartTunnels,
 } from '../features/connections/application/tunnelAutoStartService';
 import { buildConnectConfig, normalizeFolderPath, preserveVaultCredentialOnUpdate, type ImportPlanItem } from '../features/connections/domain';
+import { connectionErrorMessage } from '../features/connections/domain/errorSanitization';
 import { connectIpc, disconnectIpc, getRemoteCwdIpc } from '../features/connections/infrastructure/connectionIpc';
 import { loadConnectionsIpc, saveConnectionsIpc, type LoadConnectionsIpcResult } from '../features/connections/infrastructure/connectionPersistence';
 import { clearRemoteShellCache } from '../lib/shells/cache';
@@ -116,14 +117,6 @@ const VALID_RESTORABLE_VIEWS = new Set<CoreTabView>(['terminal', 'files', 'port-
 const RESTORABLE_TAB_TYPES = new Set(['connection', 'port-forwarding', 'release-notes', 'snippets', 'settings', 'vault', 'sync']);
 
 type PersistedConnection = Omit<Connection, 'status'> & Partial<Pick<Connection, 'status'>>;
-
-const connectionErrorMessage = (error: unknown): string => {
-    const raw = error instanceof Error ? error.message : String(error ?? 'Unknown error');
-    return raw
-        .replace(/-----BEGIN[\s\S]*?-----END [^-]+-----/g, '[redacted private key]')
-        .replace(/\b(password|passphrase|token|secret)\b\s*[:=]\s*([^\s,;]+)/gi, '$1=[redacted]')
-        .slice(0, 500);
-};
 
 export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSlice> = (set, get) => ({
     connections: [],

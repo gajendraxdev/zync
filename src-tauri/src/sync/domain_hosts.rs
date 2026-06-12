@@ -106,6 +106,10 @@ fn host_updated_at(conn: &SavedConnection) -> u64 {
     normalize_host_timestamp(conn.last_connected).max(normalize_host_timestamp(conn.created_at))
 }
 
+fn host_timestamp_from_sync(updated_at: u64) -> u64 {
+    updated_at.saturating_mul(1000)
+}
+
 pub fn apply_hosts_restore_records(
     data_dir: &Path,
     records: &[HostSyncRecord],
@@ -119,7 +123,11 @@ pub fn apply_hosts_restore_records(
     let mut updated = 0u64;
 
     for record in records {
-        if let Some(existing) = data.connections.iter_mut().find(|conn| conn.id == record.logical_id) {
+        if let Some(existing) = data
+            .connections
+            .iter_mut()
+            .find(|conn| host_logical_id(conn) == record.logical_id)
+        {
             existing.name = record.name.clone();
             existing.host = record.host.clone();
             existing.port = record.port;
@@ -132,7 +140,7 @@ pub fn apply_hosts_restore_records(
                 Some(record.tags.clone())
             };
             existing.is_favorite = Some(record.is_favorite);
-            existing.last_connected = Some(record.updated_at);
+            existing.last_connected = Some(host_timestamp_from_sync(record.updated_at));
             if let Some(auth_ref) = &record.auth_ref {
                 existing.auth_ref = Some(auth_ref.clone());
                 existing.password = None;
@@ -151,7 +159,7 @@ pub fn apply_hosts_restore_records(
             password: None,
             private_key_path: None,
             jump_server_id: record.jump_server_id.clone(),
-            last_connected: Some(record.updated_at),
+            last_connected: Some(host_timestamp_from_sync(record.updated_at)),
             icon: None,
             folder: record.folder.clone(),
             theme: None,
@@ -160,7 +168,7 @@ pub fn apply_hosts_restore_records(
             } else {
                 Some(record.tags.clone())
             },
-            created_at: Some(record.updated_at),
+            created_at: Some(host_timestamp_from_sync(record.updated_at)),
             is_favorite: Some(record.is_favorite),
             pinned_features: None,
             auth_ref: record.auth_ref.clone(),
@@ -389,6 +397,8 @@ mod tests {
         assert_eq!(restored.jump_server_id.as_deref(), Some("jump-1"));
         assert_eq!(restored.password, None);
         assert_eq!(restored.private_key_path, None);
+        assert_eq!(restored.created_at, Some(7_000));
+        assert_eq!(restored.last_connected, Some(7_000));
 
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }
@@ -436,6 +446,50 @@ mod tests {
         assert_eq!(updated.password, None);
         assert_eq!(updated.private_key_path, None);
         assert_eq!(updated.port, 2222);
+
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[test]
+    fn restore_matches_existing_host_by_legacy_fallback_logical_id() {
+        let dir = temp_dir("restore-legacy-logical-id");
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let mut existing = test_connection("");
+        existing.host = "Example.COM".into();
+        existing.username = "App".into();
+        existing.port = 2222;
+        let initial = SavedData {
+            connections: vec![existing],
+            folders: Vec::new(),
+        };
+        std::fs::write(
+            dir.join(CONNECTIONS_FILE),
+            serde_json::to_string_pretty(&initial).expect("serialize initial"),
+        )
+        .expect("write initial");
+
+        let record = HostSyncRecord {
+            logical_id: "app@example.com:2222".into(),
+            name: "Updated".into(),
+            host: "example.com".into(),
+            port: 2222,
+            username: "app".into(),
+            jump_server_id: None,
+            folder: None,
+            tags: Vec::new(),
+            is_favorite: false,
+            updated_at: 9,
+            auth_ref: None,
+        };
+
+        let (restored, updated) = apply_hosts_restore_records(&dir, &[record]).expect("apply");
+        assert_eq!((restored, updated), (0, 1));
+
+        let raw = std::fs::read_to_string(dir.join(CONNECTIONS_FILE)).expect("read saved hosts");
+        let saved: SavedData = serde_json::from_str(&raw).expect("parse saved hosts");
+        assert_eq!(saved.connections.len(), 1);
+        assert_eq!(saved.connections[0].name, "Updated");
+        assert_eq!(saved.connections[0].last_connected, Some(9_000));
 
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }

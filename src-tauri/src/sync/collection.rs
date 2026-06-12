@@ -683,10 +683,34 @@ fn generate_recovery_key() -> (String, [u8; 32]) {
 
 fn parse_recovery_key(value: &str) -> Option<[u8; 32]> {
     let normalized = value.trim();
-    let encoded = normalized
-        .strip_prefix(&format!("{SYNC_RECOVERY_KEY_PREFIX}-"))
-        .unwrap_or(normalized)
-        .replace('-', "");
+    let prefix = format!("{SYNC_RECOVERY_KEY_PREFIX}-");
+    if let Some(grouped) = normalized.strip_prefix(&prefix) {
+        return decode_grouped_recovery_key(grouped);
+    }
+
+    decode_recovery_key_bytes(normalized).or_else(|| decode_grouped_recovery_key(normalized))
+}
+
+fn decode_grouped_recovery_key(grouped: &str) -> Option<[u8; 32]> {
+    let chars: Vec<char> = grouped.chars().collect();
+    let mut encoded = String::with_capacity(chars.len());
+    let mut index = 0usize;
+    while index < chars.len() {
+        let remaining = chars.len().saturating_sub(index);
+        let group_len = remaining.min(4);
+        encoded.extend(chars[index..index + group_len].iter());
+        index += group_len;
+        if index < chars.len() {
+            if chars[index] != '-' {
+                return None;
+            }
+            index += 1;
+        }
+    }
+    decode_recovery_key_bytes(&encoded)
+}
+
+fn decode_recovery_key_bytes(encoded: &str) -> Option<[u8; 32]> {
     let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(encoded)
         .ok()?;
@@ -787,6 +811,23 @@ fn provider_from_str(value: &str) -> SyncResult<SyncProviderKind> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recovery_key_parser_preserves_url_safe_hyphens_inside_groups() {
+        let bytes = [0xfbu8; 32];
+        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+        assert!(encoded.contains('-'));
+        let grouped = encoded
+            .as_bytes()
+            .chunks(4)
+            .map(|chunk| std::str::from_utf8(chunk).expect("base64 is utf8"))
+            .collect::<Vec<_>>()
+            .join("-");
+        let formatted = format!("{SYNC_RECOVERY_KEY_PREFIX}-{grouped}");
+
+        assert_eq!(parse_recovery_key(&formatted), Some(bytes));
+        assert_eq!(parse_recovery_key(&encoded), Some(bytes));
+    }
 
     #[test]
     fn setup_manifest_creates_and_updates_sync_collection() {

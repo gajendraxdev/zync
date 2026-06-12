@@ -8,7 +8,7 @@ use crate::types::SavedData;
 use crate::vault::error::VaultError;
 use crate::vault::secure_to_vault::{SecureToVaultPreview, SecureToVaultResult};
 use crate::vault::store::VaultService;
-use crate::vault::types::{PlaintextRecord, RevisionMeta, VaultItemMeta, VaultStatus};
+use crate::vault::types::{RevisionMeta, VaultItemDetail, VaultItemMeta, VaultStatus};
 
 // ── Error wrapper (serializable for IPC) ─────────────────────────────────────
 
@@ -91,7 +91,10 @@ pub async fn vault_lock(vault: State<'_, Mutex<VaultService>>) -> VaultResult<()
 pub struct ItemCreateArgs {
     pub label: String,
     pub kind: String,
-    pub secret: SecretString,
+    #[serde(default)]
+    pub secret: Option<SecretString>,
+    #[serde(default)]
+    pub secret_values: Option<BTreeMap<String, SecretString>>,
     pub notes: Option<String>,
     pub credential_id: Option<String>,
 }
@@ -110,23 +113,29 @@ pub async fn vault_item_create(
     args: ItemCreateArgs,
 ) -> VaultResult<VaultItemMeta> {
     let vault = vault.lock().await;
-    let record = if let Some(credential_id) = args.credential_id.as_deref() {
+    let record = if let Some(secret_values) = args.secret_values.as_ref().filter(|v| !v.is_empty()) {
+        let mut exposed = expose_secret_values(secret_values);
+        let result = vault.item_create_with_secret_values(
+            &args.label,
+            &args.kind,
+            &exposed,
+            args.notes.as_deref(),
+            args.credential_id.as_deref(),
+        );
+        zeroize_secret_values(&mut exposed);
+        result.map_err(VaultCommandError::from)?
+    } else {
+        let secret = args.secret.as_ref().ok_or_else(|| VaultCommandError {
+            code: "invalid_secret_values".into(),
+            message: "Credential requires at least one secret value".into(),
+        })?;
         vault
             .item_create_with_logical_id(
                 &args.label,
                 &args.kind,
-                args.secret.expose_secret(),
+                secret.expose_secret(),
                 args.notes.as_deref(),
-                Some(credential_id),
-            )
-            .map_err(VaultCommandError::from)?
-    } else {
-        vault
-            .item_create(
-                &args.label,
-                &args.kind,
-                args.secret.expose_secret(),
-                args.notes.as_deref(),
+                args.credential_id.as_deref(),
             )
             .map_err(VaultCommandError::from)?
     };
@@ -154,12 +163,23 @@ pub struct ItemGetArgs {
 pub async fn vault_item_get(
     vault: State<'_, Mutex<VaultService>>,
     args: ItemGetArgs,
-) -> VaultResult<PlaintextRecord> {
-    vault
+) -> VaultResult<VaultItemDetail> {
+    let record = vault
         .lock()
         .await
         .item_get(&args.item_id)
-        .map_err(Into::into)
+        .map_err(VaultCommandError::from)?;
+    Ok(VaultItemDetail {
+        logical_id: VaultService::record_logical_id(&record),
+        id: record.id.clone(),
+        kind: record.kind.clone(),
+        label: record.label.clone(),
+        notes: record.notes.clone(),
+        credential: record.credential.clone(),
+        revision: record.revision,
+        created_at: record.created_at,
+        updated_at: record.updated_at,
+    })
 }
 
 #[derive(Deserialize)]
@@ -184,7 +204,10 @@ pub struct ItemUpdateArgs {
     pub item_id: String,
     pub label: String,
     pub kind: String,
-    pub secret: SecretString,
+    #[serde(default)]
+    pub secret: Option<SecretString>,
+    #[serde(default)]
+    pub secret_values: Option<BTreeMap<String, SecretString>>,
     pub notes: Option<String>,
 }
 
@@ -202,16 +225,48 @@ pub async fn vault_item_update(
     args: ItemUpdateArgs,
 ) -> VaultResult<VaultItemMeta> {
     let vault = vault.lock().await;
-    let record = vault
-        .item_update(
+    let record = if let Some(secret_values) = args.secret_values.as_ref().filter(|v| !v.is_empty()) {
+        let mut exposed = expose_secret_values(secret_values);
+        let result = vault.item_update_with_secret_values(
             &args.item_id,
             &args.label,
             &args.kind,
-            args.secret.expose_secret(),
+            &exposed,
             args.notes.as_deref(),
-        )
-        .map_err(VaultCommandError::from)?;
+            None,
+        );
+        zeroize_secret_values(&mut exposed);
+        result.map_err(VaultCommandError::from)?
+    } else {
+        let secret = args.secret.as_ref().ok_or_else(|| VaultCommandError {
+            code: "invalid_secret_values".into(),
+            message: "Credential requires at least one secret value".into(),
+        })?;
+        vault
+            .item_update(
+                &args.item_id,
+                &args.label,
+                &args.kind,
+                secret.expose_secret(),
+                args.notes.as_deref(),
+            )
+            .map_err(VaultCommandError::from)?
+    };
     vault.item_meta(&record).map_err(Into::into)
+}
+
+fn expose_secret_values(values: &BTreeMap<String, SecretString>) -> BTreeMap<String, String> {
+    values
+        .iter()
+        .map(|(name, value)| (name.clone(), value.expose_secret().to_string()))
+        .collect()
+}
+
+fn zeroize_secret_values(values: &mut BTreeMap<String, String>) {
+    for value in values.values_mut() {
+        value.zeroize();
+    }
+    values.clear();
 }
 
 // ── Revision history commands ─────────────────────────────────────────────────
@@ -513,3 +568,4 @@ pub fn repair_connection_refs(
         skipped_missing_items,
     })
 }
+use std::collections::BTreeMap;

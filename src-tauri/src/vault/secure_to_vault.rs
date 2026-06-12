@@ -184,7 +184,7 @@ pub fn secure(data_dir: &Path, vault: &VaultService) -> Result<SecureToVaultResu
     let mut existing_by_fingerprint: HashMap<(String, String, String), (String, String, u64)> =
         HashMap::new();
     for record in existing_records {
-        let fingerprint = vault.secret_fingerprint(&record.secret)?;
+        let fingerprint = vault.record_secret_fingerprint(&record)?;
         let key = (record.kind.clone(), record.label.clone(), fingerprint);
         let credential_id = VaultService::record_logical_id(&record);
         existing_by_fingerprint

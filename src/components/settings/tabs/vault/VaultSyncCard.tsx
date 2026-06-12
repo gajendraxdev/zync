@@ -69,7 +69,7 @@ interface CollectionManagementSectionProps {
   isUnlockingCollection: boolean;
   isLockingCollection: boolean;
   isRegeneratingCollectionRecoveryKey: boolean;
-  isSyncing: boolean;
+  isActionBlocked: boolean;
   onSetupCollection: () => void;
   onUnlockCollection: () => void;
   onLockCollection: () => void;
@@ -82,7 +82,7 @@ function CollectionManagementSection({
   isUnlockingCollection,
   isLockingCollection,
   isRegeneratingCollectionRecoveryKey,
-  isSyncing,
+  isActionBlocked,
   onSetupCollection,
   onUnlockCollection,
   onLockCollection,
@@ -136,7 +136,7 @@ function CollectionManagementSection({
           onClick={onUnlockCollection}
           disabled={
             isUnlockingCollection
-            || isSyncing
+            || isActionBlocked
             || isSettingUpCollection
             || isLockingCollection
             || isRegeneratingCollectionRecoveryKey
@@ -164,7 +164,7 @@ function CollectionManagementSection({
           isLockingCollection
           || isUnlockingCollection
           || isRegeneratingCollectionRecoveryKey
-          || isSyncing
+          || isActionBlocked
           || isSettingUpCollection
         }
         className="gap-1.5"
@@ -182,7 +182,7 @@ function CollectionManagementSection({
         onClick={onRegenerateCollectionRecoveryKey}
         disabled={
           isRegeneratingCollectionRecoveryKey
-          || isSyncing
+          || isActionBlocked
           || isSettingUpCollection
           || isUnlockingCollection
           || isLockingCollection
@@ -244,8 +244,18 @@ export function VaultSyncCard({
   const googleStatusTone = googleSync?.connected
     ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
     : 'bg-[var(--color-app-surface)] text-[var(--color-app-muted)] border-[var(--color-app-border)]/60';
-  const isCollectionActionBlocked =
+  const isDomainActionInFlight =
     isSyncing
+    || isSyncingHosts
+    || isRestoringHosts
+    || isSyncingTunnels
+    || isRestoringTunnels
+    || isSyncingSnippets
+    || isRestoringSnippets
+    || isSyncingSettings
+    || isRestoringSettings;
+  const isCollectionActionBlocked =
+    isDomainActionInFlight
     || isSettingUpCollection
     || isUnlockingCollection
     || isLockingCollection
@@ -260,7 +270,7 @@ export function VaultSyncCard({
       : !googleCollection?.keyCached
         ? 'Unlock Google encryption on this device to enable Sync and Restore.'
         : isCollectionActionBlocked
-          ? 'Finish the current Google encryption action first.'
+          ? 'Finish the current sync or Google encryption action first.'
           : null;
   const isVaultSyncDisabled = isProviderDomainActionDisabled || !hasVaultConfigured;
   const isRestoreDisabled = isProviderDomainActionDisabled || !isVaultUnlocked;
@@ -271,21 +281,24 @@ export function VaultSyncCard({
     domain: SyncDomain,
     fallback = getSyncDomainDefinition(domain).defaultEnabled,
   ) => domainPolicies.find(policy => policy.domain === domain)?.enabled ?? fallback;
+  const isVaultDomainEnabled = domainPolicyEnabled('vault');
   const domainRows = [
     {
       key: 'vault' as const,
-      enabled: domainPolicyEnabled('vault'),
+      enabled: isVaultDomainEnabled,
       syncing: isSyncing,
       restoring: isSyncing,
       onSync: onUpload,
       onRestore: onDownload,
       syncLabel: 'Sync',
       restoreLabel: 'Restore',
-      syncDisabled: isVaultSyncDisabled,
-      restoreDisabled: isRestoreDisabled,
-      onToggle: () => onSetDomainPolicyEnabled('vault', !domainPolicyEnabled('vault')),
+      syncDisabled: isVaultSyncDisabled || !isVaultDomainEnabled,
+      restoreDisabled: isRestoreDisabled || !isVaultDomainEnabled,
+      onToggle: () => onSetDomainPolicyEnabled('vault', !isVaultDomainEnabled),
       disabledReason: providerGateReason
-        ?? (!hasVaultConfigured
+        ?? (!isVaultDomainEnabled
+          ? 'Enable Vault credentials sync to use this domain.'
+          : !hasVaultConfigured
           ? 'Create the Local Vault before syncing vault credentials.'
           : !isVaultUnlocked
             ? 'Unlock the Local Vault before restoring vault credentials.'
@@ -401,6 +414,7 @@ export function VaultSyncCard({
               variant="ghost"
               size="sm"
               onClick={onDisconnect}
+              disabled={isCollectionActionBlocked}
               className="gap-1.5 shrink-0 text-[var(--color-app-muted)] hover:text-red-400"
             >
               <LogOut size={13} />
@@ -410,7 +424,7 @@ export function VaultSyncCard({
             <Button
               size="sm"
               onClick={onConnect}
-              disabled={isSyncing}
+              disabled={isCollectionActionBlocked}
               className="gap-1.5 shrink-0"
             >
               {isSyncing ? <RefreshCw size={13} className="animate-spin" /> : <Cloud size={13} />}
@@ -427,7 +441,7 @@ export function VaultSyncCard({
               isUnlockingCollection={isUnlockingCollection}
               isLockingCollection={isLockingCollection}
               isRegeneratingCollectionRecoveryKey={isRegeneratingCollectionRecoveryKey}
-              isSyncing={isSyncing}
+              isActionBlocked={isCollectionActionBlocked}
               onSetupCollection={onSetupCollection}
               onUnlockCollection={onUnlockCollection}
               onLockCollection={onLockCollection}

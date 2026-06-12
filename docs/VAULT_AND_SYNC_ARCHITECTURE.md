@@ -95,6 +95,8 @@ UI (Sidebar Vaults + Vault tabs + Sync status)
 For the detailed durable credential identity model that supports key-first vault UX,
 host assignment, rotation, and stale-reference repair, see
 [`VAULT_CREDENTIAL_IDENTITY_MODEL.md`](./VAULT_CREDENTIAL_IDENTITY_MODEL.md).
+For canonical credential kinds, named secret fields, and schema migration rules,
+see [`VAULT_CREDENTIAL_TYPES_MODEL.md`](./VAULT_CREDENTIAL_TYPES_MODEL.md).
 
 ### Core entities
 - `Vault`
