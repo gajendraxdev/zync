@@ -278,8 +278,14 @@ impl VaultService {
             Err(redb::TableError::TableDoesNotExist(_)) => return Ok(0),
             Err(error) => return Err(VaultError::from(error)),
         };
+        let logical_ids = match read_txn.open_table(LOGICAL_IDS) {
+            Ok(table) => Some(table),
+            Err(redb::TableError::TableDoesNotExist(_)) => None,
+            Err(error) => return Err(VaultError::from(error)),
+        };
 
         let mut rewrites: Vec<(String, StoredEnvelope)> = Vec::new();
+        let mut logical_id_mappings: Vec<(String, String)> = Vec::new();
         for entry in records.iter()? {
             let (key, value): (redb::AccessGuard<&str>, redb::AccessGuard<&[u8]>) = entry?;
             let item_id = key.value().to_string();
@@ -306,32 +312,41 @@ impl VaultService {
                 || record.secret_values.is_empty()
                 || !record.secret.is_empty()
                 || record.kind == "ssh-key-with-passphrase";
-            if !needs_rewrite {
-                continue;
+            if needs_rewrite {
+                normalize_record_credential(&mut record);
+                let rewritten_plaintext = serde_json::to_vec(&record)?;
+                let rewritten_envelope =
+                    encrypt_record(&record_key, &rewritten_plaintext, aad.as_bytes())?;
+                rewrites.push((
+                    item_id.clone(),
+                    StoredEnvelope {
+                        id: stored.id.clone(),
+                        kind: stored.kind.clone(),
+                        revision: stored.revision,
+                        deleted: stored.deleted,
+                        crypto_suite: CRYPTO_SUITE.into(),
+                        aad_version: AAD_VERSION,
+                        nonce: STANDARD.encode(rewritten_envelope.nonce),
+                        ciphertext: STANDARD.encode(&rewritten_envelope.ciphertext),
+                    },
+                ));
             }
-
-            normalize_record_credential(&mut record);
-            let rewritten_plaintext = serde_json::to_vec(&record)?;
-            let rewritten_envelope =
-                encrypt_record(&record_key, &rewritten_plaintext, aad.as_bytes())?;
-            rewrites.push((
-                item_id,
-                StoredEnvelope {
-                    id: stored.id.clone(),
-                    kind: stored.kind.clone(),
-                    revision: stored.revision,
-                    deleted: stored.deleted,
-                    crypto_suite: CRYPTO_SUITE.into(),
-                    aad_version: AAD_VERSION,
-                    nonce: STANDARD.encode(rewritten_envelope.nonce),
-                    ciphertext: STANDARD.encode(&rewritten_envelope.ciphertext),
-                },
-            ));
+            let logical_id = Self::record_logical_id(&record);
+            let mapping_is_current = match &logical_ids {
+                Some(table) => table
+                    .get(logical_id.as_str())?
+                    .is_some_and(|mapped_item_id| mapped_item_id.value() == item_id),
+                None => false,
+            };
+            if !mapping_is_current {
+                logical_id_mappings.push((logical_id, item_id));
+            }
         }
+        drop(logical_ids);
         drop(records);
         drop(read_txn);
 
-        if rewrites.is_empty() {
+        if rewrites.is_empty() && logical_id_mappings.is_empty() {
             return Ok(0);
         }
 
@@ -340,6 +355,10 @@ impl VaultService {
             let mut records = write_txn.open_table(RECORDS)?;
             for (item_id, stored) in &rewrites {
                 records.insert(item_id.as_str(), serde_json::to_vec(stored)?.as_slice())?;
+            }
+            let mut logical_ids = write_txn.open_table(LOGICAL_IDS)?;
+            for (logical_id, item_id) in &logical_id_mappings {
+                logical_ids.insert(logical_id.as_str(), item_id.as_str())?;
             }
         }
         write_txn.commit()?;
@@ -1138,7 +1157,11 @@ impl VaultService {
         drop(vm);
         drop(read_txn);
 
-        self.migrate_live_records_to_current_schema()?;
+        if let Err(error) = self.migrate_live_records_to_current_schema() {
+            self.vek = None;
+            self.meta = None;
+            return Err(error);
+        }
 
         let read_txn = db.begin_read()?;
         let item_count = live_record_count(&read_txn)?;
@@ -1661,6 +1684,47 @@ mod tests {
 
         let revisions: Vec<u64> = history.iter().map(|revision| revision.revision).collect();
         assert_eq!(revisions, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn unlock_backfills_missing_logical_id_mapping_for_current_record() {
+        let mut vault = initialized_test_vault();
+        let item = vault
+            .service
+            .item_create_with_logical_id(
+                "prod password",
+                "ssh-password",
+                "secret-v1",
+                None,
+                Some("credential-prod-password"),
+            )
+            .expect("create item");
+        let db = vault.service.db.as_ref().expect("opened database");
+        let write_txn = db.begin_write().expect("begin write");
+        {
+            let mut logical_ids = write_txn.open_table(LOGICAL_IDS).expect("open logical ids");
+            logical_ids
+                .remove("credential-prod-password")
+                .expect("remove logical id");
+        }
+        write_txn.commit().expect("commit missing logical id");
+        assert!(matches!(
+            vault
+                .service
+                .item_get_by_logical_id("credential-prod-password"),
+            Err(VaultError::RecordNotFound(_))
+        ));
+
+        vault.service.lock();
+        vault
+            .service
+            .unlock("correct horse battery staple")
+            .expect("unlock and backfill");
+        let restored = vault
+            .service
+            .item_get_by_logical_id("credential-prod-password")
+            .expect("logical id resolves after migration");
+        assert_eq!(restored.id, item.id);
     }
 
     #[test]

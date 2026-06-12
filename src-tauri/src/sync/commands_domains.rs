@@ -146,7 +146,13 @@ where
                 continue;
             }
         };
-        let plaintext = match decrypt_record(secret_key, &envelope, encrypted.aad.as_bytes()) {
+        let expected_aad = domain_aad(
+            &manifest.sync_collection_id,
+            domain,
+            &encrypted.logical_id,
+            encrypted.revision,
+        );
+        let plaintext = match decrypt_record(secret_key, &envelope, expected_aad.as_bytes()) {
             Ok(v) => v,
             Err(_) => {
                 failed += 1;

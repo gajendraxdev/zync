@@ -216,7 +216,7 @@ Rules:
       "label": "Password",
       "secret": true,
       "format": "password",
-      "valueRef": "field_password"
+      "valueRef": "secret:password"
     }
   ],
   "metadata": {
@@ -282,7 +282,7 @@ Rules:
       "secret": true,
       "format": "private-key",
       "encoding": "pem",
-      "valueRef": "field_private_key"
+      "valueRef": "secret:privateKey"
     },
     {
       "name": "chain",

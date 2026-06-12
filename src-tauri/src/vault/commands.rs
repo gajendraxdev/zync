@@ -515,19 +515,26 @@ fn save_saved_connections(path: &std::path::Path, saved: &SavedData) -> Result<(
                 return Ok(());
             }
             if path.is_file() {
-                match std::fs::remove_file(path) {
+                let backup = path.with_extension(format!("json.bak.{unique_suffix}"));
+                if let Err(backup_error) = std::fs::rename(path, &backup) {
+                    let _ = std::fs::remove_file(&tmp);
+                    return Err(VaultError::InvalidData(format!(
+                        "connections atomic rename failed and destination could not be staged: {backup_error}"
+                    )));
+                }
+                match std::fs::rename(&tmp, path) {
                     Ok(()) => {
-                        return std::fs::rename(&tmp, path).map_err(|retry_error| {
-                            let _ = std::fs::remove_file(&tmp);
-                            VaultError::InvalidData(format!(
-                                "connections atomic replace retry failed: {retry_error}"
-                            ))
-                        });
+                        let _ = std::fs::remove_file(&backup);
+                        return Ok(());
                     }
-                    Err(remove_error) => {
+                    Err(retry_error) => {
+                        let restore_error = std::fs::rename(&backup, path).err();
                         let _ = std::fs::remove_file(&tmp);
                         return Err(VaultError::InvalidData(format!(
-                            "connections atomic rename failed and destination could not be removed: {remove_error}"
+                            "connections atomic replace retry failed: {retry_error}; backup restore: {}",
+                            restore_error
+                                .map(|error| error.to_string())
+                                .unwrap_or_else(|| "succeeded".to_string())
                         )));
                     }
                 }
@@ -563,11 +570,7 @@ pub fn repair_connection_refs(
             continue;
         };
 
-        let item_lookup = if auth_ref.vault_id == active_vault_id {
-            vault.item_get(&auth_ref.item_id)
-        } else {
-            Err(VaultError::RecordNotFound(auth_ref.item_id.clone()))
-        };
+        let item_lookup = vault.item_get(&auth_ref.item_id);
 
         match item_lookup {
             Ok(record) => {

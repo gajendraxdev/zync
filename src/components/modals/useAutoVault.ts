@@ -73,8 +73,8 @@ export function useAutoVault({
     };
 
     const savePastedKey = async (): Promise<Partial<Connection> | null> => {
-        const keyText = pastedKeyText.trim();
-        if (!keyText) {
+        const keyText = pastedKeyText;
+        if (!keyText.trim()) {
             showToast('error', 'Please paste a private key.');
             setPastedKeyError('Please paste a private key.');
             return null;
@@ -91,10 +91,9 @@ export function useAutoVault({
             return null;
         }
         setPastedKeyError('');
-        const passphrase = pastedPassphrase.trim();
         const item = await vaultIpc.itemCreate(effectiveKeyVaultLabel, 'ssh-private-key', {
             privateKey: keyText,
-            ...(passphrase ? { passphrase } : {}),
+            ...(pastedPassphrase.length > 0 ? { passphrase: pastedPassphrase } : {}),
         });
         deleteOldAuthItem();
         setPastedKeyText('');
@@ -113,8 +112,8 @@ export function useAutoVault({
 
     const autoVaultPassword = async (): Promise<Partial<Connection> | null> => {
         if (vaultStatus?.status !== 'unlocked' || authMethod !== 'password') return null;
-        const password = (formData.password || '').trim();
-        if (!password) return null;
+        const password = formData.password || '';
+        if (!password.trim()) return null;
         const item = await vaultIpc.itemCreate(effectiveVaultLabel, 'ssh-password', { password });
         deleteOldAuthItem();
         return {
