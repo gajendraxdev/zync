@@ -695,7 +695,7 @@ where
     T: serde::de::DeserializeOwned,
 {
     let remote_objects = provider_impl
-        .list_credential_records(app, &manifest.sync_collection_id)
+        .list_collection_records(app, &manifest.sync_collection_id)
         .await
         .map_err(|e| sync_error_to_string(&e))?;
 
@@ -804,7 +804,7 @@ async fn collect_remote_host_records(
     logical_id_filter: Option<&HashSet<String>>,
 ) -> Result<RemoteHostCollectResult, String> {
     let remote_objects = provider_impl
-        .list_credential_records(app, &manifest.sync_collection_id)
+        .list_collection_records(app, &manifest.sync_collection_id)
         .await
         .map_err(|e| sync_error_to_string(&e))?;
 

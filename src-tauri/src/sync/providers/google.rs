@@ -1041,6 +1041,22 @@ impl VaultProviderV1 for GoogleVaultProvider {
         find_files_by_name_prefix(&token, &prefix).await
     }
 
+    async fn list_collection_records(
+        &self,
+        app: &tauri::AppHandle,
+        sync_collection_id: &str,
+    ) -> SyncResult<Vec<ProviderCredentialObject>> {
+        let provider_data_dir = data_dir(app);
+        let token = get_valid_google_token(&provider_data_dir).await?;
+        let prefix = format!("zync-sync-{sync_collection_id}-");
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "[sync][google] list_collection_records collection_id='{}' prefix='{}'",
+            sync_collection_id, prefix
+        );
+        find_files_by_name_prefix(&token, &prefix).await
+    }
+
     async fn discover_sync_collection_ids(
         &self,
         app: &tauri::AppHandle,

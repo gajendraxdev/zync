@@ -130,7 +130,7 @@ export function useVaultPanelActions({
         `Secured ${result.secured} credential(s).${result.backupPath ? ' Backup saved.' : ''}`,
       );
       await onLoadConnections();
-      await onRefresh();
+      await onRefreshItems();
       await loadSecurePreview();
     } catch (e: unknown) {
       const msg = extractErrorMessage(e);
@@ -945,7 +945,7 @@ export function useVaultPanelActions({
 
     try {
       await vaultIpc.itemDelete(itemId);
-      await onRefresh();
+      await onRefreshItems();
       showToast('success', `Deleted "${label}".`);
     } catch (e: unknown) {
       const msg = extractErrorMessage(e);

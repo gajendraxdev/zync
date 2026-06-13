@@ -101,8 +101,22 @@ pub fn save_manifest(data_dir: &Path, manifest: &SyncCollectionManifest) -> Sync
                     Ok(())
                 }
                 Err(retry_err) => {
-                    let _ = std::fs::rename(&backup_path, &final_path);
-                    let _ = std::fs::remove_file(&temp_path);
+                    if let Err(restore_err) = std::fs::rename(&backup_path, &final_path) {
+                        return Err(SyncError::new(
+                            "sync_collection_write_failed",
+                            format!(
+                                "Failed to finalize sync collection manifest after replace retry: {retry_err}; failed to restore backup: {restore_err}"
+                            ),
+                        ));
+                    }
+                    if let Err(remove_err) = std::fs::remove_file(&temp_path) {
+                        return Err(SyncError::new(
+                            "sync_collection_write_failed",
+                            format!(
+                                "Failed to finalize sync collection manifest after replace retry: {retry_err}; failed to remove temp file: {remove_err}"
+                            ),
+                        ));
+                    }
                     Err(SyncError::new(
                         "sync_collection_write_failed",
                         format!(

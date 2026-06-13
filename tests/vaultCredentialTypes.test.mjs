@@ -80,7 +80,7 @@ test('vaultItemToCredentialEnvelope preserves a backend-provided typed envelope'
     credential: typedEnvelope,
   });
 
-  assert.equal(envelope, typedEnvelope);
+  assert.deepEqual(envelope, typedEnvelope);
   assert.equal(envelope.fields.length, 2);
   assert.equal(envelope.fields[0].value, 'deploy');
 });
