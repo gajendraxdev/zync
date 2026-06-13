@@ -37,7 +37,7 @@ export function useAddCredentialModal({
   const open = () => setIsOpen(true);
 
   const close = () => {
-    if (isCreating) return;
+    if (creatingRef.current || isCreating) return;
     setIsOpen(false);
     reset();
   };

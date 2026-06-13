@@ -241,24 +241,27 @@ pub(crate) fn load_saved_tunnels(path: &Path) -> SyncResult<SavedTunnelsData> {
     if !path.exists() {
         let temp_path = path.with_extension("tmp");
         let backup_path = path.with_extension("bak");
-        if temp_path.exists() {
-            std::fs::rename(&temp_path, path).map_err(|e| {
-                SyncError::new(
-                    "sync_tunnels_read_failed",
-                    format!("Failed to recover pending tunnels temp file: {e}"),
-                )
-            })?;
-        } else if backup_path.exists() {
-            std::fs::rename(&backup_path, path).map_err(|e| {
-                SyncError::new(
-                    "sync_tunnels_read_failed",
-                    format!("Failed to restore tunnels backup file: {e}"),
-                )
-            })?;
-        } else {
-            return Ok(SavedTunnelsData { tunnels: Vec::new() });
+        for candidate in [&temp_path, &backup_path] {
+            if let Some(data) = parse_saved_tunnels_candidate(candidate) {
+                std::fs::rename(candidate, path).map_err(|e| {
+                    SyncError::new(
+                        "sync_tunnels_read_failed",
+                        format!("Failed to promote recovered tunnels file: {e}"),
+                    )
+                })?;
+                return Ok(data);
+            }
         }
+        return Ok(SavedTunnelsData { tunnels: Vec::new() });
     }
+    parse_saved_tunnels_file(path)
+}
+
+fn parse_saved_tunnels_candidate(path: &Path) -> Option<SavedTunnelsData> {
+    parse_saved_tunnels_file(path).ok()
+}
+
+fn parse_saved_tunnels_file(path: &Path) -> SyncResult<SavedTunnelsData> {
     let raw = std::fs::read_to_string(path).map_err(|e| {
         SyncError::new("sync_tunnels_read_failed", format!("Failed to read tunnels file: {e}"))
     })?;
@@ -377,6 +380,54 @@ mod tests {
         assert_eq!(loaded.tunnels.len(), 1);
         assert_eq!(loaded.tunnels[0].name, "Recovered");
         assert!(path.exists());
+        assert!(!backup_path.exists());
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[test]
+    fn load_saved_tunnels_skips_corrupt_temp_and_recovers_valid_backup() {
+        let dir = std::env::temp_dir().join(format!(
+            "zync-sync-tunnels-corrupt-temp-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let path = dir.join(TUNNELS_FILE);
+        let temp_path = path.with_extension("tmp");
+        let backup_path = path.with_extension("bak");
+        std::fs::write(&temp_path, "{not-json").expect("write corrupt temp");
+        let data = SavedTunnelsData {
+            tunnels: vec![SavedTunnel {
+                id: "tun-1".into(),
+                connection_id: "conn-1".into(),
+                name: "Recovered backup".into(),
+                tunnel_type: "local".into(),
+                local_port: 8080,
+                remote_host: "localhost".into(),
+                remote_port: 80,
+                bind_address: None,
+                bind_to_any: Some(false),
+                auto_start: Some(false),
+                status: None,
+                original_port: None,
+                group: None,
+                created_at: Some(1),
+                updated_at: Some(1),
+            }],
+        };
+        std::fs::write(
+            &backup_path,
+            serde_json::to_string_pretty(&data).expect("serialize"),
+        )
+        .expect("write backup");
+
+        let recovered = load_saved_tunnels(&path).expect("recover valid backup");
+
+        assert_eq!(recovered.tunnels[0].name, "Recovered backup");
+        assert!(path.exists());
+        assert!(temp_path.exists());
         assert!(!backup_path.exists());
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }

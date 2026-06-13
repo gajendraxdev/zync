@@ -58,8 +58,8 @@ export interface ConnectionSlice {
     openConnectionModal: (id?: string | null) => void;
 
     // Actions
-    addConnection: (conn: Connection, isTemp?: boolean) => void;
-    editConnection: (conn: Connection) => void;
+    addConnection: (conn: Connection, isTemp?: boolean) => Promise<void>;
+    editConnection: (conn: Connection) => Promise<void>;
     deleteConnection: (id: string) => void;
     importConnections: (conns: Connection[] | ImportPlanItem[], importedFolders?: Folder[]) => void;
     clearConnections: () => void;
@@ -174,13 +174,15 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
     },
 
     addConnection: (conn, isTemp = false) => {
+        let savePromise = Promise.resolve();
         set(state => {
             const next = upsertConnectionInState(state, conn);
             if (!isTemp) {
-                saveToMain(next.connections, next.folders);
+                savePromise = saveToMain(next.connections, next.folders);
             }
             return { connections: next.connections, folders: next.folders };
         });
+        return savePromise;
     },
 
     editConnection: (updatedConn) => {
@@ -188,11 +190,13 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
         if (existing && hasRemoteTargetChanged(existing, updatedConn)) {
             clearRemoteShellCache(updatedConn.id);
         }
+        let savePromise = Promise.resolve();
         set(state => {
             const next = upsertConnectionInState(state, updatedConn);
-            saveToMain(next.connections, next.folders);
+            savePromise = saveToMain(next.connections, next.folders);
             return { connections: next.connections, folders: next.folders };
         });
+        return savePromise;
     },
 
     deleteConnection: (id) => {
@@ -447,8 +451,8 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                 console.error('Failed to load/start tunnels:', err);
             }
         } catch (error) {
-            console.error('Connection failed:', error);
             const message = connectionErrorMessage(error);
+            console.error('Connection failed:', message);
             get().showToast('error', `Connection failed: ${message}`, 10000);
             // Only update to error state if not already in error to prevent loops
             set(state => {
@@ -698,15 +702,20 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                     return true;
                 })
                 .map(s => {
+                    const isLegacySnippetsTab = s.tabType === 'snippets';
                     const isPluginView = typeof s.view === 'string' && s.view.startsWith('plugin:');
-                    const view: Tab['view'] = VALID_RESTORABLE_VIEWS.has(s.view as CoreTabView) || isPluginView
-                        ? (s.view as Tab['view'])
-                        : 'terminal';
+                    const view: Tab['view'] = isLegacySnippetsTab
+                        ? 'snippets'
+                        : VALID_RESTORABLE_VIEWS.has(s.view as CoreTabView) || isPluginView
+                            ? (s.view as Tab['view'])
+                            : 'terminal';
                     return {
                         id: s.id,
-                        type: s.tabType as Tab['type'],
+                        type: isLegacySnippetsTab ? 'connection' : s.tabType as Tab['type'],
                         title: s.title,
-                        connectionId: s.connectionId,
+                        connectionId: isLegacySnippetsTab
+                            ? GLOBAL_SNIPPETS_CONNECTION_ID
+                            : s.connectionId,
                         vaultProfileId: s.tabType === 'vault'
                             ? (isVaultProfileId(s.vaultProfileId)
                                 ? s.vaultProfileId
@@ -806,10 +815,9 @@ function hasRemoteTargetChanged(previous: Connection, next: Connection): boolean
 }
 
 const saveToMain = (connections: Connection[], folders: Folder[]): Promise<void> => {
-    pendingSave = pendingSave
-        .then(() => saveConnectionsIpc(connections, folders))
-        .catch((error) => {
-            console.error('Failed to save connections:', error);
-        });
-    return pendingSave;
+    const save = pendingSave.then(() => saveConnectionsIpc(connections, folders));
+    pendingSave = save.catch((error) => {
+        console.error('Failed to save connections:', connectionErrorMessage(error));
+    });
+    return save;
 };

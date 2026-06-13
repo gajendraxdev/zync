@@ -5,6 +5,7 @@ use crate::types::{CredentialRef, SavedConnection, SavedData};
 use std::collections::BTreeMap;
 use std::io::ErrorKind;
 use std::path::Path;
+use uuid::Uuid;
 
 const CONNECTIONS_FILE: &str = "connections.json";
 
@@ -211,7 +212,9 @@ fn save_saved_data_atomic(path: &Path, data: &SavedData) -> SyncResult<()> {
             format!("Failed to create hosts directory: {e}"),
         )
     })?;
-    let temp_path = path.with_extension("tmp");
+    let write_id = Uuid::new_v4();
+    let temp_path = path.with_extension(format!("{write_id}.tmp"));
+    let backup_path = path.with_extension(format!("{write_id}.bak"));
     let json = serde_json::to_string_pretty(data).map_err(|e| {
         SyncError::new(
             "sync_hosts_write_failed",
@@ -227,7 +230,6 @@ fn save_saved_data_atomic(path: &Path, data: &SavedData) -> SyncResult<()> {
     match std::fs::rename(&temp_path, path) {
         Ok(()) => Ok(()),
         Err(rename_err) if rename_err.kind() == ErrorKind::AlreadyExists && path.exists() => {
-            let backup_path = path.with_extension("bak");
             std::fs::rename(path, &backup_path).map_err(|backup_err| {
                 let _ = std::fs::remove_file(&temp_path);
                 SyncError::new(

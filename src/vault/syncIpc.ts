@@ -59,7 +59,7 @@ export interface SyncCollectionSetupResult {
 
 export interface SyncCollectionSetupArgs {
   keyPolicyMode: SyncKeyPolicyMode;
-  passphrase: string;
+  passphrase?: string | null;
   hasRecoveryKey: boolean;
 }
 

@@ -565,6 +565,7 @@ impl VaultService {
         let vek = self.vek.as_ref().ok_or(VaultError::Locked)?;
         let db = self.db.as_ref().ok_or(VaultError::NotInitialized)?;
         let meta = self.meta.as_ref().ok_or(VaultError::Locked)?;
+        validate_secret_values(secret_values)?;
 
         let id = Uuid::new_v4().to_string();
         let logical_id = logical_id.trim();
@@ -810,6 +811,7 @@ impl VaultService {
         revision: u64,
         updated_at: u64,
     ) -> Result<PlaintextRecord, VaultError> {
+        validate_secret_values(secret_values)?;
         let existing = self.item_get(item_id)?;
         let vek = self.vek.as_ref().ok_or(VaultError::Locked)?;
         let db = self.db.as_ref().ok_or(VaultError::NotInitialized)?;
@@ -1549,6 +1551,49 @@ mod tests {
                 None,
                 None,
             );
+
+        assert!(matches!(result, Err(VaultError::InvalidData(_))));
+    }
+
+    #[test]
+    fn sync_create_rejects_blank_secret_values() {
+        let vault = initialized_test_vault();
+        let secret_values = BTreeMap::from([("password".into(), " ".into())]);
+
+        let result = vault.service.item_create_from_sync(
+            "blank synced password",
+            "ssh-password",
+            &secret_values,
+            None,
+            None,
+            "credential-sync-blank",
+            1,
+            1,
+        );
+
+        assert!(matches!(result, Err(VaultError::InvalidData(_))));
+    }
+
+    #[test]
+    fn sync_update_rejects_blank_secret_values() {
+        let vault = initialized_test_vault();
+        let item = vault
+            .service
+            .item_create("password", "ssh-password", "secret", None)
+            .expect("create item");
+        let secret_values = BTreeMap::from([("password".into(), "\n".into())]);
+
+        let result = vault.service.item_apply_sync_restore(
+            &item.id,
+            item.logical_id.as_deref().expect("logical id"),
+            "blank synced password",
+            "ssh-password",
+            &secret_values,
+            None,
+            None,
+            2,
+            item.updated_at.saturating_add(1),
+        );
 
         assert!(matches!(result, Err(VaultError::InvalidData(_))));
     }

@@ -218,9 +218,8 @@ pub fn setup_manifest(
         None
     };
 
-    persist_collection_key(&manifest, &collection_key)?;
     manifest.key_cache_unlocked_at = Some(now_secs());
-    save_manifest(data_dir, &manifest)?;
+    persist_collection_key_and_manifest(data_dir, &manifest, &collection_key)?;
     Ok(SyncCollectionSetupOutcome {
         manifest,
         recovery_key,
@@ -335,11 +334,17 @@ pub fn unlock_collection_key_with_passphrase(
     passphrase: &str,
 ) -> SyncResult<()> {
     let key = unwrap_collection_key(manifest, passphrase)?;
-    persist_collection_key(manifest, &key)?;
+    let previous_cache_unlocked_at = manifest.key_cache_unlocked_at;
+    let previous_updated_at = manifest.updated_at;
     let ts = now_secs();
     manifest.key_cache_unlocked_at = Some(ts);
     manifest.updated_at = ts;
-    save_manifest(data_dir, manifest)
+    if let Err(error) = persist_collection_key_and_manifest(data_dir, manifest, &key) {
+        manifest.key_cache_unlocked_at = previous_cache_unlocked_at;
+        manifest.updated_at = previous_updated_at;
+        return Err(error);
+    }
+    Ok(())
 }
 
 pub fn unlock_collection_key_with_recovery_key(
@@ -348,11 +353,17 @@ pub fn unlock_collection_key_with_recovery_key(
     recovery_key: &str,
 ) -> SyncResult<()> {
     let key = unwrap_collection_key_with_recovery_key(manifest, recovery_key)?;
-    persist_collection_key(manifest, &key)?;
+    let previous_cache_unlocked_at = manifest.key_cache_unlocked_at;
+    let previous_updated_at = manifest.updated_at;
     let ts = now_secs();
     manifest.key_cache_unlocked_at = Some(ts);
     manifest.updated_at = ts;
-    save_manifest(data_dir, manifest)
+    if let Err(error) = persist_collection_key_and_manifest(data_dir, manifest, &key) {
+        manifest.key_cache_unlocked_at = previous_cache_unlocked_at;
+        manifest.updated_at = previous_updated_at;
+        return Err(error);
+    }
+    Ok(())
 }
 
 fn generate_collection_key() -> [u8; 32] {
@@ -365,6 +376,37 @@ fn persist_collection_key(manifest: &SyncCollectionManifest, key: &[u8; 32]) -> 
     let account = collection_key_account(manifest);
     let encoded = base64::engine::general_purpose::STANDARD.encode(key);
     save_collection_key_secret(&account, &encoded)?;
+    Ok(())
+}
+
+fn persist_collection_key_and_manifest(
+    data_dir: &Path,
+    manifest: &SyncCollectionManifest,
+    key: &[u8; 32],
+) -> SyncResult<()> {
+    let account = collection_key_account(manifest);
+    let previous_secret = load_optional_collection_key_secret(&account)?;
+    persist_collection_key(manifest, key)?;
+    if let Err(error) = save_manifest(data_dir, manifest) {
+        let rollback_result = match previous_secret {
+            Some(secret) => {
+                save_collection_key_secret(&account, &secret)
+            }
+            None => {
+                delete_collection_key_secret(&account)
+            }
+        };
+        if let Err(rollback_error) = rollback_result {
+            return Err(SyncError::new(
+                "sync_collection_keyring_rollback_failed",
+                format!(
+                    "{}; additionally failed to restore the previous cached sync key: {}",
+                    error.message, rollback_error.message
+                ),
+            ));
+        }
+        return Err(error);
+    }
     Ok(())
 }
 
@@ -727,6 +769,20 @@ fn load_collection_key_secret(account: &str) -> SyncResult<String> {
 }
 
 #[cfg(not(test))]
+fn load_optional_collection_key_secret(account: &str) -> SyncResult<Option<String>> {
+    let entry = keyring::Entry::new(SYNC_COLLECTION_KEYRING_SERVICE, account)
+        .map_err(|e| SyncError::new("sync_collection_keyring_failed", e.to_string()))?;
+    match entry.get_password() {
+        Ok(secret) => Ok(Some(secret)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(error) => Err(SyncError::new(
+            "sync_collection_keyring_failed",
+            error.to_string(),
+        )),
+    }
+}
+
+#[cfg(not(test))]
 fn save_collection_key_secret(account: &str, value: &str) -> SyncResult<()> {
     let entry = keyring::Entry::new(SYNC_COLLECTION_KEYRING_SERVICE, account)
         .map_err(|e| SyncError::new("sync_collection_keyring_failed", e.to_string()))?;
@@ -760,6 +816,20 @@ fn load_collection_key_secret(account: &str) -> SyncResult<String> {
     lock.get(account)
         .cloned()
         .ok_or_else(|| SyncError::new("sync_collection_keyring_failed", "key not found"))
+}
+
+#[cfg(test)]
+fn load_optional_collection_key_secret(account: &str) -> SyncResult<Option<String>> {
+    let store = key_store();
+    let lock = store
+        .lock()
+        .map_err(|_| {
+            SyncError::new(
+                "sync_collection_keyring_failed",
+                "test key store lock poisoned",
+            )
+        })?;
+    Ok(lock.get(account).cloned())
 }
 
 #[cfg(test)]
@@ -1049,5 +1119,47 @@ mod tests {
         assert_eq!(outcome.manifest.sync_collection_id, "collection-from-provider");
 
         let _ = std::fs::remove_dir_all(&data_dir_path);
+    }
+
+    #[test]
+    fn unlock_rolls_back_cached_key_when_manifest_save_fails() {
+        let unique = format!(
+            "zync-sync-collection-rollback-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        );
+        let data_dir_path = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&data_dir_path).expect("create temp test dir");
+        let passphrase = "provider-sync-passphrase-v1";
+        let outcome = setup_manifest(
+            &data_dir_path,
+            SyncProviderKind::Google,
+            SyncKeyPolicyMode::CustomPassphrase,
+            passphrase,
+            false,
+            None,
+        )
+        .expect("setup manifest");
+        let mut manifest = outcome.manifest;
+        let account = collection_key_account(&manifest);
+        save_collection_key_secret(&account, "previous-cached-secret")
+            .expect("seed previous cached secret");
+
+        std::fs::remove_dir_all(&data_dir_path).expect("remove manifest directory");
+        std::fs::write(&data_dir_path, "blocks directory creation")
+            .expect("create blocking file");
+
+        let error =
+            unlock_collection_key_with_passphrase(&data_dir_path, &mut manifest, passphrase)
+                .expect_err("manifest save should fail");
+
+        assert_eq!(error.code, "sync_collection_write_failed");
+        assert_eq!(
+            load_collection_key_secret(&account).expect("cached secret"),
+            "previous-cached-secret"
+        );
+        std::fs::remove_file(&data_dir_path).expect("cleanup blocking file");
     }
 }

@@ -1,6 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::{LazyLock, Mutex};
+
+pub(crate) static SNIPPETS_MUTATION_LOCK: LazyLock<Mutex<()>> =
+    LazyLock::new(|| Mutex::new(()));
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,6 +39,13 @@ impl SnippetsManager {
     }
 
     pub async fn list(&self) -> Result<Vec<Snippet>, String> {
+        let _guard = SNIPPETS_MUTATION_LOCK
+            .lock()
+            .map_err(|error| error.to_string())?;
+        self.list_from_disk()
+    }
+
+    fn list_from_disk(&self) -> Result<Vec<Snippet>, String> {
         if !self.file_path.exists() {
             return Ok(vec![]);
         }
@@ -44,7 +55,10 @@ impl SnippetsManager {
     }
 
     pub async fn save(&self, snippet: Snippet) -> Result<(), String> {
-        let mut snippets = self.list().await?;
+        let _guard = SNIPPETS_MUTATION_LOCK
+            .lock()
+            .map_err(|error| error.to_string())?;
+        let mut snippets = self.list_from_disk()?;
         let now = current_unix_secs();
 
         if let Some(pos) = snippets.iter().position(|s| s.id == snippet.id) {
@@ -62,16 +76,19 @@ impl SnippetsManager {
             });
         }
 
-        self.save_to_disk(snippets).await
+        self.save_to_disk(snippets)
     }
 
     pub async fn delete(&self, id: String) -> Result<(), String> {
-        let mut snippets = self.list().await?;
+        let _guard = SNIPPETS_MUTATION_LOCK
+            .lock()
+            .map_err(|error| error.to_string())?;
+        let mut snippets = self.list_from_disk()?;
         snippets.retain(|s| s.id != id);
-        self.save_to_disk(snippets).await
+        self.save_to_disk(snippets)
     }
 
-    async fn save_to_disk(&self, snippets: Vec<Snippet>) -> Result<(), String> {
+    fn save_to_disk(&self, snippets: Vec<Snippet>) -> Result<(), String> {
         let data = SnippetsData { snippets };
         let json = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
         fs::write(&self.file_path, json).map_err(|e| e.to_string())
