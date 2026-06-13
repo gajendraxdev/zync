@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { vaultIpc } from '../../../../../vault/ipc';
 import type { ToastType } from '../../../../../store/toastSlice';
 import {
@@ -24,6 +24,7 @@ export function useAddCredentialModal({
   const [passphrase, setPassphrase] = useState('');
   const [notes, setNotes] = useState('');
   const [isCreating, setIsCreating] = useState(false);
+  const creatingRef = useRef(false);
 
   const reset = () => {
     setKind('ssh-private-key');
@@ -42,6 +43,8 @@ export function useAddCredentialModal({
   };
 
   const submit = async () => {
+    if (creatingRef.current) return;
+
     if (!isUnlocked) {
       showToast('error', 'Unlock the vault before adding credentials.');
       return;
@@ -73,6 +76,7 @@ export function useAddCredentialModal({
           }
         : { password: rawSecret };
 
+    creatingRef.current = true;
     setIsCreating(true);
     try {
       const item = await vaultIpc.itemCreate(
@@ -96,6 +100,7 @@ export function useAddCredentialModal({
       const msg = e instanceof Error ? e.message : String(e);
       showToast('error', `Failed to add credential: ${msg}`);
     } finally {
+      creatingRef.current = false;
       setIsCreating(false);
     }
   };

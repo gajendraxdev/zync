@@ -115,3 +115,24 @@ test('connect() normalizes direct connect payload', async () => {
     mod.__resetSyncIpcInvokeForTests();
   }
 });
+
+test('domain mutations refresh provider status after the mutation', async () => {
+  const calls = [];
+  mod.__setSyncIpcInvokeForTests(async (command) => {
+    calls.push(command);
+    if (command === 'sync_hosts_upload') {
+      return { domain: 'hosts', uploaded: 1, credentialsUploaded: 0, skipped: 0, syncedAt: 42 };
+    }
+    if (command === 'sync_status') {
+      return { connected: true, lastSync: 42 };
+    }
+    throw new Error(`unexpected command ${command}`);
+  });
+  try {
+    const result = await mod.syncIpc.hostsUpload('google');
+    assert.equal(result.syncedAt, 42);
+    assert.deepEqual(calls, ['sync_hosts_upload', 'sync_status']);
+  } finally {
+    mod.__resetSyncIpcInvokeForTests();
+  }
+});

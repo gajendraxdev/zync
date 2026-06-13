@@ -51,7 +51,9 @@ const getConnectionPrivateKeyPath = (connection: ConnectionWithLegacyAuthFields)
     normalizeOptionalText(connection.privateKeyPath) ?? normalizeOptionalText(connection.private_key_path);
 
 const getConnectionPassword = (connection: ConnectionWithLegacyAuthFields): string | undefined =>
-    normalizeOptionalText(connection.password);
+    typeof connection.password === 'string' && connection.password.length > 0
+        ? connection.password
+        : undefined;
 
 const buildAuthMethod = (connection: ConnectionWithLegacyAuthFields): ConnectAuthMethod | null => {
     const authRef = getConnectionAuthRef(connection);

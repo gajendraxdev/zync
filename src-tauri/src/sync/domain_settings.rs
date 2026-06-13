@@ -20,7 +20,10 @@ pub const SETTINGS_ALLOWLIST_KEYS: &[&str] = &[
     "terminalFontSize",
 ];
 
-pub async fn load_allowlisted_settings(app: &tauri::AppHandle) -> Result<SettingsSyncRecord, String> {
+pub async fn load_allowlisted_settings(
+    app: &tauri::AppHandle,
+    previous: Option<&SettingsSyncRecord>,
+) -> Result<SettingsSyncRecord, String> {
     let settings: serde_json::Value = crate::commands::settings_get(app.clone()).await?;
     let mut payload = serde_json::Map::new();
     let obj = settings
@@ -31,9 +34,14 @@ pub async fn load_allowlisted_settings(app: &tauri::AppHandle) -> Result<Setting
             payload.insert((*key).to_string(), value.clone());
         }
     }
+    let payload = serde_json::Value::Object(payload);
+    let updated_at = previous
+        .filter(|record| record.payload == payload)
+        .map(|record| record.updated_at)
+        .unwrap_or_else(now_secs);
     Ok(SettingsSyncRecord {
         logical_id: "app-settings-default".to_string(),
-        payload: serde_json::Value::Object(payload),
-        updated_at: now_secs(),
+        payload,
+        updated_at,
     })
 }

@@ -28,6 +28,19 @@ const AAD_VERSION: u32 = 1;
 const SCHEMA_VERSION: u32 = 1;
 pub const PASSPHRASE_MIN_LENGTH: usize = 12;
 
+fn validate_secret_values(secret_values: &BTreeMap<String, String>) -> Result<(), VaultError> {
+    if secret_values
+        .values()
+        .any(|value| !value.trim().is_empty())
+    {
+        Ok(())
+    } else {
+        Err(VaultError::InvalidData(
+            "credential requires at least one non-empty secret value".into(),
+        ))
+    }
+}
+
 // ── Service ───────────────────────────────────────────────────────────────────
 
 pub struct VaultService {
@@ -455,6 +468,7 @@ impl VaultService {
         notes: Option<&str>,
         logical_id: Option<&str>,
     ) -> Result<PlaintextRecord, VaultError> {
+        validate_secret_values(secret_values)?;
         let vek = self.vek.as_ref().ok_or(VaultError::Locked)?;
         let db = self.db.as_ref().ok_or(VaultError::NotInitialized)?;
         let meta = self.meta.as_ref().ok_or(VaultError::Locked)?;
@@ -694,6 +708,7 @@ impl VaultService {
         notes: Option<&str>,
         credential: Option<&CredentialEnvelope>,
     ) -> Result<PlaintextRecord, VaultError> {
+        validate_secret_values(secret_values)?;
         let existing = self.item_get(item_id)?;
         let vek = self.vek.as_ref().ok_or(VaultError::Locked)?;
         let db = self.db.as_ref().ok_or(VaultError::NotInitialized)?;
@@ -1495,6 +1510,47 @@ mod tests {
             VaultError::InvalidPassphraseLength { min }
             if min == PASSPHRASE_MIN_LENGTH
         ));
+    }
+
+    #[test]
+    fn item_create_rejects_blank_secret_values() {
+        let vault = initialized_test_vault();
+        let secret_values = BTreeMap::from([("password".into(), "   ".into())]);
+
+        let result = vault
+            .service
+            .item_create_with_secret_values(
+                "blank password",
+                "ssh-password",
+                &secret_values,
+                None,
+                None,
+            );
+
+        assert!(matches!(result, Err(VaultError::InvalidData(_))));
+    }
+
+    #[test]
+    fn item_update_rejects_blank_secret_values() {
+        let vault = initialized_test_vault();
+        let item = vault
+            .service
+            .item_create("password", "ssh-password", "secret", None)
+            .expect("create item");
+        let secret_values = BTreeMap::from([("password".into(), "\t".into())]);
+
+        let result = vault
+            .service
+            .item_update_with_secret_values(
+                &item.id,
+                "blank password",
+                "ssh-password",
+                &secret_values,
+                None,
+                None,
+            );
+
+        assert!(matches!(result, Err(VaultError::InvalidData(_))));
     }
 
     #[test]

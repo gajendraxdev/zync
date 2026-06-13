@@ -202,7 +202,7 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
   const assignedHostCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const connection of connections) {
-      const logicalId = connection.authRef?.credentialId;
+      const logicalId = connection.authRef?.credentialId ?? connection.authRef?.itemId;
       if (!logicalId) continue;
       counts[logicalId] = (counts[logicalId] ?? 0) + 1;
     }
@@ -211,7 +211,9 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
 
   const detailAssignedConnections = useMemo(() => {
     if (!detailItem) return [];
-    return connections.filter(connection => connection.authRef?.credentialId === detailItem.logicalId);
+    return connections.filter(
+      connection => (connection.authRef?.credentialId ?? connection.authRef?.itemId) === detailItem.logicalId,
+    );
   }, [connections, detailItem]);
 
   const filteredItems = useMemo(() => {
@@ -223,6 +225,7 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
     const requestToken = `${itemId}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
     detailRequestRef.current = requestToken;
     setDetailItemId(itemId);
+    setDetailItem(null);
     setIsDetailLoading(true);
     try {
       const full = await vaultIpc.itemGet(itemId);

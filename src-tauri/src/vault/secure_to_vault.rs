@@ -4,8 +4,10 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::types::{CredentialItemKind, CredentialPurpose, CredentialRef, SavedData};
+use crate::vault::credential::secret_values_from_legacy;
 use crate::vault::error::VaultError;
 use crate::vault::store::VaultService;
+use crate::vault::types::PlaintextRecord;
 
 // ── Preview ───────────────────────────────────────────────────────────────────
 
@@ -203,7 +205,7 @@ pub fn secure(data_dir: &Path, vault: &VaultService) -> Result<SecureToVaultResu
     let mut created_for_cleanup = Vec::new();
     for secure_item in &prepared {
         let kind = secure_item.kind.as_str();
-        let fingerprint = vault.secret_fingerprint(&secure_item.secret)?;
+        let fingerprint = prepared_secret_fingerprint(vault, secure_item)?;
         let lookup_key = (kind.to_string(), secure_item.label.clone(), fingerprint);
         if let Some((existing_id, credential_id, _)) = existing_by_fingerprint.get(&lookup_key) {
             linked.push((
@@ -281,6 +283,26 @@ struct PreparedSecureItem {
     label: String,
     kind: CredentialItemKind,
     secret: String,
+}
+
+fn prepared_secret_fingerprint(
+    vault: &VaultService,
+    item: &PreparedSecureItem,
+) -> Result<String, VaultError> {
+    let record = PlaintextRecord {
+        id: String::new(),
+        logical_id: None,
+        kind: item.kind.as_str().to_string(),
+        label: item.label.clone(),
+        secret: String::new(),
+        secret_values: secret_values_from_legacy(item.kind.as_str(), &item.secret),
+        notes: None,
+        credential: None,
+        revision: 0,
+        created_at: 0,
+        updated_at: 0,
+    };
+    vault.record_secret_fingerprint(&record)
 }
 
 fn cleanup_created_items(

@@ -177,7 +177,6 @@ export function GlobalTunnelList() {
                         };
                         await saveTunnel(revertedTunnel);
                         showToast('success', `Port reverted to ${tunnel.originalPort}`);
-                        await loadTunnels();
                     } catch (revertError: any) {
                         showToast('error', `Failed to revert port: ${revertError.message || revertError}`);
                     }

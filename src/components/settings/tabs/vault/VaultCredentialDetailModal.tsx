@@ -146,7 +146,7 @@ export function VaultCredentialDetailModal({
                     <p className="mt-1 text-[11px] text-app-muted">
                       {field.valueRef
                         ? `Reference: ${field.valueRef}`
-                        : field.value
+                        : !field.secret && field.value
                           ? `Value: ${field.value}`
                           : 'No inline value exposed'}
                     </p>

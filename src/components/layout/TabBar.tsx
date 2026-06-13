@@ -168,6 +168,7 @@ export function TabBar() {
     const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
     const [isGoogleSyncConnecting, setIsGoogleSyncConnecting] = useState(false);
     const [isGoogleSyncDisconnecting, setIsGoogleSyncDisconnecting] = useState(false);
+    const googleSyncOperationRef = useRef<Promise<unknown> | null>(null);
 
     // Click outside to close the Add menu
     useEffect(() => {
@@ -513,11 +514,21 @@ export function TabBar() {
                                         {!googleSync?.connected && (
                                             <button
                                                 onClick={async () => {
-                                                    if (isGoogleSyncConnecting) return;
+                                                    if (googleSyncOperationRef.current) return;
                                                     setIsGoogleSyncConnecting(true);
+                                                    const originalPromise = syncIpc.connect('google');
+                                                    googleSyncOperationRef.current = originalPromise;
+                                                    void originalPromise
+                                                        .catch(error => console.warn('[Sync] Google connect completed with an error:', error))
+                                                        .finally(() => {
+                                                            if (googleSyncOperationRef.current === originalPromise) {
+                                                                googleSyncOperationRef.current = null;
+                                                                setIsGoogleSyncConnecting(false);
+                                                            }
+                                                        });
                                                     try {
                                                         await withTimeout(
-                                                            syncIpc.connect('google'),
+                                                            originalPromise,
                                                             30000,
                                                             'Google sync connection timed out'
                                                         );
@@ -525,7 +536,6 @@ export function TabBar() {
                                                     } catch (error) {
                                                         showToast('error', googleConnectErrorMessage(error));
                                                     } finally {
-                                                        setIsGoogleSyncConnecting(false);
                                                         setIsProfileMenuOpen(false);
                                                     }
                                                 }}
@@ -543,11 +553,21 @@ export function TabBar() {
                                         {googleSync?.connected && (
                                             <button
                                                 onClick={async () => {
-                                                    if (isGoogleSyncDisconnecting) return;
+                                                    if (googleSyncOperationRef.current) return;
                                                     setIsGoogleSyncDisconnecting(true);
+                                                    const originalPromise = syncIpc.disconnect('google');
+                                                    googleSyncOperationRef.current = originalPromise;
+                                                    void originalPromise
+                                                        .catch(error => console.warn('[Sync] Google disconnect completed with an error:', error))
+                                                        .finally(() => {
+                                                            if (googleSyncOperationRef.current === originalPromise) {
+                                                                googleSyncOperationRef.current = null;
+                                                                setIsGoogleSyncDisconnecting(false);
+                                                            }
+                                                        });
                                                     try {
                                                         await withTimeout(
-                                                            syncIpc.disconnect('google'),
+                                                            originalPromise,
                                                             15000,
                                                             'Google sync disconnect timed out'
                                                         );
@@ -555,7 +575,6 @@ export function TabBar() {
                                                     } catch (error) {
                                                         showToast('error', googleConnectErrorMessage(error));
                                                     } finally {
-                                                        setIsGoogleSyncDisconnecting(false);
                                                         setIsProfileMenuOpen(false);
                                                     }
                                                 }}
