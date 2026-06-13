@@ -8,6 +8,18 @@ import { SecretField } from './SecretField';
 /** Minimum passphrase length enforced at vault creation time. */
 export const PASSPHRASE_MIN_LENGTH = 12;
 
+const REMEMBER_ON_DEVICE_PREF_KEY = 'zync:vault:rememberOnDevice';
+
+const readRememberOnDevicePreference = (): boolean => {
+  if (typeof localStorage === 'undefined') return true;
+  return localStorage.getItem(REMEMBER_ON_DEVICE_PREF_KEY) !== 'false';
+};
+
+const persistRememberOnDevicePreference = (enabled: boolean) => {
+  if (typeof localStorage === 'undefined') return;
+  localStorage.setItem(REMEMBER_ON_DEVICE_PREF_KEY, enabled ? 'true' : 'false');
+};
+
 interface Props {
   isOpen: boolean;
   /** Called when the modal closes; `unlocked` is true after a successful unlock/create. */
@@ -25,6 +37,7 @@ export function VaultUnlockModal({ isOpen, onClose }: Props) {
   const [showPass, setShowPass] = useState(false);
   const [localError, setLocalError] = useState('');
   const [unlockMode, setUnlockMode] = useState<'passphrase' | 'recovery'>('passphrase');
+  const [rememberOnDevice, setRememberOnDevice] = useState(readRememberOnDevicePreference);
 
   const extractError = (error: unknown): { code?: string; message: string } => {
     if (error && typeof error === 'object') {
@@ -72,7 +85,8 @@ export function VaultUnlockModal({ isOpen, onClose }: Props) {
         return;
       }
       try {
-        await initialize(passphrase);
+        await initialize(passphrase, rememberOnDevice);
+        persistRememberOnDevicePreference(rememberOnDevice);
         handleUnlocked();
       } catch (e: unknown) {
         const { message } = extractError(e);
@@ -84,7 +98,8 @@ export function VaultUnlockModal({ isOpen, onClose }: Props) {
         return;
       }
       try {
-        await unlockWithRecoveryKey(recoveryKey.trim());
+        await unlockWithRecoveryKey(recoveryKey.trim(), rememberOnDevice);
+        persistRememberOnDevicePreference(rememberOnDevice);
         handleUnlocked();
       } catch (e: unknown) {
         const { code, message } = extractError(e);
@@ -93,7 +108,8 @@ export function VaultUnlockModal({ isOpen, onClose }: Props) {
       }
     } else {
       try {
-        await unlock(passphrase);
+        await unlock(passphrase, rememberOnDevice);
+        persistRememberOnDevicePreference(rememberOnDevice);
         handleUnlocked();
       } catch (e: unknown) {
         const { code, message } = extractError(e);
@@ -183,6 +199,21 @@ export function VaultUnlockModal({ isOpen, onClose }: Props) {
           placeholder="Repeat your passphrase"
         />
       )}
+
+      <label className="flex items-start gap-2 text-[11px] text-[var(--color-app-muted)] cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={rememberOnDevice}
+          onChange={(e) => setRememberOnDevice(e.target.checked)}
+          className="mt-0.5 accent-[var(--color-app-accent)]"
+        />
+        <span>
+          Remember unlock on this device
+          <span className="block text-[10px] opacity-80 mt-0.5">
+            Stores a device-bound session key in the OS credential store. Lock now still works; use Forget this device to require a passphrase again after restart.
+          </span>
+        </span>
+      </label>
     </UnlockModalShell>
   );
 }

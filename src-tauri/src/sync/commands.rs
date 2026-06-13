@@ -2053,7 +2053,7 @@ pub async fn sync_collection_setup(
                 )
             }
             VaultStatus::Locked { .. } | VaultStatus::Unlocked { .. } => {
-                svc.unlock(&passphrase).map_err(|_| {
+                svc.verify_passphrase(&passphrase).map_err(|_| {
                     "[sync_collection_passphrase_mismatch] Local Vault passphrase did not unlock this vault."
                         .to_string()
                 })?;
@@ -2836,7 +2836,7 @@ pub async fn sync_download(
     .map_err(|e| sync_error_to_string(&e))?;
 
     let (item_count, vault_id) = match imported_status {
-        VaultStatus::Locked { item_count, vault_id } => (item_count, Some(vault_id)),
+        VaultStatus::Locked { item_count, vault_id, .. } => (item_count, Some(vault_id)),
         VaultStatus::Unlocked { item_count, vault_id } => (item_count, Some(vault_id)),
         VaultStatus::Uninitialized => (0, None),
     };

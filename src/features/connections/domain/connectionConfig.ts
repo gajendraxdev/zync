@@ -164,3 +164,22 @@ export const connectConfigUsesVaultAuth = (config: ConnectConfig): boolean => {
     if (config.jump_host) return connectConfigUsesVaultAuth(config.jump_host);
     return false;
 };
+
+export const connectionUsesVaultAuth = (
+    connections: Connection[],
+    connectionId: string,
+): boolean => {
+    const result = buildConnectConfigResult(connections, connectionId);
+    return result.status === 'ok' && connectConfigUsesVaultAuth(result.config);
+};
+
+/** Opening a tab should not auto-connect vault-backed hosts; user must reconnect explicitly. */
+export const shouldAutoConnectOnOpenTab = (
+    connections: Connection[],
+    connection: Connection,
+): boolean => {
+    if (connection.status !== 'disconnected' && connection.status !== 'error') {
+        return false;
+    }
+    return !connectionUsesVaultAuth(connections, connection.id);
+};

@@ -43,6 +43,9 @@ pub struct VaultService {
     /// Cached after initialize/unlock; cleared on lock.
     meta: Option<VaultMeta>,
     data_dir: PathBuf,
+    /// When true, `status()` must not auto-restore unlock from the OS session cache.
+    /// Set by explicit `lock()`; cleared by initialize/unlock/recovery unlock.
+    suppress_session_cache_unlock: bool,
 }
 
 impl VaultService {
@@ -52,6 +55,7 @@ impl VaultService {
             vek: None,
             meta: None,
             data_dir,
+            suppress_session_cache_unlock: false,
         }
     }
 
@@ -94,6 +98,11 @@ impl VaultService {
     // ── Status ────────────────────────────────────────────────────────────────
 
     pub fn status(&mut self) -> Result<VaultStatus, VaultError> {
+        let _ = self.try_unlock_from_session_cache();
+        self.status_after_session_attempt()
+    }
+
+    fn status_after_session_attempt(&mut self) -> Result<VaultStatus, VaultError> {
         self.try_open()?;
 
         let Some(db) = &self.db else {
@@ -119,10 +128,7 @@ impl VaultService {
         let item_count = live_record_count(&read_txn)?;
 
         if self.vek.is_none() {
-            return Ok(VaultStatus::Locked {
-                vault_id,
-                item_count,
-            });
+            return Ok(self.locked_status(vault_id, item_count));
         }
 
         Ok(VaultStatus::Unlocked {
@@ -131,9 +137,133 @@ impl VaultService {
         })
     }
 
+    fn locked_status(&self, vault_id: String, item_count: u64) -> VaultStatus {
+        let remembered_on_device =
+            super::session_cache::has_session_cache(&vault_id).unwrap_or(false);
+        VaultStatus::Locked {
+            vault_id,
+            item_count,
+            remembered_on_device,
+        }
+    }
+
+    /// Restores an in-memory unlock from the OS keychain session cache when available.
+    pub fn try_unlock_from_session_cache(&mut self) -> Result<bool, VaultError> {
+        if self.suppress_session_cache_unlock {
+            return Ok(false);
+        }
+
+        if self.vek.is_some() {
+            return Ok(true);
+        }
+
+        self.try_open()?;
+        let db = match self.db.as_ref() {
+            Some(db) => db,
+            None => return Ok(false),
+        };
+
+        let read_txn = db.begin_read()?;
+        let vm = match read_txn.open_table(VAULT_META) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(false),
+            Err(error) => return Err(VaultError::from(error)),
+        };
+
+        let vault_id = vm
+            .get("vault_id")?
+            .map(|value| String::from_utf8_lossy(value.value()).into_owned())
+            .unwrap_or_default();
+        if vault_id.is_empty() {
+            return Ok(false);
+        }
+
+        let meta_bytes = match vm.get("meta")? {
+            Some(value) => value,
+            None => return Ok(false),
+        };
+        let meta: VaultMeta = serde_json::from_slice(meta_bytes.value())?;
+
+        let Some(cached) = super::session_cache::load_session_cache(&vault_id)? else {
+            return Ok(false);
+        };
+
+        if verify_cached_vek(&cached.vek, &meta, &read_txn, cached.proof_verified).is_err() {
+            let _ = super::session_cache::clear_session_cache(&vault_id);
+            return Ok(false);
+        }
+
+        self.vek = Some(cached.vek);
+        self.meta = Some(meta);
+
+        if self.migrate_live_records_to_current_schema().is_err() {
+            self.vek = None;
+            self.meta = None;
+            let _ = super::session_cache::clear_session_cache(&vault_id);
+            return Ok(false);
+        }
+
+        Ok(true)
+    }
+
+    pub fn forget_device_session(&mut self) -> Result<(), VaultError> {
+        self.try_open()?;
+        let Some(db) = &self.db else {
+            return Ok(());
+        };
+
+        let read_txn = db.begin_read()?;
+        let meta_table = match read_txn.open_table(VAULT_META) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(()),
+            Err(error) => return Err(VaultError::from(error)),
+        };
+
+        let vault_id = meta_table
+            .get("vault_id")?
+            .map(|value| String::from_utf8_lossy(value.value()).into_owned())
+            .unwrap_or_default();
+        if vault_id.is_empty() {
+            return Ok(());
+        }
+
+        super::session_cache::clear_session_cache(&vault_id)
+    }
+
+    fn persist_session_cache_preference(&self, remember_on_device: bool) -> Result<(), VaultError> {
+        let meta = self.meta.as_ref().ok_or(VaultError::Locked)?;
+        let vek = self.vek.as_ref().ok_or(VaultError::Locked)?;
+        if remember_on_device {
+            super::session_cache::save_session_cache(&meta.vault_id, vek)
+        } else {
+            super::session_cache::clear_session_cache(&meta.vault_id)
+        }
+    }
+
+    fn persist_session_cache_best_effort(&self, remember_on_device: bool) {
+        if let Err(error) = self.persist_session_cache_preference(remember_on_device) {
+            log::warn!("vault session cache persistence failed: {error}");
+        }
+    }
+
+    fn build_unlocked_status(&self) -> Result<VaultStatus, VaultError> {
+        let meta = self.meta.as_ref().ok_or(VaultError::Locked)?;
+        let db = self.db.as_ref().ok_or(VaultError::NotInitialized)?;
+        let read_txn = db.begin_read()?;
+        let item_count = live_record_count(&read_txn)?;
+        Ok(VaultStatus::Unlocked {
+            vault_id: meta.vault_id.clone(),
+            item_count,
+        })
+    }
+
     // ── Initialize ────────────────────────────────────────────────────────────
 
-    pub fn initialize(&mut self, passphrase: &str) -> Result<VaultStatus, VaultError> {
+    pub fn initialize(
+        &mut self,
+        passphrase: &str,
+        remember_on_device: bool,
+    ) -> Result<VaultStatus, VaultError> {
         if passphrase.len() < PASSPHRASE_MIN_LENGTH {
             return Err(VaultError::InvalidPassphraseLength {
                 min: PASSPHRASE_MIN_LENGTH,
@@ -201,16 +331,19 @@ impl VaultService {
         self.db = Some(db);
         self.vek = Some(vek);
         self.meta = Some(meta);
+        self.suppress_session_cache_unlock = false;
+        self.persist_session_cache_best_effort(remember_on_device);
 
-        Ok(VaultStatus::Unlocked {
-            vault_id,
-            item_count: 0,
-        })
+        self.build_unlocked_status()
     }
 
     // ── Unlock ────────────────────────────────────────────────────────────────
 
-    pub fn unlock(&mut self, passphrase: &str) -> Result<VaultStatus, VaultError> {
+    pub fn unlock(
+        &mut self,
+        passphrase: &str,
+        remember_on_device: bool,
+    ) -> Result<VaultStatus, VaultError> {
         self.try_open()?;
         let db = self.db.as_ref().ok_or(VaultError::NotInitialized)?;
 
@@ -248,10 +381,10 @@ impl VaultService {
             .try_into()
             .map_err(|_| VaultError::InvalidData("VEK wrong length".into()))?;
 
-        let vault_id = meta.vault_id.clone();
         self.vek = Some(SecretKey::from_bytes(vek_arr));
         vek_arr.zeroize();
         self.meta = Some(meta);
+        self.suppress_session_cache_unlock = false;
         drop(ks);
         drop(vm);
         drop(read_txn);
@@ -264,14 +397,43 @@ impl VaultService {
             return Err(error);
         }
 
-        // Count existing records for the returned status
-        let read_txn = db.begin_read()?;
-        let item_count = live_record_count(&read_txn)?;
+        self.persist_session_cache_best_effort(remember_on_device);
+        self.build_unlocked_status()
+    }
 
-        Ok(VaultStatus::Unlocked {
-            vault_id,
-            item_count,
-        })
+    /// Validates a passphrase without unlocking the vault or mutating session cache.
+    pub fn verify_passphrase(&mut self, passphrase: &str) -> Result<(), VaultError> {
+        self.try_open()?;
+        let db = self.db.as_ref().ok_or(VaultError::NotInitialized)?;
+
+        let read_txn = db.begin_read()?;
+        let vm = read_txn.open_table(VAULT_META).map_err(VaultError::from)?;
+
+        let meta_bytes = vm.get("meta")?.ok_or(VaultError::NotInitialized)?;
+        let meta: VaultMeta = serde_json::from_slice(meta_bytes.value())?;
+
+        let salt = STANDARD
+            .decode(&meta.salt)
+            .map_err(|e| VaultError::InvalidData(e.to_string()))?;
+        let kdf_params = KdfParams {
+            m_cost: meta.kdf_m_cost,
+            t_cost: meta.kdf_t_cost,
+            p_cost: meta.kdf_p_cost,
+        };
+        let kek = derive_kek(passphrase.as_bytes(), &salt, &kdf_params)?;
+
+        let ks = read_txn.open_table(KEY_SLOTS).map_err(VaultError::from)?;
+        let slot_bytes = ks.get(SLOT_PASSPHRASE)?.ok_or(VaultError::NotInitialized)?;
+        let stored_slot: StoredEnvelope = serde_json::from_slice(slot_bytes.value())?;
+
+        let slot_envelope = parse_envelope(&stored_slot)?;
+        let slot_aad = slot_aad_string(&meta.vault_id, SLOT_PASSPHRASE);
+        let _vek_bytes = Zeroizing::new(
+            decrypt_record(&kek, &slot_envelope, slot_aad.as_bytes())
+                .map_err(|_| VaultError::WrongPassphrase)?,
+        );
+
+        Ok(())
     }
 
     fn migrate_live_records_to_current_schema(&self) -> Result<u64, VaultError> {
@@ -378,6 +540,7 @@ impl VaultService {
         // SecretKey implements ZeroizeOnDrop — drops immediately here.
         self.vek = None;
         self.meta = None;
+        self.suppress_session_cache_unlock = true;
     }
 
     /// Returns the vault ID if the vault is unlocked (meta is cached).
@@ -1143,7 +1306,11 @@ impl VaultService {
     }
 
     /// Unlocks the vault using a recovery key string instead of a passphrase.
-    pub fn unlock_with_recovery_key(&mut self, key: &str) -> Result<VaultStatus, VaultError> {
+    pub fn unlock_with_recovery_key(
+        &mut self,
+        key: &str,
+        remember_on_device: bool,
+    ) -> Result<VaultStatus, VaultError> {
         self.try_open()?;
         let db = self.db.as_ref().ok_or(VaultError::NotInitialized)?;
 
@@ -1174,10 +1341,10 @@ impl VaultService {
             .try_into()
             .map_err(|_| VaultError::InvalidData("VEK wrong length".into()))?;
 
-        let vault_id = meta.vault_id.clone();
         self.vek = Some(SecretKey::from_bytes(vek_arr));
         vek_arr.zeroize();
         self.meta = Some(meta);
+        self.suppress_session_cache_unlock = false;
 
         drop(slot_bytes);
         drop(ks);
@@ -1191,13 +1358,8 @@ impl VaultService {
             return Err(error);
         }
 
-        let read_txn = db.begin_read()?;
-        let item_count = live_record_count(&read_txn)?;
-
-        Ok(VaultStatus::Unlocked {
-            vault_id,
-            item_count,
-        })
+        self.persist_session_cache_best_effort(remember_on_device);
+        self.build_unlocked_status()
     }
 
     // ── Export / Import ───────────────────────────────────────────────────────
@@ -1307,16 +1469,51 @@ fn parse_envelope(stored: &StoredEnvelope) -> Result<EncryptedEnvelope, VaultErr
     Ok(EncryptedEnvelope { nonce, ciphertext })
 }
 
-fn live_record_count(read_txn: &ReadTransaction) -> Result<u64, VaultError> {
-    if let Ok(meta_table) = read_txn.open_table(VAULT_META) {
-        if let Some(meta_bytes) = meta_table.get("meta")? {
-            let meta: VaultMeta = serde_json::from_slice(meta_bytes.value())?;
-            if let Some(count) = meta.live_records {
-                return Ok(count);
-            }
+fn verify_cached_vek(
+    vek: &SecretKey,
+    meta: &VaultMeta,
+    read_txn: &ReadTransaction,
+    proof_verified: bool,
+) -> Result<(), VaultError> {
+    let item_count = live_record_count(read_txn)?;
+    if item_count > 0 {
+        decrypt_first_live_record(vek, &meta.vault_id, read_txn)
+    } else if proof_verified {
+        Ok(())
+    } else {
+        Err(VaultError::InvalidData(
+            "session cache VEK lacks integrity proof for empty vault".into(),
+        ))
+    }
+}
+
+fn decrypt_first_live_record(
+    vek: &SecretKey,
+    vault_id: &str,
+    read_txn: &ReadTransaction,
+) -> Result<(), VaultError> {
+    let records = match read_txn.open_table(RECORDS) {
+        Ok(table) => table,
+        Err(redb::TableError::TableDoesNotExist(_)) => {
+            return Err(VaultError::InvalidData("no records table".into()));
         }
+        Err(error) => return Err(VaultError::from(error)),
+    };
+
+    for entry in records.iter()? {
+        let (_, value): (redb::AccessGuard<&str>, redb::AccessGuard<&[u8]>) = entry?;
+        let stored: StoredEnvelope = serde_json::from_slice(value.value())?;
+        if stored.deleted {
+            continue;
+        }
+        decrypt_stored(vek, vault_id, &stored)?;
+        return Ok(());
     }
 
+    Err(VaultError::InvalidData("no live records to verify VEK".into()))
+}
+
+fn live_record_count(read_txn: &ReadTransaction) -> Result<u64, VaultError> {
     let records = match read_txn.open_table(RECORDS) {
         Ok(t) => t,
         Err(redb::TableError::TableDoesNotExist(_)) => return Ok(0),
@@ -1480,6 +1677,7 @@ fn sync_parent_dir(_path: &Path) -> Result<(), VaultError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vault::session_cache;
 
     struct TestVault {
         service: VaultService,
@@ -1509,7 +1707,7 @@ mod tests {
         let mut vault = TestVault::new();
         vault
             .service
-            .initialize("correct horse battery staple")
+            .initialize("correct horse battery staple", false)
             .expect("initialize vault");
         vault
     }
@@ -1517,7 +1715,7 @@ mod tests {
     #[test]
     fn initialize_rejects_short_passphrase() {
         let mut vault = TestVault::new();
-        let err = vault.service.initialize("short").unwrap_err();
+        let err = vault.service.initialize("short", false).unwrap_err();
         assert!(matches!(
             err,
             VaultError::InvalidPassphraseLength { min }
@@ -1830,7 +2028,7 @@ mod tests {
         vault.service.lock();
         vault
             .service
-            .unlock("correct horse battery staple")
+            .unlock("correct horse battery staple", false)
             .expect("unlock and backfill");
         let restored = vault
             .service
@@ -1887,6 +2085,75 @@ mod tests {
     }
 
     #[test]
+    fn explicit_lock_stays_locked_when_session_cache_remembers_device() {
+        let mut vault = initialized_test_vault();
+        vault
+            .service
+            .unlock("correct horse battery staple", true)
+            .expect("unlock with remember on device");
+        let vault_id = vault.service.meta.as_ref().expect("meta").vault_id.clone();
+
+        vault.service.lock();
+        let status = vault.service.status().expect("status after lock");
+        assert!(
+            matches!(status, VaultStatus::Locked { .. }),
+            "explicit lock must not be undone by session cache restore"
+        );
+        session_cache::clear_session_cache(&vault_id).expect("cleanup");
+    }
+
+    #[test]
+    fn verify_passphrase_does_not_clear_remembered_session_cache() {
+        let mut vault = initialized_test_vault();
+        vault
+            .service
+            .unlock("correct horse battery staple", true)
+            .expect("unlock with remember on device");
+        let vault_id = vault.service.meta.as_ref().expect("meta").vault_id.clone();
+        assert!(
+            session_cache::has_session_cache(&vault_id).expect("has cache check")
+        );
+
+        vault.service.lock();
+        vault
+            .service
+            .verify_passphrase("correct horse battery staple")
+            .expect("verify passphrase");
+        assert!(
+            session_cache::has_session_cache(&vault_id).expect("has cache check"),
+            "verify_passphrase must not clear remembered session cache"
+        );
+        session_cache::clear_session_cache(&vault_id).expect("cleanup");
+    }
+
+    #[test]
+    fn session_cache_restore_rejects_wrong_vek_for_nonempty_vault() {
+        let mut vault = initialized_test_vault();
+        vault
+            .service
+            .item_create("prod password", "ssh-password", "secret", None)
+            .expect("create item");
+        let vault_id = vault.service.meta.as_ref().expect("meta").vault_id.clone();
+        let wrong_vek = SecretKey::from_bytes([1u8; 32]);
+        session_cache::save_session_cache(&vault_id, &wrong_vek).expect("save wrong vek");
+
+        // Clear in-memory unlock without suppressing session-cache verification.
+        vault.service.vek = None;
+        vault.service.meta = None;
+        assert!(
+            !vault
+                .service
+                .try_unlock_from_session_cache()
+                .expect("try cache unlock"),
+            "wrong cached VEK must not unlock vault"
+        );
+        assert!(
+            !session_cache::has_session_cache(&vault_id).expect("cache cleared"),
+            "invalid cache entry should be cleared"
+        );
+    }
+
+    #[test]
     fn recovery_key_unlock_runs_compatibility_migration_without_transaction_conflict() {
         let mut vault = initialized_test_vault();
         vault
@@ -1901,7 +2168,7 @@ mod tests {
         vault.service.lock();
         let status = vault
             .service
-            .unlock_with_recovery_key(&recovery_key)
+            .unlock_with_recovery_key(&recovery_key, false)
             .expect("unlock with recovery key");
 
         assert!(matches!(

@@ -130,7 +130,7 @@ export function useVaultPanelActions({
         `Secured ${result.secured} credential(s).${result.backupPath ? ' Backup saved.' : ''}`,
       );
       await onLoadConnections();
-      await onRefreshItems();
+      await onRefresh();
       await loadSecurePreview();
     } catch (e: unknown) {
       const msg = extractErrorMessage(e);

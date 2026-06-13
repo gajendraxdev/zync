@@ -3,7 +3,7 @@
 ## Status
 - **Owner:** Core app team
 - **Document type:** Architecture + implementation guide
-- **Last updated:** 2026-05-08
+- **Last updated:** 2026-06-14
 - **Scope:** Vault UX, vault core, provider abstraction, sync engine, and future app-data sync
 
 ---
@@ -87,6 +87,29 @@ UI (Sidebar Vaults + Vault tabs + Sync status)
 ### Discoverability rules
 - If vault uninitialized, show global CTA: “Set up Vault”.
 - In credential creation flows, default recommendation: “Store in Vault”.
+
+### Local vault lock lifecycle
+
+```text
+App start
+  -> vault_status (try OS keychain session restore)
+      -> unlocked: work normally
+      -> locked: wait for explicit unlock or remembered-device restore on next refresh
+Explicit unlock/create
+  -> optional remember_on_device writes session cache to OS keychain
+Lock (user action)
+  -> clear in-memory vek only
+Forget this device
+  -> delete OS keychain session cache for current vault_id
+```
+
+Host connect policy:
+
+- **Vault-backed hosts:** opening a tab does not auto-connect; user must reconnect explicitly.
+- **Plaintext/key-file hosts:** existing auto-connect-on-open-tab behavior remains.
+- **Explicit connect/test/save:** may open the global unlock modal when vault is locked.
+
+See [`VAULT_CREDENTIAL_IDENTITY_MODEL.md`](./VAULT_CREDENTIAL_IDENTITY_MODEL.md) §1.2 for the full session-unlock model.
 
 ---
 

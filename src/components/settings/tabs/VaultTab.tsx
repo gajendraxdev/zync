@@ -26,7 +26,7 @@ interface VaultTabProps {
 }
 
 export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultTabProps) {
-  const { status, items, refresh, lock, refreshItems, openUnlockModal } = useVaultStore();
+  const { status, items, refresh, lock, refreshItems, openUnlockModal, forgetDevice } = useVaultStore();
   const showToast = useAppStore(state => state.showToast);
   const showConfirmDialog = useAppStore(state => state.showConfirmDialog);
   const connections = useAppStore(state => state.connections);
@@ -89,7 +89,7 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
   const addCredential = useAddCredentialModal({
     isUnlocked,
     showToast,
-    onCreated: refreshItems,
+    onCreated: refresh,
   });
 
   const rotateCredential = useRotateCredentialModal({
@@ -274,6 +274,23 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
     addCredential.close();
     closeCredentialDetails();
   }, [isUnlocked]);
+  const handleForgetDevice = useCallback(async () => {
+    const confirmed = await showConfirmDialog({
+      title: 'Forget This Device?',
+      message: 'Zync will remove the remembered vault unlock key from this device. You will need your passphrase after the next restart.',
+      confirmText: 'Forget Device',
+      variant: 'danger',
+    });
+    if (!confirmed) return;
+    try {
+      await forgetDevice();
+      showToast('success', 'Remembered unlock removed from this device.');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      showToast('error', `Failed to forget device: ${message}`);
+    }
+  }, [forgetDevice, showConfirmDialog, showToast]);
+
   const canSyncItemsToGoogle = Boolean(
     panel.googleSync?.connected
     && panel.googleCollection?.configured
@@ -299,6 +316,7 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
           onRepairRefs={panel.handleRepairRefs}
           onLock={panel.handleLock}
           onOpenUnlock={openUnlockModal}
+          onForgetDevice={handleForgetDevice}
         />
       </div>
 

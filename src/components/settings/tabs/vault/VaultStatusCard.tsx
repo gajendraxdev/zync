@@ -10,6 +10,7 @@ interface VaultStatusCardProps {
   onRepairRefs: () => void;
   onLock: () => void;
   onOpenUnlock: () => void;
+  onForgetDevice?: () => void;
 }
 
 export function VaultStatusCard({
@@ -19,6 +20,7 @@ export function VaultStatusCard({
   onRepairRefs,
   onLock,
   onOpenUnlock,
+  onForgetDevice,
 }: VaultStatusCardProps) {
   const unlockedStatus = status?.status === 'unlocked' ? status : null;
   const lockedStatus = status?.status === 'locked' ? status : null;
@@ -47,7 +49,9 @@ export function VaultStatusCard({
               {isUnlocked
                 ? `${unlockedStatus?.itemCount ?? 0} item(s) · XChaCha20-Poly1305 encrypted`
                 : status?.status === 'locked'
-                  ? `${lockedStatus?.itemCount ?? 0} item(s) in vault backup · unlock to access`
+                  ? lockedStatus?.rememberedOnDevice
+                    ? `${lockedStatus?.itemCount ?? 0} item(s) · remembered on this device`
+                    : `${lockedStatus?.itemCount ?? 0} item(s) in vault backup · unlock to access`
                   : 'Create a vault to store SSH credentials securely'}
             </p>
           </div>
@@ -71,10 +75,17 @@ export function VaultStatusCard({
             </Button>
           </div>
         ) : (
-          <Button size="sm" onClick={onOpenUnlock} className="gap-1.5 shrink-0">
-            {status?.status === 'locked' ? <Unlock size={13} /> : <Shield size={13} />}
-            {status?.status === 'locked' ? 'Unlock' : 'Set Up Vault'}
-          </Button>
+          <div className="flex items-center gap-2">
+            {status?.status === 'locked' && lockedStatus?.rememberedOnDevice && onForgetDevice && (
+              <Button variant="secondary" size="sm" onClick={onForgetDevice} className="shrink-0">
+                Forget Device
+              </Button>
+            )}
+            <Button size="sm" onClick={onOpenUnlock} className="gap-1.5 shrink-0">
+              {status?.status === 'locked' ? <Unlock size={13} /> : <Shield size={13} />}
+              {status?.status === 'locked' ? 'Unlock' : 'Set Up Vault'}
+            </Button>
+          </div>
         )}
       </div>
     </div>

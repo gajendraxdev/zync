@@ -27,7 +27,12 @@ pub struct VaultMeta {
 #[serde(tag = "status", rename_all = "camelCase")]
 pub enum VaultStatus {
     Uninitialized,
-    Locked { vault_id: String, item_count: u64 },
+    Locked {
+        vault_id: String,
+        item_count: u64,
+        /// True when an OS keychain session cache exists for this vault on this device.
+        remembered_on_device: bool,
+    },
     Unlocked { vault_id: String, item_count: u64 },
 }
 

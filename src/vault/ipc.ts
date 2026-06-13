@@ -4,7 +4,7 @@ import type { CredentialEnvelope } from './credentialTypes';
 
 export type VaultStatus =
   | { status: 'uninitialized' }
-  | { status: 'locked'; vaultId: string; itemCount: number }
+  | { status: 'locked'; vaultId: string; itemCount: number; rememberedOnDevice: boolean }
   | { status: 'unlocked'; vaultId: string; itemCount: number };
 
 export interface VaultItem {
@@ -73,11 +73,14 @@ export const vaultIpc = {
   status: (): Promise<VaultStatus> =>
     invoke('vault_status'),
 
-  initialize: (passphrase: string): Promise<VaultStatus> =>
-    invoke('vault_initialize', { args: { passphrase } }),
+  initialize: (passphrase: string, rememberOnDevice = false): Promise<VaultStatus> =>
+    invoke('vault_initialize', { args: { passphrase, remember_on_device: rememberOnDevice } }),
 
-  unlock: (passphrase: string): Promise<VaultStatus> =>
-    invoke('vault_unlock', { args: { passphrase } }),
+  unlock: (passphrase: string, rememberOnDevice = false): Promise<VaultStatus> =>
+    invoke('vault_unlock', { args: { passphrase, remember_on_device: rememberOnDevice } }),
+
+  forgetDevice: (): Promise<void> =>
+    invoke('vault_forget_device'),
 
   lock: (): Promise<void> =>
     invoke('vault_lock'),
@@ -131,8 +134,10 @@ export const vaultIpc = {
   hasRecoveryKey: (): Promise<boolean> =>
     invoke('vault_has_recovery_key'),
 
-  unlockWithRecoveryKey: (recoveryKey: string): Promise<VaultStatus> =>
-    invoke('vault_unlock_with_recovery_key', { args: { recovery_key: recoveryKey } }),
+  unlockWithRecoveryKey: (recoveryKey: string, rememberOnDevice = false): Promise<VaultStatus> =>
+    invoke('vault_unlock_with_recovery_key', {
+      args: { recovery_key: recoveryKey, remember_on_device: rememberOnDevice },
+    }),
 
   exportVault: (destPath: string): Promise<void> =>
     invoke('vault_export', { args: { dest_path: destPath } }),

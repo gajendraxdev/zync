@@ -53,6 +53,8 @@ pub async fn vault_status(vault: State<'_, Mutex<VaultService>>) -> VaultResult<
 #[derive(Deserialize)]
 pub struct InitializeArgs {
     pub passphrase: SecretString,
+    #[serde(default)]
+    pub remember_on_device: bool,
 }
 
 #[tauri::command]
@@ -63,13 +65,15 @@ pub async fn vault_initialize(
     vault
         .lock()
         .await
-        .initialize(args.passphrase.expose_secret())
+        .initialize(args.passphrase.expose_secret(), args.remember_on_device)
         .map_err(Into::into)
 }
 
 #[derive(Deserialize)]
 pub struct UnlockArgs {
     pub passphrase: SecretString,
+    #[serde(default)]
+    pub remember_on_device: bool,
 }
 
 #[tauri::command]
@@ -80,8 +84,13 @@ pub async fn vault_unlock(
     vault
         .lock()
         .await
-        .unlock(args.passphrase.expose_secret())
+        .unlock(args.passphrase.expose_secret(), args.remember_on_device)
         .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn vault_forget_device(vault: State<'_, Mutex<VaultService>>) -> VaultResult<()> {
+    vault.lock().await.forget_device_session().map_err(Into::into)
 }
 
 #[tauri::command]
@@ -349,6 +358,8 @@ pub async fn vault_has_recovery_key(vault: State<'_, Mutex<VaultService>>) -> Va
 #[derive(Deserialize)]
 pub struct UnlockWithRecoveryKeyArgs {
     pub recovery_key: SecretString,
+    #[serde(default)]
+    pub remember_on_device: bool,
 }
 
 #[tauri::command]
@@ -359,7 +370,7 @@ pub async fn vault_unlock_with_recovery_key(
     vault
         .lock()
         .await
-        .unlock_with_recovery_key(args.recovery_key.expose_secret())
+        .unlock_with_recovery_key(args.recovery_key.expose_secret(), args.remember_on_device)
         .map_err(Into::into)
 }
 

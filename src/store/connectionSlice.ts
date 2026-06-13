@@ -37,6 +37,7 @@ import {
     connectConfigUsesVaultAuth,
     normalizeFolderPath,
     preserveVaultCredentialOnUpdate,
+    shouldAutoConnectOnOpenTab,
     type ImportPlanItem,
 } from '../features/connections/domain';
 import { connectionErrorMessage } from '../features/connections/domain/errorSanitization';
@@ -523,16 +524,14 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
             const existingTab = findConnectionTab(state.tabs, conn.id);
 
             if (existingTab) {
-                // Auto connect if disconnected or error even if tab exists (e.g. user clicked to reconnect)
-                if (conn.status === 'disconnected' || conn.status === 'error') {
+                if (shouldAutoConnectOnOpenTab(state.connections, conn)) {
                     get().connect(conn.id);
                 }
 
                 return { ...activateExistingConnectionTab(state.tabs, existingTab, startView), lastRealConnectionId: conn.id, showWelcomeScreen: false };
             }
 
-            // Auto connect if disconnected or error
-            if (conn.status === 'disconnected' || conn.status === 'error') {
+            if (shouldAutoConnectOnOpenTab(state.connections, conn)) {
                 get().connect(conn.id);
             }
 

@@ -203,6 +203,7 @@ pub fn run() {
             vault::commands::vault_status,
             vault::commands::vault_initialize,
             vault::commands::vault_unlock,
+            vault::commands::vault_forget_device,
             vault::commands::vault_lock,
             vault::commands::vault_item_create,
             vault::commands::vault_item_list,
