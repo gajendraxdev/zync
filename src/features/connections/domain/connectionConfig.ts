@@ -158,3 +158,9 @@ export const buildConnectConfig = (
     const result = buildConnectConfigResult(connections, connectionId, visited);
     return result.status === 'ok' ? result.config : null;
 };
+
+export const connectConfigUsesVaultAuth = (config: ConnectConfig): boolean => {
+    if (config.auth_method.type === 'VaultRef') return true;
+    if (config.jump_host) return connectConfigUsesVaultAuth(config.jump_host);
+    return false;
+};

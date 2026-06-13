@@ -808,14 +808,6 @@ async fn collect_remote_host_records(
         .await
         .map_err(|e| sync_error_to_string(&e))?;
 
-    #[cfg(debug_assertions)]
-    eprintln!(
-        "[sync] hosts remote collect provider='{}' collection='{}' remote_object_count={}",
-        provider.as_str(),
-        manifest.sync_collection_id,
-        remote_objects.len()
-    );
-
     let mut scanned = 0u64;
     let mut skipped = 0u64;
     let mut failed = 0u64;
@@ -1378,12 +1370,6 @@ pub async fn sync_hosts_upload(
             "[sync_collection_not_configured] Sync collection is not configured. Set up sync key first."
                 .to_string()
         })?;
-    #[cfg(debug_assertions)]
-    eprintln!(
-        "[sync] hosts restore provider='{}' active_collection='{}'",
-        kind.as_str(),
-        manifest.sync_collection_id
-    );
     let collection_key = load_collection_key(&manifest).map_err(|e| sync_error_to_string(&e))?;
     let secret_key = SecretKey::from_bytes(collection_key);
 
@@ -1553,12 +1539,6 @@ pub async fn sync_hosts_remote_inventory(
             "[sync_collection_not_configured] Sync collection is not configured. Set up sync key first."
                 .to_string()
         })?;
-    #[cfg(debug_assertions)]
-    eprintln!(
-        "[sync] hosts inventory provider='{}' active_collection='{}'",
-        kind.as_str(),
-        manifest.sync_collection_id
-    );
     let collection_key = load_collection_key(&manifest).map_err(|e| sync_error_to_string(&e))?;
     let secret_key = SecretKey::from_bytes(collection_key);
     let local_host_ids = load_hosts_sync_records(&provider_data_dir)
@@ -1643,12 +1623,6 @@ pub async fn sync_hosts_restore(
             "[sync_collection_not_configured] Sync collection is not configured. Set up sync key first."
                 .to_string()
         })?;
-    #[cfg(debug_assertions)]
-    eprintln!(
-        "[sync] credential restore preview provider='{}' active_collection='{}'",
-        kind.as_str(),
-        manifest.sync_collection_id
-    );
     let collection_key = load_collection_key(&manifest).map_err(|e| sync_error_to_string(&e))?;
     let secret_key = SecretKey::from_bytes(collection_key);
     let logical_id_filter = args.logical_ids.map(|ids| {
@@ -2089,14 +2063,6 @@ pub async fn sync_collection_setup(
 
     let existing_manifest = load_manifest(&provider_data_dir, kind)
         .map_err(|e| sync_error_to_string(&e))?;
-    #[cfg(debug_assertions)]
-    eprintln!(
-        "[sync] collection setup provider='{}' existing_manifest_collection={:?}",
-        kind.as_str(),
-        existing_manifest
-            .as_ref()
-            .map(|manifest| manifest.sync_collection_id.as_str())
-    );
     let discovered_sync_collection_id = if existing_manifest.is_none() {
         let mut collection_ids = provider_impl
             .discover_sync_collection_ids(&app)
@@ -2104,12 +2070,6 @@ pub async fn sync_collection_setup(
             .map_err(|e| sync_error_to_string(&e))?;
         collection_ids.sort();
         collection_ids.dedup();
-        #[cfg(debug_assertions)]
-        eprintln!(
-            "[sync] collection setup provider='{}' discovered_remote_collections={:?}",
-            kind.as_str(),
-            collection_ids
-        );
         if collection_ids.len() > 1 {
             return Err(format!(
                 "[sync_collection_ambiguous_remote] Found {} existing encrypted sync collections in {}. This device was reset, so Zync cannot pick one automatically yet.",
@@ -2626,12 +2586,6 @@ pub async fn sync_restore_preview(
             "[sync_collection_not_configured] Sync collection is not configured. Set up sync key first."
                 .to_string()
         })?;
-    #[cfg(debug_assertions)]
-    eprintln!(
-        "[sync] credential restore provider='{}' active_collection='{}'",
-        kind.as_str(),
-        manifest.sync_collection_id
-    );
     let collection_key = load_collection_key(&manifest).map_err(|e| sync_error_to_string(&e))?;
     let secret_key = SecretKey::from_bytes(collection_key);
 
@@ -2643,14 +2597,6 @@ pub async fn sync_restore_preview(
             record_sync_error(&provider_data_dir, kind, error.code, error.message.clone());
             sync_error_to_string(&error)
         })?;
-    #[cfg(debug_assertions)]
-    eprintln!(
-        "[sync] credential restore preview provider='{}' collection='{}' remote_object_count={}",
-        kind.as_str(),
-        manifest.sync_collection_id,
-        remote_objects.len()
-    );
-
     let mut scanned = 0u64;
     let mut restorable = 0u64;
     let mut updatable = 0u64;
