@@ -3,7 +3,6 @@
 use super::types::{SyncError, SyncResult};
 use crate::types::{SavedTunnel, SavedTunnelsData};
 use std::collections::BTreeMap;
-use std::io::ErrorKind;
 use std::path::Path;
 use std::sync::{LazyLock, Mutex};
 
@@ -260,62 +259,12 @@ fn parse_saved_tunnels_file(path: &Path) -> SyncResult<SavedTunnelsData> {
 }
 
 pub(crate) fn write_saved_tunnels_atomic(path: &Path, data: &SavedTunnelsData) -> SyncResult<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| SyncError::new("sync_tunnels_write_failed", "Invalid tunnels file path"))?;
-    std::fs::create_dir_all(parent).map_err(|e| {
-        SyncError::new("sync_tunnels_write_failed", format!("Failed to create tunnels dir: {e}"))
-    })?;
-    let temp_path = path.with_extension("tmp");
     let json = serde_json::to_string_pretty(data).map_err(|e| {
         SyncError::new("sync_tunnels_write_failed", format!("Failed to serialize tunnels data: {e}"))
     })?;
-    std::fs::write(&temp_path, json).map_err(|e| {
-        SyncError::new("sync_tunnels_write_failed", format!("Failed to write temp tunnels file: {e}"))
-    })?;
-    match std::fs::rename(&temp_path, path) {
-        Ok(()) => Ok(()),
-        Err(rename_err) if rename_err.kind() == ErrorKind::AlreadyExists && path.exists() => {
-            let backup_path = path.with_extension("bak");
-            if backup_path.exists() {
-                std::fs::remove_file(&backup_path).map_err(|e| {
-                    let _ = std::fs::remove_file(&temp_path);
-                    SyncError::new(
-                        "sync_tunnels_write_failed",
-                        format!("Failed to remove stale tunnels backup before replace: {e}"),
-                    )
-                })?;
-            }
-            std::fs::rename(path, &backup_path).map_err(|e| {
-                let _ = std::fs::remove_file(&temp_path);
-                SyncError::new(
-                    "sync_tunnels_write_failed",
-                    format!("Failed to stage tunnels backup before replace: {e}"),
-                )
-            })?;
-            match std::fs::rename(&temp_path, path) {
-                Ok(()) => {
-                    let _ = std::fs::remove_file(&backup_path);
-                    Ok(())
-                }
-                Err(e) => {
-                    let _ = std::fs::rename(&backup_path, path);
-                    let _ = std::fs::remove_file(&temp_path);
-                    Err(SyncError::new(
-                        "sync_tunnels_write_failed",
-                        format!("Failed to finalize tunnels file: {e}"),
-                    ))
-                }
-            }
-        }
-        Err(rename_err) => {
-            let _ = std::fs::remove_file(&temp_path);
-            Err(SyncError::new(
-                "sync_tunnels_write_failed",
-                format!("Failed to finalize tunnels file: {rename_err}"),
-            ))
-        }
-    }
+    crate::atomic_io::durable_replace(path, json.as_bytes()).map_err(|e| {
+        SyncError::new("sync_tunnels_write_failed", format!("Failed to write tunnels file: {e}"))
+    })
 }
 
 #[cfg(test)]

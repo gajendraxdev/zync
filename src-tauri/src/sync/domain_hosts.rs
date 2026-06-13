@@ -3,7 +3,6 @@
 use super::types::{SyncDomain, SyncError, SyncResult};
 use crate::types::{CredentialRef, SavedConnection, SavedData};
 use std::collections::BTreeMap;
-use std::io::ErrorKind;
 use std::path::Path;
 use std::sync::{LazyLock, Mutex};
 
@@ -217,62 +216,18 @@ fn parse_saved_file(path: &Path) -> SyncResult<SavedData> {
 }
 
 fn save_saved_data_atomic(path: &Path, data: &SavedData) -> SyncResult<()> {
-    let parent = path.parent().ok_or_else(|| {
-        SyncError::new("sync_hosts_write_failed", "Invalid hosts file path")
-    })?;
-    std::fs::create_dir_all(parent).map_err(|e| {
-        SyncError::new(
-            "sync_hosts_write_failed",
-            format!("Failed to create hosts directory: {e}"),
-        )
-    })?;
-    let temp_path = path.with_extension("tmp");
     let json = serde_json::to_string_pretty(data).map_err(|e| {
         SyncError::new(
             "sync_hosts_write_failed",
             format!("Failed to serialize hosts data: {e}"),
         )
     })?;
-    std::fs::write(&temp_path, json).map_err(|e| {
+    crate::atomic_io::durable_replace(path, json.as_bytes()).map_err(|e| {
         SyncError::new(
             "sync_hosts_write_failed",
-            format!("Failed to write temp hosts file: {e}"),
+            format!("Failed to write hosts file: {e}"),
         )
-    })?;
-    match std::fs::rename(&temp_path, path) {
-        Ok(()) => Ok(()),
-        Err(rename_err) if rename_err.kind() == ErrorKind::AlreadyExists && path.exists() => {
-            let backup_path = path.with_extension("bak");
-            std::fs::rename(path, &backup_path).map_err(|backup_err| {
-                let _ = std::fs::remove_file(&temp_path);
-                SyncError::new(
-                    "sync_hosts_write_failed",
-                    format!("Failed to stage hosts backup before replace: {backup_err}"),
-                )
-            })?;
-            match std::fs::rename(&temp_path, path) {
-                Ok(()) => {
-                    let _ = std::fs::remove_file(&backup_path);
-                    Ok(())
-                }
-                Err(retry_err) => {
-                    let _ = std::fs::rename(&backup_path, path);
-                    let _ = std::fs::remove_file(&temp_path);
-                    Err(SyncError::new(
-                        "sync_hosts_write_failed",
-                        format!("Failed to finalize hosts file after replace retry: {retry_err}"),
-                    ))
-                }
-            }
-        }
-        Err(rename_err) => {
-            let _ = std::fs::remove_file(&temp_path);
-            Err(SyncError::new(
-                "sync_hosts_write_failed",
-                format!("Failed to finalize hosts file: {rename_err}"),
-            ))
-        }
-    }
+    })
 }
 
 fn host_logical_id(conn: &SavedConnection) -> String {
