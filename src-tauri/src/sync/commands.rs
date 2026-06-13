@@ -6,7 +6,10 @@ use super::collection::{
 };
 use super::domain_hosts::{apply_hosts_restore_records, load_hosts_sync_records, HostSyncRecord};
 use super::domain_settings::{load_allowlisted_settings, SettingsSyncRecord, SETTINGS_ALLOWLIST_KEYS};
-use super::domain_snippets::{apply_snippet_restore_records, load_snippet_sync_records, SnippetSyncRecord};
+use super::domain_snippets::{
+    apply_snippet_restore_records, load_snippet_sync_records, snippet_record_logical_id,
+    SnippetSyncRecord,
+};
 use super::domain_tunnels::{apply_tunnel_restore_records, load_tunnel_sync_records, TunnelSyncRecord};
 use super::profiles::{get_profile, now_secs, upsert_profile};
 use super::provider::{validate_provider_contract, ProviderUploadRecord, VaultProviderV1};
@@ -1907,11 +1910,7 @@ pub async fn sync_snippets_restore(app: tauri::AppHandle, provider: String) -> R
         .into_iter()
         .map(|mut record| {
             if record.logical_id.trim().is_empty() {
-                record.logical_id = format!(
-                    "{}:{}",
-                    record.name.trim().to_ascii_lowercase(),
-                    record.command.len()
-                );
+                record.logical_id = snippet_record_logical_id(&record);
             }
             record
         })
@@ -1942,7 +1941,19 @@ pub async fn sync_settings_upload(app: tauri::AppHandle, provider: String) -> Re
         .ok_or_else(|| "[sync_collection_not_configured] Sync collection is not configured. Set up sync key first.".to_string())?;
     let collection_key = load_collection_key(&manifest).map_err(|e| sync_error_to_string(&e))?;
     let secret_key = SecretKey::from_bytes(collection_key);
-    let record = load_allowlisted_settings(&app).await?;
+    let existing = collect_domain_records::<SettingsSyncRecord>(
+        provider_impl.as_ref(),
+        &app,
+        &manifest,
+        &secret_key,
+        "settings",
+        ".zset",
+    )
+    .await?
+    .records
+    .into_iter()
+    .max_by_key(|record| record.updated_at);
+    let record = load_allowlisted_settings(&app, existing.as_ref()).await?;
     let revision = default_revision(record.updated_at);
     let synced_at = upload_domain_record(
         provider_impl.as_ref(),

@@ -310,7 +310,9 @@ pub fn normalize_record_credential(record: &mut PlaintextRecord) {
     credential.updated_at = record.updated_at;
     credential.revision = record.revision;
     credential.schema_version = CURRENT_CREDENTIAL_SCHEMA_VERSION;
-    credential.metadata.legacy_kind = Some(original_kind);
+    if credential.metadata.legacy_kind.is_none() {
+        credential.metadata.legacy_kind = Some(original_kind);
+    }
 
     if credential.metadata.notes.is_none() {
         credential.metadata.notes = record.notes.clone();
@@ -568,6 +570,24 @@ mod tests {
             Some(&CredentialKind::UsernamePassword)
         );
         assert_eq!(record.kind, "username-password");
+    }
+
+    #[test]
+    fn normalize_record_credential_preserves_original_legacy_kind_metadata() {
+        let mut record = legacy_record("ssh-password");
+        let mut typed = legacy_record_to_credential(&record);
+        typed.metadata.legacy_kind = Some("original-custom-kind".into());
+        record.credential = Some(typed);
+
+        normalize_record_credential(&mut record);
+
+        assert_eq!(
+            record
+                .credential
+                .as_ref()
+                .and_then(|credential| credential.metadata.legacy_kind.as_deref()),
+            Some("original-custom-kind")
+        );
     }
 
     #[test]

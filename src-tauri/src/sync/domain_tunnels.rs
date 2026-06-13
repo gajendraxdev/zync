@@ -199,6 +199,7 @@ pub fn apply_tunnel_restore_records(data_dir: &Path, records: &[TunnelSyncRecord
             .iter_mut()
             .find(|t| tunnel_matches_record(t, record))
         {
+            existing.id = record.logical_id.clone();
             existing.connection_id = record.connection_id.clone();
             existing.name = record.name.clone();
             existing.tunnel_type = record.tunnel_type.clone();
@@ -603,11 +604,13 @@ mod tests {
             group: None,
             updated_at: 9,
         };
-        let (restored, updated) = apply_tunnel_restore_records(&dir, &[record]).expect("apply");
+        let (restored, updated) =
+            apply_tunnel_restore_records(&dir, std::slice::from_ref(&record)).expect("apply");
         assert_eq!((restored, updated), (0, 1));
         let saved = load_saved_tunnels(&dir.join(TUNNELS_FILE)).expect("read");
         assert_eq!(saved.tunnels.len(), 1);
         assert_eq!(saved.tunnels[0].name, "Updated");
+        assert_eq!(saved.tunnels[0].id, record.logical_id);
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }
 
@@ -668,11 +671,13 @@ mod tests {
             updated_at: 9,
         };
 
-        let (restored, updated) = apply_tunnel_restore_records(&dir, &[record]).expect("apply");
+        let (restored, updated) =
+            apply_tunnel_restore_records(&dir, std::slice::from_ref(&record)).expect("apply");
         assert_eq!((restored, updated), (0, 1));
         let saved = load_saved_tunnels(&dir.join(TUNNELS_FILE)).expect("read");
         assert_eq!(saved.tunnels.len(), 1);
         assert_eq!(saved.tunnels[0].name, "Updated");
+        assert_eq!(saved.tunnels[0].id, record.logical_id);
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }
 

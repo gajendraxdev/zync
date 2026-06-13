@@ -143,11 +143,9 @@ pub fn apply_hosts_restore_records(
             let restored_timestamp = host_timestamp_from_sync(record.updated_at);
             existing.created_at = Some(restored_timestamp);
             existing.last_connected = Some(restored_timestamp);
-            if let Some(auth_ref) = &record.auth_ref {
-                existing.auth_ref = Some(auth_ref.clone());
-                existing.password = None;
-                existing.private_key_path = None;
-            }
+            existing.auth_ref = record.auth_ref.clone();
+            existing.password = None;
+            existing.private_key_path = None;
             updated = updated.saturating_add(1);
             continue;
         }
@@ -229,30 +227,25 @@ fn save_saved_data_atomic(path: &Path, data: &SavedData) -> SyncResult<()> {
     match std::fs::rename(&temp_path, path) {
         Ok(()) => Ok(()),
         Err(rename_err) if rename_err.kind() == ErrorKind::AlreadyExists && path.exists() => {
-            match std::fs::remove_file(path) {
-                Ok(()) => std::fs::rename(&temp_path, path).map_err(|retry_err| {
-                    let _ = std::fs::remove_file(&temp_path);
-                    SyncError::new(
-                        "sync_hosts_write_failed",
-                        format!("Failed to finalize hosts file after replace retry: {retry_err}"),
-                    )
-                }),
-                Err(remove_err) if remove_err.kind() == ErrorKind::NotFound => {
-                    if std::fs::rename(&temp_path, path).is_ok() {
-                        Ok(())
-                    } else {
-                        let _ = std::fs::remove_file(&temp_path);
-                        Err(SyncError::new(
-                            "sync_hosts_write_failed",
-                            "Failed to finalize hosts file after replace retry",
-                        ))
-                    }
+            let backup_path = path.with_extension("bak");
+            std::fs::rename(path, &backup_path).map_err(|backup_err| {
+                let _ = std::fs::remove_file(&temp_path);
+                SyncError::new(
+                    "sync_hosts_write_failed",
+                    format!("Failed to stage hosts backup before replace: {backup_err}"),
+                )
+            })?;
+            match std::fs::rename(&temp_path, path) {
+                Ok(()) => {
+                    let _ = std::fs::remove_file(&backup_path);
+                    Ok(())
                 }
-                Err(remove_err) => {
+                Err(retry_err) => {
+                    let _ = std::fs::rename(&backup_path, path);
                     let _ = std::fs::remove_file(&temp_path);
                     Err(SyncError::new(
                         "sync_hosts_write_failed",
-                        format!("Failed to replace existing hosts file: {remove_err}"),
+                        format!("Failed to finalize hosts file after replace retry: {retry_err}"),
                     ))
                 }
             }
@@ -451,6 +444,47 @@ mod tests {
         assert_eq!(updated.created_at, Some(9_000));
         assert_eq!(updated.last_connected, Some(9_000));
 
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[test]
+    fn restore_existing_host_clears_stale_auth_when_remote_has_none() {
+        let dir = temp_dir("restore-clears-stale-auth");
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let mut existing = test_connection("host-1");
+        existing.password = Some("old-password".into());
+        existing.private_key_path = Some("C:\\Users\\me\\.ssh\\old.pem".into());
+        existing.auth_ref = Some(test_auth_ref());
+        std::fs::write(
+            dir.join(CONNECTIONS_FILE),
+            serde_json::to_string_pretty(&SavedData {
+                connections: vec![existing],
+                folders: Vec::new(),
+            })
+            .expect("serialize initial"),
+        )
+        .expect("write initial");
+
+        let record = HostSyncRecord {
+            logical_id: "host-1".into(),
+            name: "Host".into(),
+            host: "example.com".into(),
+            port: 22,
+            username: "app".into(),
+            jump_server_id: None,
+            folder: None,
+            tags: Vec::new(),
+            is_favorite: false,
+            updated_at: 9,
+            auth_ref: None,
+        };
+
+        apply_hosts_restore_records(&dir, &[record]).expect("apply");
+        let saved = load_saved_data(&dir.join(CONNECTIONS_FILE)).expect("read saved hosts");
+        let updated = saved.connections.first().expect("updated host");
+        assert_eq!(updated.auth_ref, None);
+        assert_eq!(updated.password, None);
+        assert_eq!(updated.private_key_path, None);
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }
 

@@ -464,6 +464,33 @@ runTest('buildConnectConfig rejects missing auth instead of sending empty passwo
   assert.equal(buildConnectConfig(connections, 'empty-auth'), null);
 });
 
+runTest('buildConnectConfig preserves password and key passphrase whitespace', () => {
+  const passwordConfig = buildConnectConfig([{
+    id: 'password-whitespace',
+    name: 'Password whitespace',
+    host: 'prod',
+    port: 22,
+    username: 'root',
+    status: 'disconnected',
+    password: '  valid password  ',
+  }], 'password-whitespace');
+  assert.equal(passwordConfig?.auth_method.type, 'Password');
+  assert.equal(passwordConfig?.auth_method.password, '  valid password  ');
+
+  const keyConfig = buildConnectConfig([{
+    id: 'passphrase-whitespace',
+    name: 'Passphrase whitespace',
+    host: 'prod',
+    port: 22,
+    username: 'root',
+    status: 'disconnected',
+    privateKeyPath: '/tmp/id_rsa',
+    password: '  valid passphrase  ',
+  }], 'passphrase-whitespace');
+  assert.equal(keyConfig?.auth_method.type, 'PrivateKey');
+  assert.equal(keyConfig?.auth_method.passphrase, '  valid passphrase  ');
+});
+
 runTest('buildConnectConfig accepts legacy snake_case private key records', () => {
   const connections = [{
     id: 'legacy-key',

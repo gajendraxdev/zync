@@ -155,7 +155,9 @@ export const ensureSyncBackupTabState = (
 ): { tabs?: Tab[]; activeTabId: string; activeConnectionId: null } => {
     const existing = tabs.find((tab) => tab.type === 'sync');
     if (existing) {
+        const normalizedTabs = tabs.filter((tab) => tab.type !== 'sync' || tab.id === existing.id);
         return {
+            ...(normalizedTabs.length !== tabs.length ? { tabs: normalizedTabs } : {}),
             activeTabId: existing.id,
             activeConnectionId: null,
         };

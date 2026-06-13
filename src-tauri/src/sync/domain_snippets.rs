@@ -23,21 +23,7 @@ pub struct SnippetSyncRecord {
 
 pub fn load_snippet_sync_records(data_dir: &Path) -> SyncResult<Vec<SnippetSyncRecord>> {
     let path = data_dir.join(SNIPPETS_FILE);
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-    let raw = std::fs::read_to_string(&path).map_err(|e| {
-        SyncError::new(
-            "sync_snippets_read_failed",
-            format!("Failed to read snippets source file: {e}"),
-        )
-    })?;
-    let data = serde_json::from_str::<SnippetsData>(&raw).map_err(|e| {
-        SyncError::new(
-            "sync_snippets_parse_failed",
-            format!("Failed to parse snippets source file: {e}"),
-        )
-    })?;
+    let data = load_saved(&path)?;
     let mut dedup: BTreeMap<String, SnippetSyncRecord> = BTreeMap::new();
     for snip in data.snippets {
         let logical_id = if snip.id.trim().is_empty() {
@@ -45,7 +31,13 @@ pub fn load_snippet_sync_records(data_dir: &Path) -> SyncResult<Vec<SnippetSyncR
         } else {
             snip.id.trim().to_string()
         };
-        dedup.insert(logical_id.clone(), map_snippet(snip, logical_id));
+        let record = map_snippet(snip, logical_id.clone());
+        if dedup
+            .get(&logical_id)
+            .map_or(true, |existing| record.updated_at > existing.updated_at)
+        {
+            dedup.insert(logical_id, record);
+        }
     }
     Ok(dedup.into_values().collect())
 }
@@ -64,22 +56,30 @@ fn map_snippet(snip: Snippet, logical_id: String) -> SnippetSyncRecord {
 }
 
 fn snippet_fallback_logical_id(snip: &Snippet) -> String {
-    snippet_content_logical_id(&snip.name, &snip.command)
+    snippet_content_logical_id(&snip.name, &snip.command, snip.connection_id.as_deref())
 }
 
-fn snippet_record_logical_id(record: &SnippetSyncRecord) -> String {
+pub(crate) fn snippet_record_logical_id(record: &SnippetSyncRecord) -> String {
     let logical_id = record.logical_id.trim();
     if logical_id.is_empty() {
-        snippet_content_logical_id(&record.name, &record.command)
+        snippet_content_logical_id(&record.name, &record.command, record.connection_id.as_deref())
     } else {
         logical_id.to_string()
     }
 }
 
-fn snippet_content_logical_id(name: &str, command: &str) -> String {
+fn snippet_content_logical_id(name: &str, command: &str, connection_id: Option<&str>) -> String {
     let label = name.trim().to_ascii_lowercase();
     let mut hasher = Sha256::new();
     hasher.update(command.as_bytes());
+    hasher.update([0]);
+    hasher.update(
+        connection_id
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_default()
+            .as_bytes(),
+    );
     let digest = hasher.finalize();
     let short_hash = digest[..8]
         .iter()
@@ -131,7 +131,25 @@ pub fn apply_snippet_restore_records(data_dir: &Path, records: &[SnippetSyncReco
 
 fn load_saved(path: &Path) -> SyncResult<SnippetsData> {
     if !path.exists() {
-        return Ok(SnippetsData { snippets: Vec::new() });
+        let temp_path = path.with_extension("tmp");
+        let backup_path = path.with_extension("bak");
+        if temp_path.exists() {
+            std::fs::rename(&temp_path, path).map_err(|e| {
+                SyncError::new(
+                    "sync_snippets_read_failed",
+                    format!("Failed to recover pending snippets temp file: {e}"),
+                )
+            })?;
+        } else if backup_path.exists() {
+            std::fs::rename(&backup_path, path).map_err(|e| {
+                SyncError::new(
+                    "sync_snippets_read_failed",
+                    format!("Failed to restore snippets backup file: {e}"),
+                )
+            })?;
+        } else {
+            return Ok(SnippetsData { snippets: Vec::new() });
+        }
     }
     let raw = std::fs::read_to_string(path).map_err(|e| {
         SyncError::new("sync_snippets_read_failed", format!("Failed to read snippets file: {e}"))
@@ -211,6 +229,88 @@ mod tests {
     }
 
     #[test]
+    fn load_saved_recovers_backup_when_primary_is_missing() {
+        let dir = std::env::temp_dir().join(format!(
+            "zync-sync-snippets-recovery-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let path = dir.join(SNIPPETS_FILE);
+        let backup_path = path.with_extension("bak");
+        let data = SnippetsData {
+            snippets: vec![Snippet {
+                id: "snip-1".into(),
+                name: "Recovered".into(),
+                command: "echo recovered".into(),
+                category: None,
+                tags: None,
+                connection_id: None,
+                created_at: Some(1),
+                updated_at: Some(2),
+            }],
+        };
+        std::fs::write(
+            &backup_path,
+            serde_json::to_string_pretty(&data).expect("serialize"),
+        )
+        .expect("write backup");
+
+        let recovered = load_snippet_sync_records(&dir).expect("recover backup");
+
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0].name, "Recovered");
+        assert!(path.exists());
+        assert!(!backup_path.exists());
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[test]
+    fn load_snippet_sync_records_keeps_newest_duplicate() {
+        let dir = std::env::temp_dir().join(format!(
+            "zync-sync-snippets-dedup-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let newer = Snippet {
+            id: "snip-1".into(),
+            name: "Newer".into(),
+            command: "echo newer".into(),
+            category: None,
+            tags: None,
+            connection_id: None,
+            created_at: Some(1),
+            updated_at: Some(20),
+        };
+        let older = Snippet {
+            name: "Older".into(),
+            command: "echo older".into(),
+            updated_at: Some(10),
+            ..newer.clone()
+        };
+        std::fs::write(
+            dir.join(SNIPPETS_FILE),
+            serde_json::to_string_pretty(&SnippetsData {
+                snippets: vec![newer, older],
+            })
+            .expect("serialize"),
+        )
+        .expect("write snippets");
+
+        let records = load_snippet_sync_records(&dir).expect("load records");
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].name, "Newer");
+        assert_eq!(records[0].updated_at, 20);
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[test]
     fn apply_restore_adds_and_updates_records() {
         let dir = std::env::temp_dir().join(format!(
             "zync-sync-snippets-apply-test-{}",
@@ -276,6 +376,29 @@ mod tests {
         };
         let second = Snippet {
             command: "echo second".into(),
+            ..first.clone()
+        };
+
+        assert_ne!(
+            snippet_fallback_logical_id(&first),
+            snippet_fallback_logical_id(&second)
+        );
+    }
+
+    #[test]
+    fn snippet_fallback_logical_id_distinguishes_connections() {
+        let first = Snippet {
+            id: String::new(),
+            name: "Deploy".into(),
+            command: "echo deploy".into(),
+            category: None,
+            tags: None,
+            connection_id: Some("conn-a".into()),
+            created_at: None,
+            updated_at: None,
+        };
+        let second = Snippet {
+            connection_id: Some("conn-b".into()),
             ..first.clone()
         };
 

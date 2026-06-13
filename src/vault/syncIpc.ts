@@ -328,6 +328,36 @@ function fallbackStatus(
     };
 }
 
+function resultLastSync(result: unknown): number | undefined {
+  if (!result || typeof result !== 'object' || !('syncedAt' in result)) return undefined;
+  const syncedAt = (result as { syncedAt?: unknown }).syncedAt;
+  return typeof syncedAt === 'number' ? syncedAt : undefined;
+}
+
+async function runStatusRefreshingMutation<T>(
+  provider: SyncProvider,
+  command: string,
+  payload: Record<string, unknown>,
+): Promise<T> {
+  try {
+    const result = await invokeCore<T>(command, payload);
+    let providerStatus: SyncProviderStatus;
+    try {
+      providerStatus = await syncIpc.status(provider);
+    } catch (error) {
+      providerStatus = fallbackStatus(provider, {
+        connected: true,
+        lastSync: resultLastSync(result),
+      }, error);
+    }
+    notifySyncStatusChanged(provider, providerStatus);
+    return result;
+  } catch (error) {
+    notifySyncStatusChanged(provider, fallbackStatus(provider, { connected: true }, error));
+    throw error;
+  }
+}
+
 export const syncIpc = {
   collectionStatus: async (provider: SyncProvider): Promise<SyncCollectionStatus> =>
     invokeCore<SyncCollectionStatus>('sync_collection_status', { provider }),
@@ -387,7 +417,7 @@ export const syncIpc = {
     provider: SyncProvider,
     args: SyncHostsChangesArgs = {},
   ): Promise<SyncHostsUploadResult> =>
-    invokeCore<SyncHostsUploadResult>('sync_hosts_upload', { provider, args }),
+    runStatusRefreshingMutation<SyncHostsUploadResult>(provider, 'sync_hosts_upload', { provider, args }),
 
   hostsRemoteInventory: async (
     provider: SyncProvider,
@@ -398,31 +428,31 @@ export const syncIpc = {
     provider: SyncProvider,
     args: SyncHostsRestoreArgs = {},
   ): Promise<SyncHostsRestoreResult> =>
-    invokeCore<SyncHostsRestoreResult>('sync_hosts_restore', { provider, args }),
+    runStatusRefreshingMutation<SyncHostsRestoreResult>(provider, 'sync_hosts_restore', { provider, args }),
 
   tunnelsSnapshot: async (): Promise<SyncTunnelsSnapshotResult> =>
     invokeCore<SyncTunnelsSnapshotResult>('sync_tunnels_snapshot'),
 
   tunnelsUpload: async (provider: SyncProvider): Promise<SyncDomainUploadResult> =>
-    invokeCore<SyncDomainUploadResult>('sync_tunnels_upload', { provider }),
+    runStatusRefreshingMutation<SyncDomainUploadResult>(provider, 'sync_tunnels_upload', { provider }),
 
   tunnelsRestore: async (provider: SyncProvider): Promise<SyncDomainRestoreResult> =>
-    invokeCore<SyncDomainRestoreResult>('sync_tunnels_restore', { provider }),
+    runStatusRefreshingMutation<SyncDomainRestoreResult>(provider, 'sync_tunnels_restore', { provider }),
 
   snippetsSnapshot: async (): Promise<SyncSnippetsSnapshotResult> =>
     invokeCore<SyncSnippetsSnapshotResult>('sync_snippets_snapshot'),
 
   snippetsUpload: async (provider: SyncProvider): Promise<SyncDomainUploadResult> =>
-    invokeCore<SyncDomainUploadResult>('sync_snippets_upload', { provider }),
+    runStatusRefreshingMutation<SyncDomainUploadResult>(provider, 'sync_snippets_upload', { provider }),
 
   snippetsRestore: async (provider: SyncProvider): Promise<SyncDomainRestoreResult> =>
-    invokeCore<SyncDomainRestoreResult>('sync_snippets_restore', { provider }),
+    runStatusRefreshingMutation<SyncDomainRestoreResult>(provider, 'sync_snippets_restore', { provider }),
 
   settingsUpload: async (provider: SyncProvider): Promise<SyncDomainUploadResult> =>
-    invokeCore<SyncDomainUploadResult>('sync_settings_upload', { provider }),
+    runStatusRefreshingMutation<SyncDomainUploadResult>(provider, 'sync_settings_upload', { provider }),
 
   settingsRestore: async (provider: SyncProvider): Promise<SyncDomainRestoreResult> =>
-    invokeCore<SyncDomainRestoreResult>('sync_settings_restore', { provider }),
+    runStatusRefreshingMutation<SyncDomainRestoreResult>(provider, 'sync_settings_restore', { provider }),
 
   /** Get connection status for a sync provider.
    * @param provider Cloud sync provider.

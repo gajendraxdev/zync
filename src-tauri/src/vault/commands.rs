@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -125,10 +127,14 @@ pub async fn vault_item_create(
         zeroize_secret_values(&mut exposed);
         result.map_err(VaultCommandError::from)?
     } else {
-        let secret = args.secret.as_ref().ok_or_else(|| VaultCommandError {
-            code: "invalid_secret_values".into(),
-            message: "Credential requires at least one secret value".into(),
-        })?;
+        let secret = args
+            .secret
+            .as_ref()
+            .filter(|secret| !secret.expose_secret().trim().is_empty())
+            .ok_or_else(|| VaultCommandError {
+                code: "invalid_secret_values".into(),
+                message: "Credential requires at least one non-empty secret value".into(),
+            })?;
         vault
             .item_create_with_logical_id(
                 &args.label,
@@ -238,10 +244,14 @@ pub async fn vault_item_update(
         zeroize_secret_values(&mut exposed);
         result.map_err(VaultCommandError::from)?
     } else {
-        let secret = args.secret.as_ref().ok_or_else(|| VaultCommandError {
-            code: "invalid_secret_values".into(),
-            message: "Credential requires at least one secret value".into(),
-        })?;
+        let secret = args
+            .secret
+            .as_ref()
+            .filter(|secret| !secret.expose_secret().trim().is_empty())
+            .ok_or_else(|| VaultCommandError {
+                code: "invalid_secret_values".into(),
+                message: "Credential requires at least one non-empty secret value".into(),
+            })?;
         vault
             .item_update(
                 &args.item_id,
@@ -624,4 +634,3 @@ pub fn repair_connection_refs(
         skipped_missing_items,
     })
 }
-use std::collections::BTreeMap;

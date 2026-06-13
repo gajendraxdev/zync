@@ -139,6 +139,11 @@ export function RestoreConflictModal({
                       <p className="text-[11px] text-app-muted/80 mt-1">
                         Local rev {conflict.localRevision} ({formatTimestamp(conflict.localUpdatedAt)}){' '}
                         vs Remote rev {conflict.remoteRevision} ({formatTimestamp(conflict.remoteUpdatedAt)})
+                        {conflict.remoteDeleted && (
+                          <span className="ml-2 rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-[10px] font-semibold text-red-300">
+                            Remote deleted
+                          </span>
+                        )}
                       </p>
                     </div>
                   </label>
