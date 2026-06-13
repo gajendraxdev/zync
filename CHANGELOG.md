@@ -44,7 +44,6 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Host Restore and Vault-Backed Reconnect Reliability**: Improved host restore/relink flow, added runtime connection diagnostics, and made vault-ref relink persistence non-fatal during SSH connect so successful auth is not blocked by local metadata writes. ([22256fb], [7b8e5a6])
 - **Sync Metadata Integrity**: Snippet and tunnel sync records now preserve real timestamps and stable fallback IDs so restore/sync convergence no longer depends on placeholder values or unrelated fields. ([7b8e5a6])
 - **Sync/Profile UI Resilience**: Fixed restore timestamp display for missing values, added Google avatar fallback handling, improved Google connect error messaging, and removed fragile tunnel reload timeout chains in favor of direct refresh after operations. ([7b8e5a6])
-- **Vault Session Cache Security and Lock UX**: Hardened session-cache VEK verification with v2 integrity proofs and live-record decrypt checks, made keychain persistence best-effort on unlock, validated sync-collection passphrases without clearing remembered device cache, fixed explicit Lock being immediately undone by session-cache auto-restore, and refreshed vault item counts after add/secure flows. ([b7587e0])
 
 ## [2.15.1] - 2026-04-27
 
