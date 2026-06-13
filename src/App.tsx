@@ -9,6 +9,7 @@ import { useTransferEvents } from './hooks/useTransferEvents';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { PluginProvider } from './context/PluginContext';
 import { GlobalConfirmDialog } from './components/ui/GlobalConfirmDialog';
+import { GlobalVaultUnlockModal } from './components/vault/GlobalVaultUnlockModal';
 import * as RadixTooltip from '@radix-ui/react-tooltip';
 
 function AppContent() {
@@ -62,6 +63,7 @@ function App() {
                 <RadixTooltip.Provider delayDuration={120}>
                     <AppContent />
                     <GlobalConfirmDialog />
+                    <GlobalVaultUnlockModal />
                 </RadixTooltip.Provider>
             </PluginProvider>
         </ErrorBoundary>

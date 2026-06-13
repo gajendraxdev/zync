@@ -6,6 +6,8 @@ interface VaultStore {
   items: VaultItem[];
   isLoading: boolean;
   error: string | null;
+  unlockPromptOpen: boolean;
+  unlockPromptWaiters: Array<(unlocked: boolean) => void>;
 
   refresh: () => Promise<void>;
   refreshItems: () => Promise<void>;
@@ -15,6 +17,9 @@ interface VaultStore {
   lock: () => Promise<void>;
   deleteItem: (itemId: string) => Promise<void>;
   clearError: () => void;
+  openUnlockModal: () => void;
+  requestUnlock: () => Promise<boolean>;
+  finishUnlockPrompt: (unlocked: boolean) => void;
 }
 
 export const useVaultStore = create<VaultStore>((set, get) => ({
@@ -22,8 +27,34 @@ export const useVaultStore = create<VaultStore>((set, get) => ({
   items: [],
   isLoading: false,
   error: null,
+  unlockPromptOpen: false,
+  unlockPromptWaiters: [],
 
   clearError: () => set({ error: null }),
+
+  openUnlockModal: () => set({ unlockPromptOpen: true }),
+
+  requestUnlock: async () => {
+    try {
+      await get().refresh();
+    } catch {
+      // Status refresh failed; still offer unlock UI.
+    }
+    if (get().status?.status === 'unlocked') return true;
+
+    return new Promise<boolean>((resolve) => {
+      set((state) => ({
+        unlockPromptOpen: true,
+        unlockPromptWaiters: [...state.unlockPromptWaiters, resolve],
+      }));
+    });
+  },
+
+  finishUnlockPrompt: (unlocked: boolean) => {
+    const waiters = get().unlockPromptWaiters;
+    set({ unlockPromptOpen: false, unlockPromptWaiters: [] });
+    for (const resolve of waiters) resolve(unlocked);
+  },
 
   refresh: async () => {
     set({ isLoading: true, error: null });

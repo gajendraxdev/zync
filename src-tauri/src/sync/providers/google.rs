@@ -511,14 +511,6 @@ async fn find_files_by_name_prefix(
             .await
             .map_err(|e| sync_err("provider_http_failed", e.to_string()))?;
 
-        #[cfg(debug_assertions)]
-        eprintln!(
-            "[sync][google] list files prefix='{}' page={} returned {} raw file(s)",
-            prefix,
-            page_token.as_deref().unwrap_or("<first>"),
-            resp.files.len()
-        );
-
         results.extend(resp.files.into_iter().filter_map(|file| {
             let name = file.name?;
             if !name.starts_with(prefix) {
@@ -538,23 +530,6 @@ async fn find_files_by_name_prefix(
         } else {
             break;
         }
-    }
-
-    #[cfg(debug_assertions)]
-    {
-        let names = results
-            .iter()
-            .take(12)
-            .map(|object| object.object_name.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
-        eprintln!(
-            "[sync][google] list files prefix='{}' matched {} object(s) [{}{}]",
-            prefix,
-            results.len(),
-            names,
-            if results.len() > 12 { ", ..." } else { "" }
-        );
     }
 
     Ok(results)
@@ -1033,11 +1008,6 @@ impl VaultProviderV1 for GoogleVaultProvider {
         let provider_data_dir = data_dir(app);
         let token = get_valid_google_token(&provider_data_dir).await?;
         let prefix = format!("zync-sync-{sync_collection_id}-credential-");
-        #[cfg(debug_assertions)]
-        eprintln!(
-            "[sync][google] list_credential_records collection_id='{}' prefix='{}'",
-            sync_collection_id, prefix
-        );
         find_files_by_name_prefix(&token, &prefix).await
     }
 
@@ -1049,11 +1019,6 @@ impl VaultProviderV1 for GoogleVaultProvider {
         let provider_data_dir = data_dir(app);
         let token = get_valid_google_token(&provider_data_dir).await?;
         let prefix = format!("zync-sync-{sync_collection_id}-");
-        #[cfg(debug_assertions)]
-        eprintln!(
-            "[sync][google] list_collection_records collection_id='{}' prefix='{}'",
-            sync_collection_id, prefix
-        );
         find_files_by_name_prefix(&token, &prefix).await
     }
 
@@ -1070,11 +1035,6 @@ impl VaultProviderV1 for GoogleVaultProvider {
             .collect::<Vec<_>>();
         ids.sort();
         ids.dedup();
-        #[cfg(debug_assertions)]
-        eprintln!(
-            "[sync][google] discovered remote sync collection ids: {:?}",
-            ids
-        );
         Ok(ids)
     }
 

@@ -16,6 +16,8 @@ import {
 } from '../../features/connections/infrastructure/connectionTransfer';
 import { useConnectionForm } from './useConnectionForm';
 import { useAutoVault } from './useAutoVault';
+import { useVaultStore } from '../../vault/useVaultStore';
+import { isVaultLockedError } from '../../vault/vaultUnlockPrompt';
 
 const ImportSshModal = lazy(async () => {
     const module = await import('./ImportSshModal');
@@ -47,6 +49,7 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
     const importConnections = useAppStore(state => state.importConnections);
     const showToast = useAppStore(state => state.showToast);
     const openTab = useAppStore(state => state.openTab);
+    const requestVaultUnlock = useVaultStore(state => state.requestUnlock);
 
     const {
         connections, folders, addConnection, editConnection,
@@ -114,11 +117,17 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
             ? compactIcons
             : [...compactIcons, selectedIcon];
 
-    const performSave = async (): Promise<Connection | null> => {
-        if (isSaving) return null;
+    const needsVaultUnlock = authMethod === 'vault' || Boolean(formData.authRef?.itemId);
+
+    const performSave = async (retryAfterUnlock = false): Promise<Connection | null> => {
+        if (isSaving && !retryAfterUnlock) return null;
         setIsSaving(true);
         setSubmitAttempted(true);
         try {
+            if (needsVaultUnlock) {
+                const unlocked = await requestVaultUnlock();
+                if (!unlocked) return null;
+            }
             if (authMethod === 'key' && keyInputMode === 'paste') {
                 const connectionData = await buildPastedKeyConnection();
                 if (!connectionData) return null;
@@ -128,6 +137,13 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
                 return connectionData;
             }
             return await saveForm(canSave);
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (isVaultLockedError(message)) {
+                const unlocked = await requestVaultUnlock();
+                if (unlocked) return performSave(true);
+            }
+            throw error;
         } finally {
             setIsSaving(false);
         }
@@ -156,12 +172,27 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
         setTestStatus('testing');
         setTestMessage('');
         try {
+            if (authMethod === 'vault' || formData.authRef?.itemId) {
+                const unlocked = await requestVaultUnlock();
+                if (!unlocked) {
+                    setTestStatus('idle');
+                    return;
+                }
+            }
             const config = buildConnectionTestPayload({ formData, authMethod, connections });
             await testConnectionIpc(config as ConnectionConfigPayload);
             setTestStatus('success');
             setTestMessage('Connection successful!');
         } catch (error: unknown) {
             const message = error instanceof Error ? error.message : String(error);
+            if (isVaultLockedError(message)) {
+                const unlocked = await requestVaultUnlock();
+                if (unlocked) {
+                    return handleTestConnection();
+                }
+                setTestStatus('idle');
+                return;
+            }
             setTestStatus('error');
             setTestMessage(message.replace('Error: ', ''));
         }
