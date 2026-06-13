@@ -67,7 +67,11 @@ pub fn preview(data_dir: &Path) -> Result<SecureToVaultPreview, VaultError> {
             });
             continue;
         }
-        if conn.password.is_some() {
+        if conn
+            .password
+            .as_deref()
+            .is_some_and(|password| !password.trim().is_empty())
+        {
             candidates.push(SecureToVaultCandidate {
                 connection_id: conn.id.clone(),
                 connection_name: conn.name.clone(),
@@ -152,6 +156,10 @@ pub fn secure(data_dir: &Path, vault: &VaultService) -> Result<SecureToVaultResu
         let Some(password) = conn.password.clone() else {
             continue;
         };
+        if password.trim().is_empty() {
+            skipped = skipped.saturating_add(1);
+            continue;
+        }
         let label = format!("{} ({}@{})", conn.name, conn.username, conn.host);
         prepared.push(PreparedSecureItem {
             index,

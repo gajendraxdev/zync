@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use super::types::{SyncError, SyncResult};
-use crate::snippets::{Snippet, SnippetsData};
+use crate::snippets::{Snippet, SnippetsData, SNIPPETS_MUTATION_LOCK};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::io::ErrorKind;
@@ -23,6 +23,9 @@ pub struct SnippetSyncRecord {
 
 pub fn load_snippet_sync_records(data_dir: &Path) -> SyncResult<Vec<SnippetSyncRecord>> {
     let path = data_dir.join(SNIPPETS_FILE);
+    let _guard = SNIPPETS_MUTATION_LOCK
+        .lock()
+        .map_err(|error| SyncError::new("sync_snippets_lock_failed", error.to_string()))?;
     let data = load_saved(&path)?;
     let mut dedup: BTreeMap<String, SnippetSyncRecord> = BTreeMap::new();
     for snip in data.snippets {
@@ -93,6 +96,9 @@ pub fn apply_snippet_restore_records(data_dir: &Path, records: &[SnippetSyncReco
         return Ok((0, 0));
     }
     let path = data_dir.join(SNIPPETS_FILE);
+    let _guard = SNIPPETS_MUTATION_LOCK
+        .lock()
+        .map_err(|error| SyncError::new("sync_snippets_lock_failed", error.to_string()))?;
     let mut saved = load_saved(path.as_path())?;
     let mut restored = 0u64;
     let mut updated = 0u64;
@@ -133,24 +139,27 @@ fn load_saved(path: &Path) -> SyncResult<SnippetsData> {
     if !path.exists() {
         let temp_path = path.with_extension("tmp");
         let backup_path = path.with_extension("bak");
-        if temp_path.exists() {
-            std::fs::rename(&temp_path, path).map_err(|e| {
-                SyncError::new(
-                    "sync_snippets_read_failed",
-                    format!("Failed to recover pending snippets temp file: {e}"),
-                )
-            })?;
-        } else if backup_path.exists() {
-            std::fs::rename(&backup_path, path).map_err(|e| {
-                SyncError::new(
-                    "sync_snippets_read_failed",
-                    format!("Failed to restore snippets backup file: {e}"),
-                )
-            })?;
-        } else {
-            return Ok(SnippetsData { snippets: Vec::new() });
+        for candidate in [&temp_path, &backup_path] {
+            if let Some(data) = parse_saved_candidate(candidate) {
+                std::fs::rename(candidate, path).map_err(|e| {
+                    SyncError::new(
+                        "sync_snippets_read_failed",
+                        format!("Failed to promote recovered snippets file: {e}"),
+                    )
+                })?;
+                return Ok(data);
+            }
         }
+        return Ok(SnippetsData { snippets: Vec::new() });
     }
+    parse_saved_file(path)
+}
+
+fn parse_saved_candidate(path: &Path) -> Option<SnippetsData> {
+    parse_saved_file(path).ok()
+}
+
+fn parse_saved_file(path: &Path) -> SyncResult<SnippetsData> {
     let raw = std::fs::read_to_string(path).map_err(|e| {
         SyncError::new("sync_snippets_read_failed", format!("Failed to read snippets file: {e}"))
     })?;
@@ -263,6 +272,47 @@ mod tests {
         assert_eq!(recovered.len(), 1);
         assert_eq!(recovered[0].name, "Recovered");
         assert!(path.exists());
+        assert!(!backup_path.exists());
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[test]
+    fn load_saved_skips_corrupt_temp_and_recovers_valid_backup() {
+        let dir = std::env::temp_dir().join(format!(
+            "zync-sync-snippets-corrupt-temp-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let path = dir.join(SNIPPETS_FILE);
+        let temp_path = path.with_extension("tmp");
+        let backup_path = path.with_extension("bak");
+        std::fs::write(&temp_path, "{not-json").expect("write corrupt temp");
+        let data = SnippetsData {
+            snippets: vec![Snippet {
+                id: "snip-1".into(),
+                name: "Recovered backup".into(),
+                command: "echo recovered".into(),
+                category: None,
+                tags: None,
+                connection_id: None,
+                created_at: Some(1),
+                updated_at: Some(2),
+            }],
+        };
+        std::fs::write(
+            &backup_path,
+            serde_json::to_string_pretty(&data).expect("serialize"),
+        )
+        .expect("write backup");
+
+        let recovered = load_saved(&path).expect("recover valid backup");
+
+        assert_eq!(recovered.snippets[0].name, "Recovered backup");
+        assert!(path.exists());
+        assert!(temp_path.exists());
         assert!(!backup_path.exists());
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }

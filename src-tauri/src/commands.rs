@@ -3496,18 +3496,21 @@ pub async fn tunnel_save(app: AppHandle, tunnel_val: serde_json::Value) -> Resul
     let mut saved = crate::sync::domain_tunnels::load_saved_tunnels(&file_path)
         .map_err(|error| error.to_string())?;
 
-    let now = std::time::SystemTime::now()
+    let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
-        .as_secs();
+        .as_millis() as u64;
 
     if let Some(idx) = saved.tunnels.iter().position(|t| t.id == tunnel.id) {
-        tunnel.created_at = saved.tunnels[idx].created_at.or(tunnel.created_at).or(Some(now));
-        tunnel.updated_at = Some(now);
+        tunnel.created_at = saved.tunnels[idx]
+            .created_at
+            .or(tunnel.created_at)
+            .or(Some(now_ms));
+        tunnel.updated_at = Some(now_ms);
         saved.tunnels[idx] = tunnel;
     } else {
-        tunnel.created_at = tunnel.created_at.or(Some(now));
-        tunnel.updated_at = Some(now);
+        tunnel.created_at = tunnel.created_at.or(Some(now_ms));
+        tunnel.updated_at = Some(now_ms);
         saved.tunnels.push(tunnel);
     }
 

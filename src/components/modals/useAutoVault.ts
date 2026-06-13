@@ -61,15 +61,19 @@ export function useAutoVault({
     );
     const keyVaultLabelConflict = vaultStatus?.status === 'unlocked' && hasKeyInput
         && vaultItems.some(i => i.label === effectiveKeyVaultLabel);
+    const replacedAuthItemId = activeEditingConnectionId
+        ? useAppStore.getState().connections.find(c => c.id === activeEditingConnectionId)?.authRef?.itemId
+        : undefined;
 
-    const deleteOldAuthItem = () => {
-        if (!activeEditingConnectionId) return;
-        const { connections } = useAppStore.getState();
-        const existing = connections.find(c => c.id === activeEditingConnectionId);
-        if (!existing?.authRef?.itemId) return;
-        vaultIpc.itemDelete(existing.authRef.itemId).catch(() => {
+    const finalizeVaultReplacement = async () => {
+        setPastedKeyText('');
+        setPastedPassphrase('');
+        if (!replacedAuthItemId) return;
+        try {
+            await vaultIpc.itemDelete(replacedAuthItemId);
+        } catch {
             showToast('error', 'Old vault credential could not be deleted — remove it manually in Vault tab.');
-        });
+        }
     };
 
     const savePastedKey = async (): Promise<Partial<Connection> | null> => {
@@ -95,9 +99,6 @@ export function useAutoVault({
             privateKey: keyText,
             ...(pastedPassphrase.length > 0 ? { passphrase: pastedPassphrase } : {}),
         });
-        deleteOldAuthItem();
-        setPastedKeyText('');
-        setPastedPassphrase('');
         return {
             ...formData,
             authRef: {
@@ -115,7 +116,6 @@ export function useAutoVault({
         const password = formData.password || '';
         if (!password.trim()) return null;
         const item = await vaultIpc.itemCreate(effectiveVaultLabel, 'ssh-password', { password });
-        deleteOldAuthItem();
         return {
             ...formData,
             password: '',
@@ -145,7 +145,6 @@ export function useAutoVault({
         const item = await vaultIpc.itemCreate(effectiveKeyVaultLabel, 'ssh-private-key', {
             privateKey: keyContent,
         });
-        deleteOldAuthItem();
         return {
             ...formData,
             privateKeyPath: '',
@@ -188,5 +187,6 @@ export function useAutoVault({
         defaultVaultLabel, effectiveVaultLabel, vaultLabelConflict,
         defaultKeyVaultLabel, effectiveKeyVaultLabel, keyVaultLabelConflict,
         savePastedKey, autoVaultPassword, autoVaultKeyFile, buildPastedKeyConnection,
+        finalizeVaultReplacement,
     };
 }

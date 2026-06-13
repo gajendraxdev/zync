@@ -303,6 +303,7 @@ pub fn normalize_record_credential(record: &mut PlaintextRecord) {
         record.secret_values = secret_values_from_legacy(&record.kind, &record.secret);
     }
     remap_single_legacy_secret_to_typed_field(&mut record.secret_values, &credential.fields);
+    extract_inline_secret_values(&mut record.secret_values, &credential.fields);
     record.secret.clear();
 
     credential.label = record.label.clone();
@@ -446,6 +447,23 @@ fn normalized_fields(
         }
     }
     existing_fields
+}
+
+fn extract_inline_secret_values(
+    secret_values: &mut BTreeMap<String, String>,
+    fields: &[CredentialField],
+) {
+    for field in fields.iter().filter(|field| field.secret) {
+        let Some(value) = field.value.as_ref() else {
+            continue;
+        };
+        if value.is_empty() {
+            continue;
+        }
+        secret_values
+            .entry(field.name.clone())
+            .or_insert_with(|| value.clone());
+    }
 }
 
 fn remap_single_legacy_secret_to_typed_field(
@@ -618,6 +636,80 @@ mod tests {
         assert_eq!(field.name, "clientSecret");
         assert_eq!(field.value, None);
         assert_eq!(field.value_ref.as_deref(), Some("secret:clientSecret"));
+    }
+
+    #[test]
+    fn normalize_extracts_inline_typed_secrets_before_clearing_fields() {
+        let mut record = legacy_record("plugin-defined");
+        record.secret.clear();
+        record.credential = Some(CredentialEnvelope {
+            credential_id: "cred-1".into(),
+            kind: CredentialKind::PluginDefined,
+            label: "Plugin credential".into(),
+            fields: vec![CredentialField {
+                name: "clientSecret".into(),
+                label: "Client Secret".into(),
+                secret: true,
+                required: true,
+                format: Some(CredentialFieldFormat::Password),
+                value: Some("inline-secret".into()),
+                value_ref: None,
+                encoding: None,
+            }],
+            metadata: CredentialMetadata::default(),
+            tags: Vec::new(),
+            revision: 1,
+            created_at: 1,
+            updated_at: 1,
+            schema_version: CURRENT_CREDENTIAL_SCHEMA_VERSION,
+        });
+
+        normalize_record_credential(&mut record);
+
+        assert_eq!(
+            record.secret_values.get("clientSecret").map(String::as_str),
+            Some("inline-secret")
+        );
+        let field = &record.credential.as_ref().expect("credential").fields[0];
+        assert_eq!(field.value, None);
+        assert_eq!(field.value_ref.as_deref(), Some("secret:clientSecret"));
+    }
+
+    #[test]
+    fn normalize_keeps_named_secret_over_duplicate_inline_value() {
+        let mut record = legacy_record("plugin-defined");
+        record.secret.clear();
+        record
+            .secret_values
+            .insert("clientSecret".into(), "named-secret".into());
+        record.credential = Some(CredentialEnvelope {
+            credential_id: "cred-1".into(),
+            kind: CredentialKind::PluginDefined,
+            label: "Plugin credential".into(),
+            fields: vec![CredentialField {
+                name: "clientSecret".into(),
+                label: "Client Secret".into(),
+                secret: true,
+                required: true,
+                format: Some(CredentialFieldFormat::Password),
+                value: Some("stale-inline-secret".into()),
+                value_ref: None,
+                encoding: None,
+            }],
+            metadata: CredentialMetadata::default(),
+            tags: Vec::new(),
+            revision: 1,
+            created_at: 1,
+            updated_at: 1,
+            schema_version: CURRENT_CREDENTIAL_SCHEMA_VERSION,
+        });
+
+        normalize_record_credential(&mut record);
+
+        assert_eq!(
+            record.secret_values.get("clientSecret").map(String::as_str),
+            Some("named-secret")
+        );
     }
 
     #[test]

@@ -779,11 +779,11 @@ impl VaultProviderV1 for GoogleVaultProvider {
             supports_autosync: false,
             supports_incremental: true,
             supports_etag: false,
-            supports_domains: false,
+            supports_domains: true,
             max_object_size: None,
-                encryption_mode: EncryptionMode::AppEncryptedOnly,
-            }
+            encryption_mode: EncryptionMode::AppEncryptedOnly,
         }
+    }
 
     async fn connect(&self, app: &tauri::AppHandle) -> SyncResult<ProviderIdentity> {
         if GOOGLE_CLIENT_ID.is_empty() {

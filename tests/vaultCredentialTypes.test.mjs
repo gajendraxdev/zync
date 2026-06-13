@@ -46,6 +46,45 @@ test('vaultItemToCredentialEnvelope falls back to item id when logical id is abs
   assert.equal(envelope.credentialId, 'item-1');
 });
 
+test('vaultItemToCredentialEnvelope preserves a backend-provided typed envelope', () => {
+  const typedEnvelope = {
+    credentialId: 'cred-typed',
+    kind: 'username-password',
+    label: 'Typed credential',
+    fields: [
+      {
+        name: 'username',
+        label: 'Username',
+        secret: false,
+        required: true,
+        value: 'deploy',
+      },
+      {
+        name: 'password',
+        label: 'Password',
+        secret: true,
+        required: true,
+        valueRef: 'secret:password',
+      },
+    ],
+    metadata: {},
+    tags: ['prod'],
+    revision: 2,
+    createdAt: 10,
+    updatedAt: 20,
+    schemaVersion: 2,
+  };
+
+  const envelope = vaultItemToCredentialEnvelope({
+    ...vaultItem,
+    credential: typedEnvelope,
+  });
+
+  assert.equal(envelope, typedEnvelope);
+  assert.equal(envelope.fields.length, 2);
+  assert.equal(envelope.fields[0].value, 'deploy');
+});
+
 test('vaultItemSecretReferenceField maps SSH password to password field', () => {
   const field = vaultItemSecretReferenceField({ id: 'item-2', kind: 'ssh-password' });
 

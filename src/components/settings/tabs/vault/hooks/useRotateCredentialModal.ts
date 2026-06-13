@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { vaultIpc, type VaultItem } from '../../../../../vault/ipc';
 import type { ToastType } from '../../../../../store/toastSlice';
 import type { Connection } from '../../../../../features/connections/domain/types';
@@ -27,6 +27,7 @@ export function useRotateCredentialModal({
   const [passphrase, setPassphrase] = useState('');
   const [notes, setNotes] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const currentOpenRequestIdRef = useRef<string | null>(null);
 
   const item = useMemo(
     () => items.find(i => i.id === itemId) ?? null,
@@ -41,18 +42,26 @@ export function useRotateCredentialModal({
     setSecret('');
     setPassphrase('');
     setNotes('');
+    currentOpenRequestIdRef.current = found.id;
     try {
       const full = await vaultIpc.itemGet(found.id);
+      if (currentOpenRequestIdRef.current !== found.id) return;
       setNotes(full.notes || '');
     } catch (error: unknown) {
+      if (currentOpenRequestIdRef.current !== found.id) return;
       console.warn('[Vault] Failed to load item for rotation:', error);
       const msg = extractErrorMessage(error);
       showToast('error', `Failed to load vault item notes: ${msg}`);
+    } finally {
+      if (currentOpenRequestIdRef.current === found.id) {
+        currentOpenRequestIdRef.current = null;
+      }
     }
   };
 
   const close = () => {
     if (isLoading) return;
+    currentOpenRequestIdRef.current = null;
     setItemId(null);
     setLabel('');
     setSecret('');
@@ -80,10 +89,10 @@ export function useRotateCredentialModal({
     const secretValues: Record<string, string> =
       item.kind === 'ssh-private-key'
         ? {
-            privateKey: trimmedSecret,
-            ...(trimmedPassphrase ? { passphrase: trimmedPassphrase } : {}),
+            privateKey: secret,
+            ...(trimmedPassphrase ? { passphrase } : {}),
           }
-        : { password: trimmedSecret };
+        : { password: secret };
 
     setIsLoading(true);
     try {

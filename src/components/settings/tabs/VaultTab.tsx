@@ -7,7 +7,7 @@ import { RecoveryKeyModal } from '../../vault/RecoveryKeyModal';
 import { Button } from '../../ui/Button';
 import { useAppStore } from '../../../store/useAppStore';
 import { DEFAULT_VAULT_PROFILE_ID, type VaultProfileId } from '../../../vault/profileTypes';
-import { resolveVaultFocusProfile } from './vaultFocus';
+import { didVaultTransitionToLocked, resolveVaultFocusProfile } from './vaultFocus';
 import { VaultStatusCard } from './vault/VaultStatusCard';
 import { VaultItemsPanel } from './vault/VaultItemsPanel';
 import { VaultCredentialDetailModal } from './vault/VaultCredentialDetailModal';
@@ -46,6 +46,7 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
   const syncHandoffRef = useRef<HTMLDivElement | null>(null);
 
   const isUnlocked = status?.status === 'unlocked';
+  const wasUnlockedRef = useRef(isUnlocked);
   const vaultId = status?.status === 'unlocked' ? status.vaultId : null;
 
   // ── Shared helper: prompt to disconnect affected sessions ─────────────────
@@ -257,7 +258,10 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
   }, []);
 
   useEffect(() => {
-    if (isUnlocked) return;
+    const wasUnlocked = wasUnlockedRef.current;
+    wasUnlockedRef.current = isUnlocked;
+    if (!didVaultTransitionToLocked(wasUnlocked, isUnlocked)) return;
+
     panel.closeRecoveryModal();
     assignCredential.close();
     rotateCredential.close();
@@ -265,15 +269,7 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
     addCredential.close();
     closeCredentialDetails();
     setIsUnlockModalOpen(false);
-  }, [
-    addCredential,
-    assignCredential,
-    closeCredentialDetails,
-    history,
-    isUnlocked,
-    panel,
-    rotateCredential,
-  ]);
+  }, [isUnlocked]);
   const canSyncItemsToGoogle = Boolean(
     panel.googleSync?.connected
     && panel.googleCollection?.configured
