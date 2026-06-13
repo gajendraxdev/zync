@@ -1,4 +1,5 @@
 mod ai;
+mod atomic_io;
 mod commands;
 mod fs;
 mod ghost;

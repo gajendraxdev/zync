@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 
@@ -117,38 +116,9 @@ fn parse_snippets_file(path: &Path) -> Result<SnippetsData, String> {
 }
 
 fn write_snippets_atomic(path: &Path, data: &SnippetsData) -> Result<(), String> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| "Invalid snippets file path".to_string())?;
-    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    let temp_path = path.with_extension("tmp");
     let json = serde_json::to_string_pretty(data).map_err(|e| e.to_string())?;
-    fs::write(&temp_path, json).map_err(|e| e.to_string())?;
-    match fs::rename(&temp_path, path) {
-        Ok(()) => Ok(()),
-        Err(rename_err) if rename_err.kind() == ErrorKind::AlreadyExists && path.exists() => {
-            let backup_path = path.with_extension("bak");
-            fs::rename(path, &backup_path).map_err(|e| {
-                let _ = fs::remove_file(&temp_path);
-                format!("Failed to stage snippets backup before replace: {e}")
-            })?;
-            match fs::rename(&temp_path, path) {
-                Ok(()) => {
-                    let _ = fs::remove_file(&backup_path);
-                    Ok(())
-                }
-                Err(e) => {
-                    let _ = fs::rename(&backup_path, path);
-                    let _ = fs::remove_file(&temp_path);
-                    Err(format!("Failed to finalize snippets file: {e}"))
-                }
-            }
-        }
-        Err(rename_err) => {
-            let _ = fs::remove_file(&temp_path);
-            Err(format!("Failed to finalize snippets file: {rename_err}"))
-        }
-    }
+    crate::atomic_io::durable_replace(path, json.as_bytes())
+        .map_err(|e| format!("Failed to write snippets file: {e}"))
 }
 
 fn current_unix_millis() -> u64 {

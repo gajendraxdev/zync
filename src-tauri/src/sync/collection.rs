@@ -8,7 +8,6 @@ use crate::vault::crypto::{
 };
 use base64::Engine;
 use rand_core::RngCore;
-use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -76,64 +75,12 @@ pub fn save_manifest(data_dir: &Path, manifest: &SyncCollectionManifest) -> Sync
     })?;
 
     let final_path = manifest_path(data_dir, provider_from_str(&manifest.provider)?);
-    let temp_path = final_path.with_extension("tmp");
-    std::fs::write(&temp_path, payload).map_err(|e| {
+    crate::atomic_io::durable_replace(&final_path, payload.as_bytes()).map_err(|e| {
         SyncError::new(
             "sync_collection_write_failed",
             format!("Failed to write sync collection manifest: {e}"),
         )
-    })?;
-
-    match std::fs::rename(&temp_path, &final_path) {
-        Ok(()) => Ok(()),
-        Err(rename_err) if rename_err.kind() == ErrorKind::AlreadyExists && final_path.exists() => {
-            let backup_path = final_path.with_extension("bak");
-            std::fs::rename(&final_path, &backup_path).map_err(|backup_err| {
-                let _ = std::fs::remove_file(&temp_path);
-                SyncError::new(
-                    "sync_collection_write_failed",
-                    format!("Failed to stage sync collection manifest backup before replace: {backup_err}"),
-                )
-            })?;
-            match std::fs::rename(&temp_path, &final_path) {
-                Ok(()) => {
-                    let _ = std::fs::remove_file(&backup_path);
-                    Ok(())
-                }
-                Err(retry_err) => {
-                    if let Err(restore_err) = std::fs::rename(&backup_path, &final_path) {
-                        return Err(SyncError::new(
-                            "sync_collection_write_failed",
-                            format!(
-                                "Failed to finalize sync collection manifest after replace retry: {retry_err}; failed to restore backup: {restore_err}"
-                            ),
-                        ));
-                    }
-                    if let Err(remove_err) = std::fs::remove_file(&temp_path) {
-                        return Err(SyncError::new(
-                            "sync_collection_write_failed",
-                            format!(
-                                "Failed to finalize sync collection manifest after replace retry: {retry_err}; failed to remove temp file: {remove_err}"
-                            ),
-                        ));
-                    }
-                    Err(SyncError::new(
-                        "sync_collection_write_failed",
-                        format!(
-                            "Failed to finalize sync collection manifest after replace retry: {retry_err}"
-                        ),
-                    ))
-                }
-            }
-        }
-        Err(rename_err) => {
-            let _ = std::fs::remove_file(&temp_path);
-            Err(SyncError::new(
-                "sync_collection_write_failed",
-                format!("Failed to finalize sync collection manifest: {rename_err}"),
-            ))
-        }
-    }
+    })
 }
 
 pub fn setup_manifest(

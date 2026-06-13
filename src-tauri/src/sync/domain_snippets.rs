@@ -4,7 +4,6 @@ use super::types::{SyncError, SyncResult};
 use crate::snippets::{Snippet, SnippetsData, SNIPPETS_MUTATION_LOCK};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use std::io::ErrorKind;
 use std::path::Path;
 
 const SNIPPETS_FILE: &str = "snippets.json";
@@ -189,53 +188,12 @@ fn parse_saved_file(path: &Path) -> SyncResult<SnippetsData> {
 }
 
 fn save_saved_atomic(path: &Path, data: &SnippetsData) -> SyncResult<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| SyncError::new("sync_snippets_write_failed", "Invalid snippets file path"))?;
-    std::fs::create_dir_all(parent).map_err(|e| {
-        SyncError::new("sync_snippets_write_failed", format!("Failed to create snippets dir: {e}"))
-    })?;
-    let temp_path = path.with_extension("tmp");
     let json = serde_json::to_string_pretty(data).map_err(|e| {
         SyncError::new("sync_snippets_write_failed", format!("Failed to serialize snippets data: {e}"))
     })?;
-    std::fs::write(&temp_path, json).map_err(|e| {
-        SyncError::new("sync_snippets_write_failed", format!("Failed to write temp snippets file: {e}"))
-    })?;
-    match std::fs::rename(&temp_path, path) {
-        Ok(()) => Ok(()),
-        Err(rename_err) if rename_err.kind() == ErrorKind::AlreadyExists && path.exists() => {
-            let backup_path = path.with_extension("bak");
-            std::fs::rename(path, &backup_path).map_err(|e| {
-                let _ = std::fs::remove_file(&temp_path);
-                SyncError::new(
-                    "sync_snippets_write_failed",
-                    format!("Failed to stage snippets backup before replace: {e}"),
-                )
-            })?;
-            match std::fs::rename(&temp_path, path) {
-                Ok(()) => {
-                    let _ = std::fs::remove_file(&backup_path);
-                    Ok(())
-                }
-                Err(e) => {
-                    let _ = std::fs::rename(&backup_path, path);
-                    let _ = std::fs::remove_file(&temp_path);
-                    Err(SyncError::new(
-                        "sync_snippets_write_failed",
-                        format!("Failed to finalize snippets file: {e}"),
-                    ))
-                }
-            }
-        }
-        Err(rename_err) => {
-            let _ = std::fs::remove_file(&temp_path);
-            Err(SyncError::new(
-                "sync_snippets_write_failed",
-                format!("Failed to finalize snippets file: {rename_err}"),
-            ))
-        }
-    }
+    crate::atomic_io::durable_replace(path, json.as_bytes()).map_err(|e| {
+        SyncError::new("sync_snippets_write_failed", format!("Failed to write snippets file: {e}"))
+    })
 }
 
 #[cfg(test)]
