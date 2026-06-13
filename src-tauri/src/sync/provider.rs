@@ -46,6 +46,11 @@ pub trait VaultProviderV1: Send + Sync {
         app: &tauri::AppHandle,
         sync_collection_id: &str,
     ) -> SyncResult<Vec<ProviderCredentialObject>>;
+    async fn list_collection_records(
+        &self,
+        app: &tauri::AppHandle,
+        sync_collection_id: &str,
+    ) -> SyncResult<Vec<ProviderCredentialObject>>;
     async fn discover_sync_collection_ids(
         &self,
         _app: &tauri::AppHandle,
@@ -149,6 +154,14 @@ mod tests {
         }
 
         async fn list_credential_records(
+            &self,
+            _app: &tauri::AppHandle,
+            _sync_collection_id: &str,
+        ) -> SyncResult<Vec<ProviderCredentialObject>> {
+            Err(SyncError::new("not_implemented", "not needed for contract test"))
+        }
+
+        async fn list_collection_records(
             &self,
             _app: &tauri::AppHandle,
             _sync_collection_id: &str,

@@ -106,7 +106,7 @@ function Rewrite-ConnectionsJson {
 
     $raw = Get-Content -LiteralPath $ConnectionsFile -Raw
     $json = $raw | ConvertFrom-Json
-    if (-not $json.connections) {
+    if ($null -eq $json.connections) {
         Write-Warning "Connections file does not contain a connections array: $ConnectionsFile"
         return
     }

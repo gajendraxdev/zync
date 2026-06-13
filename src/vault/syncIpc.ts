@@ -334,6 +334,24 @@ function resultLastSync(result: unknown): number | undefined {
   return typeof syncedAt === 'number' ? syncedAt : undefined;
 }
 
+async function refreshProviderStatus(provider: SyncProvider): Promise<SyncProviderStatus> {
+  const result = await invokeCore<SyncProviderStatus>('sync_status', { provider });
+  const normalized = normalizeProviderStatus(provider, result);
+  lastKnownStatusByProvider[provider] = normalized;
+  return normalized;
+}
+
+async function notifySyncStatusOnMutationError(
+  provider: SyncProvider,
+  error: unknown,
+): Promise<void> {
+  try {
+    notifySyncStatusChanged(provider, await refreshProviderStatus(provider));
+  } catch {
+    notifySyncStatusChanged(provider, fallbackStatus(provider, { connected: false }, error));
+  }
+}
+
 async function runStatusRefreshingMutation<T>(
   provider: SyncProvider,
   command: string,
@@ -343,7 +361,7 @@ async function runStatusRefreshingMutation<T>(
     const result = await invokeCore<T>(command, payload);
     let providerStatus: SyncProviderStatus;
     try {
-      providerStatus = await syncIpc.status(provider);
+      providerStatus = await refreshProviderStatus(provider);
     } catch (error) {
       providerStatus = fallbackStatus(provider, {
         connected: true,
@@ -353,12 +371,7 @@ async function runStatusRefreshingMutation<T>(
     notifySyncStatusChanged(provider, providerStatus);
     return result;
   } catch (error) {
-    try {
-      const providerStatus = await syncIpc.status(provider);
-      notifySyncStatusChanged(provider, providerStatus);
-    } catch {
-      notifySyncStatusChanged(provider, fallbackStatus(provider, { connected: false }, error));
-    }
+    await notifySyncStatusOnMutationError(provider, error);
     throw error;
   }
 }
@@ -463,12 +476,8 @@ export const syncIpc = {
    * @param provider Cloud sync provider.
    * @returns Current provider connection metadata.
    */
-  status: async (provider: SyncProvider): Promise<SyncProviderStatus> => {
-    const result = await invokeCore<SyncProviderStatus>('sync_status', { provider });
-    const normalized = normalizeProviderStatus(provider, result);
-    lastKnownStatusByProvider[provider] = normalized;
-    return normalized;
-  },
+  status: async (provider: SyncProvider): Promise<SyncProviderStatus> =>
+    refreshProviderStatus(provider),
 
   /** Connect a sync provider using its OAuth flow.
    * @param provider Cloud sync provider.
@@ -511,7 +520,7 @@ export const syncIpc = {
       }
       notifySyncStatusChanged(provider, providerStatus);
     } catch (error) {
-      notifySyncStatusChanged(provider, fallbackStatus(provider, { connected: true }, error));
+      await notifySyncStatusOnMutationError(provider, error);
       throw error;
     }
   },
@@ -529,7 +538,7 @@ export const syncIpc = {
       notifySyncStatusChanged(provider, providerStatus);
       return lastSync;
     } catch (error) {
-      notifySyncStatusChanged(provider, fallbackStatus(provider, { connected: true }, error));
+      await notifySyncStatusOnMutationError(provider, error);
       throw error;
     }
   },
@@ -549,7 +558,7 @@ export const syncIpc = {
       notifySyncStatusChanged(provider, providerStatus);
       return result;
     } catch (error) {
-      notifySyncStatusChanged(provider, fallbackStatus(provider, { connected: true }, error));
+      await notifySyncStatusOnMutationError(provider, error);
       throw error;
     }
   },
@@ -568,7 +577,7 @@ export const syncIpc = {
       notifySyncStatusChanged(provider, providerStatus);
       return result;
     } catch (error) {
-      notifySyncStatusChanged(provider, fallbackStatus(provider, { connected: true }, error));
+      await notifySyncStatusOnMutationError(provider, error);
       throw error;
     }
   },
@@ -591,7 +600,7 @@ export const syncIpc = {
       notifySyncStatusChanged(provider, providerStatus);
       return result;
     } catch (error) {
-      notifySyncStatusChanged(provider, fallbackStatus(provider, { connected: true }, error));
+      await notifySyncStatusOnMutationError(provider, error);
       throw error;
     }
   },
@@ -615,7 +624,7 @@ export const syncIpc = {
       notifySyncStatusChanged(provider, providerStatus);
       return result;
     } catch (error) {
-      notifySyncStatusChanged(provider, fallbackStatus(provider, { connected: true }, error));
+      await notifySyncStatusOnMutationError(provider, error);
       throw error;
     }
   },

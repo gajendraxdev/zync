@@ -181,7 +181,10 @@ export function isHostAssignableCredentialKind(kind: string): boolean {
 
 export function vaultItemToCredentialEnvelope(item: VaultItem | VaultItemDetail): CredentialEnvelope {
   if ('credential' in item && item.credential) {
-    return item.credential;
+    return {
+      ...item.credential,
+      tags: item.credential.tags ?? [],
+    };
   }
   const kind = normalizeCredentialKind(item.kind);
   const fields = [vaultItemSecretReferenceField(item, kind)];

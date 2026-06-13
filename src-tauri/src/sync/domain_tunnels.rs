@@ -277,6 +277,15 @@ pub(crate) fn write_saved_tunnels_atomic(path: &Path, data: &SavedTunnelsData) -
         Ok(()) => Ok(()),
         Err(rename_err) if rename_err.kind() == ErrorKind::AlreadyExists && path.exists() => {
             let backup_path = path.with_extension("bak");
+            if backup_path.exists() {
+                std::fs::remove_file(&backup_path).map_err(|e| {
+                    let _ = std::fs::remove_file(&temp_path);
+                    SyncError::new(
+                        "sync_tunnels_write_failed",
+                        format!("Failed to remove stale tunnels backup before replace: {e}"),
+                    )
+                })?;
+            }
             std::fs::rename(path, &backup_path).map_err(|e| {
                 let _ = std::fs::remove_file(&temp_path);
                 SyncError::new(

@@ -107,7 +107,7 @@ where
     T: serde::de::DeserializeOwned,
 {
     let remote_objects = provider_impl
-        .list_credential_records(app, &manifest.sync_collection_id)
+        .list_collection_records(app, &manifest.sync_collection_id)
         .await
         .map_err(|e| sync_error_to_string(&e))?;
 
