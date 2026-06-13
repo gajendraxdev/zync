@@ -34,11 +34,14 @@ import {
 } from '../features/connections/application/tunnelAutoStartService';
 import {
     buildConnectConfigResult,
+    connectConfigUsesVaultAuth,
     normalizeFolderPath,
     preserveVaultCredentialOnUpdate,
     type ImportPlanItem,
 } from '../features/connections/domain';
 import { connectionErrorMessage } from '../features/connections/domain/errorSanitization';
+import { useVaultStore } from '../vault/useVaultStore';
+import { isVaultLockedError } from '../vault/vaultUnlockPrompt';
 import { connectIpc, disconnectIpc, getRemoteCwdIpc } from '../features/connections/infrastructure/connectionIpc';
 import { loadConnectionsIpc, saveConnectionsIpc, type LoadConnectionsIpcResult } from '../features/connections/infrastructure/connectionPersistence';
 import { clearRemoteShellCache } from '../lib/shells/cache';
@@ -70,7 +73,7 @@ export interface ConnectionSlice {
     clearConnections: () => void;
 
     // Connection Actions
-    connect: (id: string) => Promise<void>;
+    connect: (id: string, options?: { skipVaultPrompt?: boolean }) => Promise<void>;
     disconnect: (id: string) => Promise<void>;
 
     // Tab Actions
@@ -376,7 +379,9 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
         get().saveSession();
     },
 
-    connect: async (id) => {
+    connect: async (id, options) => {
+        const skipVaultPrompt = options?.skipVaultPrompt ?? false;
+
         // Optimistic update
         set(state => ({
             connections: markConnectionStatus(state.connections, id, 'connecting')
@@ -405,6 +410,16 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                 return;
             }
             const fullConfig = configResult.config;
+
+            if (!skipVaultPrompt && connectConfigUsesVaultAuth(fullConfig)) {
+                const unlocked = await useVaultStore.getState().requestUnlock();
+                if (!unlocked) {
+                    set(state => ({
+                        connections: markConnectionStatus(state.connections, id, 'disconnected'),
+                    }));
+                    return;
+                }
+            }
 
             console.log('[CONNECT] Connecting with config:', fullConfig);
 
@@ -456,6 +471,16 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
             }
         } catch (error) {
             const message = connectionErrorMessage(error);
+            if (!skipVaultPrompt && isVaultLockedError(message)) {
+                const unlocked = await useVaultStore.getState().requestUnlock();
+                if (unlocked) {
+                    return get().connect(id, { skipVaultPrompt: true });
+                }
+                set(state => ({
+                    connections: markConnectionStatus(state.connections, id, 'disconnected'),
+                }));
+                return;
+            }
             console.error('Connection failed:', message);
             get().showToast('error', `Connection failed: ${message}`, 10000);
             // Only update to error state if not already in error to prevent loops

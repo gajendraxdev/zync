@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RefreshCw, ArrowRight, KeyRound, Download, Upload, Cloud } from 'lucide-react';
 import { useVaultStore } from '../../../vault/useVaultStore';
 import { vaultIpc, type VaultItemDetail } from '../../../vault/ipc';
-import { VaultUnlockModal } from '../../vault/VaultUnlockModal';
+
 import { RecoveryKeyModal } from '../../vault/RecoveryKeyModal';
 import { Button } from '../../ui/Button';
 import { useAppStore } from '../../../store/useAppStore';
@@ -26,7 +26,7 @@ interface VaultTabProps {
 }
 
 export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultTabProps) {
-  const { status, items, refresh, lock, refreshItems } = useVaultStore();
+  const { status, items, refresh, lock, refreshItems, openUnlockModal } = useVaultStore();
   const showToast = useAppStore(state => state.showToast);
   const showConfirmDialog = useAppStore(state => state.showConfirmDialog);
   const connections = useAppStore(state => state.connections);
@@ -39,7 +39,6 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
   const loadSettings = useAppStore(state => state.loadSettings);
   const openSyncBackupTab = useAppStore(state => state.openSyncBackupTab);
 
-  const [isUnlockModalOpen, setIsUnlockModalOpen] = useState(false);
   const [detailItemId, setDetailItemId] = useState<string | null>(null);
   const [detailItem, setDetailItem] = useState<VaultItemDetail | null>(null);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
@@ -274,7 +273,6 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
     history.close();
     addCredential.close();
     closeCredentialDetails();
-    setIsUnlockModalOpen(false);
   }, [isUnlocked]);
   const canSyncItemsToGoogle = Boolean(
     panel.googleSync?.connected
@@ -300,7 +298,7 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
           isRepairingRefs={panel.isRepairingRefs}
           onRepairRefs={panel.handleRepairRefs}
           onLock={panel.handleLock}
-          onOpenUnlock={() => setIsUnlockModalOpen(true)}
+          onOpenUnlock={openUnlockModal}
         />
       </div>
 
@@ -528,16 +526,6 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
         assignedConnections={detailAssignedConnections}
         isLoading={isDetailLoading}
         onClose={closeCredentialDetails}
-      />
-
-      <VaultUnlockModal
-        isOpen={isUnlockModalOpen}
-        onClose={() => {
-          setIsUnlockModalOpen(false);
-          void refresh().catch(error => {
-            console.warn('[Vault] Failed to refresh vault after unlock modal close:', error);
-          });
-        }}
       />
 
       <AddCredentialModal

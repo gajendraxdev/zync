@@ -10,7 +10,8 @@ export const PASSPHRASE_MIN_LENGTH = 12;
 
 interface Props {
   isOpen: boolean;
-  onClose: () => void;
+  /** Called when the modal closes; `unlocked` is true after a successful unlock/create. */
+  onClose: (unlocked: boolean) => void;
 }
 
 export function VaultUnlockModal({ isOpen, onClose }: Props) {
@@ -36,7 +37,7 @@ export function VaultUnlockModal({ isOpen, onClose }: Props) {
     return { message: String(error) };
   };
 
-  const handleClose = () => {
+  const resetForm = () => {
     setPassphrase('');
     setConfirm('');
     setRecoveryKey('');
@@ -44,7 +45,16 @@ export function VaultUnlockModal({ isOpen, onClose }: Props) {
     setUnlockMode('passphrase');
     setLocalError('');
     clearError();
-    onClose();
+  };
+
+  const handleClose = () => {
+    resetForm();
+    onClose(false);
+  };
+
+  const handleUnlocked = () => {
+    resetForm();
+    onClose(true);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -63,7 +73,7 @@ export function VaultUnlockModal({ isOpen, onClose }: Props) {
       }
       try {
         await initialize(passphrase);
-        handleClose();
+        handleUnlocked();
       } catch (e: unknown) {
         const { message } = extractError(e);
         setLocalError(message || 'Failed to create vault.');
@@ -75,7 +85,7 @@ export function VaultUnlockModal({ isOpen, onClose }: Props) {
       }
       try {
         await unlockWithRecoveryKey(recoveryKey.trim());
-        handleClose();
+        handleUnlocked();
       } catch (e: unknown) {
         const { code, message } = extractError(e);
         const parts = [code, message].filter(Boolean);
@@ -84,7 +94,7 @@ export function VaultUnlockModal({ isOpen, onClose }: Props) {
     } else {
       try {
         await unlock(passphrase);
-        handleClose();
+        handleUnlocked();
       } catch (e: unknown) {
         const { code, message } = extractError(e);
         const parts = [code, message].filter(Boolean);

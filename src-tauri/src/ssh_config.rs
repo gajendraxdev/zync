@@ -134,11 +134,7 @@ pub fn parse_config_text(content: &str) -> Result<Vec<ParsedSshConnection>> {
     let mut alias_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     for connection in &connections {
         for alias in &connection.aliases {
-            if let Some(existing_id) = alias_map.get(alias) {
-                eprintln!(
-                    "[SSH Config] Duplicate alias '{}' ignored: keeping id '{}' and skipping id '{}'",
-                    alias, existing_id, connection.id
-                );
+            if alias_map.get(alias).is_some() {
                 continue;
             }
             alias_map.insert(alias.clone(), connection.id.clone());

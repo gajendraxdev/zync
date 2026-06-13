@@ -25,6 +25,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Vault Accessibility Semantics**: Updated mode switch interaction semantics to radiogroup/radio patterns and improved assistive-state signaling across unlock/sync controls.
 - **Reset Script Preview Clarity**: Reset scripts now show expanded file matches (or explicit no-match output) for pattern-based vault/sync cleanup previews.
 - **Selective Provider Sync Direction**: Documented provider inventory vs explicit local restore/materialization more explicitly, including Google host inventory status and deferred provider-performance follow-up. ([22256fb], [7b8e5a6])
+- **Add Host Wizard**: Reworked the add/edit host modal with an Identity-first layout, collapsible Appearance after Authentication, plaintext-first credential entry aligned with import, sticky footer actions (Test, Save, Save & Connect), awaited save before connect, and `vaultId` backfill for vault-backed auth refs. ([dbfac90])
 
 ### Fixed
 - **Command Palette Vault Icon Semantics**: Corrected icon mapping so Local Vault and Google Vault Sync entries use appropriate visual semantics. ([d9d3663])

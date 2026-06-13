@@ -636,25 +636,9 @@ fn resolve_vault_refs<'a>(
         {
             let item_id = item_id.clone();
             let credential_id = credential_id.clone();
-            #[cfg(debug_assertions)]
-            eprintln!(
-                "[VaultAuth] Resolving VaultRef for connection='{}' item_id='{}' credential_id='{}'",
-                config.id,
-                item_id,
-                credential_id.as_deref().unwrap_or("<none>")
-            );
             let svc = vault.lock().await;
             let record = match svc.item_get(&item_id) {
-                Ok(record) => {
-                    #[cfg(debug_assertions)]
-                    eprintln!(
-                        "[VaultAuth] Resolved by item_id for connection='{}' -> kind='{}' logical_id='{}'",
-                        config.id,
-                        record.kind,
-                        crate::vault::store::VaultService::record_logical_id(&record)
-                    );
-                    record
-                }
+                Ok(record) => record,
                 Err(item_error) => {
                     let Some(credential_id) = credential_id.as_deref() else {
                         return Err(item_error.to_string());
@@ -664,14 +648,6 @@ fn resolve_vault_refs<'a>(
                                 "{item_error}; relink by credentialId '{credential_id}' failed: {logical_error}"
                             )
                         })?;
-                    #[cfg(debug_assertions)]
-                    eprintln!(
-                        "[VaultAuth] Relinked by credential_id for connection='{}' old_item_id='{}' new_item_id='{}' logical_id='{}'",
-                        config.id,
-                        item_id,
-                        record.id,
-                        credential_id
-                    );
                     relinked.push(RelinkedVaultRefUpdate {
                         connection_id: config.id.clone(),
                         credential_id: credential_id.to_string(),
@@ -1090,8 +1066,6 @@ pub async fn ssh_migrate_all_keys(app_handle: tauri::AppHandle) -> Result<usize,
 
 #[tauri::command]
 pub async fn ssh_disconnect(id: String, state: State<'_, AppState>) -> Result<(), String> {
-    println!("SSH Disconnect request for: {}", id);
-
     // First, close all associated PTYs to ensure tasks are aborted
     state
         .pty_manager
