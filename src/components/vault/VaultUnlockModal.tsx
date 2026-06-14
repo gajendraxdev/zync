@@ -11,8 +11,8 @@ export const PASSPHRASE_MIN_LENGTH = 12;
 const REMEMBER_ON_DEVICE_PREF_KEY = 'zync:vault:rememberOnDevice';
 
 const readRememberOnDevicePreference = (): boolean => {
-  if (typeof localStorage === 'undefined') return true;
-  return localStorage.getItem(REMEMBER_ON_DEVICE_PREF_KEY) !== 'false';
+  if (typeof localStorage === 'undefined') return false;
+  return localStorage.getItem(REMEMBER_ON_DEVICE_PREF_KEY) === 'true';
 };
 
 const persistRememberOnDevicePreference = (enabled: boolean) => {

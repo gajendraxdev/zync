@@ -27,6 +27,10 @@ const CRYPTO_SUITE: &str = "xchacha20poly1305-argon2id-v1";
 const AAD_VERSION: u32 = 1;
 const SCHEMA_VERSION: u32 = 1;
 pub const PASSPHRASE_MIN_LENGTH: usize = 12;
+const SESSION_CACHE_VERIFIER_META_KEY: &str = "session_cache_verifier";
+const SESSION_CACHE_VERIFIER_RECORD_ID: &str = "__session_cache_verifier__";
+const SESSION_CACHE_VERIFIER_REVISION: u64 = 1;
+const SESSION_CACHE_VERIFIER_PLAINTEXT: &[u8] = b"zync-vault-session-verify-v1";
 
 fn validate_secret_values(
     kind: &str,
@@ -227,16 +231,19 @@ impl VaultService {
             return Ok(());
         }
 
-        super::session_cache::clear_session_cache(&vault_id)
+        super::session_cache::clear_session_cache(&vault_id)?;
+        self.clear_session_cache_verifier()
     }
 
     fn persist_session_cache_preference(&self, remember_on_device: bool) -> Result<(), VaultError> {
         let meta = self.meta.as_ref().ok_or(VaultError::Locked)?;
         let vek = self.vek.as_ref().ok_or(VaultError::Locked)?;
         if remember_on_device {
-            super::session_cache::save_session_cache(&meta.vault_id, vek)
+            super::session_cache::save_session_cache(&meta.vault_id, vek)?;
+            self.write_session_cache_verifier()
         } else {
-            super::session_cache::clear_session_cache(&meta.vault_id)
+            super::session_cache::clear_session_cache(&meta.vault_id)?;
+            self.clear_session_cache_verifier()
         }
     }
 
@@ -244,6 +251,36 @@ impl VaultService {
         if let Err(error) = self.persist_session_cache_preference(remember_on_device) {
             log::warn!("vault session cache persistence failed: {error}");
         }
+    }
+
+    fn write_session_cache_verifier(&self) -> Result<(), VaultError> {
+        let vek = self.vek.as_ref().ok_or(VaultError::Locked)?;
+        let meta = self.meta.as_ref().ok_or(VaultError::Locked)?;
+        let db = self.db.as_ref().ok_or(VaultError::NotInitialized)?;
+        let stored = encrypt_session_cache_verifier(vek, &meta.vault_id)?;
+        let write_txn = db.begin_write()?;
+        {
+            let mut meta_table = write_txn.open_table(VAULT_META)?;
+            meta_table.insert(
+                SESSION_CACHE_VERIFIER_META_KEY,
+                serde_json::to_vec(&stored)?.as_slice(),
+            )?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+
+    fn clear_session_cache_verifier(&self) -> Result<(), VaultError> {
+        let db = self.db.as_ref().ok_or(VaultError::NotInitialized)?;
+        let write_txn = db.begin_write()?;
+        {
+            let mut meta_table = write_txn.open_table(VAULT_META)?;
+            if meta_table.get(SESSION_CACHE_VERIFIER_META_KEY)?.is_some() {
+                meta_table.remove(SESSION_CACHE_VERIFIER_META_KEY)?;
+            }
+        }
+        write_txn.commit()?;
+        Ok(())
     }
 
     fn build_unlocked_status(&self) -> Result<VaultStatus, VaultError> {
@@ -1473,18 +1510,77 @@ fn verify_cached_vek(
     vek: &SecretKey,
     meta: &VaultMeta,
     read_txn: &ReadTransaction,
-    proof_verified: bool,
+    _proof_verified: bool,
 ) -> Result<(), VaultError> {
     let item_count = live_record_count(read_txn)?;
     if item_count > 0 {
         decrypt_first_live_record(vek, &meta.vault_id, read_txn)
-    } else if proof_verified {
-        Ok(())
     } else {
-        Err(VaultError::InvalidData(
-            "session cache VEK lacks integrity proof for empty vault".into(),
-        ))
+        verify_session_cache_verifier(vek, &meta.vault_id, read_txn)
     }
+}
+
+fn encrypt_session_cache_verifier(
+    vek: &SecretKey,
+    vault_id: &str,
+) -> Result<StoredEnvelope, VaultError> {
+    let record_key = derive_record_key(
+        vek,
+        record_info_bytes(SESSION_CACHE_VERIFIER_RECORD_ID, SESSION_CACHE_VERIFIER_REVISION)
+            .as_bytes(),
+    )?;
+    let aad = record_aad_string(
+        vault_id,
+        SESSION_CACHE_VERIFIER_RECORD_ID,
+        SESSION_CACHE_VERIFIER_REVISION,
+    );
+    let envelope = encrypt_record(
+        &record_key,
+        SESSION_CACHE_VERIFIER_PLAINTEXT,
+        aad.as_bytes(),
+    )?;
+    Ok(StoredEnvelope {
+        id: SESSION_CACHE_VERIFIER_RECORD_ID.into(),
+        kind: "session-cache-verifier".into(),
+        revision: SESSION_CACHE_VERIFIER_REVISION,
+        deleted: false,
+        crypto_suite: CRYPTO_SUITE.into(),
+        aad_version: AAD_VERSION,
+        nonce: STANDARD.encode(envelope.nonce),
+        ciphertext: STANDARD.encode(&envelope.ciphertext),
+    })
+}
+
+fn verify_session_cache_verifier(
+    vek: &SecretKey,
+    vault_id: &str,
+    read_txn: &ReadTransaction,
+) -> Result<(), VaultError> {
+    let meta_table = read_txn.open_table(VAULT_META).map_err(VaultError::from)?;
+    let Some(verifier_bytes) = meta_table.get(SESSION_CACHE_VERIFIER_META_KEY)? else {
+        return Err(VaultError::InvalidData(
+            "session cache verifier missing for empty vault".into(),
+        ));
+    };
+    let stored: StoredEnvelope = serde_json::from_slice(verifier_bytes.value())?;
+    let record_key = derive_record_key(
+        vek,
+        record_info_bytes(SESSION_CACHE_VERIFIER_RECORD_ID, SESSION_CACHE_VERIFIER_REVISION)
+            .as_bytes(),
+    )?;
+    let envelope = parse_envelope(&stored)?;
+    let aad = record_aad_string(
+        vault_id,
+        SESSION_CACHE_VERIFIER_RECORD_ID,
+        SESSION_CACHE_VERIFIER_REVISION,
+    );
+    let plaintext = decrypt_record(&record_key, &envelope, aad.as_bytes())?;
+    if plaintext.as_slice() != SESSION_CACHE_VERIFIER_PLAINTEXT {
+        return Err(VaultError::InvalidData(
+            "session cache verifier plaintext mismatch".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn decrypt_first_live_record(
@@ -2124,6 +2220,54 @@ mod tests {
             "verify_passphrase must not clear remembered session cache"
         );
         session_cache::clear_session_cache(&vault_id).expect("cleanup");
+    }
+
+    #[test]
+    fn session_cache_restore_empty_vault_with_verifier_record() {
+        let mut vault = initialized_test_vault();
+        vault
+            .service
+            .unlock("correct horse battery staple", true)
+            .expect("unlock with remember on device");
+
+        vault.service.vek = None;
+        vault.service.meta = None;
+        assert!(
+            vault
+                .service
+                .try_unlock_from_session_cache()
+                .expect("try cache unlock"),
+            "empty vault should restore from cache when verifier record exists"
+        );
+
+        let vault_id = vault.service.meta.as_ref().expect("meta").vault_id.clone();
+        session_cache::clear_session_cache(&vault_id).expect("cleanup");
+    }
+
+    #[test]
+    fn session_cache_restore_rejects_wrong_vek_for_empty_vault() {
+        let mut vault = initialized_test_vault();
+        vault
+            .service
+            .unlock("correct horse battery staple", true)
+            .expect("unlock with remember on device");
+        let vault_id = vault.service.meta.as_ref().expect("meta").vault_id.clone();
+        let wrong_vek = SecretKey::from_bytes([2u8; 32]);
+        session_cache::save_session_cache(&vault_id, &wrong_vek).expect("save wrong vek");
+
+        vault.service.vek = None;
+        vault.service.meta = None;
+        assert!(
+            !vault
+                .service
+                .try_unlock_from_session_cache()
+                .expect("try cache unlock"),
+            "wrong cached VEK must not unlock empty vault"
+        );
+        assert!(
+            !session_cache::has_session_cache(&vault_id).expect("cache cleared"),
+            "invalid cache entry should be cleared"
+        );
     }
 
     #[test]

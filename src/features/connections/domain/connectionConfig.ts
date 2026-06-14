@@ -170,7 +170,8 @@ export const connectionUsesVaultAuth = (
     connectionId: string,
 ): boolean => {
     const result = buildConnectConfigResult(connections, connectionId);
-    return result.status === 'ok' && connectConfigUsesVaultAuth(result.config);
+    if (result.status !== 'ok') return true;
+    return connectConfigUsesVaultAuth(result.config);
 };
 
 /** Opening a tab should not auto-connect vault-backed hosts; user must reconnect explicitly. */
