@@ -7,6 +7,7 @@ const root = process.cwd();
 const files = [
   path.join(root, 'src/components/vault/VaultUnlockModal.tsx'),
   path.join(root, 'src/components/settings/tabs/vault/SyncCollectionUnlockModal.tsx'),
+  path.join(root, 'src/components/settings/tabs/vault/SyncCollectionSetupModal.tsx'),
 ];
 
 const failures = [];
@@ -72,21 +73,36 @@ for (const file of files) {
   };
   const short = file.replace(root + path.sep, '');
   const vaultUnlockModalPath = path.normalize('src/components/vault/VaultUnlockModal.tsx');
+  const setupModalPath = path.normalize('src/components/settings/tabs/vault/SyncCollectionSetupModal.tsx');
+  const isSetupModal = short === setupModalPath;
   const expectedUnlockModalShellModule = short === vaultUnlockModalPath
     ? './UnlockModalShell'
     : '../../../vault/UnlockModalShell';
-  runTest(`${short} imports UnlockModalShell`, () => {
-    assert.ok(
-      hasImportNamed('UnlockModalShell', expectedUnlockModalShellModule),
-      'UnlockModalShell import missing',
-    );
-  });
-  runTest(`${short} uses UnlockModalShell`, () => {
-    assert.ok(hasJsxElementNamed('UnlockModalShell'), 'UnlockModalShell usage missing');
-  });
+
+  if (!isSetupModal) {
+    runTest(`${short} imports UnlockModalShell`, () => {
+      assert.ok(
+        hasImportNamed('UnlockModalShell', expectedUnlockModalShellModule),
+        'UnlockModalShell import missing',
+      );
+    });
+    runTest(`${short} uses UnlockModalShell`, () => {
+      assert.ok(hasJsxElementNamed('UnlockModalShell'), 'UnlockModalShell usage missing');
+    });
+  }
+
   runTest(`${short} uses shared SecretField`, () => {
     assert.ok(hasJsxElementNamed('SecretField'), 'SecretField usage missing');
   });
+
+  if (isSetupModal) {
+    runTest(`${short} imports shared sync passphrase helpers`, () => {
+      assert.ok(
+        hasImportNamed('validateSyncSetupPassphrase', '../../../../vault/syncPassphrase'),
+        'syncPassphrase helper import missing',
+      );
+    });
+  }
 }
 
 if (failures.length > 0) {

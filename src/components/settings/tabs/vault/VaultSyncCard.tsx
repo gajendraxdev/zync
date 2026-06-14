@@ -1,21 +1,27 @@
-import { Cloud, Download, LogOut, RefreshCw, Shield, Server } from 'lucide-react';
+import { useState } from 'react';
+import { ChevronDown, Cloud, LogOut, RefreshCw, Shield } from 'lucide-react';
 import type {
   SyncCollectionStatus,
-  SyncDomain,
+  SyncConnectionsRestoreArgs,
   SyncDomainPolicy,
-  SyncDomainStatus,
   SyncProviderStatus,
 } from '../../../../vault/syncIpc';
-import { getSyncDomainDefinition } from '../../../../vault/syncDomains';
 import { Button } from '../../../ui/Button';
 import { cn } from '../../../../lib/utils';
+import { getProviderGateReason, getProviderReadiness } from '../../../../vault/syncProviderGate';
+import { SyncDomainsGrouped } from './SyncDomainsGrouped';
+import { SyncProviderSetupSteps } from './SyncProviderSetupSteps';
 
 interface VaultSyncCardProps {
   googleSync: SyncProviderStatus | null;
   googleCollection: SyncCollectionStatus | null;
   isSyncing: boolean;
+  isSyncingVault: boolean;
+  isRestoringVault: boolean;
   isSyncingHosts: boolean;
   isRestoringHosts: boolean;
+  isPreviewingConnections: boolean;
+  isRestoringConnections: boolean;
   isSyncingTunnels: boolean;
   isRestoringTunnels: boolean;
   isSyncingSnippets: boolean;
@@ -41,6 +47,8 @@ interface VaultSyncCardProps {
   onDownload: () => void;
   onSyncHosts: () => void;
   onRestoreHosts: () => void;
+  onRestoreConnections: (args: SyncConnectionsRestoreArgs) => void;
+  onRestoreGlobalSnippets: () => void;
   onSetHostsSyncEnabled: (enabled: boolean) => void;
   onSetDomainPolicyEnabled: (domain: SyncDomainPolicy['domain'], enabled: boolean) => void;
   onSyncTunnels: () => void;
@@ -49,18 +57,6 @@ interface VaultSyncCardProps {
   onRestoreSnippets: () => void;
   onSyncSettings: () => void;
   onRestoreSettings: () => void;
-}
-
-function formatSyncTime(value?: number): string {
-  if (!value) return 'Never synced';
-  return `Last sync ${new Date(value * 1000).toLocaleString()}`;
-}
-
-function domainStatusCopy(status?: SyncDomainStatus): string {
-  if (status?.lastError) {
-    return `Error${status.lastErrorCode ? ` (${status.lastErrorCode})` : ''}: ${status.lastError}`;
-  }
-  return formatSyncTime(status?.lastSync);
 }
 
 interface CollectionManagementSectionProps {
@@ -157,7 +153,7 @@ function CollectionManagementSection({
   return (
     <div className="mb-2 flex flex-wrap items-center gap-2">
       <Button
-        variant="ghost"
+        variant="secondary"
         size="sm"
         onClick={onLockCollection}
         disabled={
@@ -177,7 +173,7 @@ function CollectionManagementSection({
         Lock Encryption
       </Button>
       <Button
-        variant="ghost"
+        variant="secondary"
         size="sm"
         onClick={onRegenerateCollectionRecoveryKey}
         disabled={
@@ -204,8 +200,12 @@ export function VaultSyncCard({
   googleSync,
   googleCollection,
   isSyncing,
+  isSyncingVault,
+  isRestoringVault,
   isSyncingHosts,
   isRestoringHosts,
+  isPreviewingConnections,
+  isRestoringConnections,
   isSyncingTunnels,
   isRestoringTunnels,
   isSyncingSnippets,
@@ -231,6 +231,8 @@ export function VaultSyncCard({
   onDownload,
   onSyncHosts,
   onRestoreHosts,
+  onRestoreConnections,
+  onRestoreGlobalSnippets,
   onSetHostsSyncEnabled,
   onSetDomainPolicyEnabled,
   onSyncTunnels,
@@ -246,8 +248,12 @@ export function VaultSyncCard({
     : 'bg-[var(--color-app-surface)] text-[var(--color-app-muted)] border-[var(--color-app-border)]/60';
   const isDomainActionInFlight =
     isSyncing
+    || isSyncingVault
+    || isRestoringVault
     || isSyncingHosts
     || isRestoringHosts
+    || isPreviewingConnections
+    || isRestoringConnections
     || isSyncingTunnels
     || isRestoringTunnels
     || isSyncingSnippets
@@ -264,107 +270,12 @@ export function VaultSyncCard({
     isCollectionActionBlocked
     || !googleCollection?.configured
     || !googleCollection?.keyCached;
-  const providerGateReason =
-    !googleCollection?.configured
-      ? 'Set up Google encryption to enable Sync and Restore.'
-      : !googleCollection?.keyCached
-        ? 'Unlock Google encryption on this device to enable Sync and Restore.'
-        : isCollectionActionBlocked
-          ? 'Finish the current sync or Google encryption action first.'
-          : null;
-  const isVaultSyncDisabled = isProviderDomainActionDisabled || !hasVaultConfigured;
-  const isRestoreDisabled = isProviderDomainActionDisabled || !isVaultUnlocked;
-  const domainStatusByKey = new Map(
-    (googleSync?.domainStatuses ?? []).map(status => [status.domain, status]),
-  );
-  const domainPolicyEnabled = (
-    domain: SyncDomain,
-    fallback = getSyncDomainDefinition(domain).defaultEnabled,
-  ) => domainPolicies.find(policy => policy.domain === domain)?.enabled ?? fallback;
-  const isVaultDomainEnabled = domainPolicyEnabled('vault');
-  const domainRows = [
-    {
-      key: 'vault' as const,
-      enabled: isVaultDomainEnabled,
-      syncing: isSyncing,
-      restoring: isSyncing,
-      onSync: onUpload,
-      onRestore: onDownload,
-      syncLabel: 'Sync',
-      restoreLabel: 'Restore',
-      syncDisabled: isVaultSyncDisabled || !isVaultDomainEnabled,
-      restoreDisabled: isRestoreDisabled || !isVaultDomainEnabled,
-      onToggle: () => onSetDomainPolicyEnabled('vault', !isVaultDomainEnabled),
-      disabledReason: providerGateReason
-        ?? (!isVaultDomainEnabled
-          ? 'Enable Vault credentials sync to use this domain.'
-          : !hasVaultConfigured
-          ? 'Create the Local Vault before syncing vault credentials.'
-          : !isVaultUnlocked
-            ? 'Unlock the Local Vault before restoring vault credentials.'
-            : null),
-    },
-    {
-      key: 'hosts' as const,
-      enabled: hostsSyncEnabled,
-      syncing: isSyncingHosts,
-      restoring: isRestoringHosts,
-      onSync: onSyncHosts,
-      onRestore: onRestoreHosts,
-      syncLabel: 'Sync',
-      restoreLabel: 'Restore',
-      syncDisabled: isProviderDomainActionDisabled || !hostsSyncEnabled || isSyncingHosts,
-      restoreDisabled: isProviderDomainActionDisabled || !hostsSyncEnabled || isRestoringHosts,
-      onToggle: () => onSetHostsSyncEnabled(!hostsSyncEnabled),
-      disabledReason: providerGateReason ?? (!hostsSyncEnabled ? 'Enable Hosts sync to use this domain.' : null),
-    },
-    {
-      key: 'tunnels' as const,
-      enabled: domainPolicyEnabled('tunnels'),
-      syncing: isSyncingTunnels,
-      restoring: isRestoringTunnels,
-      onSync: onSyncTunnels,
-      onRestore: onRestoreTunnels,
-      syncLabel: 'Sync',
-      restoreLabel: 'Restore',
-      syncDisabled: isProviderDomainActionDisabled || !domainPolicyEnabled('tunnels') || isSyncingTunnels,
-      restoreDisabled: isProviderDomainActionDisabled || !domainPolicyEnabled('tunnels') || isRestoringTunnels,
-      onToggle: () => onSetDomainPolicyEnabled('tunnels', !domainPolicyEnabled('tunnels')),
-      disabledReason: providerGateReason
-        ?? (!domainPolicyEnabled('tunnels') ? 'Enable Tunnels sync to use this domain.' : null),
-    },
-    {
-      key: 'snippets' as const,
-      enabled: domainPolicyEnabled('snippets'),
-      syncing: isSyncingSnippets,
-      restoring: isRestoringSnippets,
-      onSync: onSyncSnippets,
-      onRestore: onRestoreSnippets,
-      syncLabel: 'Sync',
-      restoreLabel: 'Restore',
-      syncDisabled: isProviderDomainActionDisabled || !domainPolicyEnabled('snippets') || isSyncingSnippets,
-      restoreDisabled: isProviderDomainActionDisabled || !domainPolicyEnabled('snippets') || isRestoringSnippets,
-      onToggle: () => onSetDomainPolicyEnabled('snippets', !domainPolicyEnabled('snippets')),
-      disabledReason: providerGateReason
-        ?? (!domainPolicyEnabled('snippets') ? 'Enable Snippets sync to use this domain.' : null),
-    },
-    {
-      key: 'settings' as const,
-      enabled: domainPolicyEnabled('settings'),
-      syncing: isSyncingSettings,
-      restoring: isRestoringSettings,
-      onSync: onSyncSettings,
-      onRestore: onRestoreSettings,
-      syncLabel: 'Sync',
-      restoreLabel: 'Restore',
-      syncDisabled: isProviderDomainActionDisabled || !domainPolicyEnabled('settings') || isSyncingSettings,
-      restoreDisabled: isProviderDomainActionDisabled || !domainPolicyEnabled('settings') || isRestoringSettings,
-      onToggle: () => onSetDomainPolicyEnabled('settings', !domainPolicyEnabled('settings')),
-      disabledReason: providerGateReason
-        ?? (!domainPolicyEnabled('settings') ? 'Enable Settings sync to use this domain.' : null),
-    },
-  ];
-
+  const providerReadiness = getProviderReadiness(googleSync, googleCollection);
+  const providerGateReason = getProviderGateReason(providerReadiness, {
+    isActionBlocked: isCollectionActionBlocked,
+  });
+  const isProviderReady = providerReadiness.isProviderReady;
+  const [encryptionHelpOpen, setEncryptionHelpOpen] = useState(false);
   return (
     <div className="space-y-2">
       <h4 className="px-1 text-xs font-semibold uppercase tracking-wider text-[var(--color-app-muted)]">
@@ -433,8 +344,23 @@ export function VaultSyncCard({
           )}
         </div>
 
-        {googleSync?.connected && (
-          <div className="rounded-lg border border-[var(--color-app-border)]/50 bg-[var(--color-app-bg)]/25 p-2.5">
+        {!isProviderReady && (
+          <SyncProviderSetupSteps
+            isConnected={providerReadiness.isConnected}
+            isEncryptionConfigured={providerReadiness.isEncryptionConfigured}
+            isEncryptionUnlocked={providerReadiness.isEncryptionUnlocked}
+            isConnectLoading={isSyncing}
+            isSettingUpCollection={isSettingUpCollection}
+            isUnlockingCollection={isUnlockingCollection}
+            isActionBlocked={isCollectionActionBlocked}
+            onConnect={onConnect}
+            onSetupCollection={onSetupCollection}
+            onUnlockCollection={onUnlockCollection}
+          />
+        )}
+
+        {isProviderReady && (
+          <div className="space-y-4 border-t border-[var(--color-app-border)]/30 pt-4">
             <CollectionManagementSection
               googleCollection={googleCollection}
               isSettingUpCollection={isSettingUpCollection}
@@ -448,114 +374,47 @@ export function VaultSyncCard({
               onRegenerateCollectionRecoveryKey={onRegenerateCollectionRecoveryKey}
             />
 
-            <div className="mt-2.5 space-y-2.5 rounded-lg border border-[var(--color-app-border)]/50 bg-[var(--color-app-surface)]/20 p-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--color-app-muted)]">
-                    Sync Domains
-                  </p>
-                  <p className="mt-0.5 text-[11px] text-[var(--color-app-muted)]/75">
-                    Choose what Google Drive manages. Each domain keeps separate sync state.
-                  </p>
-                </div>
-                {googleSync?.lastSync != null && (
-                  <span className="whitespace-nowrap text-[11px] text-[var(--color-app-muted)]">
-                    Overall {formatSyncTime(googleSync.lastSync).toLowerCase()}
-                  </span>
-                )}
-              </div>
-
-              <div className="grid gap-2 md:grid-cols-2">
-                {domainRows.map(row => {
-                  const definition = getSyncDomainDefinition(row.key);
-                  const status = domainStatusByKey.get(row.key);
-                  const hasError = Boolean(status?.lastError);
-                  return (
-                    <div
-                      key={row.key}
-                      className={cn(
-                        'rounded-lg border p-3 transition-colors',
-                        row.enabled
-                          ? 'border-[var(--color-app-accent)]/25 bg-[var(--color-app-accent)]/5'
-                          : 'border-[var(--color-app-border)]/45 bg-[var(--color-app-bg)]/20',
-                      )}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-semibold text-[var(--color-app-text)]">
-                              {definition.label}
-                            </span>
-                            <span
-                              className={cn(
-                                'inline-flex items-center rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide',
-                                row.enabled
-                                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                                  : 'border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)] text-[var(--color-app-muted)]',
-                              )}
-                            >
-                              {row.enabled ? 'On' : 'Off'}
-                            </span>
-                          </div>
-                          <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-app-muted)]">
-                            {definition.description}
-                          </p>
-                        </div>
-                        <Button
-                          variant={row.enabled ? 'secondary' : 'ghost'}
-                          size="sm"
-                          onClick={row.onToggle}
-                          disabled={isUpdatingDomainPolicy || isCollectionActionBlocked}
-                          className="h-7 min-w-[72px] shrink-0 gap-1.5 px-2"
-                        >
-                          {isUpdatingDomainPolicy ? <RefreshCw size={13} className="animate-spin" /> : <Shield size={13} />}
-                          {row.enabled ? 'Enabled' : 'Disabled'}
-                        </Button>
-                      </div>
-
-                      <div className="mt-3 flex flex-col gap-2">
-                        <p className={cn(
-                          'min-w-0 text-[11px]',
-                          hasError ? 'text-red-300/85' : 'text-[var(--color-app-muted)]/80',
-                        )}>
-                          {domainStatusCopy(status)}
-                        </p>
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={row.onSync}
-                            disabled={row.syncDisabled}
-                            className="h-7 min-w-[78px] gap-1.5 px-2"
-                          >
-                            {row.syncing ? <RefreshCw size={13} className="animate-spin" /> : <Server size={13} />}
-                            {row.syncLabel}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={row.onRestore}
-                            disabled={row.restoreDisabled}
-                            className="h-7 min-w-[78px] gap-1.5 px-2"
-                          >
-                            {row.restoring ? <RefreshCw size={13} className="animate-spin" /> : <Download size={13} />}
-                            {row.restoreLabel}
-                          </Button>
-                        </div>
-                        {(row.syncDisabled || row.restoreDisabled) && row.disabledReason && (
-                          <p className="text-[10px] leading-relaxed text-amber-300/80">
-                            {row.disabledReason}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+            <SyncDomainsGrouped
+                googleSync={googleSync}
+                googleCollection={googleCollection}
+                hostsSyncEnabled={hostsSyncEnabled}
+                domainPolicies={domainPolicies}
+                isUpdatingDomainPolicy={isUpdatingDomainPolicy}
+                isCollectionActionBlocked={isCollectionActionBlocked}
+                isProviderDomainActionDisabled={isProviderDomainActionDisabled}
+                providerGateReason={providerGateReason}
+                hasVaultConfigured={hasVaultConfigured}
+                isVaultUnlocked={isVaultUnlocked}
+                isSyncingVault={isSyncingVault}
+                isRestoringVault={isRestoringVault}
+                isSyncingHosts={isSyncingHosts}
+                isRestoringHosts={isRestoringHosts}
+                isPreviewingConnections={isPreviewingConnections}
+                isRestoringConnections={isRestoringConnections}
+                isSyncingTunnels={isSyncingTunnels}
+                isRestoringTunnels={isRestoringTunnels}
+                isSyncingSnippets={isSyncingSnippets}
+                isRestoringSnippets={isRestoringSnippets}
+                isSyncingSettings={isSyncingSettings}
+                isRestoringSettings={isRestoringSettings}
+                onSetHostsSyncEnabled={onSetHostsSyncEnabled}
+                onSetDomainPolicyEnabled={onSetDomainPolicyEnabled}
+                onSyncHosts={onSyncHosts}
+                onRestoreConnections={onRestoreConnections}
+                onRestoreHosts={onRestoreHosts}
+                onSyncTunnels={onSyncTunnels}
+                onRestoreTunnels={onRestoreTunnels}
+                onSyncSnippets={onSyncSnippets}
+                onRestoreGlobalSnippets={onRestoreGlobalSnippets}
+                onRestoreSnippets={onRestoreSnippets}
+                onSyncSettings={onSyncSettings}
+                onRestoreSettings={onRestoreSettings}
+                onUpload={onUpload}
+                onDownload={onDownload}
+              />
 
             {!hasVaultConfigured && (
-              <p className="mt-2 text-[11px] leading-relaxed text-amber-400/85">
+              <p className="text-[11px] leading-relaxed text-amber-400/85">
                 Local vault is not set up. App-data domains can sync with a custom Google sync passphrase; vault credential sync/restore stays disabled until you create the local vault.
               </p>
             )}
@@ -568,12 +427,38 @@ export function VaultSyncCard({
           </p>
         )}
 
-        <p className="text-[11px] leading-relaxed text-[var(--color-app-muted)]/70">
-          Google Drive records are encrypted by Zync before upload. Zync never uploads plaintext credentials, sync passphrases, or recovery keys.
-        </p>
-        <p className="text-[11px] leading-relaxed text-[var(--color-app-muted)]/70">
-          Credential sync stores item-level encrypted vault records. Full vault backup remains a disaster-recovery path and stays separate from domain sync.
-        </p>
+        <button
+          type="button"
+          onClick={() => setEncryptionHelpOpen(value => !value)}
+          className="flex w-full items-center justify-between rounded-lg border border-[var(--color-app-border)]/45 bg-[var(--color-app-bg)]/15 px-3 py-2 text-left"
+        >
+          <span className="text-[11px] font-medium text-[var(--color-app-text)]">
+            How encryption & backup work
+          </span>
+          <ChevronDown
+            size={14}
+            className={cn(
+              'shrink-0 text-[var(--color-app-muted)] transition-transform',
+              encryptionHelpOpen && 'rotate-180',
+            )}
+          />
+        </button>
+        {encryptionHelpOpen && (
+          <div className="space-y-2 rounded-lg border border-[var(--color-app-border)]/40 bg-[var(--color-app-bg)]/15 px-3 py-2.5">
+            <p className="text-[11px] leading-relaxed text-[var(--color-app-muted)]/80">
+              Google Drive records are encrypted by Zync before upload. Zync never uploads plaintext credentials, sync passphrases, or recovery keys.
+            </p>
+            <p className="text-[11px] leading-relaxed text-[var(--color-app-muted)]/80">
+              Domain sync stores encrypted app data per category. Vault credential sync stores item-level records; full vault backup stays a separate disaster-recovery path.
+            </p>
+            {!googleSync?.connected && (
+              <p className="text-[11px] leading-relaxed text-amber-400/75">
+                Tip: on the Google sign-in screen, check the Drive checkbox — Google requires explicit consent for storage access.
+              </p>
+            )}
+          </div>
+        )}
+
         <div className="inline-flex items-center gap-2 rounded-md border border-[var(--color-app-accent)]/25 bg-[var(--color-app-accent)]/8 px-2.5 py-1.5">
           <img
             src="/icon.png"
@@ -584,11 +469,6 @@ export function VaultSyncCard({
             Encrypted locally before Google Drive
           </span>
         </div>
-        {!googleSync?.connected && (
-          <p className="text-[11px] leading-relaxed text-amber-400/75">
-            Tip: on the Google sign-in screen, make sure to check the Drive checkbox; Google requires explicit consent for storage access.
-          </p>
-        )}
       </div>
     </div>
   );

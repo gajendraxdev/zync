@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronDown, Shield } from 'lucide-react';
+import { useCallback, useMemo } from 'react';
+import { Shield } from 'lucide-react';
 import { useAppStore } from '../../../store/useAppStore';
 import { cn } from '../../../lib/utils';
 import { DEFAULT_VAULT_PROFILE_ID } from '../../../vault/profileTypes';
 import { useVaultStore } from '../../../vault/useVaultStore';
-import { syncIpc, SYNC_STATUS_CHANGED_EVENT, type SyncProviderStatus } from '../../../vault/syncIpc';
 import { SidebarActionButton } from './SidebarActionButton';
+import { SplitSidebarActionButton } from './SplitSidebarActionButton';
 import { VAULT_NAV_ITEMS } from './vaultNavConfig';
 import { nextSidebarSectionsForVaultToggle, resolveVaultExpanded } from './vaultNavState';
 
@@ -13,56 +13,37 @@ function StatusDot({ className, title }: { className: string; title: string }) {
     return (
         <span
             title={title}
-            className={cn("h-1.5 w-1.5 rounded-full", className)}
+            className={cn('h-1.5 w-1.5 rounded-full', className)}
         />
     );
+}
+
+function resolveLocalVaultStatusDot(status: ReturnType<typeof useVaultStore.getState>['status']) {
+    if (status?.status === 'unlocked') {
+        return { className: 'bg-emerald-400/80', title: 'Local vault unlocked' };
+    }
+    if (status?.status === 'locked') {
+        return { className: 'bg-amber-400/80', title: 'Local vault locked' };
+    }
+    return { className: 'bg-app-muted/40', title: 'Local vault not set up' };
 }
 
 export function VaultNavSection() {
     const settings = useAppStore(state => state.settings);
     const updateSidebarSectionsSettings = useAppStore(state => state.updateSidebarSectionsSettings);
     const openVaultTab = useAppStore(state => state.openVaultTab);
-    const openSyncBackupTab = useAppStore(state => state.openSyncBackupTab);
-    const activeVaultSurface = useAppStore(state => {
+    const activeVaultProfileId = useAppStore(state => {
         const activeTab = state.tabs.find(tab => tab.id === state.activeTabId);
-        if (activeTab?.type === 'sync') return 'google';
-        if (activeTab?.type === 'vault') return activeTab.vaultProfileId ?? DEFAULT_VAULT_PROFILE_ID;
-
-        return null;
+        if (activeTab?.type !== 'vault') return null;
+        return activeTab.vaultProfileId ?? DEFAULT_VAULT_PROFILE_ID;
     });
     const vaultStatus = useVaultStore(state => state.status);
-    const [googleSync, setGoogleSync] = useState<SyncProviderStatus | null>(null);
-    const [googleSyncError, setGoogleSyncError] = useState<string | null>(null);
 
     const expanded = resolveVaultExpanded(settings);
-
-    const refreshGoogleSync = useCallback(() => {
-        syncIpc.status('google')
-            .then(result => {
-                setGoogleSync(result);
-                setGoogleSyncError(null);
-            })
-            .catch(error => {
-                setGoogleSyncError(error instanceof Error ? error.message : String(error));
-                console.error('[VaultNavSection] Failed to load Google sync status:', error);
-            });
-    }, []);
-
-    useEffect(() => {
-        refreshGoogleSync();
-        const interval = window.setInterval(refreshGoogleSync, 30_000);
-        const handleSyncChanged = (event: Event) => {
-            const detail = (event as CustomEvent<{ provider?: string }>).detail;
-            if (!detail?.provider || detail.provider === 'google') {
-                refreshGoogleSync();
-            }
-        };
-        window.addEventListener(SYNC_STATUS_CHANGED_EVENT, handleSyncChanged);
-        return () => {
-            window.clearInterval(interval);
-            window.removeEventListener(SYNC_STATUS_CHANGED_EVENT, handleSyncChanged);
-        };
-    }, [refreshGoogleSync]);
+    const localVaultStatus = useMemo(
+        () => resolveLocalVaultStatusDot(vaultStatus),
+        [vaultStatus],
+    );
 
     const toggleExpanded = useCallback(() => {
         const sidebarSections = nextSidebarSectionsForVaultToggle(settings, expanded);
@@ -71,61 +52,42 @@ export function VaultNavSection() {
         });
     }, [expanded, settings, updateSidebarSectionsSettings]);
 
-    const statusByProfile = useMemo(() => ({
-        local: vaultStatus?.status === 'unlocked'
-            ? { className: 'bg-emerald-400/80', title: 'Local vault unlocked' }
-            : vaultStatus?.status === 'locked'
-                ? { className: 'bg-amber-400/80', title: 'Local vault locked' }
-                : { className: 'bg-app-muted/40', title: 'Local vault not set up' },
-        google: googleSyncError
-            ? { className: 'bg-red-400/70', title: 'Google sync status unavailable' }
-            : googleSync?.connected
-                ? { className: 'bg-blue-400/80', title: 'Google sync connected' }
-                : { className: 'bg-app-muted/40', title: 'Google sync not connected' },
-    }), [googleSync?.connected, googleSyncError, vaultStatus?.status]);
+    const openLocalVault = useCallback(() => {
+        openVaultTab(DEFAULT_VAULT_PROFILE_ID);
+    }, [openVaultTab]);
 
     return (
         <>
-            <SidebarActionButton
+            <SplitSidebarActionButton
                 icon={<Shield size={13} />}
                 label="Vault"
-                onClick={toggleExpanded}
-                trailing={(
-                    <ChevronDown
-                        size={12}
-                        className={cn(
-                            "transition-transform duration-200",
-                            !expanded && "-rotate-90",
-                        )}
-                    />
-                )}
+                expanded={expanded}
+                active={activeVaultProfileId === DEFAULT_VAULT_PROFILE_ID}
+                onPrimaryClick={openLocalVault}
+                onToggleClick={toggleExpanded}
+                toggleAriaLabel={expanded ? 'Collapse vault menu' : 'Expand vault menu'}
             />
 
             {expanded && (
-                <div className="flex flex-col gap-1 w-full">
-                    {VAULT_NAV_ITEMS.map((item) => {
+                <div className="flex w-full flex-col gap-1">
+                    {VAULT_NAV_ITEMS.map(item => {
                         const Icon = item.icon;
-                        const status = statusByProfile[item.id];
-                        if (!status && !import.meta.env.PROD) {
-                            console.warn('[VaultNavSection] Missing statusByProfile entry for profile id:', item.id, statusByProfile);
-                        }
-                        const resolvedStatus = status ?? { className: 'bg-app-muted/40', title: 'Unknown vault profile' };
+                        const isActive = activeVaultProfileId === item.id;
+                        const status = item.id === 'local' ? localVaultStatus : null;
 
                         return (
                             <SidebarActionButton
                                 key={item.id}
                                 nested
-                                active={activeVaultSurface === item.id}
+                                active={isActive}
                                 icon={<Icon size={12} />}
                                 label={item.label}
-                                onClick={() => {
-                                    if (item.id === 'google') {
-                                        openSyncBackupTab();
-                                        return;
-                                    }
-                                    openVaultTab(item.id);
-                                }}
-                                trailing={<StatusDot className={resolvedStatus.className} title={resolvedStatus.title} />}
+                                onClick={() => openVaultTab(item.id)}
+                                trailing={
+                                    status
+                                        ? <StatusDot className={status.className} title={status.title} />
+                                        : undefined
+                                }
                             />
                         );
                     })}

@@ -283,6 +283,21 @@ pub struct SyncCollectionSetupArgs {
     pub passphrase: Option<String>,
     #[serde(default)]
     pub has_recovery_key: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_collection_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncRemoteCollectionSummary {
+    pub sync_collection_id: String,
+    pub file_count: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncCollectionDiscoverResult {
+    pub collections: Vec<SyncRemoteCollectionSummary>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

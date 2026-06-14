@@ -187,6 +187,23 @@ Current closure status:
 
 ---
 
+## Phase 3.5 — Connection bundle restore + grouped Sync UI (planned)
+
+**Canonical plan:** [`SYNC_CONNECTION_BUNDLE_RESTORE_PLAN.md`](./SYNC_CONNECTION_BUNDLE_RESTORE_PLAN.md)
+
+This is the pre-implementation spec for:
+
+- Grouped Sync & Backup UX (item **#8**, split into **8a** progressive setup and **8b** grouped domains)
+- `sync_connections_restore` orchestrator (creds → hosts → tunnels → host-scoped snippets)
+- Restore dependency rules, orphan skips, and sync-vs-restore separation
+- Risk mitigations (no over-bundled upload, per-host restore scope, shared-cred dedup)
+
+**Implementation order:** scenario sign-off → backend orchestrator → grouped UI (8b) → progressive setup (8a).
+
+Do not implement grouped “Restore connections” in the UI until the orchestrator exists.
+
+---
+
 ## Deferred (Phase 4+)
 - Second provider implementation.
 - Team/shared vault + org policy controls.

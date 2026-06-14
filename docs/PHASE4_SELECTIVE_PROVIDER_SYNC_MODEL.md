@@ -159,6 +159,7 @@ They should remain conceptually separate from per-item provider records.
 
 - VAULT_CREDENTIAL_TYPES_MODEL.md — long-term model for vault credentials beyond SSH keys/passwords.
 - VAULT_CREDENTIAL_IDENTITY_MODEL.md — stable credential identity and host reference rules.
+- SYNC_CONNECTION_BUNDLE_RESTORE_PLAN.md — near-term grouped Sync UI + connection restore orchestrator (Phase 3.5).
 
 ---
 

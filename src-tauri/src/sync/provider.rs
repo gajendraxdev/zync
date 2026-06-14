@@ -1,6 +1,6 @@
 use super::types::{
     ProviderCapabilities, ProviderCredentialObject, ProviderIdentity, ProviderStatusSnapshot,
-    SyncError, SyncProviderKind, SyncResult,
+    SyncError, SyncProviderKind, SyncRemoteCollectionSummary, SyncResult,
 };
 use async_trait::async_trait;
 
@@ -56,6 +56,19 @@ pub trait VaultProviderV1: Send + Sync {
         _app: &tauri::AppHandle,
     ) -> SyncResult<Vec<String>> {
         Ok(Vec::new())
+    }
+    async fn discover_sync_collection_summaries(
+        &self,
+        app: &tauri::AppHandle,
+    ) -> SyncResult<Vec<SyncRemoteCollectionSummary>> {
+        let ids = self.discover_sync_collection_ids(app).await?;
+        Ok(ids
+            .into_iter()
+            .map(|sync_collection_id| SyncRemoteCollectionSummary {
+                sync_collection_id,
+                file_count: 0,
+            })
+            .collect())
     }
     async fn read_credential_record(
         &self,

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { RefreshCw, ArrowRight, KeyRound, Download, Upload, Cloud } from 'lucide-react';
+import { RefreshCw, ArrowRight, KeyRound, Download, Upload } from 'lucide-react';
 import { useVaultStore } from '../../../vault/useVaultStore';
 import { isVaultStatusPending } from '../../../vault/vaultLoading';
 import { vaultIpc, type VaultItemDetail } from '../../../vault/ipc';
@@ -8,7 +8,7 @@ import { RecoveryKeyModal } from '../../vault/RecoveryKeyModal';
 import { Button } from '../../ui/Button';
 import { useAppStore } from '../../../store/useAppStore';
 import { DEFAULT_VAULT_PROFILE_ID, type VaultProfileId } from '../../../vault/profileTypes';
-import { didVaultTransitionToLocked, resolveVaultFocusProfile } from './vaultFocus';
+import { didVaultTransitionToLocked } from './vaultFocus';
 import { VaultStatusCard } from './vault/VaultStatusCard';
 import { VaultSectionSkeleton } from './vault/VaultSectionSkeleton';
 import { VaultLockedPanel } from './vault/VaultLockedPanel';
@@ -40,15 +40,12 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
   const loadAllTunnels = useAppStore(state => state.loadAllTunnels);
   const loadSnippets = useAppStore(state => state.loadSnippets);
   const loadSettings = useAppStore(state => state.loadSettings);
-  const openSyncBackupTab = useAppStore(state => state.openSyncBackupTab);
-
   const [detailItemId, setDetailItemId] = useState<string | null>(null);
   const [detailItem, setDetailItem] = useState<VaultItemDetail | null>(null);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const detailRequestRef = useRef<string | null>(null);
 
   const localSectionRef = useRef<HTMLDivElement | null>(null);
-  const syncHandoffRef = useRef<HTMLDivElement | null>(null);
 
   const isStatusPending = isVaultStatusPending(status, isLoading);
   const isUnlocked = status?.status === 'unlocked';
@@ -161,13 +158,11 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
     void loadDomainPolicies();
   }, [refresh, loadGoogleSync, loadGoogleCollection, loadDomainPolicies]);
 
+  // Scroll local vault into view whenever vault profile navigation changes.
   useEffect(() => {
-    const targetProfile = resolveVaultFocusProfile(focusedProfileId);
-    const target =
-      targetProfile === 'google' ? syncHandoffRef.current : localSectionRef.current;
-    if (!target) return;
+    if (!localSectionRef.current) return;
     requestAnimationFrame(() => {
-      target.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      localSectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
     });
   }, [focusedProfileId]);
 
@@ -302,14 +297,6 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
     && panel.googleCollection?.configured
     && panel.googleCollection?.keyCached,
   );
-  const syncStatusLabel = !panel.googleSync?.connected
-    ? 'Google Drive not connected'
-    : panel.googleCollection?.configured
-      ? panel.googleCollection.keyCached
-        ? 'Google encryption ready'
-        : 'Google encryption locked'
-      : 'Google encryption not set up';
-
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-5 animate-in fade-in duration-300">
@@ -456,42 +443,6 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
           </div>
         </div>
       ) : null}
-
-      {/* Sync handoff */}
-      <div ref={syncHandoffRef} className="space-y-2">
-        <h4 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-app-muted)] px-1">
-          Sync & Backup
-        </h4>
-        <div className="rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/25 p-4">
-          <div className="flex min-w-0 items-start gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-500/15 text-blue-300">
-              <Cloud size={16} />
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-[var(--color-app-text)]">
-                Google sync is separate from Local Vault
-              </p>
-              <p className="mt-1 text-xs leading-relaxed text-[var(--color-app-muted)]">
-                {syncStatusLabel}. Connect Google Drive, set up sync encryption, and back up
-                hosts, tunnels, snippets, settings, or individual credentials from the
-                Sync & Backup workspace.
-              </p>
-              {canSyncItemsToGoogle && isUnlocked && (
-                <p className="mt-1 text-[11px] text-emerald-300/80">
-                  Per-credential backup is available from the stored items list below.
-                </p>
-              )}
-              <button
-                type="button"
-                onClick={openSyncBackupTab}
-                className="mt-2 text-xs font-medium text-app-accent transition-colors hover:text-app-accent/80"
-              >
-                Open Sync & Backup workspace
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
 
       {/* Items list */}
       {isStatusPending ? (

@@ -15,8 +15,9 @@ use super::profiles::{get_profile, now_secs, upsert_profile};
 use super::provider::{validate_provider_contract, ProviderUploadRecord, VaultProviderV1};
 use super::providers::google::{legacy_google_token_snapshot, GoogleVaultProvider};
 use super::types::{
-    ProviderCapabilities, ProviderStatusSnapshot, SyncCollectionManifest, SyncCollectionSetupArgs,
-    SyncCollectionSetupResult, SyncCollectionStatus, SyncCollectionUnlockArgs, SyncDomain,
+    ProviderCapabilities, ProviderStatusSnapshot, SyncCollectionDiscoverResult,
+    SyncCollectionManifest, SyncCollectionSetupArgs, SyncCollectionSetupResult, SyncCollectionStatus,
+    SyncCollectionUnlockArgs, SyncDomain,
     SyncDomainPolicy, SyncDomainStatus, SyncError, SyncKeyPolicyMode, SyncPolicyMode, SyncProfile, SyncProviderKind,
     SyncProviderStatus, SyncResult, SyncRestoreConflictItem,
     SyncRestoreCredentialsArgs, SyncRestoreCredentialsResult, SyncRestorePreviewResult,
@@ -340,6 +341,38 @@ fn clear_sync_error(data_dir: &Path, provider: SyncProviderKind) {
 
 const SYNC_COLLECTION_PASSPHRASE_MIN_LENGTH: usize = 12;
 
+fn resolve_discovered_sync_collection_id(
+    mut collection_ids: Vec<String>,
+    preferred_sync_collection_id: Option<&str>,
+    provider_label: &str,
+) -> Result<Option<String>, String> {
+    collection_ids.sort();
+    collection_ids.dedup();
+    match collection_ids.len() {
+        0 => Ok(None),
+        1 => Ok(collection_ids.into_iter().next()),
+        _ => {
+            let preferred = preferred_sync_collection_id
+                .map(str::trim)
+                .filter(|value| !value.is_empty());
+            if let Some(id) = preferred {
+                if collection_ids.iter().any(|existing| existing == id) {
+                    return Ok(Some(id.to_string()));
+                }
+                return Err(
+                    "[sync_collection_id_not_found] Selected encrypted sync collection was not found on google."
+                        .to_string(),
+                );
+            }
+            Err(format!(
+                "[sync_collection_ambiguous_remote] Found {} existing encrypted sync collections in {}. Choose which backup to link on this device.",
+                collection_ids.len(),
+                provider_label
+            ))
+        }
+    }
+}
+
 fn collection_status_from_manifest(
     provider: SyncProviderKind,
     manifest: Option<super::types::SyncCollectionManifest>,
@@ -426,6 +459,73 @@ pub struct SyncHostsRestoreResult {
     pub skipped: u64,
     pub failed: u64,
     pub synced_at: u64,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncConnectionsRestoreArgs {
+    #[serde(default)]
+    pub host_logical_ids: Option<Vec<String>>,
+    #[serde(default = "default_true")]
+    pub include_host_definitions: bool,
+    #[serde(default = "default_true")]
+    pub include_tunnels: bool,
+    #[serde(default = "default_true")]
+    pub include_host_snippets: bool,
+    #[serde(default = "default_true")]
+    pub include_referenced_credentials: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncConnectionsBundledDomainResult {
+    pub domain: String,
+    pub scanned: u64,
+    pub restored: u64,
+    pub updated: u64,
+    pub skipped: u64,
+    pub skipped_orphaned: u64,
+    pub failed: u64,
+    pub synced_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncConnectionsRestoreResult {
+    pub hosts: SyncHostsRestoreResult,
+    pub tunnels: Option<SyncConnectionsBundledDomainResult>,
+    pub host_snippets: Option<SyncConnectionsBundledDomainResult>,
+    pub synced_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncConnectionsRestorePreviewResult {
+    pub provider: String,
+    pub hosts_selected: u64,
+    pub hosts_new: u64,
+    pub hosts_existing: u64,
+    pub referenced_credentials: u64,
+    pub hosts_failed: u64,
+    pub tunnels_scanned: Option<u64>,
+    pub tunnels_restorable: Option<u64>,
+    pub tunnels_orphaned: Option<u64>,
+    pub host_snippets_scanned: Option<u64>,
+    pub host_snippets_restorable: Option<u64>,
+    pub host_snippets_orphaned: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncSnippetsRestoreArgs {
+    #[serde(default)]
+    pub global_only: bool,
+    #[serde(default)]
+    pub host_connection_ids: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1107,6 +1207,221 @@ fn host_auth_credential_ids(records: &[HostSyncRecord]) -> HashSet<String> {
         .collect()
 }
 
+fn normalize_host_connection_id(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
+}
+
+fn host_connection_id_set(records: &[HostSyncRecord]) -> HashSet<String> {
+    records
+        .iter()
+        .map(|record| normalize_host_connection_id(&record.logical_id))
+        .collect()
+}
+
+fn local_host_connection_id_set(provider_data_dir: &Path) -> Result<HashSet<String>, String> {
+    Ok(load_hosts_sync_records(provider_data_dir)
+        .map_err(|e| sync_error_to_string(&e))?
+        .into_iter()
+        .map(|record| normalize_host_connection_id(&record.logical_id))
+        .collect())
+}
+
+fn resolve_bundle_eligible_host_ids(
+    remote_records: &[HostSyncRecord],
+    local_host_ids: &HashSet<String>,
+    include_host_definitions: bool,
+) -> HashSet<String> {
+    let remote_ids = host_connection_id_set(remote_records);
+    if include_host_definitions {
+        return remote_ids;
+    }
+    remote_ids
+        .into_iter()
+        .filter(|id| local_host_ids.contains(id))
+        .collect()
+}
+
+fn host_connection_id_matches(set: &HashSet<String>, connection_id: &str) -> bool {
+    set.contains(&normalize_host_connection_id(connection_id))
+}
+
+fn filter_host_records_for_eligible_hosts(
+    records: Vec<HostSyncRecord>,
+    eligible_host_ids: &HashSet<String>,
+) -> Vec<HostSyncRecord> {
+    records
+        .into_iter()
+        .filter(|record| host_connection_id_matches(eligible_host_ids, &record.logical_id))
+        .collect()
+}
+
+fn filter_tunnel_records_for_hosts(
+    records: Vec<TunnelSyncRecord>,
+    eligible_host_ids: &HashSet<String>,
+) -> (Vec<TunnelSyncRecord>, u64) {
+    let mut skipped_orphaned = 0u64;
+    let filtered = records
+        .into_iter()
+        .filter(|record| {
+            if host_connection_id_matches(eligible_host_ids, &record.connection_id) {
+                true
+            } else {
+                skipped_orphaned = skipped_orphaned.saturating_add(1);
+                false
+            }
+        })
+        .collect();
+    (filtered, skipped_orphaned)
+}
+
+fn filter_host_scoped_snippet_records(
+    records: Vec<SnippetSyncRecord>,
+    eligible_host_ids: &HashSet<String>,
+) -> (Vec<SnippetSyncRecord>, u64) {
+    let mut skipped_orphaned = 0u64;
+    let filtered = records
+        .into_iter()
+        .filter(|record| {
+            let Some(connection_id) = record
+                .connection_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            else {
+                // Global snippets (no connection_id) are excluded from host-scoped restore
+                // but are not orphaned host references.
+                return false;
+            };
+            if host_connection_id_matches(eligible_host_ids, connection_id) {
+                true
+            } else {
+                skipped_orphaned = skipped_orphaned.saturating_add(1);
+                false
+            }
+        })
+        .collect();
+    (filtered, skipped_orphaned)
+}
+
+fn filter_global_snippet_records(records: Vec<SnippetSyncRecord>) -> (Vec<SnippetSyncRecord>, u64) {
+    let mut skipped_host_scoped = 0u64;
+    let filtered = records
+        .into_iter()
+        .filter(|record| {
+            let is_global = record
+                .connection_id
+                .as_deref()
+                .map(str::trim)
+                .is_none_or(|value| value.is_empty());
+            if is_global {
+                true
+            } else {
+                skipped_host_scoped = skipped_host_scoped.saturating_add(1);
+                false
+            }
+        })
+        .collect();
+    (filtered, skipped_host_scoped)
+}
+
+fn normalize_tunnel_records(records: Vec<TunnelSyncRecord>) -> Vec<TunnelSyncRecord> {
+    records
+        .into_iter()
+        .map(|mut record| {
+            if record.logical_id.trim().is_empty() {
+                record.logical_id = format!(
+                    "{}:{}:{}:{}",
+                    record.connection_id.trim().to_ascii_lowercase(),
+                    record.local_port,
+                    record.remote_host.trim().to_ascii_lowercase(),
+                    record.remote_port
+                );
+            }
+            record
+        })
+        .collect()
+}
+
+fn normalize_snippet_records(records: Vec<SnippetSyncRecord>) -> Vec<SnippetSyncRecord> {
+    records
+        .into_iter()
+        .map(|mut record| {
+            if record.logical_id.trim().is_empty() {
+                record.logical_id = snippet_record_logical_id(&record);
+            }
+            record
+        })
+        .collect()
+}
+
+async fn execute_hosts_restore_step(
+    app: &tauri::AppHandle,
+    vault: &Mutex<VaultService>,
+    provider_impl: &dyn VaultProviderV1,
+    provider_data_dir: &Path,
+    kind: SyncProviderKind,
+    manifest: &SyncCollectionManifest,
+    secret_key: &SecretKey,
+    scanned: u64,
+    skipped: u64,
+    failed: u64,
+    records: Vec<HostSyncRecord>,
+    include_referenced_credentials: bool,
+    apply_host_records: bool,
+) -> Result<SyncHostsRestoreResult, String> {
+    let credential_ids = host_auth_credential_ids(&records);
+    let credential_stats = if !include_referenced_credentials || credential_ids.is_empty() {
+        CredentialRestoreStats::default()
+    } else {
+        restore_credentials_from_provider_records(
+            app,
+            vault,
+            provider_impl,
+            provider_data_dir,
+            kind,
+            manifest,
+            secret_key,
+            Some(&credential_ids),
+            &HashSet::new(),
+        )
+        .await?
+    };
+
+    let (restored, updated) = if apply_host_records {
+        apply_hosts_restore_records(provider_data_dir, &records).map_err(|e| sync_error_to_string(&e))?
+    } else {
+        (0, 0)
+    };
+    let credential_refs_relinked = if include_referenced_credentials && !credential_ids.is_empty() {
+        let svc = vault.lock().await;
+        crate::vault::commands::repair_connection_refs(provider_data_dir, &svc)
+            .map(|result| result.relinked_item_ids as u64)
+            .map_err(|e| sync_local_error("vault_ref_repair_failed", e.to_string()))?
+    } else {
+        0
+    };
+    let synced_at = now_secs();
+    record_domain_sync_success(provider_data_dir, kind, SyncDomain::Hosts, synced_at)
+        .map_err(|e| sync_error_to_string(&e))?;
+
+    Ok(SyncHostsRestoreResult {
+        domain: "hosts".to_string(),
+        scanned,
+        restored,
+        updated,
+        credentials_scanned: credential_stats.scanned,
+        credentials_restored: credential_stats.restored,
+        credentials_updated: credential_stats.updated,
+        credentials_skipped: credential_stats.skipped,
+        credentials_conflicts: credential_stats.conflicts,
+        credentials_failed: credential_stats.failed,
+        credential_refs_relinked,
+        skipped,
+        failed,
+        synced_at,
+    })
+}
+
 async fn ensure_unlocked_vault_for_credential_restore(
     vault: &Mutex<VaultService>,
     context: &str,
@@ -1654,53 +1969,382 @@ pub async fn sync_hosts_restore(
         .map(|(record, _revision)| record)
         .collect::<Vec<_>>();
 
-    let credential_ids = host_auth_credential_ids(&records);
-    let credential_stats = if credential_ids.is_empty() {
-        CredentialRestoreStats::default()
-    } else {
-        restore_credentials_from_provider_records(
-            &app,
-            &vault,
-            provider_impl.as_ref(),
-            &provider_data_dir,
-            kind,
-            &manifest,
-            &secret_key,
-            Some(&credential_ids),
-            &HashSet::new(),
-        )
-        .await?
-    };
-
-    let (restored, updated) =
-        apply_hosts_restore_records(&provider_data_dir, &records).map_err(|e| sync_error_to_string(&e))?;
-    let credential_refs_relinked = if credential_ids.is_empty() {
-        0
-    } else {
-        let svc = vault.lock().await;
-        crate::vault::commands::repair_connection_refs(&provider_data_dir, &svc)
-            .map(|result| result.relinked_item_ids as u64)
-            .map_err(|e| sync_local_error("vault_ref_repair_failed", e.to_string()))?
-    };
-    let synced_at = now_secs();
-    record_domain_sync_success(&provider_data_dir, kind, SyncDomain::Hosts, synced_at)
-        .map_err(|e| sync_error_to_string(&e))?;
-
-    Ok(SyncHostsRestoreResult {
-        domain: "hosts".to_string(),
+    execute_hosts_restore_step(
+        &app,
+        &vault,
+        provider_impl.as_ref(),
+        &provider_data_dir,
+        kind,
+        &manifest,
+        &secret_key,
         scanned,
-        restored,
-        updated,
-        credentials_scanned: credential_stats.scanned,
-        credentials_restored: credential_stats.restored,
-        credentials_updated: credential_stats.updated,
-        credentials_skipped: credential_stats.skipped,
-        credentials_conflicts: credential_stats.conflicts,
-        credentials_failed: credential_stats.failed,
-        credential_refs_relinked,
         skipped,
         failed,
-        synced_at,
+        records,
+        true,
+        true,
+    )
+    .await
+}
+
+struct ConnectionsRestoreScope {
+    records: Vec<HostSyncRecord>,
+    scanned: u64,
+    skipped: u64,
+    failed: u64,
+}
+
+fn normalize_host_logical_id_filter(ids: Option<Vec<String>>) -> Option<HashSet<String>> {
+    ids.map(|ids| {
+        ids.into_iter()
+            .map(|id| id.trim().to_string())
+            .filter(|id| !id.is_empty())
+            .collect::<HashSet<_>>()
+    })
+}
+
+async fn prepare_connections_restore_scope(
+    provider_impl: &dyn VaultProviderV1,
+    app: &tauri::AppHandle,
+    kind: SyncProviderKind,
+    provider_data_dir: &Path,
+    manifest: &super::types::SyncCollectionManifest,
+    secret_key: &SecretKey,
+    host_logical_ids: Option<Vec<String>>,
+    error_code: &'static str,
+) -> Result<ConnectionsRestoreScope, String> {
+    let logical_id_filter = normalize_host_logical_id_filter(host_logical_ids);
+    let collected = collect_remote_host_records(
+        provider_impl,
+        app,
+        kind,
+        manifest,
+        secret_key,
+        logical_id_filter.as_ref(),
+    )
+    .await
+    .map_err(|message| {
+        record_sync_error(provider_data_dir, kind, error_code, message.clone());
+        message
+    })?;
+    let records = collected
+        .records
+        .into_iter()
+        .map(|(record, _revision)| record)
+        .collect::<Vec<_>>();
+    Ok(ConnectionsRestoreScope {
+        records,
+        scanned: collected.scanned,
+        skipped: collected.skipped,
+        failed: collected.failed,
+    })
+}
+
+struct BundledDomainRestoreCounts {
+    scanned: u64,
+    restorable: u64,
+    orphaned: u64,
+}
+
+async fn preview_bundled_tunnel_counts_for_hosts(
+    provider_impl: &dyn VaultProviderV1,
+    app: &tauri::AppHandle,
+    manifest: &super::types::SyncCollectionManifest,
+    secret_key: &SecretKey,
+    eligible_host_ids: &HashSet<String>,
+) -> Result<BundledDomainRestoreCounts, String> {
+    let collected = collect_domain_records::<TunnelSyncRecord>(
+        provider_impl,
+        app,
+        manifest,
+        secret_key,
+        "tunnels",
+        ".ztun",
+    )
+    .await?;
+    let normalized = normalize_tunnel_records(collected.records);
+    let (filtered, skipped_orphaned) = filter_tunnel_records_for_hosts(normalized, eligible_host_ids);
+    Ok(BundledDomainRestoreCounts {
+        scanned: collected.scanned,
+        restorable: filtered.len() as u64,
+        orphaned: skipped_orphaned,
+    })
+}
+
+async fn preview_bundled_host_snippet_counts_for_hosts(
+    provider_impl: &dyn VaultProviderV1,
+    app: &tauri::AppHandle,
+    manifest: &super::types::SyncCollectionManifest,
+    secret_key: &SecretKey,
+    eligible_host_ids: &HashSet<String>,
+) -> Result<BundledDomainRestoreCounts, String> {
+    let collected = collect_domain_records::<SnippetSyncRecord>(
+        provider_impl,
+        app,
+        manifest,
+        secret_key,
+        "snippets",
+        ".zsnp",
+    )
+    .await?;
+    let normalized = normalize_snippet_records(collected.records);
+    let (filtered, skipped_orphaned) =
+        filter_host_scoped_snippet_records(normalized, eligible_host_ids);
+    Ok(BundledDomainRestoreCounts {
+        scanned: collected.scanned,
+        restorable: filtered.len() as u64,
+        orphaned: skipped_orphaned,
+    })
+}
+
+#[tauri::command]
+pub async fn sync_connections_restore(
+    app: tauri::AppHandle,
+    vault: State<'_, Mutex<VaultService>>,
+    provider: String,
+    args: SyncConnectionsRestoreArgs,
+) -> Result<SyncConnectionsRestoreResult, String> {
+    let kind = parse_provider(&provider)?;
+    let provider_impl = provider_for(kind).map_err(|e| sync_error_to_string(&e))?;
+    let provider_data_dir = crate::commands::get_data_dir(&app);
+    ensure_domain_enabled_for_provider(&provider_data_dir, kind, SyncDomain::Hosts)?;
+    let manifest = load_manifest(&provider_data_dir, kind)
+        .map_err(|e| sync_error_to_string(&e))?
+        .ok_or_else(|| {
+            "[sync_collection_not_configured] Sync collection is not configured. Set up sync key first."
+                .to_string()
+        })?;
+    let collection_key = load_collection_key(&manifest).map_err(|e| sync_error_to_string(&e))?;
+    let secret_key = SecretKey::from_bytes(collection_key);
+    let scope = prepare_connections_restore_scope(
+        provider_impl.as_ref(),
+        &app,
+        kind,
+        &provider_data_dir,
+        &manifest,
+        &secret_key,
+        args.host_logical_ids.clone(),
+        "sync_connections_restore_failed",
+    )
+    .await?;
+    let records = scope.records;
+    let local_host_ids = local_host_connection_id_set(&provider_data_dir)?;
+    let eligible_host_ids = resolve_bundle_eligible_host_ids(
+        &records,
+        &local_host_ids,
+        args.include_host_definitions,
+    );
+
+    let eligible_records =
+        filter_host_records_for_eligible_hosts(records, &eligible_host_ids);
+    let hosts = execute_hosts_restore_step(
+        &app,
+        &vault,
+        provider_impl.as_ref(),
+        &provider_data_dir,
+        kind,
+        &manifest,
+        &secret_key,
+        scope.scanned,
+        scope.skipped,
+        scope.failed,
+        eligible_records,
+        args.include_referenced_credentials,
+        args.include_host_definitions,
+    )
+    .await?;
+
+    let mut latest_synced_at = hosts.synced_at;
+
+    let tunnels = if args.include_tunnels {
+        ensure_domain_enabled_for_provider(&provider_data_dir, kind, SyncDomain::Tunnels)?;
+        let collected = collect_domain_records::<TunnelSyncRecord>(
+            provider_impl.as_ref(),
+            &app,
+            &manifest,
+            &secret_key,
+            "tunnels",
+            ".ztun",
+        )
+        .await?;
+        let normalized = normalize_tunnel_records(collected.records);
+        let (filtered, skipped_orphaned) =
+            filter_tunnel_records_for_hosts(normalized, &eligible_host_ids);
+        let (restored, updated) = apply_tunnel_restore_records(&provider_data_dir, &filtered)
+            .map_err(|e| sync_error_to_string(&e))?;
+        let synced_at = now_secs();
+        record_domain_sync_success(&provider_data_dir, kind, SyncDomain::Tunnels, synced_at)
+            .map_err(|e| sync_error_to_string(&e))?;
+        latest_synced_at = latest_synced_at.max(synced_at);
+        Some(SyncConnectionsBundledDomainResult {
+            domain: "tunnels".to_string(),
+            scanned: collected.scanned,
+            restored,
+            updated,
+            skipped: collected.skipped,
+            skipped_orphaned,
+            failed: collected.failed,
+            synced_at,
+        })
+    } else {
+        None
+    };
+
+    let host_snippets = if args.include_host_snippets {
+        ensure_domain_enabled_for_provider(&provider_data_dir, kind, SyncDomain::Snippets)?;
+        let collected = collect_domain_records::<SnippetSyncRecord>(
+            provider_impl.as_ref(),
+            &app,
+            &manifest,
+            &secret_key,
+            "snippets",
+            ".zsnp",
+        )
+        .await?;
+        let normalized = normalize_snippet_records(collected.records);
+        let (filtered, skipped_orphaned) =
+            filter_host_scoped_snippet_records(normalized, &eligible_host_ids);
+        let (restored, updated) = apply_snippet_restore_records(&provider_data_dir, &filtered)
+            .map_err(|e| sync_error_to_string(&e))?;
+        let synced_at = now_secs();
+        record_domain_sync_success(&provider_data_dir, kind, SyncDomain::Snippets, synced_at)
+            .map_err(|e| sync_error_to_string(&e))?;
+        latest_synced_at = latest_synced_at.max(synced_at);
+        Some(SyncConnectionsBundledDomainResult {
+            domain: "snippets".to_string(),
+            scanned: collected.scanned,
+            restored,
+            updated,
+            skipped: collected.skipped,
+            skipped_orphaned,
+            failed: collected.failed,
+            synced_at,
+        })
+    } else {
+        None
+    };
+
+    Ok(SyncConnectionsRestoreResult {
+        hosts,
+        tunnels,
+        host_snippets,
+        synced_at: latest_synced_at,
+    })
+}
+
+#[tauri::command]
+pub async fn sync_connections_restore_preview(
+    app: tauri::AppHandle,
+    provider: String,
+    args: SyncConnectionsRestoreArgs,
+) -> Result<SyncConnectionsRestorePreviewResult, String> {
+    let kind = parse_provider(&provider)?;
+    let provider_impl = provider_for(kind).map_err(|e| sync_error_to_string(&e))?;
+    let provider_data_dir = crate::commands::get_data_dir(&app);
+    ensure_domain_enabled_for_provider(&provider_data_dir, kind, SyncDomain::Hosts)?;
+    let manifest = load_manifest(&provider_data_dir, kind)
+        .map_err(|e| sync_error_to_string(&e))?
+        .ok_or_else(|| {
+            "[sync_collection_not_configured] Sync collection is not configured. Set up sync key first."
+                .to_string()
+        })?;
+    let collection_key = load_collection_key(&manifest).map_err(|e| sync_error_to_string(&e))?;
+    let secret_key = SecretKey::from_bytes(collection_key);
+    let local_host_ids = local_host_connection_id_set(&provider_data_dir)?;
+    let scope = prepare_connections_restore_scope(
+        provider_impl.as_ref(),
+        &app,
+        kind,
+        &provider_data_dir,
+        &manifest,
+        &secret_key,
+        args.host_logical_ids.clone(),
+        "sync_connections_restore_preview_failed",
+    )
+    .await?;
+    let eligible_host_ids = resolve_bundle_eligible_host_ids(
+        &scope.records,
+        &local_host_ids,
+        args.include_host_definitions,
+    );
+    let hosts_selected = if args.include_host_definitions {
+        scope.records.len() as u64
+    } else {
+        eligible_host_ids.len() as u64
+    };
+    let mut hosts_new = 0u64;
+    let mut hosts_existing = 0u64;
+    if args.include_host_definitions {
+        for record in &scope.records {
+            if host_connection_id_matches(&local_host_ids, &record.logical_id) {
+                hosts_existing = hosts_existing.saturating_add(1);
+            } else {
+                hosts_new = hosts_new.saturating_add(1);
+            }
+        }
+    }
+    let referenced_credentials = if args.include_referenced_credentials {
+        let eligible_records = filter_host_records_for_eligible_hosts(
+            scope.records.clone(),
+            &eligible_host_ids,
+        );
+        host_auth_credential_ids(&eligible_records).len() as u64
+    } else {
+        0
+    };
+
+    let (tunnels_scanned, tunnels_restorable, tunnels_orphaned) = if args.include_tunnels {
+        ensure_domain_enabled_for_provider(&provider_data_dir, kind, SyncDomain::Tunnels)?;
+        let counts = preview_bundled_tunnel_counts_for_hosts(
+            provider_impl.as_ref(),
+            &app,
+            &manifest,
+            &secret_key,
+            &eligible_host_ids,
+        )
+        .await?;
+        (
+            Some(counts.scanned),
+            Some(counts.restorable),
+            Some(counts.orphaned),
+        )
+    } else {
+        (None, None, None)
+    };
+
+    let (host_snippets_scanned, host_snippets_restorable, host_snippets_orphaned) =
+        if args.include_host_snippets {
+            ensure_domain_enabled_for_provider(&provider_data_dir, kind, SyncDomain::Snippets)?;
+            let counts = preview_bundled_host_snippet_counts_for_hosts(
+                provider_impl.as_ref(),
+                &app,
+                &manifest,
+                &secret_key,
+                &eligible_host_ids,
+            )
+            .await?;
+            (
+                Some(counts.scanned),
+                Some(counts.restorable),
+                Some(counts.orphaned),
+            )
+        } else {
+            (None, None, None)
+        };
+
+    Ok(SyncConnectionsRestorePreviewResult {
+        provider: kind.as_str().to_string(),
+        hosts_selected,
+        hosts_new,
+        hosts_existing,
+        referenced_credentials,
+        hosts_failed: scope.failed,
+        tunnels_scanned,
+        tunnels_restorable,
+        tunnels_orphaned,
+        host_snippets_scanned,
+        host_snippets_restorable,
+        host_snippets_orphaned,
     })
 }
 
@@ -1860,7 +2504,11 @@ pub async fn sync_tunnels_restore(app: tauri::AppHandle, provider: String) -> Re
 }
 
 #[tauri::command]
-pub async fn sync_snippets_restore(app: tauri::AppHandle, provider: String) -> Result<SyncDomainRestoreResult, String> {
+pub async fn sync_snippets_restore(
+    app: tauri::AppHandle,
+    provider: String,
+    args: SyncSnippetsRestoreArgs,
+) -> Result<SyncDomainRestoreResult, String> {
     let kind = parse_provider(&provider)?;
     let provider_impl = provider_for(kind).map_err(|e| sync_error_to_string(&e))?;
     let data_dir = crate::commands::get_data_dir(&app);
@@ -1879,16 +2527,23 @@ pub async fn sync_snippets_restore(app: tauri::AppHandle, provider: String) -> R
         ".zsnp",
     )
     .await?;
-    let records = collected
-        .records
-        .into_iter()
-        .map(|mut record| {
-            if record.logical_id.trim().is_empty() {
-                record.logical_id = snippet_record_logical_id(&record);
-            }
-            record
-        })
-        .collect::<Vec<_>>();
+    let mut records = normalize_snippet_records(collected.records);
+    let mut skipped = collected.skipped;
+    if args.global_only {
+        let (filtered, skipped_host_scoped) = filter_global_snippet_records(records);
+        records = filtered;
+        skipped = skipped.saturating_add(skipped_host_scoped);
+    } else if let Some(host_connection_ids) = args.host_connection_ids {
+        let eligible_host_ids = host_connection_ids
+            .into_iter()
+            .map(|id| normalize_host_connection_id(&id))
+            .filter(|id| !id.is_empty())
+            .collect::<HashSet<_>>();
+        let (filtered, skipped_orphaned) =
+            filter_host_scoped_snippet_records(records, &eligible_host_ids);
+        records = filtered;
+        skipped = skipped.saturating_add(skipped_orphaned);
+    }
     let (restored, updated) = apply_snippet_restore_records(&data_dir, &records).map_err(|e| sync_error_to_string(&e))?;
     let synced_at = now_secs();
     record_domain_sync_success(&data_dir, kind, SyncDomain::Snippets, synced_at)
@@ -1898,7 +2553,7 @@ pub async fn sync_snippets_restore(app: tauri::AppHandle, provider: String) -> R
         scanned: collected.scanned,
         restored,
         updated,
-        skipped: collected.skipped,
+        skipped,
         failed: collected.failed,
         synced_at,
     })
@@ -2013,6 +2668,20 @@ pub async fn sync_collection_status(
 }
 
 #[tauri::command]
+pub async fn sync_collection_discover_remote(
+    app: tauri::AppHandle,
+    provider: String,
+) -> Result<SyncCollectionDiscoverResult, String> {
+    let kind = parse_provider(&provider)?;
+    let provider_impl = provider_for(kind).map_err(|e| sync_error_to_string(&e))?;
+    let collections = provider_impl
+        .discover_sync_collection_summaries(&app)
+        .await
+        .map_err(|e| sync_error_to_string(&e))?;
+    Ok(SyncCollectionDiscoverResult { collections })
+}
+
+#[tauri::command]
 pub async fn sync_collection_setup(
     app: tauri::AppHandle,
     vault: State<'_, Mutex<VaultService>>,
@@ -2064,20 +2733,15 @@ pub async fn sync_collection_setup(
     let existing_manifest = load_manifest(&provider_data_dir, kind)
         .map_err(|e| sync_error_to_string(&e))?;
     let discovered_sync_collection_id = if existing_manifest.is_none() {
-        let mut collection_ids = provider_impl
+        let collection_ids = provider_impl
             .discover_sync_collection_ids(&app)
             .await
             .map_err(|e| sync_error_to_string(&e))?;
-        collection_ids.sort();
-        collection_ids.dedup();
-        if collection_ids.len() > 1 {
-            return Err(format!(
-                "[sync_collection_ambiguous_remote] Found {} existing encrypted sync collections in {}. This device was reset, so Zync cannot pick one automatically yet.",
-                collection_ids.len(),
-                kind.as_str()
-            ));
-        }
-        collection_ids.into_iter().next()
+        resolve_discovered_sync_collection_id(
+            collection_ids,
+            args.sync_collection_id.as_deref(),
+            kind.as_str(),
+        )?
     } else {
         None
     };
@@ -2907,6 +3571,50 @@ mod tests {
         }
     }
 
+    #[test]
+    fn resolve_discovered_sync_collection_id_returns_single_match() {
+        let resolved = resolve_discovered_sync_collection_id(
+            vec!["collection-b".to_string()],
+            None,
+            "google",
+        )
+        .expect("single collection should resolve");
+        assert_eq!(resolved.as_deref(), Some("collection-b"));
+    }
+
+    #[test]
+    fn resolve_discovered_sync_collection_id_requires_selection_when_ambiguous() {
+        let error = resolve_discovered_sync_collection_id(
+            vec!["collection-a".to_string(), "collection-b".to_string()],
+            None,
+            "google",
+        )
+        .expect_err("ambiguous collections should fail without selection");
+        assert!(error.contains("sync_collection_ambiguous_remote"));
+        assert!(error.contains("Choose which backup"));
+    }
+
+    #[test]
+    fn resolve_discovered_sync_collection_id_honors_preferred_selection() {
+        let resolved = resolve_discovered_sync_collection_id(
+            vec!["collection-a".to_string(), "collection-b".to_string()],
+            Some("collection-b"),
+            "google",
+        )
+        .expect("preferred collection should resolve");
+        assert_eq!(resolved.as_deref(), Some("collection-b"));
+    }
+
+    #[test]
+    fn resolve_discovered_sync_collection_id_rejects_unknown_selection() {
+        let error = resolve_discovered_sync_collection_id(
+            vec!["collection-a".to_string(), "collection-b".to_string()],
+            Some("collection-c"),
+            "google",
+        )
+        .expect_err("unknown selection should fail");
+        assert!(error.contains("sync_collection_id_not_found"));
+    }
 
     #[test]
     fn status_from_profile_exposes_default_domain_statuses() {
@@ -3056,6 +3764,20 @@ mod tests {
         assert_eq!(ids.len(), 2);
         assert!(ids.contains("cred-a"));
         assert!(ids.contains("cred-b"));
+    }
+
+    #[test]
+    fn normalize_host_logical_id_filter_trims_and_filters_blanks() {
+        let filter = normalize_host_logical_id_filter(Some(vec![
+            " host-a ".to_string(),
+            "".to_string(),
+            "   ".to_string(),
+            "host-b".to_string(),
+        ]))
+        .expect("filter should exist");
+        assert_eq!(filter.len(), 2);
+        assert!(filter.contains("host-a"));
+        assert!(filter.contains("host-b"));
     }
 
     #[test]
@@ -3300,5 +4022,196 @@ mod tests {
 
         assert_eq!(ids.len(), 1);
         assert!(ids.contains("cred-a"));
+    }
+
+    #[test]
+    fn filter_tunnel_records_for_hosts_skips_orphans() {
+        let records = vec![
+            TunnelSyncRecord {
+                logical_id: "tun-1".to_string(),
+                connection_id: "Host-A".to_string(),
+                name: "db".to_string(),
+                tunnel_type: "local".to_string(),
+                local_port: 8080,
+                remote_host: "127.0.0.1".to_string(),
+                remote_port: 5432,
+                bind_address: None,
+                bind_to_any: false,
+                auto_start: false,
+                group: None,
+                updated_at: 1,
+            },
+            TunnelSyncRecord {
+                logical_id: "tun-2".to_string(),
+                connection_id: "missing-host".to_string(),
+                name: "orphan".to_string(),
+                tunnel_type: "local".to_string(),
+                local_port: 9090,
+                remote_host: "127.0.0.1".to_string(),
+                remote_port: 22,
+                bind_address: None,
+                bind_to_any: false,
+                auto_start: false,
+                group: None,
+                updated_at: 1,
+            },
+        ];
+        let eligible = HashSet::from([normalize_host_connection_id("host-a")]);
+        let (filtered, skipped_orphaned) = filter_tunnel_records_for_hosts(records, &eligible);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].logical_id, "tun-1");
+        assert_eq!(skipped_orphaned, 1);
+    }
+
+    #[test]
+    fn filter_host_scoped_snippet_records_skips_global_and_orphans() {
+        let records = vec![
+            SnippetSyncRecord {
+                logical_id: "global".to_string(),
+                name: "global".to_string(),
+                command: "ls".to_string(),
+                category: None,
+                tags: Vec::new(),
+                connection_id: None,
+                updated_at: 1,
+            },
+            SnippetSyncRecord {
+                logical_id: "host-scoped".to_string(),
+                name: "host".to_string(),
+                command: "pwd".to_string(),
+                category: None,
+                tags: Vec::new(),
+                connection_id: Some("host-a".to_string()),
+                updated_at: 1,
+            },
+            SnippetSyncRecord {
+                logical_id: "orphan".to_string(),
+                name: "orphan".to_string(),
+                command: "whoami".to_string(),
+                category: None,
+                tags: Vec::new(),
+                connection_id: Some("missing".to_string()),
+                updated_at: 1,
+            },
+        ];
+        let eligible = HashSet::from([normalize_host_connection_id("host-a")]);
+        let (filtered, skipped_orphaned) = filter_host_scoped_snippet_records(records, &eligible);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].logical_id, "host-scoped");
+        assert_eq!(skipped_orphaned, 1);
+    }
+
+    #[test]
+    fn filter_host_records_for_eligible_hosts_respects_local_scope() {
+        let records = vec![
+            test_host_record("Host-A"),
+            test_host_record("host-b"),
+        ];
+        let eligible = HashSet::from([normalize_host_connection_id("host-a")]);
+        let filtered = filter_host_records_for_eligible_hosts(records, &eligible);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].logical_id, "Host-A");
+    }
+
+    #[test]
+    fn filter_global_snippet_records_keeps_only_global_entries() {
+        let records = vec![
+            SnippetSyncRecord {
+                logical_id: "global".to_string(),
+                name: "global".to_string(),
+                command: "ls".to_string(),
+                category: None,
+                tags: Vec::new(),
+                connection_id: None,
+                updated_at: 1,
+            },
+            SnippetSyncRecord {
+                logical_id: "host".to_string(),
+                name: "host".to_string(),
+                command: "pwd".to_string(),
+                category: None,
+                tags: Vec::new(),
+                connection_id: Some("host-a".to_string()),
+                updated_at: 1,
+            },
+        ];
+        let (filtered, skipped_host_scoped) = filter_global_snippet_records(records);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].logical_id, "global");
+        assert_eq!(skipped_host_scoped, 1);
+    }
+
+    fn test_host_record(logical_id: &str) -> HostSyncRecord {
+        HostSyncRecord {
+            logical_id: logical_id.to_string(),
+            name: logical_id.to_string(),
+            host: "example.com".to_string(),
+            port: 22,
+            username: "user".to_string(),
+            jump_server_id: None,
+            folder: None,
+            tags: Vec::new(),
+            is_favorite: false,
+            updated_at: 1,
+            auth_ref: None,
+        }
+    }
+
+    #[test]
+    fn resolve_bundle_eligible_host_ids_returns_all_remote_when_definitions_included() {
+        let remote = vec![test_host_record("Host-A"), test_host_record("host-b")];
+        let local = HashSet::from(["existing".to_string()]);
+        let eligible = resolve_bundle_eligible_host_ids(&remote, &local, true);
+        assert_eq!(eligible.len(), 2);
+        assert!(eligible.contains("host-a"));
+        assert!(eligible.contains("host-b"));
+    }
+
+    #[test]
+    fn resolve_bundle_eligible_host_ids_filters_to_local_hosts_when_definitions_excluded() {
+        let remote = vec![test_host_record("Host-A"), test_host_record("host-b")];
+        let local = HashSet::from(["host-a".to_string()]);
+        let eligible = resolve_bundle_eligible_host_ids(&remote, &local, false);
+        assert_eq!(eligible.len(), 1);
+        assert!(eligible.contains("host-a"));
+    }
+
+    #[test]
+    fn filter_tunnel_records_for_hosts_counts_orphaned_records() {
+        let records = vec![
+            TunnelSyncRecord {
+                logical_id: "tunnel-1".to_string(),
+                connection_id: "Host-A".to_string(),
+                name: "tunnel".to_string(),
+                tunnel_type: "local".to_string(),
+                local_port: 2222,
+                remote_host: "127.0.0.1".to_string(),
+                remote_port: 22,
+                bind_address: None,
+                bind_to_any: false,
+                auto_start: false,
+                group: None,
+                updated_at: 1,
+            },
+            TunnelSyncRecord {
+                logical_id: "tunnel-2".to_string(),
+                connection_id: "missing-host".to_string(),
+                name: "orphan".to_string(),
+                tunnel_type: "local".to_string(),
+                local_port: 2223,
+                remote_host: "127.0.0.1".to_string(),
+                remote_port: 22,
+                bind_address: None,
+                bind_to_any: false,
+                auto_start: false,
+                group: None,
+                updated_at: 1,
+            },
+        ];
+        let eligible = HashSet::from(["host-a".to_string()]);
+        let (filtered, skipped_orphaned) = filter_tunnel_records_for_hosts(records, &eligible);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].logical_id, "tunnel-1");
+        assert_eq!(skipped_orphaned, 1);
     }
 }

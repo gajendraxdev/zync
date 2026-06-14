@@ -28,6 +28,7 @@ We need a modular, robust, scalable, and maintainable architecture that:
 - Per-provider sync profiles (manual + optional autosync).
 - Predictable conflict handling and operator-visible sync state.
 - Forward-compatible design for syncing additional domains (hosts, snippets, tunnels, settings, etc.).
+- Connection-scoped restore orchestration (see [`SYNC_CONNECTION_BUNDLE_RESTORE_PLAN.md`](./SYNC_CONNECTION_BUNDLE_RESTORE_PLAN.md)).
 
 ### Non-Goals (phase 1)
 - Cross-provider automatic merge of the same logical item.
