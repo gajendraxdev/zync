@@ -4,7 +4,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
-## [2.16.0] - 2026-04-27
+## [2.16.0] - 2026-06-15
 
 ### Added
 - **Global Vault Workspace**: Vault as a first-class sidebar/workspace with profile-based navigation for Local Vault and Google Vault Sync, dedicated panels, unlock/recovery flows, and command-palette entries. ([6e8dd42], [d9d3663])

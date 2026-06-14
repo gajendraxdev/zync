@@ -75,7 +75,7 @@ export function SyncCollectionSetupModal({
     setHasRecoveryKey(true);
     setError('');
     setSelectedCollectionId('');
-  }, [isOpen, hasLocalVaultConfigured]);
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
