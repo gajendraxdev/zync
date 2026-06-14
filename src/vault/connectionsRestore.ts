@@ -30,7 +30,7 @@ export function formatConnectionsRestoreSuccessMessage(
   const snippetChanged =
     (result.hostSnippets?.restored ?? 0) + (result.hostSnippets?.updated ?? 0);
 
-  if (hostChanged + tunnelChanged + snippetChanged === 0) {
+  if (hostChanged + tunnelChanged + snippetChanged + credentialChanged === 0) {
     return 'No connection changes restored from Google.';
   }
 

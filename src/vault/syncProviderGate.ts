@@ -28,6 +28,9 @@ export function getProviderGateReason(
   readiness: ProviderReadiness,
   options?: { isActionBlocked?: boolean },
 ): string | null {
+  if (!readiness.isConnected) {
+    return 'Connect Google Drive to enable Sync and Restore.';
+  }
   if (!readiness.isEncryptionConfigured) {
     return 'Set up Google encryption to enable Sync and Restore.';
   }

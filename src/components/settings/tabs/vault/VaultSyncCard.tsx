@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { ChevronDown, Cloud, LogOut, RefreshCw, Shield } from 'lucide-react';
 import type {
   SyncCollectionStatus,
@@ -275,6 +275,7 @@ export function VaultSyncCard({
     isActionBlocked: isCollectionActionBlocked,
   });
   const isProviderReady = providerReadiness.isProviderReady;
+  const encryptionHelpId = useId();
   const [encryptionHelpOpen, setEncryptionHelpOpen] = useState(false);
   return (
     <div className="space-y-2">
@@ -430,6 +431,8 @@ export function VaultSyncCard({
         <button
           type="button"
           onClick={() => setEncryptionHelpOpen(value => !value)}
+          aria-expanded={encryptionHelpOpen}
+          aria-controls={encryptionHelpId}
           className="flex w-full items-center justify-between rounded-lg border border-[var(--color-app-border)]/45 bg-[var(--color-app-bg)]/15 px-3 py-2 text-left"
         >
           <span className="text-[11px] font-medium text-[var(--color-app-text)]">
@@ -444,7 +447,10 @@ export function VaultSyncCard({
           />
         </button>
         {encryptionHelpOpen && (
-          <div className="space-y-2 rounded-lg border border-[var(--color-app-border)]/40 bg-[var(--color-app-bg)]/15 px-3 py-2.5">
+          <div
+            id={encryptionHelpId}
+            className="space-y-2 rounded-lg border border-[var(--color-app-border)]/40 bg-[var(--color-app-bg)]/15 px-3 py-2.5"
+          >
             <p className="text-[11px] leading-relaxed text-[var(--color-app-muted)]/80">
               Google Drive records are encrypted by Zync before upload. Zync never uploads plaintext credentials, sync passphrases, or recovery keys.
             </p>

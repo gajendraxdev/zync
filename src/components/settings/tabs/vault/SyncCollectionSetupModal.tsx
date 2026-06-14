@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Shield } from 'lucide-react';
 import { Modal } from '../../../ui/Modal';
 import { Input } from '../../../ui/Input';
@@ -43,8 +43,7 @@ export function SyncCollectionSetupModal({
   onClose,
   onSubmit,
 }: SyncCollectionSetupModalProps) {
-  const initialMode: SyncKeyPolicyMode = hasLocalVaultConfigured ? 'local-passphrase' : 'custom-passphrase';
-  const [mode, setMode] = useState<SyncKeyPolicyMode>(initialMode);
+  const [mode, setMode] = useState<SyncKeyPolicyMode>('local-passphrase');
   const [passphrase, setPassphrase] = useState('');
   const [confirmPassphrase, setConfirmPassphrase] = useState('');
   const [showPassphrase, setShowPassphrase] = useState(false);
@@ -57,21 +56,26 @@ export function SyncCollectionSetupModal({
   const remoteCollections = remoteDiscovery.status === 'ready' ? remoteDiscovery.collections : [];
   const requiresCollectionSelection = remoteCollections.length > 1;
 
-  const resetModalState = useCallback(() => {
-    setMode(initialMode);
+  useEffect(() => {
+    if (!isOpen) {
+      setRemoteDiscovery({ status: 'idle' });
+      setPassphrase('');
+      setConfirmPassphrase('');
+      setShowPassphrase(false);
+      setHasRecoveryKey(true);
+      setError('');
+      setSelectedCollectionId('');
+      return;
+    }
+
+    setMode(hasLocalVaultConfigured ? 'local-passphrase' : 'custom-passphrase');
     setPassphrase('');
     setConfirmPassphrase('');
     setShowPassphrase(false);
     setHasRecoveryKey(true);
     setError('');
-    setRemoteDiscovery({ status: 'idle' });
     setSelectedCollectionId('');
-  }, [initialMode]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    resetModalState();
-  }, [isOpen, resetModalState]);
+  }, [isOpen, hasLocalVaultConfigured]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -144,7 +148,6 @@ export function SyncCollectionSetupModal({
   ]);
 
   const handleClose = () => {
-    resetModalState();
     onClose();
   };
 

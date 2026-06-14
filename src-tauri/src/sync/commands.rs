@@ -348,28 +348,27 @@ fn resolve_discovered_sync_collection_id(
 ) -> Result<Option<String>, String> {
     collection_ids.sort();
     collection_ids.dedup();
+
+    let preferred = preferred_sync_collection_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    if let Some(id) = preferred {
+        if collection_ids.iter().any(|existing| existing == id) {
+            return Ok(Some(id.to_string()));
+        }
+        return Err(
+            "[sync_collection_id_not_found] Selected encrypted sync collection was not found on google."
+                .to_string(),
+        );
+    }
+
     match collection_ids.len() {
         0 => Ok(None),
         1 => Ok(collection_ids.into_iter().next()),
-        _ => {
-            let preferred = preferred_sync_collection_id
-                .map(str::trim)
-                .filter(|value| !value.is_empty());
-            if let Some(id) = preferred {
-                if collection_ids.iter().any(|existing| existing == id) {
-                    return Ok(Some(id.to_string()));
-                }
-                return Err(
-                    "[sync_collection_id_not_found] Selected encrypted sync collection was not found on google."
-                        .to_string(),
-                );
-            }
-            Err(format!(
-                "[sync_collection_ambiguous_remote] Found {} existing encrypted sync collections in {}. Choose which backup to link on this device.",
-                collection_ids.len(),
-                provider_label
-            ))
-        }
+        count => Err(format!(
+            "[sync_collection_ambiguous_remote] Found {count} existing encrypted sync collections in {provider_label}. Choose which backup to link on this device."
+        )),
     }
 }
 
@@ -1401,8 +1400,10 @@ async fn execute_hosts_restore_step(
         0
     };
     let synced_at = now_secs();
-    record_domain_sync_success(provider_data_dir, kind, SyncDomain::Hosts, synced_at)
-        .map_err(|e| sync_error_to_string(&e))?;
+    if apply_host_records {
+        record_domain_sync_success(provider_data_dir, kind, SyncDomain::Hosts, synced_at)
+            .map_err(|e| sync_error_to_string(&e))?;
+    }
 
     Ok(SyncHostsRestoreResult {
         domain: "hosts".to_string(),
@@ -3613,6 +3614,17 @@ mod tests {
             "google",
         )
         .expect_err("unknown selection should fail");
+        assert!(error.contains("sync_collection_id_not_found"));
+    }
+
+    #[test]
+    fn resolve_discovered_sync_collection_id_rejects_mismatched_single_selection() {
+        let error = resolve_discovered_sync_collection_id(
+            vec!["collection-a".to_string()],
+            Some("collection-b"),
+            "google",
+        )
+        .expect_err("preferred id must match the only discovered collection");
         assert!(error.contains("sync_collection_id_not_found"));
     }
 

@@ -74,6 +74,30 @@ test('formatConnectionsRestoreSuccessMessage summarizes restored domains', () =>
   );
 });
 
+test('formatConnectionsRestoreSuccessMessage reports credential-only restores', () => {
+  const message = formatConnectionsRestoreSuccessMessage({
+    syncedAt: 1,
+    hosts: {
+      scanned: 1,
+      restored: 0,
+      updated: 0,
+      skipped: 0,
+      failed: 0,
+      syncedAt: 1,
+      credentialsRestored: 1,
+      credentialsUpdated: 0,
+      credentialsSkipped: 0,
+      credentialsFailed: 0,
+      credentialsConflicts: 0,
+    },
+  });
+
+  assert.equal(
+    message,
+    'Restored connections from Google (0 hosts; 1 credential).',
+  );
+});
+
 test('formatConnectionsRestoreSuccessMessage handles empty restore', () => {
   const message = formatConnectionsRestoreSuccessMessage({
     syncedAt: 1,

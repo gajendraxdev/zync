@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { ChevronDown, SlidersHorizontal } from 'lucide-react';
 import { Button } from '../../../ui/Button';
 import type {
@@ -65,6 +65,7 @@ function SectionLabel({ title }: { title: string }) {
 }
 
 export function SyncDomainsGrouped(props: SyncDomainsGroupedProps) {
+  const advancedSectionId = useId();
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [restoreBundleOpen, setRestoreBundleOpen] = useState(false);
   const [includeTunnels, setIncludeTunnels] = useState(true);
@@ -242,6 +243,8 @@ export function SyncDomainsGrouped(props: SyncDomainsGroupedProps) {
         <button
           type="button"
           onClick={() => setAdvancedOpen(value => !value)}
+          aria-expanded={advancedOpen}
+          aria-controls={advancedSectionId}
           className="flex w-full items-center justify-between px-1 py-1 text-left"
         >
           <div>
@@ -258,7 +261,7 @@ export function SyncDomainsGrouped(props: SyncDomainsGroupedProps) {
           />
         </button>
         {advancedOpen && (
-          <SyncDomainListCard>
+          <SyncDomainListCard id={advancedSectionId}>
             {(['hosts', 'tunnels', 'snippets'] as const).map(domain => {
               const enabled = domain === 'hosts' ? props.hostsSyncEnabled : domainPolicyEnabled(domain);
               const definition = getSyncDomainDefinition(domain);

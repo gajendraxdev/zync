@@ -1041,12 +1041,16 @@ impl VaultProviderV1 for GoogleVaultProvider {
         app: &tauri::AppHandle,
     ) -> SyncResult<Vec<super::super::types::SyncRemoteCollectionSummary>> {
         use super::super::types::SyncRemoteCollectionSummary;
-        use std::collections::HashMap;
+        use std::collections::{HashMap, HashSet};
 
         let provider_data_dir = data_dir(app);
         let token = get_valid_google_token(&provider_data_dir).await?;
         let mut counts: HashMap<String, u64> = HashMap::new();
+        let mut seen_object_names = HashSet::new();
         for object in find_files_by_name_prefix(&token, "zync-sync-").await? {
+            if !seen_object_names.insert(object.object_name.clone()) {
+                continue;
+            }
             if let Some(sync_collection_id) =
                 provider_collection_id_from_object_name(&object.object_name)
             {

@@ -210,7 +210,7 @@ Phase C  UI 8b: grouped VaultSyncCard + Restore connections wired to orchestrato
    ↓
 Phase D  UI 8a: progressive connect/encryption setup (can parallelize after B if needed)
    ↓
-Phase D  Restore preview modal (counts, orphans, credential conflicts summary)
+Phase E  Restore preview modal (counts, orphans, credential conflicts summary)
 ```
 
 **Default sequence:** A → B → C, with 8a (D) anytime after or in parallel with B.
