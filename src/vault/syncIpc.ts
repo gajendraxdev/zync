@@ -57,10 +57,20 @@ export interface SyncCollectionSetupResult {
   recoveryKey?: string;
 }
 
+export interface SyncRemoteCollectionSummary {
+  syncCollectionId: string;
+  fileCount: number;
+}
+
+export interface SyncCollectionDiscoverResult {
+  collections: SyncRemoteCollectionSummary[];
+}
+
 export interface SyncCollectionSetupArgs {
   keyPolicyMode: SyncKeyPolicyMode;
   passphrase?: string | null;
   hasRecoveryKey: boolean;
+  syncCollectionId?: string | null;
 }
 
 export interface SyncCollectionUnlockArgs {
@@ -186,6 +196,52 @@ export interface SyncHostsRestoreResult {
   skipped: number;
   failed: number;
   syncedAt: number;
+}
+
+export interface SyncConnectionsRestoreArgs {
+  hostLogicalIds?: string[];
+  includeHostDefinitions?: boolean;
+  includeTunnels?: boolean;
+  includeHostSnippets?: boolean;
+  includeReferencedCredentials?: boolean;
+}
+
+export interface SyncConnectionsBundledDomainResult {
+  domain: string;
+  scanned: number;
+  restored: number;
+  updated: number;
+  skipped: number;
+  skippedOrphaned: number;
+  failed: number;
+  syncedAt: number;
+}
+
+export interface SyncConnectionsRestoreResult {
+  hosts: SyncHostsRestoreResult;
+  tunnels?: SyncConnectionsBundledDomainResult;
+  hostSnippets?: SyncConnectionsBundledDomainResult;
+  syncedAt: number;
+}
+
+export interface SyncConnectionsRestorePreviewResult {
+  provider: SyncProvider;
+  hostsSelected: number;
+  hostsNew: number;
+  hostsExisting: number;
+  referencedCredentials: number;
+  hostsFailed: number;
+  tunnelsScanned?: number;
+  tunnelsRestorable?: number;
+  tunnelsOrphaned?: number;
+  hostSnippetsScanned?: number;
+  hostSnippetsRestorable?: number;
+  hostSnippetsOrphaned?: number;
+}
+
+export interface SyncSnippetsRestoreArgs {
+  globalOnly?: boolean;
+  hostConnectionIds?: string[];
 }
 
 export interface SyncRemoteHostInventoryItem {
@@ -381,6 +437,11 @@ export const syncIpc = {
   collectionStatus: async (provider: SyncProvider): Promise<SyncCollectionStatus> =>
     invokeCore<SyncCollectionStatus>('sync_collection_status', { provider }),
 
+  collectionDiscoverRemote: async (
+    provider: SyncProvider,
+  ): Promise<SyncCollectionDiscoverResult> =>
+    invokeCore<SyncCollectionDiscoverResult>('sync_collection_discover_remote', { provider }),
+
   collectionSetup: async (
     provider: SyncProvider,
     args: SyncCollectionSetupArgs,
@@ -449,6 +510,24 @@ export const syncIpc = {
   ): Promise<SyncHostsRestoreResult> =>
     runStatusRefreshingMutation<SyncHostsRestoreResult>(provider, 'sync_hosts_restore', { provider, args }),
 
+  connectionsRestore: async (
+    provider: SyncProvider,
+    args: SyncConnectionsRestoreArgs = {},
+  ): Promise<SyncConnectionsRestoreResult> =>
+    runStatusRefreshingMutation<SyncConnectionsRestoreResult>(provider, 'sync_connections_restore', {
+      provider,
+      args,
+    }),
+
+  connectionsRestorePreview: async (
+    provider: SyncProvider,
+    args: SyncConnectionsRestoreArgs = {},
+  ): Promise<SyncConnectionsRestorePreviewResult> =>
+    invokeCore<SyncConnectionsRestorePreviewResult>('sync_connections_restore_preview', {
+      provider,
+      args,
+    }),
+
   tunnelsSnapshot: async (): Promise<SyncTunnelsSnapshotResult> =>
     invokeCore<SyncTunnelsSnapshotResult>('sync_tunnels_snapshot'),
 
@@ -464,8 +543,11 @@ export const syncIpc = {
   snippetsUpload: async (provider: SyncProvider): Promise<SyncDomainUploadResult> =>
     runStatusRefreshingMutation<SyncDomainUploadResult>(provider, 'sync_snippets_upload', { provider }),
 
-  snippetsRestore: async (provider: SyncProvider): Promise<SyncDomainRestoreResult> =>
-    runStatusRefreshingMutation<SyncDomainRestoreResult>(provider, 'sync_snippets_restore', { provider }),
+  snippetsRestore: async (
+    provider: SyncProvider,
+    args: SyncSnippetsRestoreArgs = {},
+  ): Promise<SyncDomainRestoreResult> =>
+    runStatusRefreshingMutation<SyncDomainRestoreResult>(provider, 'sync_snippets_restore', { provider, args }),
 
   settingsUpload: async (provider: SyncProvider): Promise<SyncDomainUploadResult> =>
     runStatusRefreshingMutation<SyncDomainUploadResult>(provider, 'sync_settings_upload', { provider }),

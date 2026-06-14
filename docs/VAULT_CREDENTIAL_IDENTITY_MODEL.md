@@ -3,7 +3,7 @@
 ## Status
 - **Owner:** Core app team
 - **Document type:** Architecture decision + implementation guide
-- **Last updated:** 2026-05-15
+- **Last updated:** 2026-06-14
 - **Scope:** Stable credential identity, host assignment, key-first vault UX, rotation, sync/relink behavior
 
 ---
@@ -50,6 +50,9 @@ Current phase-1 vault work already has:
 - migration from plaintext host credentials into vault items
 - credential record schema v2 with named secret fields and idempotent
   legacy-record migration on unlock
+- optional **remember unlock on this device** via OS keychain session cache
+- deferred vault unlock prompts for vault-backed hosts when opening tabs (explicit reconnect only)
+- global unlock modal for explicit connect/test/save flows
 
 Current phase-1 work does **not yet** fully implement:
 
@@ -115,6 +118,48 @@ Credential revision snapshots
 
 This is intentionally deferred because stable identity + relink + assignment safety are
 more important than history UI for the first robust vault foundation.
+
+---
+
+## 1.2) Local vault lock and device session unlock
+
+The local vault has two distinct layers:
+
+1. **Encrypted vault file (`vault.redb`)** — always persisted on disk.
+2. **In-memory unlock (`vek`)** — cleared on app exit and when the user clicks **Lock**.
+
+### Default behavior
+
+- App restart always starts with the vault **locked in memory**.
+- SSH connect/test/save that needs vault secrets requires an unlocked vault.
+
+### Remember unlock on this device (implemented)
+
+When the user opts in at unlock/create time:
+
+- Zync stores a **device-bound session key** in the OS credential store
+  (Windows Credential Manager / macOS Keychain) under service `Zync Vault Session`.
+- `vault_status` / frontend `refresh()` attempts a silent session restore before
+  reporting `locked`.
+- **Lock** clears memory only; remembered device unlock still works on the next app start.
+- **Forget this device** removes the keychain entry and forces passphrase entry again.
+
+Security notes:
+
+- The passphrase is never written to disk or uploaded.
+- Remember-on-device is per machine and per `vault_id`.
+- Stale/invalid session cache entries are cleared automatically.
+
+### Connect UX for vault-backed hosts (implemented)
+
+- Opening a host tab does **not** auto-connect vault-backed hosts.
+- The user reconnects explicitly (terminal **Reconnect**, sidebar **Connect**, tunnel start, etc.).
+- Explicit flows may show the global unlock modal when the vault is still locked.
+
+### Deferred follow-up
+
+- Windows Hello / Touch ID as a convenience gate on top of remembered device unlock.
+- Separate timeout policy for in-app auto-lock after idle time.
 
 ---
 

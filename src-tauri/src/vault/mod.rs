@@ -12,5 +12,6 @@ pub(crate) mod crypto;
 pub mod error;
 pub(crate) mod secure_to_vault;
 pub(crate) mod schema;
+pub(crate) mod session_cache;
 pub(crate) mod store;
 pub mod types;

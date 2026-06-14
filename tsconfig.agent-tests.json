@@ -64,6 +64,8 @@
         "src/store/sessionPersistence.ts",
         "src/vault/credentialTypes.ts",
         "src/vault/profileTypes.ts",
-        "src/vault/syncError.ts"
+        "src/vault/syncError.ts",
+        "src/vault/syncPassphrase.ts",
+        "src/vault/connectionsRestore.ts"
     ]
 }

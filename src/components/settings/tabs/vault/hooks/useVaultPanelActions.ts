@@ -10,10 +10,15 @@ import {
   type SyncCollectionUnlockArgs,
   type SyncRestoreConflictItem,
   type SyncRestorePreviewResult,
-  type SyncHostsRemoteInventoryResult,
   type SyncProviderStatus,
 } from '../../../../../vault/syncIpc';
 import { parseSyncInvokeError } from '../../../../../vault/syncError';
+import {
+  getProviderActionBlockedMessage,
+  getProviderReadiness,
+  type ProviderSyncAction,
+} from '../../../../../vault/syncProviderGate';
+import { useConnectionsRestore } from './useConnectionsRestore';
 import { disconnectVaultBackedIpc } from '../../../../../features/connections/infrastructure/connectionIpc';
 import type { VaultItem } from '../../../../../vault/ipc';
 import type { ToastType } from '../../../../../store/toastSlice';
@@ -118,7 +123,7 @@ export function useVaultPanelActions({
     const confirmed = await showConfirmDialog({
       title: 'Secure Credentials in Vault',
       message: `Secure ${securableCount} connection credential(s) in the encrypted vault. A backup will be saved first.`,
-      confirmText: 'Secure Keys',
+      confirmText: 'Secure Credentials',
     });
     if (!confirmed) return;
 
@@ -130,7 +135,7 @@ export function useVaultPanelActions({
         `Secured ${result.secured} credential(s).${result.backupPath ? ' Backup saved.' : ''}`,
       );
       await onLoadConnections();
-      await onRefreshItems();
+      await onRefresh();
       await loadSecurePreview();
     } catch (e: unknown) {
       const msg = extractErrorMessage(e);
@@ -293,11 +298,10 @@ export function useVaultPanelActions({
   const [googleSync, setGoogleSync] = useState<SyncProviderStatus | null>(null);
   const [googleCollection, setGoogleCollection] = useState<SyncCollectionStatus | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isSyncingVault, setIsSyncingVault] = useState(false);
+  const [isRestoringVault, setIsRestoringVault] = useState(false);
   const [isSyncingHosts, setIsSyncingHosts] = useState(false);
   const [isRestoringHosts, setIsRestoringHosts] = useState(false);
-  const [isLoadingRemoteHosts, setIsLoadingRemoteHosts] = useState(false);
-  const [remoteHostsInventory, setRemoteHostsInventory] =
-    useState<SyncHostsRemoteInventoryResult | null>(null);
   const [isSyncingTunnels, setIsSyncingTunnels] = useState(false);
   const [isRestoringTunnels, setIsRestoringTunnels] = useState(false);
   const [isSyncingSnippets, setIsSyncingSnippets] = useState(false);
@@ -317,6 +321,22 @@ export function useVaultPanelActions({
   const [selectedConflictLogicalIds, setSelectedConflictLogicalIds] = useState<string[]>([]);
   const hostsPolicy = domainPolicies.find(policy => policy.domain === 'hosts');
   const hostsSyncEnabled = hostsPolicy ? hostsPolicy.enabled : true;
+
+  const ensureProviderAction = useCallback(
+    (action: ProviderSyncAction, subject: string): boolean => {
+      const blockedMessage = getProviderActionBlockedMessage(
+        getProviderReadiness(googleSync, googleCollection),
+        action,
+        subject,
+      );
+      if (blockedMessage) {
+        showToast('error', blockedMessage);
+        return false;
+      }
+      return true;
+    },
+    [googleCollection, googleSync, showToast],
+  );
 
   const loadGoogleSync = useCallback(async () => {
     try {
@@ -475,7 +495,7 @@ export function useVaultPanelActions({
   };
 
   const handleSyncUpload = async () => {
-    setIsSyncing(true);
+    setIsSyncingVault(true);
     try {
       const result = await syncIpc.uploadCredentials('google');
       setGoogleSync(prev => (prev ? { ...prev, lastSync: result.syncedAt } : prev));
@@ -490,12 +510,12 @@ export function useVaultPanelActions({
       const msg = parseSyncInvokeError(e).message;
       showToast('error', `Credential sync failed: ${msg}`);
     } finally {
-      setIsSyncing(false);
+      setIsSyncingVault(false);
     }
   };
 
   const runRestoreCredentials = async (resolveConflictLogicalIds?: string[]): Promise<boolean> => {
-    setIsSyncing(true);
+    setIsRestoringVault(true);
     try {
       const args = resolveConflictLogicalIds && resolveConflictLogicalIds.length > 0
         ? { resolveConflictLogicalIds }
@@ -534,7 +554,7 @@ export function useVaultPanelActions({
       showToast('error', `Restore failed: ${msg}`);
       return false;
     } finally {
-      setIsSyncing(false);
+      setIsRestoringVault(false);
     }
   };
 
@@ -577,7 +597,7 @@ export function useVaultPanelActions({
   };
 
   const closeRestoreConflictModal = () => {
-    if (isSyncing) return;
+    if (isRestoringVault) return;
     setIsRestoreConflictModalOpen(false);
     setRestorePreview(null);
     setRestoreConflictItems([]);
@@ -625,18 +645,7 @@ export function useVaultPanelActions({
       showToast('error', 'Hosts sync is disabled. Enable hosts domain sync first.');
       return;
     }
-    if (!googleSync?.connected) {
-      showToast('error', 'Connect Google Drive before syncing hosts.');
-      return;
-    }
-    if (!googleCollection?.configured) {
-      showToast('error', 'Set up Google encryption before syncing hosts.');
-      return;
-    }
-    if (!googleCollection?.keyCached) {
-      showToast('error', 'Unlock Google encryption before syncing hosts.');
-      return;
-    }
+    if (!ensureProviderAction('sync', 'hosts')) return;
 
     setIsSyncingHosts(true);
     try {
@@ -653,7 +662,6 @@ export function useVaultPanelActions({
       );
       await onLoadConnections();
       await loadGoogleSync();
-      await loadRemoteHostsInventory();
       const syncedCount = result.uploaded;
       const syncedCredentials = result.credentialsUploaded;
       const skippedCount = result.skipped;
@@ -672,50 +680,33 @@ export function useVaultPanelActions({
     }
   };
 
-  const loadRemoteHostsInventory = useCallback(async () => {
-    if (!hostsSyncEnabled || !googleSync?.connected || !googleCollection?.configured || !googleCollection?.keyCached) {
-      setRemoteHostsInventory(null);
-      return null;
-    }
-
-    setIsLoadingRemoteHosts(true);
-    try {
-      const result = await syncIpc.hostsRemoteInventory('google');
-      setRemoteHostsInventory(result);
-      return result;
-    } catch (error) {
-      const msg = parseSyncInvokeError(error).message;
-      setRemoteHostsInventory(null);
-      showToast('error', `Remote host inventory failed: ${msg}`);
-      return null;
-    } finally {
-      setIsLoadingRemoteHosts(false);
-    }
-  }, [
-    googleCollection?.configured,
-    googleCollection?.keyCached,
-    googleSync?.connected,
+  const {
+    isPreviewingConnections,
+    isRestoringConnections,
+    isConnectionsRestorePreviewOpen,
+    connectionsRestorePreview,
+    pendingConnectionsRestoreArgs,
+    handleRestoreConnections,
+    closeConnectionsRestorePreviewModal,
+    confirmConnectionsRestore,
+  } = useConnectionsRestore({
     hostsSyncEnabled,
+    googleSync,
+    googleCollection,
     showToast,
-  ]);
+    setGoogleSync,
+    onLoadConnections,
+    loadGoogleSync,
+    onReloadTunnels,
+    onReloadSnippets,
+  });
 
   const handleRestoreHosts = async () => {
     if (!hostsSyncEnabled) {
       showToast('error', 'Hosts sync is disabled. Enable hosts domain sync first.');
       return;
     }
-    if (!googleSync?.connected) {
-      showToast('error', 'Connect Google Drive before restoring hosts.');
-      return;
-    }
-    if (!googleCollection?.configured) {
-      showToast('error', 'Set up Google encryption before restoring hosts.');
-      return;
-    }
-    if (!googleCollection?.keyCached) {
-      showToast('error', 'Unlock Google encryption before restoring hosts.');
-      return;
-    }
+    if (!ensureProviderAction('restore', 'hosts')) return;
 
     const confirmed = await showConfirmDialog({
       title: 'Restore Hosts from Drive',
@@ -735,7 +726,6 @@ export function useVaultPanelActions({
       );
       await onLoadConnections();
       await loadGoogleSync();
-      await loadRemoteHostsInventory();
       const changed = result.restored + result.updated;
       const credentialChanged = result.credentialsRestored + result.credentialsUpdated;
       showToast(
@@ -770,18 +760,7 @@ export function useVaultPanelActions({
       showToast('error', `${domain} sync is disabled. Enable ${domain} domain sync first.`);
       return;
     }
-    if (!googleSync?.connected) {
-      showToast('error', `Connect Google Drive before syncing ${domain}.`);
-      return;
-    }
-    if (!googleCollection?.configured) {
-      showToast('error', `Set up Google encryption before syncing ${domain}.`);
-      return;
-    }
-    if (!googleCollection?.keyCached) {
-      showToast('error', `Unlock Google encryption before syncing ${domain}.`);
-      return;
-    }
+    if (!ensureProviderAction('sync', domain)) return;
 
     setLoading(true);
     try {
@@ -812,31 +791,21 @@ export function useVaultPanelActions({
   const runDomainRestore = async (
     domain: 'tunnels' | 'snippets' | 'settings',
     setLoading: (v: boolean) => void,
+    snippetsArgs?: { globalOnly?: boolean },
   ) => {
     const policy = domainPolicies.find(p => p.domain === domain);
     if (policy && !policy.enabled) {
       showToast('error', `${domain} sync is disabled. Enable ${domain} domain sync first.`);
       return;
     }
-    if (!googleSync?.connected) {
-      showToast('error', `Connect Google Drive before restoring ${domain}.`);
-      return;
-    }
-    if (!googleCollection?.configured) {
-      showToast('error', `Set up Google encryption before restoring ${domain}.`);
-      return;
-    }
-    if (!googleCollection?.keyCached) {
-      showToast('error', `Unlock Google encryption before restoring ${domain}.`);
-      return;
-    }
+    if (!ensureProviderAction('restore', domain)) return;
     setLoading(true);
     try {
       const result =
         domain === 'tunnels'
           ? await syncIpc.tunnelsRestore('google')
           : domain === 'snippets'
-            ? await syncIpc.snippetsRestore('google')
+            ? await syncIpc.snippetsRestore('google', snippetsArgs ?? {})
             : await syncIpc.settingsRestore('google');
       setGoogleSync(prev =>
         prev
@@ -870,6 +839,8 @@ export function useVaultPanelActions({
   const handleRestoreTunnels = async () => runDomainRestore('tunnels', setIsRestoringTunnels);
   const handleSyncSnippets = async () => runDomainUpload('snippets', setIsSyncingSnippets);
   const handleRestoreSnippets = async () => runDomainRestore('snippets', setIsRestoringSnippets);
+  const handleRestoreGlobalSnippets = async () =>
+    runDomainRestore('snippets', setIsRestoringSnippets, { globalOnly: true });
   const handleSyncSettings = async () => runDomainUpload('settings', setIsSyncingSettings);
   const handleRestoreSettings = async () => runDomainRestore('settings', setIsRestoringSettings);
 
@@ -1078,6 +1049,8 @@ export function useVaultPanelActions({
     googleSync,
     googleCollection,
     isSyncing,
+    isSyncingVault,
+    isRestoringVault,
     isSettingUpCollection,
     isUnlockingCollection,
     isLockingCollection,
@@ -1085,8 +1058,8 @@ export function useVaultPanelActions({
     syncingItemId,
     isSyncingHosts,
     isRestoringHosts,
-    isLoadingRemoteHosts,
-    remoteHostsInventory,
+    isPreviewingConnections,
+    isRestoringConnections,
     isSyncingTunnels,
     isRestoringTunnels,
     isSyncingSnippets,
@@ -1097,6 +1070,9 @@ export function useVaultPanelActions({
     restorePreview,
     restoreConflictItems,
     selectedConflictLogicalIds,
+    isConnectionsRestorePreviewOpen,
+    connectionsRestorePreview,
+    pendingConnectionsRestoreArgs,
     loadGoogleSync,
     loadGoogleCollection,
     loadDomainPolicies,
@@ -1113,10 +1089,13 @@ export function useVaultPanelActions({
     clearConflictLogicalIds,
     closeRestoreConflictModal,
     confirmRestoreWithConflictSelection,
+    closeConnectionsRestorePreviewModal,
+    confirmConnectionsRestore,
     handleSyncCredentialItem,
     handleSyncHosts,
-    loadRemoteHostsInventory,
     handleRestoreHosts,
+    handleRestoreConnections,
+    handleRestoreGlobalSnippets,
     handleSyncTunnels,
     handleRestoreTunnels,
     handleSyncSnippets,

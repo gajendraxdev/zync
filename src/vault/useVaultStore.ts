@@ -11,9 +11,10 @@ interface VaultStore {
 
   refresh: () => Promise<void>;
   refreshItems: () => Promise<void>;
-  initialize: (passphrase: string) => Promise<void>;
-  unlock: (passphrase: string) => Promise<void>;
-  unlockWithRecoveryKey: (recoveryKey: string) => Promise<void>;
+  initialize: (passphrase: string, rememberOnDevice?: boolean) => Promise<void>;
+  unlock: (passphrase: string, rememberOnDevice?: boolean) => Promise<void>;
+  unlockWithRecoveryKey: (recoveryKey: string, rememberOnDevice?: boolean) => Promise<void>;
+  forgetDevice: () => Promise<void>;
   lock: () => Promise<void>;
   deleteItem: (itemId: string) => Promise<void>;
   clearError: () => void;
@@ -57,7 +58,10 @@ export const useVaultStore = create<VaultStore>((set, get) => ({
   },
 
   refresh: async () => {
-    set({ isLoading: true, error: null });
+    const isInitialLoad = get().status === null;
+    if (isInitialLoad) {
+      set({ isLoading: true, error: null });
+    }
     try {
       const status = await vaultIpc.status();
       set({ status });
@@ -84,7 +88,13 @@ export const useVaultStore = create<VaultStore>((set, get) => ({
   refreshItems: async () => {
     try {
       const items = await vaultIpc.itemList();
-      set({ items });
+      set((state) => ({
+        items,
+        status:
+          state.status?.status === 'unlocked'
+            ? { ...state.status, itemCount: items.length }
+            : state.status,
+      }));
     } catch (e: unknown) {
       const msg = extractErrorMessage(e);
       console.warn('[Vault] refreshItems failed:', e);
@@ -93,10 +103,10 @@ export const useVaultStore = create<VaultStore>((set, get) => ({
     }
   },
 
-  initialize: async (passphrase: string) => {
+  initialize: async (passphrase: string, rememberOnDevice = false) => {
     set({ isLoading: true, error: null });
     try {
-      const status = await vaultIpc.initialize(passphrase);
+      const status = await vaultIpc.initialize(passphrase, rememberOnDevice);
       set({ status, isLoading: false });
     } catch (e: unknown) {
       const msg = extractErrorMessage(e);
@@ -105,10 +115,10 @@ export const useVaultStore = create<VaultStore>((set, get) => ({
     }
   },
 
-  unlock: async (passphrase: string) => {
+  unlock: async (passphrase: string, rememberOnDevice = false) => {
     set({ isLoading: true, error: null });
     try {
-      const status = await vaultIpc.unlock(passphrase);
+      const status = await vaultIpc.unlock(passphrase, rememberOnDevice);
       set({ status });
       await get().refreshItems();
     } catch (e: unknown) {
@@ -120,10 +130,10 @@ export const useVaultStore = create<VaultStore>((set, get) => ({
     }
   },
 
-  unlockWithRecoveryKey: async (recoveryKey: string) => {
+  unlockWithRecoveryKey: async (recoveryKey: string, rememberOnDevice = false) => {
     set({ isLoading: true, error: null });
     try {
-      const status = await vaultIpc.unlockWithRecoveryKey(recoveryKey);
+      const status = await vaultIpc.unlockWithRecoveryKey(recoveryKey, rememberOnDevice);
       set({ status });
       await get().refreshItems();
     } catch (e: unknown) {
@@ -132,6 +142,17 @@ export const useVaultStore = create<VaultStore>((set, get) => ({
       throw e;
     } finally {
       set({ isLoading: false });
+    }
+  },
+
+  forgetDevice: async () => {
+    try {
+      await vaultIpc.forgetDevice();
+      await get().refresh();
+    } catch (e: unknown) {
+      const msg = extractErrorMessage(e);
+      set({ error: msg });
+      throw e;
     }
   },
 

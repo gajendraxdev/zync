@@ -3,8 +3,7 @@ import { KeyRound } from 'lucide-react';
 import { UnlockModalShell } from '../../../vault/UnlockModalShell';
 import { SecretField } from '../../../vault/SecretField';
 import type { SyncCollectionUnlockArgs } from '../../../../vault/syncIpc';
-
-const SYNC_PASSPHRASE_MIN_LENGTH = 12;
+import { SYNC_PASSPHRASE_MIN_LENGTH } from '../../../../vault/syncPassphrase';
 
 type UnlockMode = 'passphrase' | 'recovery-key';
 

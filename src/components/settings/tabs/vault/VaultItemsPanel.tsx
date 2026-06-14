@@ -76,6 +76,11 @@ export function VaultItemsPanel({
           </Button>
         </div>
       </div>
+      {canSyncItems && (
+        <p className="px-1 text-[10px] leading-relaxed text-app-muted/85">
+          Use the upload action on each item to back up individual credentials to provider sync.
+        </p>
+      )}
       {items.length === 0 ? (
         <div className="rounded-xl border border-[var(--color-app-border)]/40 bg-[var(--color-app-surface)]/15 py-8 text-center">
           <p className="text-sm text-[var(--color-app-muted)]">No items in vault</p>
@@ -141,7 +146,7 @@ export function VaultItemsPanel({
                       </span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1 md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                  <div className="flex flex-wrap items-center justify-end gap-1">
                     {isHostAssignableCredentialKind(item.kind) && (
                       <Button
                         variant="ghost"

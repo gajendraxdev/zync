@@ -1026,16 +1026,52 @@ impl VaultProviderV1 for GoogleVaultProvider {
         &self,
         app: &tauri::AppHandle,
     ) -> SyncResult<Vec<String>> {
-        let provider_data_dir = data_dir(app);
-        let token = get_valid_google_token(&provider_data_dir).await?;
-        let mut ids = find_files_by_name_prefix(&token, "zync-sync-")
-            .await?
+        let summaries = self.discover_sync_collection_summaries(app).await?;
+        let mut ids = summaries
             .into_iter()
-            .filter_map(|object| provider_collection_id_from_object_name(&object.object_name))
+            .map(|summary| summary.sync_collection_id)
             .collect::<Vec<_>>();
         ids.sort();
         ids.dedup();
         Ok(ids)
+    }
+
+    async fn discover_sync_collection_summaries(
+        &self,
+        app: &tauri::AppHandle,
+    ) -> SyncResult<Vec<super::super::types::SyncRemoteCollectionSummary>> {
+        use super::super::types::SyncRemoteCollectionSummary;
+        use std::collections::{HashMap, HashSet};
+
+        let provider_data_dir = data_dir(app);
+        let token = get_valid_google_token(&provider_data_dir).await?;
+        let mut counts: HashMap<String, u64> = HashMap::new();
+        let mut seen_object_names = HashSet::new();
+        for object in find_files_by_name_prefix(&token, "zync-sync-").await? {
+            if !seen_object_names.insert(object.object_name.clone()) {
+                continue;
+            }
+            if let Some(sync_collection_id) =
+                provider_collection_id_from_object_name(&object.object_name)
+            {
+                *counts.entry(sync_collection_id).or_insert(0) += 1;
+            }
+        }
+
+        let mut summaries = counts
+            .into_iter()
+            .map(|(sync_collection_id, file_count)| SyncRemoteCollectionSummary {
+                sync_collection_id,
+                file_count,
+            })
+            .collect::<Vec<_>>();
+        summaries.sort_by(|left, right| {
+            right
+                .file_count
+                .cmp(&left.file_count)
+                .then_with(|| left.sync_collection_id.cmp(&right.sync_collection_id))
+        });
+        Ok(summaries)
     }
 
     async fn read_credential_record(
