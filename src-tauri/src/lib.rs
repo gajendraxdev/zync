@@ -22,7 +22,20 @@ use tauri::{Emitter, Manager};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }));
+    }
+
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
@@ -39,7 +52,7 @@ pub fn run() {
 
             let app_handle = app.handle().clone();
             let data_dir = commands::get_data_dir(&app_handle);
-            let app_state = AppState::new(data_dir.clone());
+            let app_state = AppState::new(data_dir.clone(), app_handle.clone());
             app.manage(app_state);
             app.manage(tokio::sync::Mutex::new(vault::store::VaultService::new(
                 data_dir,

@@ -131,6 +131,49 @@ Host connect policy:
 
 See [§2 Credential Identity Model](#2-credential-identity-model) §1.2 for the full session-unlock model.
 
+### Single Zync instance (multi-window limitation)
+
+**Only one running Zync process can use the local vault at a time.**
+
+The local vault file (`vault.redb`) is opened through **redb**, which takes an
+**exclusive file lock** on disk. A second Zync instance cannot open the same file
+while the first holds that lock. In addition, the in-memory unlock key (`vek`) exists
+only inside the process that unlocked the vault — it is not shared across windows or
+processes.
+
+This applies to all the following:
+
+- Two windows from the same installed app (double-clicking the icon again)
+- Dev build (`tauri dev`) and installed build at the same time
+- Any two processes that point at the same `dataPath` / `vault.redb`
+
+#### Expected behavior today
+
+| Scenario | Result |
+|----------|--------|
+| Second instance opens while first has vault | Vault status fails with `vault_in_use`; connect/test/save for vault-backed hosts cannot proceed |
+| Misleading UI (older builds) | Second instance may show **Vault Not Set Up** or **Create Vault** — the vault exists; it is locked by the other process |
+| Current / fixed UI | **Vault In Use** + toast; single-instance plugin focuses the existing window instead of starting a duplicate process |
+
+**Do not click Create Vault in a second instance** — that path is for a machine with
+no vault yet, not for “vault busy elsewhere.”
+
+#### Recommended usage
+
+- Run **one Zync instance per machine** for vault-backed work.
+- Use **multiple tabs and connections** inside that instance for parallel sessions.
+- If you run dev and installed builds against the same data folder, **close one before
+  starting the other**.
+- For credentials on another machine, use **provider sync** (Google, etc.) — that backs
+  up and restores credential records; it does not provide live shared access to the
+  same local `vault.redb` from two processes.
+
+#### Future direction (not implemented)
+
+Sharing a vault across multiple local processes would require a **vault broker** (a
+single background owner of `vault.redb` and `vek`, with other Zync windows calling it
+over IPC). That is deferred; see [VAULT_ROADMAP.md §7](./VAULT_ROADMAP.md#7-provider-sync-deferred-work).
+
 ---
 
 ## 6) Domain Model
@@ -498,6 +541,12 @@ Security notes:
 - Opening a host tab does **not** auto-connect vault-backed hosts.
 - The user reconnects explicitly (terminal **Reconnect**, sidebar **Connect**, tunnel start, etc.).
 - Explicit flows may show the global unlock modal when the vault is still locked.
+
+### Single instance per machine (implemented constraint)
+
+The local vault cannot be opened by two Zync processes at once (`vault_in_use`).
+See [§1 Single Zync instance (multi-window limitation)](#single-zync-instance-multi-window-limitation)
+for symptoms, workarounds, and future broker direction.
 
 ### Deferred follow-up
 

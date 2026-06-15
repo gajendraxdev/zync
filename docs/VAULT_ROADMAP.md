@@ -849,7 +849,13 @@ more important than history UI for the first robust vault foundation.
 
 ## 7. Provider Sync Deferred Work
 
-## 9) Non-Goals / Deferred Work- Team vault authority model.
+## 9) Non-Goals / Deferred Work
+
+- **Multi-process local vault sharing** — two running Zync instances cannot share one
+  `vault.redb` (redb exclusive lock + in-process `vek`). Workaround: one instance per
+  machine; use tabs for parallel sessions. Future option: vault broker over IPC.
+  Documented in [VAULT.md §1 — Single Zync instance](./VAULT.md#single-zync-instance-multi-window-limitation).
+- Team vault authority model.
 - Multi-user sharing policies.
 - Hardware-backed FIDO2 credential sync.
 - Cross-provider automatic merge without user-visible conflict state.
