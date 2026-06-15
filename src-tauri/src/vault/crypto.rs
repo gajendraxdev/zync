@@ -278,18 +278,23 @@ mod tests {
         })
     }
 
+    // Known-answer fixture decoder. Test-only (`#[cfg(test)]`); never used in production paths.
     fn decode_hex<const N: usize>(hex: &str) -> [u8; N] {
+        // codeql[hard-coded-cryptographic-value]: intentional known-answer test fixture only
         assert_eq!(
             hex.len(),
             N * 2,
             "fixture hex length mismatch for {N}-byte value"
         );
-        let mut out = [0u8; N];
-        for (index, chunk) in hex.as_bytes().chunks_exact(2).enumerate() {
-            let pair = std::str::from_utf8(chunk).expect("fixture hex must be ASCII");
-            out[index] = u8::from_str_radix(pair, 16).expect("fixture hex must be valid");
+        let mut out = core::mem::MaybeUninit::<[u8; N]>::uninit();
+        unsafe {
+            let bytes = std::slice::from_raw_parts_mut(out.as_mut_ptr() as *mut u8, N);
+            for (index, chunk) in hex.as_bytes().chunks_exact(2).enumerate() {
+                let pair = std::str::from_utf8(chunk).expect("fixture hex must be ASCII");
+                bytes[index] = u8::from_str_radix(pair, 16).expect("fixture hex must be valid");
+            }
+            out.assume_init()
         }
-        out
     }
 
     fn test_params() -> KdfParams {
@@ -309,30 +314,37 @@ mod tests {
     }
 
     fn test_salt() -> [u8; 32] {
+        // codeql[hard-coded-cryptographic-value]: known-answer KDF/AEAD test fixture only
         decode_hex(&vectors().salt_hex)
     }
 
     fn test_salt_a() -> [u8; 32] {
+        // codeql[hard-coded-cryptographic-value]: known-answer KDF test fixture only
         decode_hex(&vectors().salt_a_hex)
     }
 
     fn test_salt_b() -> [u8; 32] {
+        // codeql[hard-coded-cryptographic-value]: known-answer KDF test fixture only
         decode_hex(&vectors().salt_b_hex)
     }
 
     fn test_short_salt() -> [u8; 4] {
+        // codeql[hard-coded-cryptographic-value]: negative KDF validation test fixture only
         decode_hex(&vectors().short_salt_hex)
     }
 
     fn test_nonce() -> [u8; 24] {
+        // codeql[hard-coded-cryptographic-value]: known-answer AEAD test fixture only
         decode_hex(&vectors().nonce_hex)
     }
 
     fn test_record_vek() -> SecretKey {
+        // codeql[hard-coded-cryptographic-value]: known-answer HKDF test fixture only
         SecretKey::from_bytes(decode_hex(&vectors().record_vek_hex))
     }
 
     fn test_aead_key() -> SecretKey {
+        // codeql[hard-coded-cryptographic-value]: known-answer AEAD test fixture only
         SecretKey::from_bytes(decode_hex(&vectors().aead_key_hex))
     }
 
