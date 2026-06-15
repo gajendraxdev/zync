@@ -4,6 +4,17 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Added
+- **Single-Instance Local Vault Docs**: Documented why only one Zync process can open `vault.redb` at a time, expected `vault_in_use` behavior, workarounds, and deferred vault-broker direction. ([f83b09d])
+
+### Changed
+- **Single-Instance Desktop Guard**: Launching a second Zync window on desktop OS targets now focuses the existing instance via `tauri-plugin-single-instance` instead of opening a competing vault lock. ([018063c])
+- **Vault In-Use UX**: Vault status, unlock modal, and connect flows surface a dedicated in-use state, block Create Vault when another instance holds the lock, and require explicit refresh from `VaultStatusCard`. ([018063c])
+
+### Fixed
+- **Vault-Backed SSH Reconnect**: Terminal reconnect after a pipeline break now resolves vault credential refs against an unlocked vault instead of failing with a hard lock error, and no longer resurrects connections removed while reconnect was in flight. ([dec2bc1])
+- **Multi-Instance Vault Lock Handling**: `DatabaseAlreadyOpen` is detected as `vault_in_use` rather than an uninitialized vault; only redb lock conflicts map to `InUseByAnotherInstance`, with other open errors surfaced as storage failures. ([018063c])
+
 ## [2.16.0] - 2026-06-15
 
 ### Added
