@@ -141,7 +141,7 @@ while the first holds that lock. In addition, the in-memory unlock key (`vek`) e
 only inside the process that unlocked the vault — it is not shared across windows or
 processes.
 
-This applies to all of the following:
+This applies to all the following:
 
 - Two windows from the same installed app (double-clicking the icon again)
 - Dev build (`tauri dev`) and installed build at the same time

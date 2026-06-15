@@ -201,9 +201,10 @@ pub fn decrypt_record(
 /// Generate a cryptographically random 32-byte vault salt.
 pub fn generate_salt() -> [u8; 32] {
     let mut salt = core::mem::MaybeUninit::<[u8; 32]>::uninit();
-    // SAFETY: OsRng fills all 32 bytes before the array is read.
     unsafe {
-        OsRng.fill_bytes(&mut *salt.as_mut_ptr());
+        // SAFETY: Slice covers all 32 bytes; OsRng fills them before assume_init.
+        let slice = std::slice::from_raw_parts_mut(salt.as_mut_ptr() as *mut u8, 32);
+        OsRng.fill_bytes(slice);
         salt.assume_init()
     }
 }

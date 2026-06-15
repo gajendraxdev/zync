@@ -462,6 +462,8 @@ pub struct ConnectionHandle {
     pub detected_os: Option<String>,
     pub detected_shell: Option<String>,
     pub uses_vault_auth: bool,
+    /// Bumped on each new connect/reconnect; stale in-flight reconnects must match before replacing.
+    pub reconnect_generation: u64,
 }
 
 /// Internal helper: establishes a full SSH connection (session + SFTP + OS detection)
@@ -598,6 +600,7 @@ async fn reconnect_connection(
         detected_os,
         detected_shell,
         uses_vault_auth: config_uses_vault_auth(config),
+        reconnect_generation: 0,
     })
 }
 
@@ -779,6 +782,10 @@ pub async fn ssh_connect(
             handle.config = original_config.clone();
             handle.uses_vault_auth = uses_vault_auth;
             let mut connections = state.connections.lock().await;
+            handle.reconnect_generation = connections
+                .get(&original_config.id)
+                .map(|existing| existing.reconnect_generation.wrapping_add(1))
+                .unwrap_or(0);
             connections.insert(original_config.id.clone(), handle);
 
             Ok(ConnectionResponse {
@@ -1828,6 +1835,16 @@ async fn reconnect_stored_connection(
     original_config: ConnectionConfig,
     state: &State<'_, AppState>,
 ) -> Result<(), String> {
+    let expected_generation = {
+        let connections = state.connections.lock().await;
+        connections
+            .get(connection_id)
+            .map(|handle| handle.reconnect_generation)
+            .ok_or_else(|| {
+                format!("Connection {connection_id} was disconnected during reconnect")
+            })?
+    };
+
     let uses_vault_auth = config_uses_vault_auth(&original_config);
     let mut connect_config = original_config.clone();
 
@@ -1865,13 +1882,19 @@ async fn reconnect_stored_connection(
     new_handle.config = original_config;
     new_handle.uses_vault_auth = uses_vault_auth;
     let mut connections = state.connections.lock().await;
-    if !connections.contains_key(connection_id) {
-        return Err(format!(
+    match connections.get(connection_id) {
+        Some(existing) if existing.reconnect_generation == expected_generation => {
+            new_handle.reconnect_generation = expected_generation.wrapping_add(1);
+            connections.insert(connection_id.to_string(), new_handle);
+            Ok(())
+        }
+        Some(_) => Err(format!(
+            "Connection {connection_id} changed during reconnect"
+        )),
+        None => Err(format!(
             "Connection {connection_id} was disconnected during reconnect"
-        ));
+        )),
     }
-    connections.insert(connection_id.to_string(), new_handle);
-    Ok(())
 }
 
 async fn get_live_ssh_session(

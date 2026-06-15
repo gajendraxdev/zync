@@ -37,13 +37,15 @@ export const useVaultStore = create<VaultStore>((set, get) => ({
   openUnlockModal: () => set({ unlockPromptOpen: true }),
 
   requestUnlock: async () => {
+    let refreshFailed = false;
     try {
       await get().refresh();
     } catch {
+      refreshFailed = true;
       // Status refresh failed; vault-in-use is handled below, otherwise offer unlock UI.
     }
     if (get().status?.status === 'unlocked') return true;
-    if (isVaultInUseError(get().error)) return false;
+    if (refreshFailed && isVaultInUseError(get().error)) return false;
 
     return new Promise<boolean>((resolve) => {
       set((state) => ({

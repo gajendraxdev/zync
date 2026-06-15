@@ -5,7 +5,9 @@ All notable changes to Zync are documented in this file. The format is based on 
 ## [Unreleased]
 
 ### Fixed
-- **CodeQL CI Alerts**: Add explicit `permissions: contents: read` to the CI workflow and move vault crypto known-answer test vectors into `src-tauri/test-fixtures/vault_crypto_vectors.json`.
+- **CodeQL CI Alerts**: Add explicit `permissions: contents: read` to the CI workflow and move vault crypto known-answer test vectors into `src-tauri/test-fixtures/vault_crypto_vectors.json`. ([6a51a70], [e64d2c1])
+- **Vault-Backed SSH Reconnect**: Terminal reconnect after a pipeline break now resolves vault credential refs against an unlocked vault instead of failing with a hard lock error, and no longer resurrects connections removed while reconnect was in flight. ([dec2bc1])
+- **Multi-Instance Vault Lock Handling**: `DatabaseAlreadyOpen` is detected as `vault_in_use` rather than an uninitialized vault; only redb lock conflicts map to `InUseByAnotherInstance`, with other open errors surfaced as storage failures. ([018063c])
 
 ### Added
 - **Single-Instance Local Vault Docs**: Documented why only one Zync process can open `vault.redb` at a time, expected `vault_in_use` behavior, workarounds, and deferred vault-broker direction. ([f83b09d])
@@ -13,10 +15,6 @@ All notable changes to Zync are documented in this file. The format is based on 
 ### Changed
 - **Single-Instance Desktop Guard**: Launching a second Zync window on desktop OS targets now focuses the existing instance via `tauri-plugin-single-instance` instead of opening a competing vault lock. ([018063c])
 - **Vault In-Use UX**: Vault status, unlock modal, and connect flows surface a dedicated in-use state, block Create Vault when another instance holds the lock, and require explicit refresh from `VaultStatusCard`. ([018063c])
-
-### Fixed
-- **Vault-Backed SSH Reconnect**: Terminal reconnect after a pipeline break now resolves vault credential refs against an unlocked vault instead of failing with a hard lock error, and no longer resurrects connections removed while reconnect was in flight. ([dec2bc1])
-- **Multi-Instance Vault Lock Handling**: `DatabaseAlreadyOpen` is detected as `vault_in_use` rather than an uninitialized vault; only redb lock conflicts map to `InUseByAnotherInstance`, with other open errors surfaced as storage failures. ([018063c])
 
 ## [2.16.0] - 2026-06-15
 
@@ -680,6 +678,11 @@ All notable changes to Zync are documented in this file. The format is based on 
 - Multiple themes (Dark, Light, Dracula)
 
 [Unreleased]: https://github.com/zync-sh/zync/compare/v2.16.0...HEAD
+[dec2bc1]: https://github.com/zync-sh/zync/commit/dec2bc1
+[018063c]: https://github.com/zync-sh/zync/commit/018063c
+[f83b09d]: https://github.com/zync-sh/zync/commit/f83b09d
+[6a51a70]: https://github.com/zync-sh/zync/commit/6a51a70
+[e64d2c1]: https://github.com/zync-sh/zync/commit/e64d2c1
 [#38]: https://github.com/zync-sh/zync/pull/38
 [f766ac2]: https://github.com/zync-sh/zync/commit/f766ac2
 [3df9766]: https://github.com/zync-sh/zync/commit/3df9766
