@@ -26,6 +26,7 @@ static PLUGIN_WINDOW_TEMP_FILES: LazyLock<StdMutex<HashMap<String, std::path::Pa
     LazyLock::new(|| StdMutex::new(HashMap::new()));
 static SETTINGS_MUTATION_LOCK: LazyLock<tokio::sync::Mutex<()>> =
     LazyLock::new(|| tokio::sync::Mutex::new(()));
+pub(crate) use crate::sync::domain_hosts::CONNECTIONS_MUTATION_LOCK;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -354,7 +355,8 @@ pub fn get_data_dir(app: &AppHandle) -> std::path::PathBuf {
     let merged_settings =
         read_effective_settings(app).unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
 
-    let resolved = if let Some(data_path) = merged_settings.get("dataPath").and_then(|v| v.as_str()) {
+    let resolved = if let Some(data_path) = merged_settings.get("dataPath").and_then(|v| v.as_str())
+    {
         if !data_path.is_empty() {
             let custom_dir = std::path::PathBuf::from(data_path);
             if !custom_dir.exists() {
@@ -411,6 +413,7 @@ pub struct CopyOperation {
 
 #[derive(Clone)]
 pub struct AppState {
+    pub app_handle: tauri::AppHandle,
     pub connections: Arc<Mutex<HashMap<String, ConnectionHandle>>>,
     pub pty_manager: Arc<PtyManager>,
     pub file_system: Arc<FileSystem>,
@@ -431,8 +434,9 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(data_dir: std::path::PathBuf) -> Self {
+    pub fn new(data_dir: std::path::PathBuf, app_handle: tauri::AppHandle) -> Self {
         Self {
+            app_handle,
             connections: Arc::new(Mutex::new(HashMap::new())),
             pty_manager: Arc::new(PtyManager::new()),
             file_system: Arc::new(FileSystem::new()),
@@ -457,6 +461,9 @@ pub struct ConnectionHandle {
     pub sftp_session: Option<Arc<russh_sftp::client::SftpSession>>,
     pub detected_os: Option<String>,
     pub detected_shell: Option<String>,
+    pub uses_vault_auth: bool,
+    /// Bumped on each new connect/reconnect; stale in-flight reconnects must match before replacing.
+    pub reconnect_generation: u64,
 }
 
 /// Internal helper: establishes a full SSH connection (session + SFTP + OS detection)
@@ -592,24 +599,199 @@ async fn reconnect_connection(
         sftp_session,
         detected_os,
         detected_shell,
+        uses_vault_auth: config_uses_vault_auth(config),
+        reconnect_generation: 0,
     })
+}
+
+/// Recursively resolves every `VaultRef` auth method in `config` (and jump hosts)
+/// to a concrete `Password` or `PrivateKeyData` using the vault service.
+/// Must be called before any SSH connect/test operation.
+fn config_uses_vault_auth(config: &ConnectionConfig) -> bool {
+    matches!(config.auth_method, crate::types::AuthMethod::VaultRef { .. })
+        || config
+            .jump_host
+            .as_ref()
+            .map(|jump| config_uses_vault_auth(jump.as_ref()))
+            .unwrap_or(false)
+}
+
+#[derive(Debug, Clone)]
+struct RelinkedVaultRefUpdate {
+    connection_id: String,
+    credential_id: String,
+    item_id: String,
+    vault_id: Option<String>,
+}
+
+fn resolve_vault_refs<'a>(
+    config: &'a mut ConnectionConfig,
+    vault: &'a tokio::sync::Mutex<crate::vault::store::VaultService>,
+) -> std::pin::Pin<
+    Box<
+        dyn std::future::Future<Output = Result<Vec<RelinkedVaultRefUpdate>, String>> + Send + 'a,
+    >,
+> {
+    Box::pin(async move {
+        let mut relinked = Vec::new();
+        if let crate::types::AuthMethod::VaultRef {
+            item_id,
+            credential_id,
+        } = &config.auth_method
+        {
+            let item_id = item_id.clone();
+            let credential_id = credential_id.clone();
+            let svc = vault.lock().await;
+            let record = match svc.item_get(&item_id) {
+                Ok(record) => record,
+                Err(item_error) => {
+                    let Some(credential_id) = credential_id.as_deref() else {
+                        return Err(item_error.to_string());
+                    };
+                    let record = svc.item_get_by_logical_id(credential_id).map_err(|logical_error| {
+                            format!(
+                                "{item_error}; relink by credentialId '{credential_id}' failed: {logical_error}"
+                            )
+                        })?;
+                    relinked.push(RelinkedVaultRefUpdate {
+                        connection_id: config.id.clone(),
+                        credential_id: credential_id.to_string(),
+                        item_id: record.id.clone(),
+                        vault_id: svc.vault_id(),
+                    });
+                    record
+                }
+            };
+            drop(svc);
+            config.auth_method = match record.kind.as_str() {
+                "ssh-password" => crate::types::AuthMethod::Password {
+                    password: crate::vault::credential::primary_secret_value(&record)
+                        .ok_or_else(|| "Vault password credential has no password value".to_string())?
+                        .to_string(),
+                },
+                "ssh-private-key" => {
+                    let (key_data, passphrase) =
+                        crate::vault::credential::private_key_auth_values(&record).ok_or_else(
+                            || "Vault private-key credential has no private key value".to_string(),
+                        )?;
+                    crate::types::AuthMethod::PrivateKeyData {
+                        key_data: key_data.to_string(),
+                        passphrase: passphrase.map(str::to_string),
+                    }
+                }
+                k => {
+                    return Err(format!(
+                        "Vault item kind '{k}' is not supported for SSH auth"
+                    ))
+                }
+            };
+        }
+        if let Some(jump) = config.jump_host.as_mut() {
+            relinked.extend(resolve_vault_refs(jump.as_mut(), vault).await?);
+        }
+        Ok(relinked)
+    })
+}
+
+fn persist_relinked_vault_refs(
+    app: &AppHandle,
+    updates: &[RelinkedVaultRefUpdate],
+) -> Result<(), String> {
+    if updates.is_empty() {
+        return Ok(());
+    }
+
+    let data_dir = get_data_dir(app);
+    let file_path = data_dir.join("connections.json");
+    if !file_path.exists() {
+        return Ok(());
+    }
+
+    let _connections_guard = CONNECTIONS_MUTATION_LOCK
+        .lock()
+        .map_err(|e| e.to_string())?;
+    let data = std::fs::read_to_string(&file_path).map_err(|e| e.to_string())?;
+    let mut saved_data: SavedData = serde_json::from_str(&data).map_err(|e| e.to_string())?;
+    let mut changed = false;
+
+    for update in updates {
+        if let Some(connection) = saved_data
+            .connections
+            .iter_mut()
+            .find(|connection| connection.id == update.connection_id)
+        {
+            if let Some(auth_ref) = connection.auth_ref.as_mut() {
+                let credential_matches = auth_ref
+                    .credential_id
+                    .as_deref()
+                    .map(|value| value == update.credential_id)
+                    .unwrap_or(false);
+                if credential_matches && auth_ref.item_id != update.item_id {
+                    auth_ref.item_id = update.item_id.clone();
+                    changed = true;
+                }
+                if let Some(vault_id) = update.vault_id.as_deref() {
+                    if credential_matches && auth_ref.vault_id != vault_id {
+                        auth_ref.vault_id = vault_id.to_string();
+                        changed = true;
+                    }
+                }
+            }
+        }
+    }
+
+    if changed {
+        let json = serde_json::to_string_pretty(&saved_data).map_err(|e| e.to_string())?;
+        write_atomic_file(&file_path, &json)?;
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn ssh_connect(
-    config: ConnectionConfig,
+    app: AppHandle,
+    mut config: ConnectionConfig,
     state: State<'_, AppState>,
+    vault: State<'_, tokio::sync::Mutex<crate::vault::store::VaultService>>,
 ) -> Result<ConnectionResponse, String> {
+    let original_config = config.clone();
+    let uses_vault_auth = config_uses_vault_auth(&original_config);
+    let relinked = resolve_vault_refs(&mut config, &vault).await?;
+    if !relinked.is_empty() {
+        let app_handle = app.clone();
+        let persist_result =
+            tokio::task::spawn_blocking(move || persist_relinked_vault_refs(&app_handle, &relinked))
+                .await;
+        match persist_result {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => return Err(format!("Failed to persist relinked vault refs: {error}")),
+            Err(join_error) => {
+                return Err(format!(
+                    "Failed to persist relinked vault refs: task join error: {join_error}"
+                ))
+            }
+        }
+    }
     match reconnect_connection(&config, &state.ssh_manager, &state.tunnel_manager).await {
-        Ok(handle) => {
+        Ok(mut handle) => {
             let detected_os = handle.detected_os.clone();
+            // Do not keep decrypted vault secrets in the long-lived handle config.
+            // The handle keeps the original VaultRef config so future reconnects
+            // require the vault to be explicitly unlocked again.
+            handle.config = original_config.clone();
+            handle.uses_vault_auth = uses_vault_auth;
             let mut connections = state.connections.lock().await;
-            connections.insert(config.id.clone(), handle);
+            handle.reconnect_generation = connections
+                .get(&original_config.id)
+                .map(|existing| existing.reconnect_generation.wrapping_add(1))
+                .unwrap_or(0);
+            connections.insert(original_config.id.clone(), handle);
 
             Ok(ConnectionResponse {
                 success: true,
                 message: "Connected".to_string(),
-                term_id: Some(config.id.clone()),
+                term_id: Some(original_config.id.clone()),
                 detected_os,
             })
         }
@@ -622,9 +804,11 @@ pub async fn ssh_connect(
 
 #[tauri::command]
 pub async fn ssh_test_connection(
-    config: ConnectionConfig,
+    mut config: ConnectionConfig,
     state: State<'_, AppState>,
+    vault: State<'_, tokio::sync::Mutex<crate::vault::store::VaultService>>,
 ) -> Result<String, String> {
+    let _relinked = resolve_vault_refs(&mut config, &vault).await?;
     match state
         .ssh_manager
         .connect(config.clone(), Arc::new((*state.tunnel_manager).clone()))
@@ -770,6 +954,9 @@ pub async fn ssh_migrate_all_keys(app_handle: tauri::AppHandle) -> Result<usize,
         return Ok(0);
     }
 
+    let _connections_guard = CONNECTIONS_MUTATION_LOCK
+        .lock()
+        .map_err(|e| e.to_string())?;
     let data = std::fs::read_to_string(&connections_path).map_err(|e| e.to_string())?;
     let mut saved_data: crate::types::SavedData =
         serde_json::from_str(&data).map_err(|e| e.to_string())?;
@@ -888,8 +1075,6 @@ pub async fn ssh_migrate_all_keys(app_handle: tauri::AppHandle) -> Result<usize,
 
 #[tauri::command]
 pub async fn ssh_disconnect(id: String, state: State<'_, AppState>) -> Result<(), String> {
-    println!("SSH Disconnect request for: {}", id);
-
     // First, close all associated PTYs to ensure tasks are aborted
     state
         .pty_manager
@@ -902,6 +1087,104 @@ pub async fn ssh_disconnect(id: String, state: State<'_, AppState>) -> Result<()
     // Explicit close logic if needed, but drop handles largely work.
 
     Ok(())
+}
+
+#[tauri::command]
+pub async fn ssh_disconnect_vault_backed(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    let ids = {
+        let connections = state.connections.lock().await;
+        connections
+            .iter()
+            .filter_map(|(id, handle)| handle.uses_vault_auth.then(|| id.clone()))
+            .collect::<Vec<_>>()
+    };
+
+    let mut errors = Vec::new();
+    for id in &ids {
+        if let Err(error) = state.pty_manager.close_by_connection(id).await {
+            errors.push(format!("PTY close failed for {id}: {error}"));
+        }
+    }
+
+    if let Err(error) = stop_tunnels_for_connections(&app, &state, &ids).await {
+        errors.push(format!("Tunnel stop failed: {error}"));
+    }
+
+    let mut connections = state.connections.lock().await;
+    for id in &ids {
+        connections.remove(id);
+    }
+
+    if errors.is_empty() {
+        Ok(ids)
+    } else {
+        Err(errors.join("; "))
+    }
+}
+
+async fn stop_tunnels_for_connections(
+    app: &AppHandle,
+    state: &AppState,
+    connection_ids: &[String],
+) -> Result<(), String> {
+    if connection_ids.is_empty() {
+        return Ok(());
+    }
+
+    let data_dir = get_data_dir(app);
+    let file_path = data_dir.join("tunnels.json");
+    if !file_path.exists() {
+        return Ok(());
+    }
+
+    let data = std::fs::read_to_string(file_path).map_err(|e| e.to_string())?;
+    let saved_data: SavedTunnelsData = serde_json::from_str(&data).map_err(|e| e.to_string())?;
+    let connection_id_set: HashSet<&str> = connection_ids.iter().map(String::as_str).collect();
+    let tunnels = saved_data
+        .tunnels
+        .into_iter()
+        .filter(|t| connection_id_set.contains(t.connection_id.as_str()))
+        .collect::<Vec<_>>();
+
+    for tunnel in tunnels {
+        let internal_id = tunnel_internal_id(&tunnel);
+        let session = {
+            let connections = state.connections.lock().await;
+            connections
+                .get(&tunnel.connection_id)
+                .and_then(|c| c.session.clone())
+        };
+        let result = state
+            .tunnel_manager
+            .stop_tunnel(session, internal_id, tunnel.bind_address.clone())
+            .await;
+
+        let (status, error) = match result {
+            Ok(()) => ("stopped".to_string(), None),
+            Err(error) => ("error".to_string(), Some(error.to_string())),
+        };
+        let _ = app.emit(
+            "tunnel:status-change",
+            TunnelStatusChange {
+                id: tunnel.id,
+                status,
+                error,
+            },
+        );
+    }
+
+    Ok(())
+}
+
+fn tunnel_internal_id(tunnel: &SavedTunnel) -> String {
+    if tunnel.tunnel_type == "local" {
+        format!("local:{}:{}", tunnel.local_port, tunnel.remote_port)
+    } else {
+        format!("remote:{}:{}", tunnel.remote_port, tunnel.local_port)
+    }
 }
 
 #[tauri::command]
@@ -946,8 +1229,18 @@ pub async fn terminal_navigate(
 }
 
 #[tauri::command]
-pub async fn connections_get(app: AppHandle) -> Result<SavedData, String> {
+pub async fn connections_get(
+    app: AppHandle,
+    vault: State<'_, tokio::sync::Mutex<crate::vault::store::VaultService>>,
+) -> Result<SavedData, String> {
     let data_dir = get_data_dir(&app);
+    {
+        let guard = vault.lock().await;
+        if guard.vault_id().is_some() {
+            crate::vault::commands::repair_connection_refs(&data_dir, &guard)
+                .map_err(|e| e.to_string())?;
+        }
+    }
     let file_path = data_dir.join("connections.json");
 
     if !file_path.exists() {
@@ -982,7 +1275,10 @@ pub async fn connections_save(
     let file_path = data_dir.join("connections.json");
     let json = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
 
-    std::fs::write(file_path, json).map_err(|e| e.to_string())?;
+    let _connections_guard = CONNECTIONS_MUTATION_LOCK
+        .lock()
+        .map_err(|e| e.to_string())?;
+    write_atomic_file(&file_path, &json)?;
 
     Ok(())
 }
@@ -1281,6 +1577,7 @@ fn parse_csv_connections(content: &str) -> Result<Vec<SavedConnection>, String> 
             } else {
                 Some(pinned_features)
             },
+            auth_ref: None,
         });
     }
 
@@ -1323,13 +1620,14 @@ fn build_ssh_config_export(connections: &[SavedConnection]) -> String {
 pub async fn connections_export_to_file(
     app: AppHandle,
     request: ConnectionExportRequest,
+    vault: State<'_, tokio::sync::Mutex<crate::vault::store::VaultService>>,
 ) -> Result<String, String> {
     let path = request.path.trim();
     if path.is_empty() {
         return Err("Export path is required.".to_string());
     }
 
-    let data = connections_get(app).await?;
+    let data = connections_get(app, vault).await?;
     let SavedData {
         connections: all_connections,
         folders: all_folders,
@@ -1532,6 +1830,73 @@ pub async fn terminal_create(
     }
 }
 
+async fn reconnect_stored_connection(
+    connection_id: &str,
+    original_config: ConnectionConfig,
+    state: &State<'_, AppState>,
+) -> Result<(), String> {
+    let expected_generation = {
+        let connections = state.connections.lock().await;
+        connections
+            .get(connection_id)
+            .map(|handle| handle.reconnect_generation)
+            .ok_or_else(|| {
+                format!("Connection {connection_id} was disconnected during reconnect")
+            })?
+    };
+
+    let uses_vault_auth = config_uses_vault_auth(&original_config);
+    let mut connect_config = original_config.clone();
+
+    if uses_vault_auth {
+        let vault = state
+            .app_handle
+            .try_state::<tokio::sync::Mutex<crate::vault::store::VaultService>>()
+            .ok_or("Vault service unavailable")?;
+        let relinked = resolve_vault_refs(&mut connect_config, &vault).await?;
+        if !relinked.is_empty() {
+            let app_handle = state.app_handle.clone();
+            let persist_result =
+                tokio::task::spawn_blocking(move || persist_relinked_vault_refs(&app_handle, &relinked))
+                    .await;
+            match persist_result {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    return Err(format!("Failed to persist relinked vault refs: {error}"))
+                }
+                Err(join_error) => {
+                    return Err(format!(
+                        "Failed to persist relinked vault refs: task join error: {join_error}"
+                    ))
+                }
+            }
+        }
+    }
+
+    let mut new_handle = reconnect_connection(
+        &connect_config,
+        &state.ssh_manager,
+        &state.tunnel_manager,
+    )
+    .await?;
+    new_handle.config = original_config;
+    new_handle.uses_vault_auth = uses_vault_auth;
+    let mut connections = state.connections.lock().await;
+    match connections.get(connection_id) {
+        Some(existing) if existing.reconnect_generation == expected_generation => {
+            new_handle.reconnect_generation = expected_generation.wrapping_add(1);
+            connections.insert(connection_id.to_string(), new_handle);
+            Ok(())
+        }
+        Some(_) => Err(format!(
+            "Connection {connection_id} changed during reconnect"
+        )),
+        None => Err(format!(
+            "Connection {connection_id} was disconnected during reconnect"
+        )),
+    }
+}
+
 async fn get_live_ssh_session(
     connection_id: &str,
     state: &State<'_, AppState>,
@@ -1553,19 +1918,15 @@ async fn get_live_ssh_session(
             .map(|c| c.config.clone())
             .ok_or_else(|| format!("Connection config for {} not found", connection_id))?
     };
-    let mut new_handle =
-        reconnect_connection(&config, &state.ssh_manager, &state.tunnel_manager).await?;
-    let new_session = new_handle
-        .session
-        .take()
-        .ok_or("Reconnection did not produce a session")?;
-    new_handle.session = Some(new_session.clone());
-    state
-        .connections
-        .lock()
-        .await
-        .insert(connection_id.to_string(), new_handle);
-    Ok(new_session)
+
+    reconnect_stored_connection(connection_id, config, state).await?;
+    let session = {
+        let connections = state.connections.lock().await;
+        connections
+            .get(connection_id)
+            .and_then(|c| c.session.clone())
+    };
+    session.ok_or_else(|| "Reconnection did not produce a session".to_string())
 }
 
 async fn open_ssh_channel_with_single_reconnect(
@@ -1632,13 +1993,13 @@ async fn get_sftp_or_reconnect(
     );
 
     let timeout_duration = std::time::Duration::from_secs(12);
-    let new_handle = match tokio::time::timeout(
+    match tokio::time::timeout(
         timeout_duration,
-        reconnect_connection(&config, &state.ssh_manager, &state.tunnel_manager),
+        reconnect_stored_connection(id, config, state),
     )
     .await
     {
-        Ok(Ok(h)) => h,
+        Ok(Ok(())) => {}
         Ok(Err(e)) => return Err(format!("DISCONNECTED: Auto-reconnect failed: {}", e)),
         Err(_) => {
             return Err(format!(
@@ -1647,13 +2008,13 @@ async fn get_sftp_or_reconnect(
             ))
         }
     };
-    let sftp = new_handle
-        .sftp_session
-        .clone()
-        .ok_or_else(|| "Reconnection succeeded but SFTP initialization failed".to_string())?;
-
-    let mut connections = state.connections.lock().await;
-    connections.insert(id.to_string(), new_handle);
+    let sftp = {
+        let connections = state.connections.lock().await;
+        connections
+            .get(id)
+            .and_then(|c| c.sftp_session.clone())
+    }
+    .ok_or_else(|| "Reconnection succeeded but SFTP initialization failed".to_string())?;
 
     println!("[SFTP] Reconnected successfully for '{}'", id);
     Ok(sftp)
@@ -2567,7 +2928,10 @@ pub async fn fs_copy(
                         println!("[FS] Server-side copy failed (non-zero exit), checking SFTP fallback...");
                     }
                     Ok(Err(e)) => {
-                        println!("[FS] Server-side copy failed (error), checking SFTP fallback: {}", e);
+                        println!(
+                            "[FS] Server-side copy failed (error), checking SFTP fallback: {}",
+                            e
+                        );
                     }
                     Err(_) => {
                         println!("[FS] Server-side copy optimization timed out, checking SFTP fallback...");
@@ -3151,30 +3515,39 @@ pub async fn tunnel_list(
 
 #[tauri::command]
 pub async fn tunnel_save(app: AppHandle, tunnel_val: serde_json::Value) -> Result<(), String> {
-    let tunnel: SavedTunnel = serde_json::from_value(tunnel_val).map_err(|e| e.to_string())?;
+    let mut tunnel: SavedTunnel = serde_json::from_value(tunnel_val).map_err(|e| e.to_string())?;
     let data_dir = get_data_dir(&app);
     if !data_dir.exists() {
         std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
     }
     let file_path = data_dir.join("tunnels.json");
 
-    let mut tunnels = if file_path.exists() {
-        let data = std::fs::read_to_string(&file_path).map_err(|e| e.to_string())?;
-        let saved: SavedTunnelsData = serde_json::from_str(&data).map_err(|e| e.to_string())?;
-        saved.tunnels
-    } else {
-        vec![]
-    };
+    let _guard = crate::sync::domain_tunnels::TUNNELS_MUTATION_LOCK
+        .lock()
+        .map_err(|error| error.to_string())?;
+    let mut saved = crate::sync::domain_tunnels::load_saved_tunnels(&file_path)
+        .map_err(|error| error.to_string())?;
 
-    if let Some(idx) = tunnels.iter().position(|t| t.id == tunnel.id) {
-        tunnels[idx] = tunnel;
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+
+    if let Some(idx) = saved.tunnels.iter().position(|t| t.id == tunnel.id) {
+        tunnel.created_at = saved.tunnels[idx]
+            .created_at
+            .or(tunnel.created_at)
+            .or(Some(now_ms));
+        tunnel.updated_at = Some(now_ms);
+        saved.tunnels[idx] = tunnel;
     } else {
-        tunnels.push(tunnel);
+        tunnel.created_at = tunnel.created_at.or(Some(now_ms));
+        tunnel.updated_at = Some(now_ms);
+        saved.tunnels.push(tunnel);
     }
 
-    let json =
-        serde_json::to_string_pretty(&SavedTunnelsData { tunnels }).map_err(|e| e.to_string())?;
-    std::fs::write(file_path, json).map_err(|e| e.to_string())?;
+    crate::sync::domain_tunnels::write_saved_tunnels_atomic(&file_path, &saved)
+        .map_err(|error| error.to_string())?;
 
     Ok(())
 }
@@ -3188,13 +3561,16 @@ pub async fn tunnel_delete(app: AppHandle, id: String) -> Result<(), String> {
         return Ok(());
     }
 
-    let data = std::fs::read_to_string(&file_path).map_err(|e| e.to_string())?;
-    let mut saved: SavedTunnelsData = serde_json::from_str(&data).map_err(|e| e.to_string())?;
+    let _guard = crate::sync::domain_tunnels::TUNNELS_MUTATION_LOCK
+        .lock()
+        .map_err(|error| error.to_string())?;
+    let mut saved = crate::sync::domain_tunnels::load_saved_tunnels(&file_path)
+        .map_err(|error| error.to_string())?;
 
     saved.tunnels.retain(|t| t.id != id);
 
-    let json = serde_json::to_string_pretty(&saved).map_err(|e| e.to_string())?;
-    std::fs::write(file_path, json).map_err(|e| e.to_string())?;
+    crate::sync::domain_tunnels::write_saved_tunnels_atomic(&file_path, &saved)
+        .map_err(|error| error.to_string())?;
 
     Ok(())
 }
@@ -3677,9 +4053,7 @@ pub async fn settings_write_raw(
     } else {
         None
     };
-    let current_data_path = current_raw
-        .as_deref()
-        .and_then(data_path_from_raw_json);
+    let current_data_path = current_raw.as_deref().and_then(data_path_from_raw_json);
 
     let actual = settings_mtime_ms(&settings_path);
     if actual != expected_modified_ms {
@@ -3721,9 +4095,7 @@ pub async fn settings_restore_last_known_good(
     } else {
         None
     };
-    let current_data_path = current_raw
-        .as_deref()
-        .and_then(data_path_from_raw_json);
+    let current_data_path = current_raw.as_deref().and_then(data_path_from_raw_json);
     let backup_path = get_last_known_good_settings_path(&app)?;
     if !backup_path.exists() {
         return Err("No last-known-good settings backup found.".to_string());
@@ -4642,7 +5014,9 @@ pub enum ShellIconData {
 }
 
 fn bundled(name: &'static str) -> Option<ShellIconData> {
-    Some(ShellIconData::Bundled { name: name.to_string() })
+    Some(ShellIconData::Bundled {
+        name: name.to_string(),
+    })
 }
 
 fn wsl_bundled_icon(_distro: &str) -> Option<ShellIconData> {
@@ -4775,11 +5149,18 @@ async fn query_remote_windows_shells(
 
 #[cfg(not(target_os = "windows"))]
 fn linux_icon(path: &str) -> Option<ShellIconData> {
-    let name = if path.contains("bash") { "bash.png" }
-        else if path.contains("zsh")  { "zsh.svg"  }
-        else if path.contains("fish") { "fish.png" }
-        else                           { "terminal.png" };
-    Some(ShellIconData::Bundled { name: name.to_string() })
+    let name = if path.contains("bash") {
+        "bash.png"
+    } else if path.contains("zsh") {
+        "zsh.svg"
+    } else if path.contains("fish") {
+        "fish.png"
+    } else {
+        "terminal.png"
+    };
+    Some(ShellIconData::Bundled {
+        name: name.to_string(),
+    })
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -4790,14 +5171,20 @@ pub struct DetectedShell {
 }
 
 #[tauri::command]
-pub async fn shell_get_windows_shells(state: tauri::State<'_, AppState>) -> Result<Vec<DetectedShell>, String> {
+pub async fn shell_get_windows_shells(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<DetectedShell>, String> {
     #[cfg(target_os = "windows")]
     {
         use tokio::process::Command;
         let mut shells = Vec::new();
 
         // Windows PowerShell — always present on Win10+
-        shells.push(DetectedShell { id: "powershell".into(), label: "Windows PowerShell".into(), icon: bundled("powershell.svg") });
+        shells.push(DetectedShell {
+            id: "powershell".into(),
+            label: "Windows PowerShell".into(),
+            icon: bundled("powershell.svg"),
+        });
 
         // PowerShell 7 (pwsh) — optional install
         let pwsh_paths = [
@@ -4805,19 +5192,34 @@ pub async fn shell_get_windows_shells(state: tauri::State<'_, AppState>) -> Resu
             "C:\\Program Files\\PowerShell\\pwsh.exe",
         ];
         if pwsh_paths.iter().any(|p| std::path::Path::new(p).exists()) {
-            shells.push(DetectedShell { id: "pwsh".into(), label: "PowerShell".into(), icon: bundled("pwsh.svg") });
+            shells.push(DetectedShell {
+                id: "pwsh".into(),
+                label: "PowerShell".into(),
+                icon: bundled("pwsh.svg"),
+            });
         }
 
         // Command Prompt — always present
-        shells.push(DetectedShell { id: "cmd".into(), label: "Command Prompt".into(), icon: bundled("cmd.png") });
+        shells.push(DetectedShell {
+            id: "cmd".into(),
+            label: "Command Prompt".into(),
+            icon: bundled("cmd.png"),
+        });
 
         // Git Bash — check common install paths
         let git_bash_paths = [
             "C:\\Program Files\\Git\\bin\\bash.exe",
             "C:\\Program Files (x86)\\Git\\bin\\bash.exe",
         ];
-        if git_bash_paths.iter().any(|p| std::path::Path::new(p).exists()) {
-            shells.push(DetectedShell { id: "gitbash".into(), label: "Git Bash".into(), icon: bundled("gitbash.svg") });
+        if git_bash_paths
+            .iter()
+            .any(|p| std::path::Path::new(p).exists())
+        {
+            shells.push(DetectedShell {
+                id: "gitbash".into(),
+                label: "Git Bash".into(),
+                icon: bundled("gitbash.svg"),
+            });
         }
 
         // WSL distros — reuse the same UTF-16 decode as shell_get_wsl_distros
@@ -4831,8 +5233,11 @@ pub async fn shell_get_windows_shells(state: tauri::State<'_, AppState>) -> Resu
                     i += 2;
                 }
                 let mut decoded = String::from_utf16_lossy(&words);
-                if decoded.starts_with('\u{feff}') { decoded.remove(0); }
-                let distros: Vec<String> = decoded.lines()
+                if decoded.starts_with('\u{feff}') {
+                    decoded.remove(0);
+                }
+                let distros: Vec<String> = decoded
+                    .lines()
                     .map(|l| l.trim().to_string())
                     .filter(|l| !l.is_empty() && !l.to_lowercase().starts_with("docker-"))
                     .collect();
@@ -4856,15 +5261,23 @@ pub async fn shell_get_windows_shells(state: tauri::State<'_, AppState>) -> Resu
                             .and_then(|v| v.clone())
                             .map(|tagged| {
                                 if let Some(data) = tagged.strip_prefix("png:") {
-                                    ShellIconData::Base64Png { data: data.to_string() }
+                                    ShellIconData::Base64Png {
+                                        data: data.to_string(),
+                                    }
                                 } else if let Some(data) = tagged.strip_prefix("ico:") {
-                                    ShellIconData::Base64Icon { data: data.to_string() }
+                                    ShellIconData::Base64Icon {
+                                        data: data.to_string(),
+                                    }
                                 } else {
                                     ShellIconData::Base64Png { data: tagged }
                                 }
                             })
                             .or_else(|| wsl_bundled_icon(&distro));
-                        shells.push(DetectedShell { id: format!("wsl:{}", distro), label: distro, icon });
+                        shells.push(DetectedShell {
+                            id: format!("wsl:{}", distro),
+                            label: distro,
+                            icon,
+                        });
                     }
                 }
             }
@@ -5006,14 +5419,21 @@ pub async fn shell_get_connection_shells(
     };
 
     if let Err(err) = query_result {
-        eprintln!("[Shells] Remote query FAILED for '{}': {}", connection_id, err);
+        eprintln!(
+            "[Shells] Remote query FAILED for '{}': {}",
+            connection_id, err
+        );
         // Return Err — not Ok([]) — so the frontend keeps any cached shells
         // visible and exposes an explicit reload affordance instead of caching
         // a sticky empty result during connection-startup races.
         return Err(err);
     }
     if !stderr.trim().is_empty() {
-        eprintln!("[Shells] Remote stderr for '{}': {}", connection_id, stderr.trim());
+        eprintln!(
+            "[Shells] Remote stderr for '{}': {}",
+            connection_id,
+            stderr.trim()
+        );
     }
 
     let mut seen = HashSet::new();
@@ -5194,10 +5614,8 @@ pub async fn plugin_window_create(
                 std::fs::create_dir_all(&cache_dir)
                     .map_err(|e| format!("Failed to create plugin cache dir: {}", e))?;
             }
-            let file_path = cache_dir.join(format!(
-                "zync-plugin-window-{}.html",
-                uuid::Uuid::new_v4()
-            ));
+            let file_path =
+                cache_dir.join(format!("zync-plugin-window-{}.html", uuid::Uuid::new_v4()));
             std::fs::write(&file_path, h)
                 .map_err(|e| format!("Failed to write temporary plugin HTML file: {}", e))?;
             temp_html_path = Some(file_path.clone());

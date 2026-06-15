@@ -1,4 +1,5 @@
 import type { Connection, Tab } from '../domain/types.js';
+import type { VaultProfileId } from '../../../vault/profileTypes.js';
 
 export interface TabState {
     tabs: Tab[];
@@ -114,5 +115,64 @@ export const ensureGlobalSnippetsTab = (
         tabs: [...tabs, newTab],
         activeTabId: newTab.id,
         activeConnectionId: GLOBAL_SNIPPETS_CONNECTION_ID,
+    };
+};
+
+export const ensureVaultTabState = (
+    tabs: Tab[],
+    profileId: VaultProfileId,
+): { tabs: Tab[]; activeTabId: string; activeConnectionId: null } => {
+    const existing = tabs.find((tab) => tab.type === 'vault');
+    if (existing) {
+        return {
+            tabs: tabs.flatMap((tab) => {
+                if (tab.id === existing.id) return [{ ...tab, vaultProfileId: profileId }];
+                if (tab.type === 'vault') return [];
+                return [tab];
+            }),
+            activeTabId: existing.id,
+            activeConnectionId: null,
+        };
+    }
+
+    const newTab: Tab = {
+        id: crypto.randomUUID(),
+        type: 'vault',
+        title: 'Vault',
+        view: 'terminal',
+        vaultProfileId: profileId,
+    };
+
+    return {
+        tabs: [...tabs, newTab],
+        activeTabId: newTab.id,
+        activeConnectionId: null,
+    };
+};
+
+export const ensureSyncBackupTabState = (
+    tabs: Tab[],
+): { tabs?: Tab[]; activeTabId: string; activeConnectionId: null } => {
+    const existing = tabs.find((tab) => tab.type === 'sync');
+    if (existing) {
+        const normalizedTabs = tabs.filter((tab) => tab.type !== 'sync' || tab.id === existing.id);
+        return {
+            ...(normalizedTabs.length !== tabs.length ? { tabs: normalizedTabs } : {}),
+            activeTabId: existing.id,
+            activeConnectionId: null,
+        };
+    }
+
+    const newTab: Tab = {
+        id: crypto.randomUUID(),
+        type: 'sync',
+        title: 'Sync & Backup',
+        view: 'terminal',
+    };
+
+    return {
+        tabs: [...tabs, newTab],
+        activeTabId: newTab.id,
+        activeConnectionId: null,
     };
 };

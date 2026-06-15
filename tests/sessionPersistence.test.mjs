@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { buildSessionData, MAX_TABS_PER_SCOPE } from '../.tmp-agent-tests/src/store/sessionPersistence.js';
+import { DEFAULT_VAULT_PROFILE_ID } from '../.tmp-agent-tests/src/vault/profileTypes.js';
 
 function runTest(name, fn) {
   try {
@@ -13,6 +14,10 @@ function runTest(name, fn) {
 
 function makeConnectionTab(id = 'tab-1') {
   return { id, type: 'connection', title: 'Prod', connectionId: 'conn-1', view: 'terminal' };
+}
+
+function makeVaultTab(id = 'vault-tab', profile = DEFAULT_VAULT_PROFILE_ID) {
+  return { id, type: 'vault', title: 'Vault', vaultProfileId: profile, view: 'terminal' };
 }
 
 function makeSettingsTab(id = 'settings-tab') {
@@ -100,6 +105,29 @@ runTest('buildSessionData filters active terminal IDs to kept terminals only', (
   assert.deepEqual(data.activeTerminalIds, {
     local: 'term-0',
   });
+});
+
+runTest('buildSessionData preserves vault tab profile metadata', () => {
+  const defaultProfileData = buildSessionData({
+    activeTabId: 'vault-tab',
+    activeConnectionId: null,
+    tabs: [makeVaultTab()],
+    terminals: {},
+    activeTerminalIds: {},
+  });
+
+  assert.equal(defaultProfileData.tabs.length, 1);
+  assert.equal(defaultProfileData.tabs[0].tabType, 'vault');
+  assert.equal(defaultProfileData.tabs[0].vaultProfileId, DEFAULT_VAULT_PROFILE_ID);
+
+  const customProfileData = buildSessionData({
+    activeTabId: 'vault-tab',
+    activeConnectionId: null,
+    tabs: [makeVaultTab('vault-tab', 'custom-profile')],
+    terminals: {},
+    activeTerminalIds: {},
+  });
+  assert.equal(customProfileData.tabs[0].vaultProfileId, 'custom-profile');
 });
 
 console.log('Session persistence tests passed.');

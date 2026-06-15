@@ -3,11 +3,13 @@ import { UpdateNotification } from './components/UpdateNotification';
 import { ToastContainer } from './components/ui/Toast';
 import { useEffect } from 'react';
 import { useAppStore } from './store/useAppStore';
+import { useVaultStore } from './vault/useVaultStore';
 import { WelcomeScreen } from './components/dashboard/WelcomeScreen';
 import { useTransferEvents } from './hooks/useTransferEvents';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { PluginProvider } from './context/PluginContext';
 import { GlobalConfirmDialog } from './components/ui/GlobalConfirmDialog';
+import { GlobalVaultUnlockModal } from './components/vault/GlobalVaultUnlockModal';
 import * as RadixTooltip from '@radix-ui/react-tooltip';
 
 function AppContent() {
@@ -15,6 +17,7 @@ function AppContent() {
     const loadSettings = useAppStore((state) => state.loadSettings);
     const loadSession = useAppStore((state) => state.loadSession);
     const fetchSystemInfo = useAppStore((state) => state.fetchSystemInfo);
+    const refreshVault = useVaultStore((state) => state.refresh);
 
     useTransferEvents();
 
@@ -33,6 +36,7 @@ function AppContent() {
             } catch (e) {
                 console.warn('[App] fetchSystemInfo failed:', e);
             }
+            refreshVault().catch(e => console.warn('[App] refreshVault failed:', e));
         };
         init().catch(e => console.warn('[App] Initialisation error:', e));
         // eslint-disable-next-line react-hooks/exhaustive-deps -- store actions are stable
@@ -59,6 +63,7 @@ function App() {
                 <RadixTooltip.Provider delayDuration={120}>
                     <AppContent />
                     <GlobalConfirmDialog />
+                    <GlobalVaultUnlockModal />
                 </RadixTooltip.Provider>
             </PluginProvider>
         </ErrorBoundary>

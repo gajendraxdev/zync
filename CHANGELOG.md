@@ -4,6 +4,43 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.16.1] - 2026-06-15
+
+### Fixed
+- **CodeQL CI Alerts**: Add explicit `permissions: contents: read` to the CI workflow and move vault crypto known-answer test vectors into `src-tauri/test-fixtures/vault_crypto_vectors.json`. ([6a51a70], [e64d2c1])
+- **Vault-Backed SSH Reconnect**: Terminal reconnect after a pipeline break now resolves vault credential refs against an unlocked vault instead of failing with a hard lock error, and no longer resurrects connections removed while reconnect was in flight. ([dec2bc1], [ce57b8e])
+- **Multi-Instance Vault Lock Handling**: `DatabaseAlreadyOpen` is detected as `vault_in_use` rather than an uninitialized vault; only redb lock conflicts map to `InUseByAnotherInstance`, with other open errors surfaced as storage failures. ([018063c])
+- **Vault Unlock Stale Error Handling**: `requestUnlock` no longer skips the unlock modal when a prior `vault_in_use` error lingers after a successful vault status refresh. ([ce57b8e])
+
+### Added
+- **Single-Instance Local Vault Docs**: Documented why only one Zync process can open `vault.redb` at a time, expected `vault_in_use` behavior, workarounds, and deferred vault-broker direction. ([f83b09d])
+
+### Changed
+- **Single-Instance Desktop Guard**: Launching a second Zync window on desktop OS targets now focuses the existing instance via `tauri-plugin-single-instance` instead of opening a competing vault lock. ([018063c])
+- **Vault In-Use UX**: Vault status, unlock modal, and connect flows surface a dedicated in-use state, block Create Vault when another instance holds the lock, and require explicit refresh from `VaultStatusCard`. ([018063c])
+
+## [2.16.0] - 2026-06-15
+
+### Added
+- **Global Vault Workspace**: Vault as a first-class sidebar/workspace with profile-based navigation for Local Vault and Google Vault Sync, dedicated panels, unlock/recovery flows, and command-palette entries. ([6e8dd42], [d9d3663])
+- **Vault Core Backend Foundation**: Crypto, schema, storage, lifecycle commands, and migration scaffolding for encrypted credential storage and recovery. ([6e8dd42])
+- **Google Drive Vault Sync**: Connect/disconnect/backup/restore IPC and command module for encrypted vault sync. ([8cdb20d])
+- **Vault Credential Identity Model**: Durable `credentialId` identity, key-first creation/assignment, auth-ref relinking/backfill, and lifecycle docs. ([1d865ed], [bdbd81b], [bf01457])
+- **Vault Credential Revision History**: Revision snapshots and restore across backend, IPC, and Vault workspace UI. ([e0409f4])
+- **Provider App-Data Sync**: Manual Google-backed domains for hosts, tunnels, snippets, and settings with domain status, policy metadata, and frontend IPC helpers.
+- **Sync & Backup Workspace UI**: List-card rows aligned with Local Vault styling, grouped domain sections, sidebar split navigation, and clearer Upload/Restore affordances.
+- **Connections Bundle Restore**: Scoped connections restore with preview/options modals, eligible-host filtering, global-snippet scope rules, and frontend/backend tests.
+- **Google Encryption Setup**: Local Vault passphrase uses a single verified input; custom passphrase still confirms; shared `syncPassphrase` validation helpers and tests.
+- **Google Drive Backup Picker**: Scans Drive for multiple encrypted sync collections after local reset and lets you choose which backup to link.
+- **Provider Host Inventory**: Read-only Google host inventory in Sync & Backup before local restore/materialization. ([22256fb])
+- **Vault Remember-On-Device Unlock**: Optional OS keychain session cache, global unlock modal for connect/test/save, deferred auto-connect for vault-backed tabs, and Forget Device controls. ([b7587e0])
+- **Full Local Reset Test Mode**: `full-local-reset` script mode to wipe local hosts/folders plus vault/sync state for restore-path validation. ([22256fb])
+- **Selective Sync Architecture Docs**: Phase 3/Phase 4 planning docs and typed vault credential model docs.
+
+### Changed
+- **Settings Information Architecture**: Vault management moved out of Settings into the dedicated Vault workspace; related copy updated from “Settings → Vault” to “Vault tab/workspace”. ([d9d3663])
+- **Add Host Wizard**: Identity-first layout, collapsible Appearance after Authentication, plaintext-first credential entry, sticky footer actions (Test, Save, Save & Connect), awaited save before connect, and `vaultId` backfill for vault-backed auth refs. ([dbfac90])
+
 ## [2.15.1] - 2026-04-27
 
 ### Fixed
@@ -643,7 +680,14 @@ All notable changes to Zync are documented in this file. The format is based on 
 - Auto-updates
 - Multiple themes (Dark, Light, Dracula)
 
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.15.1...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.16.1...HEAD
+[2.16.1]: https://github.com/zync-sh/zync/compare/v2.16.0...v2.16.1
+[ce57b8e]: https://github.com/zync-sh/zync/commit/ce57b8e
+[dec2bc1]: https://github.com/zync-sh/zync/commit/dec2bc1
+[018063c]: https://github.com/zync-sh/zync/commit/018063c
+[f83b09d]: https://github.com/zync-sh/zync/commit/f83b09d
+[6a51a70]: https://github.com/zync-sh/zync/commit/6a51a70
+[e64d2c1]: https://github.com/zync-sh/zync/commit/e64d2c1
 [#38]: https://github.com/zync-sh/zync/pull/38
 [f766ac2]: https://github.com/zync-sh/zync/commit/f766ac2
 [3df9766]: https://github.com/zync-sh/zync/commit/3df9766
@@ -734,6 +778,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 [8faf6ef]: https://github.com/zync-sh/zync/commit/8faf6ef
 [480a8f9]: https://github.com/zync-sh/zync/commit/480a8f9
 [b915006]: https://github.com/zync-sh/zync/commit/b915006
+[2.16.0]: https://github.com/zync-sh/zync/compare/v2.15.1...v2.16.0
 [2.15.1]: https://github.com/zync-sh/zync/compare/v2.15.0...v2.15.1
 [2.15.0]: https://github.com/zync-sh/zync/compare/v2.14.1...v2.15.0
 [2.14.1]: https://github.com/zync-sh/zync/compare/v2.14.0...v2.14.1
@@ -767,3 +812,13 @@ All notable changes to Zync are documented in this file. The format is based on 
 [2.3.0]: https://github.com/zync-sh/zync/compare/v2.2.1...v2.3.0
 [2.2.1]: https://github.com/zync-sh/zync/releases/tag/v2.2.1
 
+
+[6e8dd42]: https://github.com/zync-sh/zync/commit/6e8dd42
+[d9d3663]: https://github.com/zync-sh/zync/commit/d9d3663
+[8cdb20d]: https://github.com/zync-sh/zync/commit/8cdb20d
+[1d865ed]: https://github.com/zync-sh/zync/commit/1d865ed
+[bdbd81b]: https://github.com/zync-sh/zync/commit/bdbd81b
+[bf01457]: https://github.com/zync-sh/zync/commit/bf01457
+[2df515d]: https://github.com/zync-sh/zync/commit/2df515d
+[22256fb]: https://github.com/zync-sh/zync/commit/22256fb
+[7b8e5a6]: https://github.com/zync-sh/zync/commit/7b8e5a6

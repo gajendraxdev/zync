@@ -1,25 +1,41 @@
 mod ai;
+mod atomic_io;
 mod commands;
-mod shell_icons;
 mod fs;
 mod ghost;
 pub mod plugins;
 mod pty;
 mod session;
+mod shell_icons;
 mod snippets;
 mod ssh;
 mod ssh_config;
 mod ssh_parser;
+mod sync;
 pub mod tunnel;
 mod types;
 mod utils;
+mod vault;
 
 use commands::AppState;
 use tauri::{Emitter, Manager};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }));
+    }
+
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
@@ -36,8 +52,11 @@ pub fn run() {
 
             let app_handle = app.handle().clone();
             let data_dir = commands::get_data_dir(&app_handle);
-            let app_state = AppState::new(data_dir);
+            let app_state = AppState::new(data_dir.clone(), app_handle.clone());
             app.manage(app_state);
+            app.manage(tokio::sync::Mutex::new(vault::store::VaultService::new(
+                data_dir,
+            )));
             commands::cleanup_stale_plugin_window_temp_files(&app_handle);
             Ok(())
         })
@@ -98,6 +117,7 @@ pub fn run() {
             commands::ssh_extract_pem,
             commands::ssh_migrate_all_keys,
             commands::ssh_disconnect,
+            commands::ssh_disconnect_vault_backed,
             commands::terminal_write,
             commands::terminal_navigate,
             commands::terminal_resize,
@@ -193,6 +213,60 @@ pub fn run() {
             ghost::commands::ghost_candidates,
             session::session_load,
             session::session_save,
+            vault::commands::vault_status,
+            vault::commands::vault_initialize,
+            vault::commands::vault_unlock,
+            vault::commands::vault_forget_device,
+            vault::commands::vault_lock,
+            vault::commands::vault_item_create,
+            vault::commands::vault_item_list,
+            vault::commands::vault_item_get,
+            vault::commands::vault_item_update,
+            vault::commands::vault_item_delete,
+            vault::commands::vault_item_revision_history,
+            vault::commands::vault_item_restore_revision,
+            vault::commands::vault_secure_to_vault_preview,
+            vault::commands::vault_secure_to_vault,
+            vault::commands::vault_backfill_connection_refs,
+            vault::commands::vault_generate_recovery_key,
+            vault::commands::vault_has_recovery_key,
+            vault::commands::vault_unlock_with_recovery_key,
+            vault::commands::vault_export,
+            vault::commands::vault_import,
+            sync::commands::sync_status,
+            sync::commands::sync_collection_status,
+            sync::commands::sync_collection_discover_remote,
+            sync::commands::sync_collection_setup,
+            sync::commands::sync_collection_unlock,
+            sync::commands::sync_collection_regenerate_recovery_key,
+            sync::commands::sync_collection_lock,
+            sync::commands::sync_collection_forget_key,
+            sync::commands::sync_collection_set_cache_ttl,
+            sync::commands::sync_domain_policies,
+            sync::commands::sync_domain_policy_set,
+            sync::commands::sync_hosts_snapshot,
+            sync::commands::sync_hosts_changes,
+            sync::commands::sync_hosts_upload,
+            sync::commands::sync_hosts_remote_inventory,
+            sync::commands::sync_hosts_restore,
+            sync::commands::sync_connections_restore,
+            sync::commands::sync_connections_restore_preview,
+            sync::commands::sync_tunnels_snapshot,
+            sync::commands::sync_tunnels_upload,
+            sync::commands::sync_tunnels_restore,
+            sync::commands::sync_snippets_snapshot,
+            sync::commands::sync_snippets_upload,
+            sync::commands::sync_snippets_restore,
+            sync::commands::sync_settings_upload,
+            sync::commands::sync_settings_restore,
+            sync::commands::sync_connect,
+            sync::commands::sync_disconnect,
+            sync::commands::sync_upload,
+            sync::commands::sync_upload_credential,
+            sync::commands::sync_upload_credentials,
+            sync::commands::sync_restore_preview,
+            sync::commands::sync_restore_credentials,
+            sync::commands::sync_download,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
