@@ -5,17 +5,17 @@ All notable changes to Zync are documented in this file. The format is based on 
 ## [Unreleased]
 
 ### Added
-- **Terminal GPU Acceleration (WebGL)**: Modular `src/lib/terminal/` renderer stack — policy, WebGL2 probe, lazy `@xterm/addon-webgl` load, session-scoped state, context-loss handling, and canvas fallback via `@xterm/addon-canvas`. Settings → Terminal adds a **GPU Acceleration** toggle (default on). ([ad1f90c])
-- **GPU + Font Ligatures**: WebGL and `LigaturesAddon` can run together using xterm’s recommended activation order (WebGL → ligatures → WebGL reactivate for texture-atlas font features). ([ad1f90c])
-- **Terminal Renderer Status**: Settings → Terminal shows live renderer health for the active tab (GPU active, canvas fallback, or GPU off) with WebGL2 availability and a refresh control. ([ad1f90c])
-- **Terminal Renderer Tests**: `npm run test:terminal-renderer` and agent-test coverage for policy, WebGL probe cache, session ownership, controller sync/reactivate, and diagnostics. ([ad1f90c])
-- **Terminal Roadmap**: `docs/TERMINAL_ROADMAP.md` — optimization/robustness audit, P0/P1 priorities, and GPU implementation notes. ([ad1f90c])
+- **Terminal GPU Acceleration (WebGL)**: Modular `src/lib/terminal/` renderer stack — policy, WebGL2 probe, lazy `@xterm/addon-webgl` load, session-scoped state, context-loss handling, and canvas fallback via `@xterm/addon-canvas`. Settings → Terminal adds a **GPU Acceleration** toggle (default on). ([15576ab])
+- **GPU + Font Ligatures**: WebGL and `LigaturesAddon` can run together using xterm’s recommended activation order (WebGL → ligatures → WebGL reactivate for texture-atlas font features). ([15576ab])
+- **Terminal Renderer Status**: Settings → Terminal shows live renderer health for the active tab (GPU active, canvas fallback, or GPU off) with WebGL2 availability and a refresh control. ([15576ab])
+- **Terminal Renderer Tests**: `npm run test:terminal-renderer` and agent-test coverage for policy, WebGL probe cache, session ownership, controller sync/reactivate, and diagnostics. ([15576ab])
+- **Terminal Roadmap**: `docs/TERMINAL_ROADMAP.md` — optimization/robustness audit, P0/P1 priorities, and GPU implementation notes. ([15576ab])
 
 ### Fixed
 - **Terminal Resize Hardening**: Layout transitions always run visual `fit()` while deferring PTY resize IPC until settle; removed legacy width pinning; added window-resize refit, post-fit screen refresh, layout-transition safety timeout, and terminal container fill CSS to keep the xterm canvas aligned with its host. ([c10c082])
 - **Dev Single-Instance Focus Steal**: `tauri dev` no longer focuses the installed production app — single-instance guard is release-only (`debug_assertions` off) because dev and production share the same app identifier. ([c10c082])
-- **GPU Off Blank Terminal**: Turning off GPU acceleration no longer wipes the active terminal — WebGL dispose now loads the explicit canvas renderer and refreshes the buffer so existing tabs stay visible and usable. ([ad1f90c])
-- **WebGL Reactivate Races**: `reactivateTerminalWebgl` coalesces concurrent loads through the shared `loadPromise` used by `syncTerminalRenderer`. ([ad1f90c])
+- **GPU Off Blank Terminal**: Turning off GPU acceleration no longer wipes the active terminal — WebGL dispose now loads the explicit canvas renderer and refreshes the buffer so existing tabs stay visible and usable. ([15576ab])
+- **WebGL Reactivate Races**: `reactivateTerminalWebgl` coalesces concurrent loads through the shared `loadPromise` used by `syncTerminalRenderer`. ([15576ab])
 
 ## [2.16.1] - 2026-06-15
 
@@ -696,7 +696,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 [Unreleased]: https://github.com/zync-sh/zync/compare/v2.16.1...HEAD
 [2.16.1]: https://github.com/zync-sh/zync/compare/v2.16.0...v2.16.1
 [c10c082]: https://github.com/zync-sh/zync/commit/c10c082
-[ad1f90c]: https://github.com/zync-sh/zync/commit/ad1f90c
+[15576ab]: https://github.com/zync-sh/zync/commit/15576ab
 [ce57b8e]: https://github.com/zync-sh/zync/commit/ce57b8e
 [dec2bc1]: https://github.com/zync-sh/zync/commit/dec2bc1
 [018063c]: https://github.com/zync-sh/zync/commit/018063c
