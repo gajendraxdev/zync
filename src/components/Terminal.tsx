@@ -441,8 +441,14 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
   
   // Layout transition fast-path tracking
   const isLayoutTransitioning = useRef(false);
+  const layoutTransitionSafetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Layout transition React state for DOM class rendering
   const [layoutTransitioning, setLayoutTransitioning] = useState(false);
+  const isVisibleRef = useRef(isVisible);
+
+  useEffect(() => {
+    isVisibleRef.current = isVisible;
+  }, [isVisible]);
 
   // Search State
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -535,6 +541,81 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
 
   // Use termId if provided, otherwise fallback to terminalKey
   const sessionId = termId || terminalKey;
+  const isConnectedRef = useRef(isConnected);
+  const sessionIdRef = useRef(sessionId);
+
+  useEffect(() => {
+    isConnectedRef.current = isConnected;
+  }, [isConnected]);
+
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
+
+  const clearLayoutWidthPin = useCallback(() => {
+    if (!containerRef.current) return;
+    containerRef.current.style.width = '';
+    containerRef.current.style.flexShrink = '';
+    containerRef.current.style.height = '';
+    containerRef.current.style.maxHeight = '';
+  }, []);
+
+  const refreshTerminalScreen = useCallback((term: XTerm) => {
+    try {
+      const lastRow = Math.max(0, term.rows - 1);
+      term.refresh(0, lastRow);
+    } catch {
+      // Ignore refresh failures; geometry is still updated by fit().
+    }
+  }, []);
+
+  const refitTerminal = useCallback((options?: { forceSync?: boolean; syncBackend?: boolean }) => {
+    if (!isVisibleRef.current || !isConnectedRef.current) return;
+
+    const fit = fitAddonRef.current;
+    const term = termRef.current;
+    const container = containerRef.current;
+    if (!fit || !term || !container) return;
+
+    clearLayoutWidthPin();
+
+    const nextWidth = container.clientWidth;
+    const nextHeight = container.clientHeight;
+    if (nextWidth <= 0 || nextHeight <= 0) return;
+
+    try {
+      fit.fit();
+      refreshTerminalScreen(term);
+      const shouldSyncBackend = options?.syncBackend ?? true;
+      if (shouldSyncBackend) {
+        if (options?.forceSync) {
+          const cached = terminalCache.get(sessionIdRef.current);
+          if (cached) cached.lastResize = null;
+        }
+        syncTerminalResize(sessionIdRef.current, term);
+      }
+    } catch (e) {
+      console.warn('Terminal refit failed', e);
+    }
+  }, [clearLayoutWidthPin, refreshTerminalScreen]);
+
+  const finishLayoutTransition = useCallback(() => {
+    if (layoutTransitionSafetyTimerRef.current) {
+      clearTimeout(layoutTransitionSafetyTimerRef.current);
+      layoutTransitionSafetyTimerRef.current = null;
+    }
+
+    isLayoutTransitioning.current = false;
+    setLayoutTransitioning(false);
+    clearLayoutWidthPin();
+
+    // Two animation frames let flex layout settle before the final fit/sync.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        refitTerminal({ forceSync: true });
+      });
+    });
+  }, [clearLayoutWidthPin, refitTerminal]);
 
   const acceptGhostSuffix = useCallback((suffix: string) => {
     if (!suffix) return;
@@ -584,65 +665,49 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
 
   // Force fit and focus when visibility changes (e.g. switching tabs) or connection becomes active
   useEffect(() => {
-    if (isVisible && isConnected && fitAddonRef.current && termRef.current) {
-      let timer: ReturnType<typeof setTimeout>;
-      // Small delay using requestAnimationFrame + setTimeout for layout stability
-      const frameId = requestAnimationFrame(() => {
-        timer = setTimeout(() => {
-          try {
-            if (fitAddonRef.current) fitAddonRef.current.fit();
+    if (!isVisible || !isConnected) return;
 
-            // Focus the terminal aggressively when it becomes visible or connected
-            if (termRef.current) {
-              termRef.current.focus();
+    let timer: ReturnType<typeof setTimeout>;
+    const frameId = requestAnimationFrame(() => {
+      timer = setTimeout(() => {
+        try {
+          refitTerminal({ forceSync: true });
+          termRef.current?.focus();
+        } catch (e) {
+          console.warn('Fit/Focus failed on visibility change', e);
+        }
+      }, 150);
+    });
 
-              // Also sync with backend
-              syncTerminalResize(sessionId, termRef.current);
-            }
-          } catch (e) { console.warn('Fit/Focus failed on visibility change', e); }
-        }, 150); // Increased delay for layout settling
-      });
-      
-      return () => {
-        cancelAnimationFrame(frameId);
-        if (timer) clearTimeout(timer);
-      };
-    }
-  }, [isVisible, sessionId, isConnected]);
+    return () => {
+      cancelAnimationFrame(frameId);
+      if (timer) clearTimeout(timer);
+    };
+  }, [isVisible, isConnected, refitTerminal]);
 
   // Layout Transition Listener (Flicker Hardening V2)
+  // Keep listener registration stable (no isVisible/session deps) so we never miss
+  // layout-transition-end while the effect is re-subscribing.
   useEffect(() => {
     const handleStart = () => {
       isLayoutTransitioning.current = true;
       setLayoutTransitioning(true);
+      // Clear any legacy inline dimension pins from older builds.
+      clearLayoutWidthPin();
 
-      // V2 Width Pinning: Lock the terminal to its current pixel width instantly
-      // using our own container width to prevent the flex parent from squishing the canvas
-      if (containerRef.current) {
-        const currentWidth = containerRef.current.offsetWidth;
-        if (currentWidth && currentWidth > 0) {
-          containerRef.current.style.width = `${currentWidth}px`;
-          containerRef.current.style.flexShrink = '0';
-        }
+      if (layoutTransitionSafetyTimerRef.current) {
+        clearTimeout(layoutTransitionSafetyTimerRef.current);
       }
+      layoutTransitionSafetyTimerRef.current = setTimeout(() => {
+        layoutTransitionSafetyTimerRef.current = null;
+        if (isLayoutTransitioning.current) {
+          console.warn('[Terminal] Layout transition safety timeout — forcing refit');
+          finishLayoutTransition();
+        }
+      }, 500);
     };
     const handleEnd = () => {
-      isLayoutTransitioning.current = false;
-      setLayoutTransitioning(false);
-      
-      // Unlock the fixed width
-      if (containerRef.current) {
-        containerRef.current.style.width = '';
-        containerRef.current.style.flexShrink = '';
-      }
-
-      // Trigger a final clean fit when the layout is stable
-      if (isVisible && isConnected && fitAddonRef.current && termRef.current) {
-        try {
-          fitAddonRef.current.fit();
-          syncTerminalResize(sessionId, termRef.current);
-        } catch (e) { console.warn('Final layout fit failed', e); }
-      }
+      finishLayoutTransition();
     };
 
     window.addEventListener('zync:layout-transition-start', handleStart);
@@ -650,8 +715,33 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
     return () => {
       window.removeEventListener('zync:layout-transition-start', handleStart);
       window.removeEventListener('zync:layout-transition-end', handleEnd);
+      if (layoutTransitionSafetyTimerRef.current) {
+        clearTimeout(layoutTransitionSafetyTimerRef.current);
+        layoutTransitionSafetyTimerRef.current = null;
+      }
     };
-  }, [isVisible, isConnected, sessionId]);
+  }, [clearLayoutWidthPin, finishLayoutTransition]);
+
+  // Window maximize/restore and other OS-level resizes do not emit layout-transition-end.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    const handleWindowResize = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (isLayoutTransitioning.current) {
+          finishLayoutTransition();
+        } else {
+          refitTerminal({ forceSync: true });
+        }
+      }, 100);
+    };
+
+    window.addEventListener('resize', handleWindowResize);
+    return () => {
+      window.removeEventListener('resize', handleWindowResize);
+      clearTimeout(timer);
+    };
+  }, [finishLayoutTransition, refitTerminal]);
 
   useEffect(() => {
     if (!containerRef.current || !activeConnectionId || !sessionId || !isConnected) return;
@@ -1153,18 +1243,19 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
     const resizeObserver = new ResizeObserver(() => {
       try {
         if (!term.element || !containerRef.current) return;
-        
-        // Flicker Hardening: Skip fitting if we are currently animating/dragging a sidebar
-        if (isLayoutTransitioning.current) return;
 
         // Only fit if dimensions are valid
         const nextWidth = containerRef.current.clientWidth;
         const nextHeight = containerRef.current.clientHeight;
         if (nextWidth <= 0 || nextHeight <= 0) return;
 
-        // Synchronous visual fit prevents tearing/flickering during layout changes!
-        // We MUST do this before the browser paints the next frame.
+        // Always keep the canvas in sync with the container. Blocking fit during
+        // layout transitions left a small canvas inside a large viewport (duplicated
+        // / collapsed content). Defer only the PTY resize IPC until layout settles.
         fitAddon.fit();
+        refreshTerminalScreen(term);
+
+        if (isLayoutTransitioning.current) return;
 
         // Throttle backend PTY resize communication (IPC) to prevent flooding Tauri
         if (ipcResizeTimer) clearTimeout(ipcResizeTimer);
@@ -1213,6 +1304,7 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
     activeConnectionId,
     sessionId,
     isConnected,
+    refreshTerminalScreen,
     // Settings dependencies removed to prevent re-spawning on theme/font changes.
   ]);
 

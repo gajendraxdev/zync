@@ -141,6 +141,16 @@
 
 /* Terminal styles overrides */
 
+.terminal-container {
+    position: relative;
+    overflow: hidden;
+}
+
+.terminal-container .xterm {
+    height: 100%;
+    width: 100%;
+}
+
 body {
     background-color: transparent;
     transition: color 0.2s;
