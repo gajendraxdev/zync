@@ -27,6 +27,11 @@ import { handleGhostInputEvent } from '../lib/ghostSuggestions/runtime';
 import { useGhostPopupState } from '../lib/ghostSuggestions/uiState';
 import { GhostSuggestionOverlay } from './terminal/GhostSuggestionOverlay';
 import { GhostSuggestionListOverlay } from './terminal/GhostSuggestionListOverlay';
+import {
+  clearTerminalRendererSession,
+  reactivateTerminalWebgl,
+  syncTerminalRenderer,
+} from '../lib/terminal';
 
 // Module-level cache to preserve xterm instances across component remounts
 // This ensures terminal history is maintained during tab reordering
@@ -63,6 +68,58 @@ const THEME_PRESETS: Record<string, Record<string, string>> = {
   orange: { background: '#1a120b', cursor: '#f97316', selectionBackground: 'rgba(249, 115, 22, 0.3)' },
   purple: { background: '#160b1a', cursor: '#d946ef', selectionBackground: 'rgba(217, 70, 239, 0.3)' },
 };
+
+function getTerminalRendererPreferences(
+  terminalSettings: { gpuAcceleration?: boolean; fontLigatures?: boolean },
+) {
+  return {
+    gpuAcceleration: terminalSettings.gpuAcceleration ?? true,
+    fontLigatures: Boolean(terminalSettings.fontLigatures),
+  };
+}
+
+function buildRendererRefitCallback(
+  sessionId: string,
+  fitAddon: FitAddon | null,
+  term: XTerm | null,
+) {
+  return () => {
+    try {
+      fitAddon?.fit();
+      if (term) {
+        const lastRow = Math.max(0, term.rows - 1);
+        term.refresh(0, lastRow);
+        syncTerminalResize(sessionId, term);
+      }
+    } catch (error) {
+      console.warn('[terminal] Renderer refit failed', error);
+    }
+  };
+}
+
+async function applyTerminalRendererAndLigatures(
+  sessionId: string,
+  term: XTerm,
+  terminalSettings: { gpuAcceleration?: boolean; fontLigatures?: boolean },
+  fitAddon: FitAddon | null,
+) {
+  const prefs = getTerminalRendererPreferences(terminalSettings);
+  const onRefit = buildRendererRefitCallback(sessionId, fitAddon, term);
+  await syncTerminalRenderer(sessionId, term, {
+    gpuAcceleration: prefs.gpuAcceleration,
+    onRefit,
+  });
+  await setTerminalLigatures(sessionId, term, prefs.fontLigatures);
+  if (prefs.gpuAcceleration && prefs.fontLigatures) {
+    await reactivateTerminalWebgl(sessionId, term, { onRefit });
+  }
+  try {
+    const lastRow = Math.max(0, term.rows - 1);
+    term.refresh(0, lastRow);
+  } catch {
+    // Ignore refresh failures; fit below still applies geometry.
+  }
+}
 
 async function setTerminalLigatures(sessionId: string, term: XTerm, enabled: boolean) {
   const cached = terminalCache.get(sessionId);
@@ -146,6 +203,7 @@ export function destroyTerminalInstance(termId: string) {
       }
       cached.ligaturesAddon = undefined;
     }
+    clearTerminalRendererSession(termId);
     // Remove all Tauri event listeners if they exist
     if (cached.unlisten && cached.unlisten.length > 0) {
       cached.unlisten.forEach(fn => fn());
@@ -643,15 +701,12 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
       term.options.fontFamily = settings.terminal.fontFamily;
       term.options.cursorStyle = settings.terminal.cursorStyle;
       term.options.lineHeight = settings.terminal.lineHeight;
-      void (async () => {
-        await setTerminalLigatures(sessionId, term, Boolean(settings.terminal.fontLigatures));
-        try {
-          const lastRow = Math.max(0, term.rows - 1);
-          term.refresh(0, lastRow);
-        } catch {
-          // Ignore refresh failures; fit below still applies geometry.
-        }
-      })();
+      void applyTerminalRendererAndLigatures(
+        sessionId,
+        term,
+        settings.terminal,
+        fitAddonRef.current,
+      );
     }
 
     if (fitAddonRef.current) {
@@ -758,7 +813,6 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
       term = cached.term;
       fitAddon = cached.fitAddon;
       searchAddon = cached.searchAddon;
-
       // Reattach cached xterm DOM when remounting after route/view changes.
       // xterm.open() is a one-time operation; for already-opened terminals we
       // must move the existing element instead of calling open() again.
@@ -897,7 +951,7 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
         ligaturesAddon: undefined,
         ligaturesEnabled: false,
       });
-      void setTerminalLigatures(sessionId, term, Boolean(settings.terminal.fontLigatures));
+      void applyTerminalRendererAndLigatures(sessionId, term, settings.terminal, fitAddon);
 
       // Create tracker once per cached terminal; handlers are bound per mount below.
       const ghostTracker = new InputTracker({

@@ -127,6 +127,11 @@ This document describes the fish-style terminal suggestion system in Zync:
 - `Enter`
   - Commits command; history score updated.
 
+## Related Documents
+
+- [TERMINAL_ROADMAP.md](./TERMINAL_ROADMAP.md) — terminal performance, robustness, and refactor priorities
+- [SESSION_PERSISTENCE.md](./SESSION_PERSISTENCE.md) — tab/terminal session restore
+
 ## Notes For Future Changes
 
 - Keep popup rendering portal-based to avoid parent clipping.
