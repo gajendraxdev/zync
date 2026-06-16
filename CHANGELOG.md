@@ -4,6 +4,9 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Changed
+- **Terminal Module Layout**: Moved `Terminal.tsx` to `src/components/terminal/`; extracted `terminalCache`, ligatures, renderer setup, and instance lifecycle (`destroyTerminalInstance`, `getTerminalRecentLines`) into `src/lib/terminal/`. Store and AI context now import from `lib/terminal` instead of the React component. ([b0cfd5f])
+
 ### Added
 - **Terminal GPU Acceleration (WebGL)**: Modular `src/lib/terminal/` renderer stack — policy, WebGL2 probe, lazy `@xterm/addon-webgl` load, session-scoped state, context-loss handling, and canvas fallback via `@xterm/addon-canvas`. Settings → Terminal adds a **GPU Acceleration** toggle (default on). ([15576ab])
 - **GPU + Font Ligatures**: WebGL and `LigaturesAddon` can run together using xterm’s recommended activation order (WebGL → ligatures → WebGL reactivate for texture-atlas font features). ([15576ab])
@@ -697,6 +700,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 [2.16.1]: https://github.com/zync-sh/zync/compare/v2.16.0...v2.16.1
 [c10c082]: https://github.com/zync-sh/zync/commit/c10c082
 [15576ab]: https://github.com/zync-sh/zync/commit/15576ab
+[b0cfd5f]: https://github.com/zync-sh/zync/commit/b0cfd5f
 [ce57b8e]: https://github.com/zync-sh/zync/commit/ce57b8e
 [dec2bc1]: https://github.com/zync-sh/zync/commit/dec2bc1
 [018063c]: https://github.com/zync-sh/zync/commit/018063c
