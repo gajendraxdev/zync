@@ -1,6 +1,6 @@
 
 import { useEffect, useRef } from 'react';
-import { TerminalComponent } from '../Terminal';
+import { TerminalComponent } from './Terminal';
 import { useAppStore } from '../../store/useAppStore';
 import { useShallow } from 'zustand/react/shallow';
 import { Terminal as TerminalIcon, Plus, X, Zap } from 'lucide-react';

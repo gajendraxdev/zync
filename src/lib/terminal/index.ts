@@ -43,3 +43,20 @@ export {
   ensureCanvasRenderer,
   refreshTerminalScreen,
 } from './rendererLifecycle.js';
+
+export type { TerminalCache } from './terminalCache.js';
+export { clearTerminalPendingInput, terminalCache } from './terminalCache.js';
+
+export { setTerminalLigatures, disposeTerminalLigatures } from './ligatures.js';
+
+export type {
+  TerminalRendererSetupSettings,
+  TerminalResizeSync,
+} from './rendererSetup.js';
+export {
+  applyTerminalRendererAndLigatures,
+  buildRendererRefitCallback,
+  getTerminalRendererPreferences,
+} from './rendererSetup.js';
+
+export { destroyTerminalInstance, getTerminalRecentLines } from './instanceApi.js';

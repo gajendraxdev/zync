@@ -4,14 +4,14 @@ import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
-import { useAppStore, Connection } from '../store/useAppStore';
+import { useAppStore, Connection } from '../../store/useAppStore';
 import { Search, ArrowUp, ArrowDown, X, Copy, Clipboard as ClipboardIcon, Trash2, Scissors } from 'lucide-react';
-import { cn } from '../lib/utils';
-import { ContextMenu } from './ui/ContextMenu';
-import { Button } from './ui/Button';
+import { cn } from '../../lib/utils';
+import { ContextMenu } from '../ui/ContextMenu';
+import { Button } from '../ui/Button';
 import { Terminal } from 'lucide-react';
-import { listen, UnlistenFn } from '@tauri-apps/api/event';
-import { InputTracker } from '../lib/ghostSuggestions/inputTracker';
+import { listen } from '@tauri-apps/api/event';
+import { InputTracker } from '../../lib/ghostSuggestions/inputTracker';
 import {
   acceptGhostCommand,
   commitGhostCommand,
@@ -19,43 +19,19 @@ import {
   resolvePopupCandidates,
   resolveTabCompletionOutcome,
   shouldPreferPathSuggestion,
-} from '../lib/ghostSuggestions/client';
-import type { GhostTabState } from '../lib/ghostSuggestions/types';
-import { createInitialGhostTabState, resetGhostTabState } from '../lib/ghostSuggestions/tabState';
-import { bindGhostTrackerRuntime } from '../lib/ghostSuggestions/runtime';
-import { handleGhostInputEvent } from '../lib/ghostSuggestions/runtime';
-import { useGhostPopupState } from '../lib/ghostSuggestions/uiState';
-import { GhostSuggestionOverlay } from './terminal/GhostSuggestionOverlay';
-import { GhostSuggestionListOverlay } from './terminal/GhostSuggestionListOverlay';
+} from '../../lib/ghostSuggestions/client';
+import type { GhostTabState } from '../../lib/ghostSuggestions/types';
+import { createInitialGhostTabState, resetGhostTabState } from '../../lib/ghostSuggestions/tabState';
+import { bindGhostTrackerRuntime } from '../../lib/ghostSuggestions/runtime';
+import { handleGhostInputEvent } from '../../lib/ghostSuggestions/runtime';
+import { useGhostPopupState } from '../../lib/ghostSuggestions/uiState';
+import { GhostSuggestionOverlay } from './GhostSuggestionOverlay';
+import { GhostSuggestionListOverlay } from './GhostSuggestionListOverlay';
 import {
-  clearTerminalRendererSession,
-  reactivateTerminalWebgl,
-  syncTerminalRenderer,
-} from '../lib/terminal';
-
-// Module-level cache to preserve xterm instances across component remounts
-// This ensures terminal history is maintained during tab reordering
-interface TerminalCache {
-  term: XTerm;
-  fitAddon: FitAddon;
-  searchAddon: SearchAddon;
-  generation: number;
-  spawned: boolean;
-  starting: boolean;
-  listenerAttached: boolean;
-  pendingInput: string;
-  inputFlushTimer: ReturnType<typeof window.setTimeout> | null;
-  lastResize: { rows: number; cols: number } | null;
-  unlisten?: UnlistenFn[];
-  ghostTracker?: InputTracker;
-  onDataDisposable?: { dispose: () => void };
-  ligaturesAddon?: { dispose: () => void };
-  ligaturesEnabled: boolean;
-  ligaturesDesiredEnabled?: boolean;
-  ligaturesLoadPromise?: Promise<void> | null;
-}
-const terminalCache = new Map<string, TerminalCache>();
-let ligaturesAddonImport: Promise<typeof import('@xterm/addon-ligatures')> | null = null;
+  applyTerminalRendererAndLigatures,
+  clearTerminalPendingInput,
+  terminalCache,
+} from '../../lib/terminal';
 
 const INPUT_BATCH_MS = 4;
 const INPUT_FLUSH_THRESHOLD = 64;
@@ -68,151 +44,6 @@ const THEME_PRESETS: Record<string, Record<string, string>> = {
   orange: { background: '#1a120b', cursor: '#f97316', selectionBackground: 'rgba(249, 115, 22, 0.3)' },
   purple: { background: '#160b1a', cursor: '#d946ef', selectionBackground: 'rgba(217, 70, 239, 0.3)' },
 };
-
-function getTerminalRendererPreferences(
-  terminalSettings: { gpuAcceleration?: boolean; fontLigatures?: boolean },
-) {
-  return {
-    gpuAcceleration: terminalSettings.gpuAcceleration ?? true,
-    fontLigatures: Boolean(terminalSettings.fontLigatures),
-  };
-}
-
-function buildRendererRefitCallback(
-  sessionId: string,
-  fitAddon: FitAddon | null,
-  term: XTerm | null,
-) {
-  return () => {
-    try {
-      fitAddon?.fit();
-      if (term) {
-        const lastRow = Math.max(0, term.rows - 1);
-        term.refresh(0, lastRow);
-        syncTerminalResize(sessionId, term);
-      }
-    } catch (error) {
-      console.warn('[terminal] Renderer refit failed', error);
-    }
-  };
-}
-
-async function applyTerminalRendererAndLigatures(
-  sessionId: string,
-  term: XTerm,
-  terminalSettings: { gpuAcceleration?: boolean; fontLigatures?: boolean },
-  fitAddon: FitAddon | null,
-) {
-  const prefs = getTerminalRendererPreferences(terminalSettings);
-  const onRefit = buildRendererRefitCallback(sessionId, fitAddon, term);
-  await syncTerminalRenderer(sessionId, term, {
-    gpuAcceleration: prefs.gpuAcceleration,
-    onRefit,
-  });
-  await setTerminalLigatures(sessionId, term, prefs.fontLigatures);
-  if (prefs.gpuAcceleration && prefs.fontLigatures) {
-    await reactivateTerminalWebgl(sessionId, term, { onRefit });
-  }
-  try {
-    const lastRow = Math.max(0, term.rows - 1);
-    term.refresh(0, lastRow);
-  } catch {
-    // Ignore refresh failures; fit below still applies geometry.
-  }
-}
-
-async function setTerminalLigatures(sessionId: string, term: XTerm, enabled: boolean) {
-  const cached = terminalCache.get(sessionId);
-  if (!cached) return;
-  cached.ligaturesDesiredEnabled = enabled;
-
-  if (enabled) {
-    if (cached.ligaturesAddon) {
-      cached.ligaturesEnabled = true;
-      return;
-    }
-    if (!cached.ligaturesLoadPromise) {
-      cached.ligaturesLoadPromise = (async () => {
-        try {
-          if (!ligaturesAddonImport) {
-            ligaturesAddonImport = import('@xterm/addon-ligatures');
-          }
-          const { LigaturesAddon } = await ligaturesAddonImport;
-          const latest = terminalCache.get(sessionId);
-          if (!latest || latest.ligaturesDesiredEnabled !== true || latest.ligaturesAddon) return;
-          const addon = new LigaturesAddon();
-          term.loadAddon(addon);
-          latest.ligaturesAddon = addon;
-        } catch (error) {
-          console.warn('[terminal] Failed to load ligatures addon', error);
-        } finally {
-          const latest = terminalCache.get(sessionId);
-          if (latest) latest.ligaturesLoadPromise = null;
-        }
-      })();
-    }
-    await cached.ligaturesLoadPromise;
-    const latest = terminalCache.get(sessionId);
-    cached.ligaturesEnabled = Boolean(latest && latest.ligaturesAddon);
-    return;
-  }
-
-  if (cached.ligaturesAddon) {
-    try {
-      cached.ligaturesAddon.dispose();
-    } catch (error) {
-      console.warn('[terminal] Failed to dispose ligatures addon', error);
-    }
-    cached.ligaturesAddon = undefined;
-  }
-  cached.ligaturesEnabled = false;
-}
-// Export recent terminal buffer lines for AI context
-export function getTerminalRecentLines(termId: string, lineCount = 20): string | null {
-  if (!termId) {
-    return null;
-  }
-
-  const cached = terminalCache.get(termId);
-  if (!cached?.term?.buffer?.active) return null;
-  const buf = cached.term.buffer.active;
-  const lines: string[] = [];
-  const start = Math.max(0, buf.length - lineCount);
-  for (let i = start; i < buf.length; i++) {
-    const line = buf.getLine(i);
-    if (line) lines.push(line.translateToString(true));
-  }
-  return lines.join('\n').trim() || null;
-}
-
-// Export for cleanup from terminalSlice when terminal is explicitly closed
-export function destroyTerminalInstance(termId: string) {
-  if (!termId) {
-    return;
-  }
-
-  const cached = terminalCache.get(termId);
-  if (cached) {
-    clearPendingInput(termId);
-    cached.ghostTracker?.destroy();
-    if (cached.ligaturesAddon) {
-      try {
-        cached.ligaturesAddon.dispose();
-      } catch (error) {
-        console.warn('[terminal] Failed to dispose ligatures addon on destroy', error);
-      }
-      cached.ligaturesAddon = undefined;
-    }
-    clearTerminalRendererSession(termId);
-    // Remove all Tauri event listeners if they exist
-    if (cached.unlisten && cached.unlisten.length > 0) {
-      cached.unlisten.forEach(fn => fn());
-      cached.unlisten = [];
-    }
-    cached.term.dispose();
-    terminalCache.delete(termId);
-  }
-}
 
 /** Returns true when the active app theme has a light background */
 function isLightTheme(): boolean {
@@ -370,27 +201,6 @@ function buildXtermTheme(appBg: string, appText: string, appAccent: string, back
   };
 }
 
-
-/**
- * Clears any buffered terminal input and cancels a scheduled flush.
- */
-function clearPendingInput(termId: string | null | undefined): void {
-  if (!termId) {
-    return;
-  }
-
-  const cached = terminalCache.get(termId);
-  if (!cached) {
-    return;
-  }
-
-  if (cached.inputFlushTimer !== null) {
-    window.clearTimeout(cached.inputFlushTimer);
-    cached.inputFlushTimer = null;
-  }
-
-  cached.pendingInput = '';
-}
 
 /**
  * Sends queued terminal input to the backend as a single IPC write.
@@ -706,6 +516,7 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
         term,
         settings.terminal,
         fitAddonRef.current,
+        syncTerminalResize,
       );
     }
 
@@ -951,7 +762,7 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
         ligaturesAddon: undefined,
         ligaturesEnabled: false,
       });
-      void applyTerminalRendererAndLigatures(sessionId, term, settings.terminal, fitAddon);
+      void applyTerminalRendererAndLigatures(sessionId, term, settings.terminal, fitAddon, syncTerminalResize);
 
       // Create tracker once per cached terminal; handlers are bound per mount below.
       const ghostTracker = new InputTracker({
@@ -1117,7 +928,7 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
         // Check if the PTY session has ended and needs restart
         if (cached && !cached.spawned) {
           console.log('[Terminal] Session ended, restarting on user input');
-          clearPendingInput(sessionId);
+          clearTerminalPendingInput(sessionId);
           cached.lastResize = null;
           const generation = cached.generation + 1;
           cached.generation = generation;
@@ -1234,7 +1045,7 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
           // Reset spawned flag so terminal can be restarted
           cached.starting = false;
           cached.spawned = false;
-          clearPendingInput(sessionId);
+          clearTerminalPendingInput(sessionId);
           cached.lastResize = null;
           // Clear the terminal buffer and show exit message
           term.write('\r\n\x1b[33m[Terminal session ended. Press Enter to restart.]\x1b[0m\r\n');
@@ -1341,7 +1152,7 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
       if (cachedForCleanup?.spawned) {
         flushPendingInput(sessionId);
       } else {
-        clearPendingInput(sessionId);
+        clearTerminalPendingInput(sessionId);
       }
       unbindGhostTracker();
 
@@ -1439,7 +1250,7 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
         if (cached && !cached.spawned) {
           console.log('[Terminal] Auto-waking terminal from File Manager reconnect');
           
-          clearPendingInput(sessionId);
+          clearTerminalPendingInput(sessionId);
           cached.lastResize = null;
           const generation = cached.generation + 1;
           cached.generation = generation;

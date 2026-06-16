@@ -1,7 +1,7 @@
 # Zync Terminal — Optimization & Robustness Roadmap
 
 **Last updated:** 2026-06-17
-**Audit basis:** Full-stack review of `Terminal.tsx`, `TerminalManager.tsx`, `pty.rs`, `terminalSlice.ts`, ghost suggestions, and terminal IPC.
+**Audit basis:** Full-stack review of `terminal/Terminal.tsx`, `TerminalManager.tsx`, `pty.rs`, `terminalSlice.ts`, ghost suggestions, and terminal IPC.
 
 Plans and prioritized work for terminal performance, reliability, and code quality. For ghost-suggestion architecture, see [TERMINAL_GHOST_SUGGESTIONS.md](./TERMINAL_GHOST_SUGGESTIONS.md). For session/tab restore behavior, see [SESSION_PERSISTENCE.md](./SESSION_PERSISTENCE.md).
 
@@ -32,7 +32,7 @@ The largest remaining costs are:
 | **Scale** | N tabs ⇒ N live PTYs, N ResizeObservers, N reader tasks (even when hidden) |
 | **IPC** | Local PTY output is unbatched; remote path already batches |
 | **Correctness** | Async `onData` can reorder keystrokes; input not gated on `terminal-ready` |
-| **Structure** | `Terminal.tsx` (~1,500 lines) couples xterm, IPC, ghost, theme, search, layout |
+| **Structure** | `terminal/Terminal.tsx` (~1,300 lines) still couples xterm, IPC, ghost, theme, search, layout |
 | **Resize** | Five overlapping fit/resize paths; hidden tabs still observe resize |
 
 Recent hardening (commit `c10c082`): layout-transition safety timeout, always-on visual fit during transitions, window-resize refit, dev single-instance disabled in debug builds.
@@ -78,7 +78,7 @@ xterm on Windows ConPTY disables scrollback reflow by design (`windowsPty` compa
 
 **Today:** `TerminalManager` mounts every tab; inactive tabs are `invisible` but still spawn PTYs and run ResizeObservers.
 
-**Files:** `src/components/terminal/TerminalManager.tsx`, `src/components/Terminal.tsx`
+**Files:** `src/components/terminal/TerminalManager.tsx`, `src/components/terminal/Terminal.tsx`
 
 **Proposal:** Keep xterm instances mounted for scrollback; spawn PTY only for the active tab. Suspend or close inactive PTY readers on tab blur.
 
@@ -90,7 +90,7 @@ xterm on Windows ConPTY disables scrollback reflow by design (`windowsPty` compa
 
 **Today:** `term.onData(async (data) => { ... await handleGhostInputEvent ... })` — concurrent async handlers can interleave at `await` and call `queueTerminalInput` out of order.
 
-**Files:** `src/components/Terminal.tsx`, `src/lib/ghostSuggestions/runtime.ts`
+**Files:** `src/components/terminal/Terminal.tsx`, `src/lib/ghostSuggestions/runtime.ts`
 
 **Proposal:** Per-session input queue. Ghost logic runs inside the queue worker; PTY writes always leave in order.
 
@@ -102,7 +102,7 @@ xterm on Windows ConPTY disables scrollback reflow by design (`windowsPty` compa
 
 **Today:** `spawned = true` is set before `terminal:create` completes. `starting` is written but never read. Early keystrokes can produce silent `"Session not found"` from backend.
 
-**Files:** `src/components/Terminal.tsx`, `src-tauri/src/pty.rs`, `src-tauri/src/commands.rs`
+**Files:** `src/components/terminal/Terminal.tsx`, `src-tauri/src/pty.rs`, `src-tauri/src/commands.rs`
 
 **Proposal:** Buffer or drop input while `starting === true`; flush after `terminal-ready-${sessionId}` for matching `generation`.
 
@@ -127,8 +127,8 @@ xterm on Windows ConPTY disables scrollback reflow by design (`windowsPty` compa
 | 5.1 | Hidden-tab resize | `ResizeObserver` runs when `!isVisible` | Skip fit + IPC unless `isVisibleRef.current` |
 | 5.2 | Resize path overlap | 5 mechanisms trigger fit/sync | Single debounced `scheduleResize()` (50–100ms trailing edge) |
 | 5.3 | Spawn duplication | 3 copies of spawn/restart boilerplate | Extract `spawnTerminalSession({ reason })` |
-| 5.4 | Dead `connection-wakeup` | Listener in `Terminal.tsx`; nothing dispatches event | Remove or wire from file-manager reconnect |
-| 5.5 | Store ↔ UI coupling | `terminalSlice` imports `destroyTerminalInstance` from React component | Move `terminalCache` to `src/lib/terminal/` |
+| 5.4 | Dead `connection-wakeup` | Listener in `terminal/Terminal.tsx`; nothing dispatches event | Remove or wire from file-manager reconnect |
+| 5.5 | Store ↔ UI coupling | ~~`terminalSlice` imported lifecycle from React component~~ | **Done (partial):** `terminalCache`, `destroyTerminalInstance`, ligatures, renderer setup in `src/lib/terminal/`; UI shell remains in `terminal/Terminal.tsx` |
 | 5.6 | Split write paths | `TerminalManager` sends `terminal:write` directly for snippets/plugins | Route through shared `queueTerminalInput` |
 | 5.7 | Child cleanup | Local `close()` aborts reader; child kill relies on `Drop` | Explicit `child.kill()` / wait on local handle |
 | 5.8 | Input batch encoding | Full `pendingInput` re-encoded each keystroke | Track `pendingInputBytes` incrementally |
@@ -138,7 +138,7 @@ xterm on Windows ConPTY disables scrollback reflow by design (`windowsPty` compa
 
 ## 6. P2 — Polish & Longer-Term
 
-- **GPU acceleration (WebGL renderer)** — see [§11](#11-gpu-acceleration-webgl-renderer); dependency already present, not wired
+- **GPU acceleration (WebGL renderer)** — implemented; see [§11](#11-gpu-acceleration-webgl-renderer)
 - Skip ghost suggestion IPC when tab is hidden
 - Binary Tauri event payloads instead of `number[]` serde for output
 - Integration tests: spawn → resize → generation → close sequences
@@ -185,7 +185,7 @@ Phase 2 (2–3 days)
 
 Phase 3 (2–3 days)
   - Spawn helper (5.3)
-  - terminalCache module extraction (5.5)
+  - ~~terminalCache module extraction (5.5)~~ — done (cache, ligatures, instance API, renderer setup)
   - Dead code cleanup (5.4)
 
 Phase 4 (ongoing)
@@ -193,9 +193,9 @@ Phase 4 (ongoing)
   - Child kill (5.7)
   - Integration tests
 
-Phase 5 (1–2 days, after Phase 1 resize/input stability)
+Phase 5 — **done**
   - WebGL renderer with canvas fallback (§11)
-  - Settings toggle + context-loss recovery
+  - Settings toggle + context-loss recovery + renderer status panel
 ```
 
 ---
@@ -204,17 +204,22 @@ Phase 5 (1–2 days, after Phase 1 resize/input stability)
 
 | File | Responsibility |
 |------|----------------|
-| `src/components/Terminal.tsx` | xterm lifecycle, cache, resize, IPC, ghost integration, theme |
+| `src/components/terminal/Terminal.tsx` | xterm UI shell: resize, IPC, ghost integration, theme |
 | `src/components/terminal/TerminalManager.tsx` | Multi-tab shell; mounts all tabs |
-| `src/store/terminalSlice.ts` | Tab CRUD, `destroyTerminalInstance` on close |
+| `src/store/terminalSlice.ts` | Tab CRUD; calls `destroyTerminalInstance` from `lib/terminal` |
 | `src-tauri/src/pty.rs` | PTY spawn, read/write, resize, local + remote paths |
 | `src-tauri/src/commands.rs` | `terminal_create`, `terminal_write`, `terminal_resize` |
 | `src/lib/tauri-ipc.ts` | Channel mapping; fire-and-forget `send()` |
 | `src/lib/ghostSuggestions/*` | Input tracking, inline/popup suggestions |
 | `src/index.css` | `.terminal-container` sizing overrides |
-| `src/lib/terminal/` | **GPU renderer module** — policy, WebGL load, fallback, dispose |
+| `src/lib/terminal/terminalCache.ts` | Module-level xterm instance cache |
+| `src/lib/terminal/ligatures.ts` | `LigaturesAddon` load/dispose |
+| `src/lib/terminal/rendererSetup.ts` | GPU + ligatures activation orchestration |
+| `src/lib/terminal/instanceApi.ts` | `destroyTerminalInstance`, `getTerminalRecentLines` |
+| `src/lib/terminal/renderer*.ts` | GPU policy, WebGL load, canvas fallback, diagnostics |
+| `src/lib/terminal/index.ts` | Public API for UI + store |
 | `@xterm/addon-webgl` | Loaded lazily by `rendererController.ts` |
-| `@xterm/addon-canvas` | **Installed, not loaded** — optional explicit canvas fallback |
+| `@xterm/addon-canvas` | Loaded on WebGL → canvas transitions |
 
 ---
 
@@ -238,7 +243,7 @@ Terminal optimization work can be considered **Phase 1 complete** when:
 
 - [x] WebGL renderer active by default on supported Tauri/WebView2 targets (`gpuAcceleration: true`)
 - [x] Automatic fallback to canvas when WebGL init or context loss occurs
-- [x] Ligatures + GPU mutual exclusion enforced in policy + settings UI
+- [x] Ligatures + GPU compatible (WebGL → ligatures → WebGL reactivate)
 - [x] WebGL2 probe before load; init failure vs context-loss split
 - [x] Renderer session ownership in `lib/terminal/rendererSession.ts`
 - [x] Automated tests: policy, capability, session, controller sync
@@ -250,21 +255,26 @@ Terminal optimization work can be considered **Phase 1 complete** when:
 
 ### Status: implemented (modular)
 
-GPU rendering is implemented via `src/lib/terminal/` and wired from `Terminal.tsx`.
+GPU rendering is implemented via `src/lib/terminal/` and wired from `terminal/Terminal.tsx`.
 
 | Module | Role |
 |--------|------|
 | `types.ts` | `TerminalRendererKind`, `TerminalRendererState` |
 | `rendererPolicy.ts` | Pure policy: WebGL vs canvas from settings + context-loss blocks |
 | `webglCapability.ts` | Cached WebGL2 probe before attempting load |
-| `rendererLifecycle.ts` | Dispose / canvas fallback (no session coupling) |
+| `rendererLifecycle.ts` | Dispose / explicit canvas fallback + screen refresh |
 | `rendererSession.ts` | Per-`sessionId` renderer state ownership |
 | `rendererController.ts` | Lazy WebGL load, init vs context-loss failure paths |
-| `index.ts` | Public API surface for UI integration |
+| `rendererDiagnostics.ts` | Renderer health summaries for settings UI |
+| `terminalCache.ts` | Shared xterm instance cache |
+| `ligatures.ts` | Ligatures addon load/dispose |
+| `rendererSetup.ts` | Applies GPU + ligatures in xterm-recommended order |
+| `instanceApi.ts` | Tab destroy + AI context line export |
+| `index.ts` | Public API surface for UI, store, and tests |
 
-**Settings:** `settings.terminal.gpuAcceleration` (default `true`). Toggle in Settings → Terminal. Disabled automatically when font ligatures are on.
+**Settings:** `settings.terminal.gpuAcceleration` (default `true`). Toggle in Settings → Terminal. Compatible with font ligatures. **Renderer status** panel shows active renderer for the focused tab.
 
-**Tests:** `npm run test:terminal-renderer` (policy, WebGL probe, session ownership, controller sync)
+**Tests:** `npm run test:terminal-renderer` (policy, WebGL probe, session, controller, diagnostics)
 
 ### Previous state (pre-implementation)
 
@@ -272,11 +282,11 @@ GPU rendering is implemented via `src/lib/terminal/` and wired from `Terminal.ts
 |-------|----------|------|
 | **Before** | xterm 5 default **Canvas** (2D CPU) | No |
 | **Package installed** | `@xterm/addon-webgl` ^0.19.0 | Was not loaded |
-| **Also installed** | `@xterm/addon-canvas` ^0.7.0 | Unused explicit fallback |
+| **Also installed** | `@xterm/addon-canvas` ^0.7.0 | Loaded on WebGL dispose / GPU off |
 
-`Terminal.tsx` loads `FitAddon`, `SearchAddon`, `WebLinksAddon`, and optionally `LigaturesAddon`. No `WebglAddon`.
+`terminal/Terminal.tsx` loads `FitAddon`, `SearchAddon`, `WebLinksAddon`. GPU and ligatures load via `lib/terminal`.
 
-```808:815:zync/src/components/Terminal.tsx
+```765:772:zync/src/components/terminal/Terminal.tsx
       fitAddon = new FitAddon();
       const webLinksAddon = new WebLinksAddon();
       searchAddon = new SearchAddon();
@@ -301,7 +311,7 @@ WebGL does **not** fix scrollback reflow on maximize (that remains correct termi
 
 | Concern | Detail |
 |---------|--------|
-| **Font ligatures** | `LigaturesAddon` targets the canvas renderer; WebGL + ligatures may conflict. Policy: **WebGL OR ligatures**, not both — prefer WebGL by default; disable WebGL when user enables ligatures (or show settings hint). |
+| **Font ligatures** | `LigaturesAddon` uses character joiners; WebGL renderer handles joined ranges. Activation order: WebGL → ligatures → WebGL reactivate (texture atlas picks up `font-feature-settings`). |
 | **Transparency** | Zync uses `allowTransparency: true` and host-level `color-mix` backgrounds. Test WebGL + transparent host on Windows WebView2; fall back if alpha compositing glitches. |
 | **Context loss** | Browser/GPU can drop WebGL context (OOM, sleep/resume, driver reset). Must handle `webglcontextlost` — dispose `WebglAddon`, fall back to canvas, optionally retry on next focus. |
 | **Tauri WebView2** | WebGL2 is generally available on Windows 10+; still probe at runtime and never assume success. |

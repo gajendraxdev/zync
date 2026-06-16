@@ -46,7 +46,7 @@ State is serialised to `session.json` in the app data directory after every mean
   - `restoreTerminalTabs()` — rebuilds terminal tabs from snapshots; sets `pendingRestore: true` on SSH tabs; restores `syncedTerminalId`
   - `clearPendingRestore()` — called after a successful SSH reconnect to mark tabs as live
 
-- `src/components/Terminal.tsx`
+- `src/components/terminal/Terminal.tsx`
   - Registers an OSC 7 handler on new terminal instances to capture CWD from shells that emit it natively
 
 - `src/components/layout/MainLayout.tsx`
@@ -105,7 +105,7 @@ The `view` field is validated against the allowed `Tab['view']` union on restore
 
 ## SSH Terminal Restore
 
-SSH terminal tabs set `pendingRestore: true` on restore. This drives the "Reconnect to resume" UI in `Terminal.tsx` and prevents premature PTY spawning. The flag is cleared by `clearPendingRestore()` after a successful connection in `connect()`.
+SSH terminal tabs set `pendingRestore: true` on restore. This drives the "Reconnect to resume" UI in `terminal/Terminal.tsx` and prevents premature PTY spawning. The flag is cleared by `clearPendingRestore()` after a successful connection in `connect()`.
 
 Orphaned SSH scopes (connection deleted since last session) are skipped entirely during restore.
 
@@ -120,7 +120,7 @@ CWD is captured **passively** via OSC 7 (`\x1b]7;file://hostname/path\x07`). No 
 - fish
 - zsh with `precmd` / `chpwd`
 
-The handler in `Terminal.tsx` strips the `file://hostname` prefix, percent-decodes the path, and strips the leading `/` from Windows paths (`/C:/Users/...` → `C:/Users/...`).
+The handler in `terminal/Terminal.tsx` strips the `file://hostname` prefix, percent-decodes the path, and strips the leading `/` from Windows paths (`/C:/Users/...` → `C:/Users/...`).
 
 CWD is stored in the session for use by ghost suggestions and AI context. It is **not** used to reopen terminals in the saved directory on restore.
 
