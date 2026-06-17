@@ -36,5 +36,5 @@ export function enqueueTerminalInputTask(
 
 export function clearTerminalInputQueue(sessionId: string): void {
   bumpTerminalInputQueueEpoch(sessionId);
-  sessionQueues.delete(sessionId);
+  // Do not delete the queue entry: the bumped epoch filters stale tasks; deleting would let new tasks run concurrently with an in-flight task, breaking per-session serialization.
 }

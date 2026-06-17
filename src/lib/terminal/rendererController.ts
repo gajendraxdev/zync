@@ -102,7 +102,11 @@ export async function syncTerminalRenderer(
     }
 
     if (rendererState.loadPromise) {
-      return rendererState.loadPromise;
+      // Do not return stale loadPromise if desiredKind changed while the previous transition was in-flight.
+      if (rendererState.kind === rendererState.desiredKind) {
+        return rendererState.loadPromise;
+      }
+      // fall through to start transition for the new desiredKind
     }
 
     const transitionPromise: Promise<TerminalRendererKind> = (async (): Promise<TerminalRendererKind> => {
@@ -130,7 +134,11 @@ export async function syncTerminalRenderer(
   }
 
   if (rendererState.loadPromise) {
-    return rendererState.loadPromise;
+    // Do not return stale loadPromise if desiredKind changed while the previous transition was in-flight.
+    if (rendererState.kind === rendererState.desiredKind) {
+      return rendererState.loadPromise;
+    }
+    // fall through to start transition for the new desiredKind
   }
 
   rendererState.loadPromise = (async () => {

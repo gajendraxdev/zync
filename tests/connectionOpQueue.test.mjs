@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { runSerializedConnectionOp } from '../.tmp-agent-tests/src/features/connections/infrastructure/connectionOpQueue.js';
 
-function runTest(name, fn) {
+async function runTest(name, fn) {
   try {
-    fn();
+    await fn();
     console.log(`  ok ${name}`);
   } catch (error) {
     console.error(`  fail ${name}`);

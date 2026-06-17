@@ -18,6 +18,7 @@ export function syncTerminalResize(termId: string | null | undefined, term: XTer
     return;
   }
 
-  cached.lastResize = nextSize;
   window.ipcRenderer.send('terminal:resize', { termId, ...nextSize });
+  // Assign cache only after send (if send fails we will retry on next sync).
+  cached.lastResize = nextSize;
 }

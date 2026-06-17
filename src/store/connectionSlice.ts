@@ -526,26 +526,27 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
         } finally {
             // Suspend PTYs but keep xterm scrollback/tabs — avoids WebGL teardown blank screens.
             suspendAllTerminalsForConnection(get().terminals[id]);
-
-            // Preserve pendingRestore metadata on SSH tabs so reconnect can respawn PTY without losing tab list (roadmap 5.9)
-            if (id !== 'local') {
-                const tabs = get().terminals[id] || [];
-                if (tabs.length > 0) {
-                    set(state => ({
-                        connections: markConnectionStatus(state.connections, id, 'disconnected'),
-                        terminals: {
-                            ...state.terminals,
-                            [id]: tabs.map(t => ({ ...t, pendingRestore: true })),
-                        },
-                    }));
-                    return;  // avoid double set
-                }
-            }
-
-            set(state => ({
-                connections: markConnectionStatus(state.connections, id, 'disconnected')
-            }));
         }
+
+        // Preserve pendingRestore metadata on SSH tabs so reconnect can respawn PTY without losing tab list (roadmap 5.9)
+        // (moved out of finally so return does not suppress prior exceptions)
+        if (id !== 'local') {
+            const tabs = get().terminals[id] || [];
+            if (tabs.length > 0) {
+                set(state => ({
+                    connections: markConnectionStatus(state.connections, id, 'disconnected'),
+                    terminals: {
+                        ...state.terminals,
+                        [id]: tabs.map(t => ({ ...t, pendingRestore: true })),
+                    },
+                }));
+                return;  // avoid double set
+            }
+        }
+
+        set(state => ({
+            connections: markConnectionStatus(state.connections, id, 'disconnected')
+        }));
         });
     },
 

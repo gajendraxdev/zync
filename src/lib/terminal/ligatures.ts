@@ -44,9 +44,10 @@ export async function setTerminalLigatures(
   }
 
   disposeTerminalLigatures(cached);
+  cached.ligaturesEnabled = false;
 }
 
-export function disposeTerminalLigatures(cached: { ligaturesAddon?: { dispose: () => void } }): void {
+export function disposeTerminalLigatures(cached: { ligaturesAddon?: { dispose: () => void }; ligaturesEnabled?: boolean }): void {
   if (cached.ligaturesAddon) {
     try {
       cached.ligaturesAddon.dispose();
@@ -54,5 +55,8 @@ export function disposeTerminalLigatures(cached: { ligaturesAddon?: { dispose: (
       console.warn('[terminal] Failed to dispose ligatures addon', error);
     }
     cached.ligaturesAddon = undefined;
+  }
+  if ('ligaturesEnabled' in cached) {
+    cached.ligaturesEnabled = false;
   }
 }

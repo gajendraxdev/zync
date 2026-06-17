@@ -15,13 +15,18 @@ export function runSerializedConnectionOp<T>(
     .catch(() => {})
     .then(() => op());
 
-  opChains.set(
-    connectionId,
-    next.then(
-      () => undefined,
-      () => undefined,
-    ),
+  const settled = next.then(
+    () => undefined,
+    () => undefined,
   );
+  opChains.set(connectionId, settled);
+
+  // Cleanup entry once this op settles (if no newer op has overwritten the map entry).
+  settled.finally(() => {
+    if (opChains.get(connectionId) === settled) {
+      opChains.delete(connectionId);
+    }
+  }).catch(() => {});
 
   return next;
 }

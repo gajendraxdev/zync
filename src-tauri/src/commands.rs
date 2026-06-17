@@ -1837,16 +1837,15 @@ async fn reconnect_stored_connection(
     original_config: ConnectionConfig,
     state: &State<'_, AppState>,
 ) -> Result<(), String> {
-    // Acquire per-connection reconnect lock to serialize attempts and prevent races (see CodeRabbit).
-    let _reconnect_guard = {
+    // Acquire per-connection reconnect lock *without* holding connections lock across await (avoids deadlock with concurrent ops needing connections).
+    let reconnect_lock = {
         let connections = state.connections.lock().await;
         connections
             .get(connection_id)
             .map(|h| h.reconnect_lock.clone())
             .ok_or_else(|| format!("Connection {connection_id} was disconnected during reconnect"))?
-            .lock_owned()
-            .await
     };
+    let _reconnect_guard = reconnect_lock.clone().lock_owned().await;
 
     let expected_generation = {
         let connections = state.connections.lock().await;
@@ -1898,6 +1897,8 @@ async fn reconnect_stored_connection(
     match connections.get(connection_id) {
         Some(existing) if existing.reconnect_generation == expected_generation => {
             new_handle.reconnect_generation = expected_generation.wrapping_add(1);
+            // Preserve the *same* reconnect_lock Arc so any concurrent waiters on the old handle continue to serialize against this instance.
+            new_handle.reconnect_lock = reconnect_lock.clone();
             connections.insert(connection_id.to_string(), new_handle);
             Ok(())
         }

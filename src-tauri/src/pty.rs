@@ -810,13 +810,15 @@ impl PtyManager {
         for id in ids_to_remove {
             if let Some(mut session) = sessions.remove(&id) {
                 match &mut session.handle {
-                    TerminalHandle::Local { reader_handle, inject_handle, .. } => {
+                    TerminalHandle::Local { reader_handle, inject_handle, child, .. } => {
                         if let Some(handle) = inject_handle.take() {
                             handle.abort();
                         }
                         if let Some(handle) = reader_handle.take() {
                             handle.abort();
                         }
+                        // Explicitly kill the child process (same as close(); see roadmap 5.7 and close_by_connection review)
+                        let _ = child.kill();
                     }
                     TerminalHandle::Remote { task_handle, .. } => {
                         if let Some(handle) = task_handle.take() {

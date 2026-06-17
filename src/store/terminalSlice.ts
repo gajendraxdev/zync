@@ -221,12 +221,15 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
     /** @inheritdoc */
     clearTerminals: (connectionId, options = {}) => {
         set(state => {
-            // Kill all known terminals for this connection and destroy cached instances
             const tabs = state.terminals[connectionId] || [];
-            tabs.forEach(t => {
-                ipc.send('terminal:kill', { termId: t.id });
-                destroyTerminalInstance(t.id);
-            });
+
+            if (!options.preservePendingRestore) {
+                // Kill/destroy only when not preserving (for reconnect/restore flow).
+                tabs.forEach(t => {
+                    ipc.send('terminal:kill', { termId: t.id });
+                    destroyTerminalInstance(t.id);
+                });
+            }
 
             if (options.preservePendingRestore) {
                 // Preserve tab list with pendingRestore metadata for SSH reconnect/restore flow (roadmap 5.9)

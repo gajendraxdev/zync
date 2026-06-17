@@ -33,9 +33,10 @@ export function flushPendingInput(termId: string | null | undefined): void {
   }
 
   const data = cached.pendingInput;
+  window.ipcRenderer.send('terminal:write', { termId, data });
+  // Clear only after send (prevents loss on sync throw; fire-and-forget IPC is best-effort).
   cached.pendingInput = '';
   cached.pendingInputBytes = 0;
-  window.ipcRenderer.send('terminal:write', { termId, data });
 }
 
 /**

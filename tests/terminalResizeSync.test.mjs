@@ -17,6 +17,7 @@ function runTest(name, fn) {
 
 const term = { rows: 24, cols: 80 };
 
+const originalWindow = globalThis.window;
 globalThis.window = {
   ipcRenderer: {
     send: (_channel, payload) => {
@@ -93,4 +94,5 @@ runTest('syncTerminalResize sends IPC when PTY is live', () => {
   assert.deepEqual(ipcResizes[0], { termId: SESSION, rows: 24, cols: 80 });
 });
 
+globalThis.window = originalWindow;
 console.log('Terminal resize sync tests passed.');

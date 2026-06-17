@@ -24,6 +24,9 @@ export function attachTerminalLifecycleListeners(sessionId: string, term: XTerm)
     cached.unlisten = [];
   }
 
+  // Set early to prevent concurrent attach attempts; catches below handle registration failures without unhandled rejections.
+  cached.listenerAttached = true;
+
   listen<TerminalOutputEvent>(`terminal-output-${sessionId}`, (event) => {
     const entry = terminalCache.get(sessionId);
     if (!entry || event.payload.generation !== entry.generation) {
@@ -34,7 +37,7 @@ export function attachTerminalLifecycleListeners(sessionId: string, term: XTerm)
     if (terminalCache.has(sessionId)) {
       terminalCache.get(sessionId)?.unlisten?.push(unlistenFn);
     }
-  });
+  }).catch((e) => console.warn(`[terminal] output listener attach failed for ${sessionId}`, e));
 
   listen<TerminalLifecycleEvent>(`terminal-ready-${sessionId}`, (event) => {
     handleTerminalReady(sessionId, event.payload.generation);
@@ -42,7 +45,7 @@ export function attachTerminalLifecycleListeners(sessionId: string, term: XTerm)
     if (terminalCache.has(sessionId)) {
       terminalCache.get(sessionId)?.unlisten?.push(unlistenFn);
     }
-  });
+  }).catch((e) => console.warn(`[terminal] ready listener attach failed for ${sessionId}`, e));
 
   listen<TerminalLifecycleEvent>(`terminal-exit-${sessionId}`, (event) => {
     const entry = terminalCache.get(sessionId);
@@ -69,7 +72,7 @@ export function attachTerminalLifecycleListeners(sessionId: string, term: XTerm)
     if (terminalCache.has(sessionId)) {
       terminalCache.get(sessionId)?.unlisten?.push(unlistenFn);
     }
-  });
+  }).catch((e) => console.warn(`[terminal] exit listener attach failed for ${sessionId}`, e));
 
-  cached.listenerAttached = true;
+  // listenerAttached was already set before the async registrations to guard against concurrent calls
 }

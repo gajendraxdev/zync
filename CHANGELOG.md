@@ -10,6 +10,11 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Lazy PTY Spawn**: PTYs spawn when a shell tab is first selected. Switching hosts, local terminal, or internal shell tabs keeps shells and scrollback alive. PTYs suspend only when switching to Files/Dashboard within the same workspace. ([d15f536])
 - **Terminal PTY Lifecycle Module**: `spawnTerminalSession` / `suspendTerminalPty` in `src/lib/terminal/ptyLifecycle.ts` with agent tests for spawn, suspend, and input-pipeline buffering. ([d15f536], [a684bb5])
 - **Terminal Resize Unification (roadmap 5.2)**: `createResizeScheduler` (60ms trailing edge) + `safeFitTerminal`/`syncTerminalResize` primitives in `src/lib/terminal/terminalFit.ts`; all fit/sync triggers now funnel through the scheduler. ([d15f536])
+- **Terminal GPU Acceleration (WebGL)**: Modular `src/lib/terminal/` renderer stack — policy, WebGL2 probe, lazy `@xterm/addon-webgl` load, session-scoped state, context-loss handling, and canvas fallback via `@xterm/addon-canvas`. Settings → Terminal adds a **GPU Acceleration** toggle (default on). ([15576ab])
+- **GPU + Font Ligatures**: WebGL and `LigaturesAddon` can run together using xterm’s recommended activation order (WebGL → ligatures → WebGL reactivate for texture-atlas font features). ([15576ab])
+- **Terminal Renderer Status**: Settings → Terminal shows live renderer health for the active tab (GPU active, canvas fallback, or GPU off) with WebGL2 availability and a refresh control. ([15576ab])
+- **Terminal Renderer Tests**: `npm run test:terminal-renderer` and agent-test coverage for policy, WebGL probe cache, session ownership, controller sync/reactivate, and diagnostics. ([15576ab])
+- **Terminal Roadmap**: `docs/TERMINAL_ROADMAP.md` — optimization/robustness audit, P0/P1 priorities, and GPU implementation notes. ([15576ab])
 
 ### Fixed
 - **Connecting Screen Transparency**: Host connection loading no longer flashes fully transparent when vibrancy/terminal transparency is enabled — connecting and error states use an opaque shell and skip the tab fade-in animation.
@@ -19,22 +24,13 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Input Batching Perf (5.8)**: `pendingInputBytes` is tracked incrementally; avoids full re-encode of pending input on each keystroke. ([1fd77d5])
 - **Reconnect Tab Preservation (5.9)**: `clearTerminals` now supports `preservePendingRestore`; SSH disconnect marks tabs with `pendingRestore` so they survive for restore flow. ([1fd77d5])
 - **Reconnect race & handle cleanup**: Added `reconnect_lock` guard; only drop handles on full success path; removed stray console.log of connection config. ([8d17335], [1fd77d5])
-
-### Changed
-- **Terminal Module Layout**: Moved `Terminal.tsx` to `src/components/terminal/`; extracted `terminalCache`, ligatures, renderer setup, and instance lifecycle (`destroyTerminalInstance`, `getTerminalRecentLines`) into `src/lib/terminal/`. Store and AI context now import from `lib/terminal` instead of the React component. ([b0cfd5f], [d15f536])
-
-### Added
-- **Terminal GPU Acceleration (WebGL)**: Modular `src/lib/terminal/` renderer stack — policy, WebGL2 probe, lazy `@xterm/addon-webgl` load, session-scoped state, context-loss handling, and canvas fallback via `@xterm/addon-canvas`. Settings → Terminal adds a **GPU Acceleration** toggle (default on). ([15576ab])
-- **GPU + Font Ligatures**: WebGL and `LigaturesAddon` can run together using xterm’s recommended activation order (WebGL → ligatures → WebGL reactivate for texture-atlas font features). ([15576ab])
-- **Terminal Renderer Status**: Settings → Terminal shows live renderer health for the active tab (GPU active, canvas fallback, or GPU off) with WebGL2 availability and a refresh control. ([15576ab])
-- **Terminal Renderer Tests**: `npm run test:terminal-renderer` and agent-test coverage for policy, WebGL probe cache, session ownership, controller sync/reactivate, and diagnostics. ([15576ab])
-- **Terminal Roadmap**: `docs/TERMINAL_ROADMAP.md` — optimization/robustness audit, P0/P1 priorities, and GPU implementation notes. ([15576ab])
-
-### Fixed
 - **Terminal Resize Hardening**: Layout transitions always run visual `fit()` while deferring PTY resize IPC until settle; removed legacy width pinning; added window-resize refit, post-fit screen refresh, layout-transition safety timeout, and terminal container fill CSS to keep the xterm canvas aligned with its host. ([c10c082])
 - **Dev Single-Instance Focus Steal**: `tauri dev` no longer focuses the installed production app — single-instance guard is release-only (`debug_assertions` off) because dev and production share the same app identifier. ([c10c082])
 - **GPU Off Blank Terminal**: Turning off GPU acceleration no longer wipes the active terminal — WebGL dispose now loads the explicit canvas renderer and refreshes the buffer so existing tabs stay visible and usable. ([15576ab])
 - **WebGL Reactivate Races**: `reactivateTerminalWebgl` coalesces concurrent loads through the shared `loadPromise` used by `syncTerminalRenderer`. ([15576ab])
+
+### Changed
+- **Terminal Module Layout**: Moved `Terminal.tsx` to `src/components/terminal/`; extracted `terminalCache`, ligatures, renderer setup, and instance lifecycle (`destroyTerminalInstance`, `getTerminalRecentLines`) into `src/lib/terminal/`. Store and AI context now import from `lib/terminal` instead of the React component. ([b0cfd5f], [d15f536])
 
 ## [2.16.1] - 2026-06-15
 

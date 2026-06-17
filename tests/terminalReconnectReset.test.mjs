@@ -17,8 +17,8 @@ function runTest(name, fn) {
 
 globalThis.window = {
   ipcRenderer: {
-    send: (_channel, payload) => {
-      ipcKills.push(payload);
+    send: (channel, payload) => {
+      ipcKills.push({ channel, payload });
     },
   },
 };
@@ -49,7 +49,8 @@ runTest('resetTerminalPtyForReconnect clears stale live PTY flags', () => {
   assert.equal(cached.pendingInput, '');
   assert.equal(cached.lastResize, null);
   assert.equal(ipcKills.length, 1);
-  assert.equal(ipcKills[0].termId, SESSION);
+  assert.equal(ipcKills[0].channel, 'terminal:kill');
+  assert.equal(ipcKills[0].payload.termId, SESSION);
 });
 
 console.log('Terminal reconnect reset tests passed.');
