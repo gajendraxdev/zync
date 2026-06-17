@@ -464,6 +464,8 @@ pub struct ConnectionHandle {
     pub uses_vault_auth: bool,
     /// Bumped on each new connect/reconnect; stale in-flight reconnects must match before replacing.
     pub reconnect_generation: u64,
+    /// Serializes reconnect attempts for this connection to prevent races.
+    pub reconnect_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// Internal helper: establishes a full SSH connection (session + SFTP + OS detection)
@@ -601,6 +603,7 @@ async fn reconnect_connection(
         detected_shell,
         uses_vault_auth: config_uses_vault_auth(config),
         reconnect_generation: 0,
+        reconnect_lock: Arc::new(tokio::sync::Mutex::new(())),
     })
 }
 
@@ -1113,12 +1116,11 @@ pub async fn ssh_disconnect_vault_backed(
         errors.push(format!("Tunnel stop failed: {error}"));
     }
 
-    let mut connections = state.connections.lock().await;
-    for id in &ids {
-        connections.remove(id);
-    }
-
     if errors.is_empty() {
+        let mut connections = state.connections.lock().await;
+        for id in &ids {
+            connections.remove(id);
+        }
         Ok(ids)
     } else {
         Err(errors.join("; "))
@@ -1835,6 +1837,17 @@ async fn reconnect_stored_connection(
     original_config: ConnectionConfig,
     state: &State<'_, AppState>,
 ) -> Result<(), String> {
+    // Acquire per-connection reconnect lock to serialize attempts and prevent races (see CodeRabbit).
+    let _reconnect_guard = {
+        let connections = state.connections.lock().await;
+        connections
+            .get(connection_id)
+            .map(|h| h.reconnect_lock.clone())
+            .ok_or_else(|| format!("Connection {connection_id} was disconnected during reconnect"))?
+            .lock_owned()
+            .await
+    };
+
     let expected_generation = {
         let connections = state.connections.lock().await;
         connections
@@ -1897,6 +1910,11 @@ async fn reconnect_stored_connection(
     }
 }
 
+/// Machine-readable prefix — must stay in sync with `TERMINAL_SPAWN_CONNECTION_NOT_READY` in TS.
+fn connection_not_ready_error(connection_id: &str) -> String {
+    format!("CONNECTION_NOT_READY:{connection_id}")
+}
+
 async fn get_live_ssh_session(
     connection_id: &str,
     state: &State<'_, AppState>,
@@ -1916,7 +1934,7 @@ async fn get_live_ssh_session(
         connections
             .get(connection_id)
             .map(|c| c.config.clone())
-            .ok_or_else(|| format!("Connection config for {} not found", connection_id))?
+            .ok_or_else(|| connection_not_ready_error(connection_id))?
     };
 
     reconnect_stored_connection(connection_id, config, state).await?;
