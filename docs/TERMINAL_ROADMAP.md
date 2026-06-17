@@ -1,6 +1,6 @@
 # Zync Terminal — Optimization & Robustness Roadmap
 
-**Last updated:** 2026-06-17 (P1 5.7/5.8/5.9 + CR fixes landed)
+**Last updated:** 2026-06-18 (P1 complete)
 **Audit basis:** Full-stack review of `terminal/Terminal.tsx`, `TerminalManager.tsx`, `pty.rs`, `terminalSlice.ts`, ghost suggestions, and terminal IPC.
 
 Plans and prioritized work for terminal performance, reliability, and code quality. For ghost-suggestion architecture, see [TERMINAL_GHOST_SUGGESTIONS.md](./TERMINAL_GHOST_SUGGESTIONS.md). For session/tab restore behavior, see [SESSION_PERSISTENCE.md](./SESSION_PERSISTENCE.md).
@@ -117,7 +117,7 @@ xterm on Windows ConPTY disables scrollback reflow by design (`windowsPty` compa
 | 5.6 | Split write paths | ~~`TerminalManager` sends `terminal:write` directly~~ | **Done:** route through `queueTerminalInput` |
 | 5.7 | Child cleanup | Local `close()` aborts reader; child kill relies on `Drop` | **Done:** explicit `child.kill()` in PtyManager::close / close_by_connection (see src-tauri/src/pty.rs) |
 | 5.8 | Input batch encoding | Full `pendingInput` re-encoded each keystroke | **Done:** track `pendingInputBytes` incrementally (encode only delta) |
-| 5.9 | Disconnect tab wipe | `clearTerminals` on disconnect destroys cache + PTYs | **Done (partial):** clearTerminals supports preservePendingRestore; on SSH disconnect we now set pendingRestore on tabs; UX documented in comments (tabs preserved for reconnect, local clears fully) |
+| 5.9 | Disconnect tab wipe | `clearTerminals` on disconnect destroys cache + PTYs | **Done:** clearTerminals supports preservePendingRestore; on SSH disconnect we now set pendingRestore on tabs; UX documented in comments (tabs preserved for reconnect, local clears fully) |
 
 ---
 
@@ -175,12 +175,12 @@ Phase 2 — **shipped** (see §10 exit criteria)
 Phase 3 (2–3 days)
   - ~~terminalCache module extraction (5.5)~~ — done (cache, ligatures, instance API, renderer setup)
 
-Phase 4 (ongoing)
+Phase 4 — **done**
   - ~~Resize unification (5.2)~~ — done via createResizeScheduler + call site consolidation
   - ~~Child kill (5.7)~~ — done with explicit `child.kill()`
   - ~~Input batch encoding (5.8)~~ — done
-  - ~~Disconnect tab wipe (5.9)~~ — clearTerminals preserve option + set pendingRestore on disconnect
-  - Integration tests
+  - ~~Disconnect tab wipe (5.9)~~ — done (clearTerminals preserve option + set pendingRestore on disconnect)
+  - ~~Integration tests~~ — done (terminalLifecycleIntegration, terminalPtyLifecycle, terminalReconnect*, terminalSpawn*, etc.)
 
 Phase 5 — **done**
   - WebGL renderer with canvas fallback (§11)

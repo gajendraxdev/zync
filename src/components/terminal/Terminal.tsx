@@ -776,6 +776,7 @@ export function TerminalComponent({
         debounceMs: 30,
         resolveInlineSuggestion: async (line) => {
           if (!ghostSettingsRef.current.inlineEnabled) return '';
+          if (!isVisibleRef.current) return ''; // P2: skip IPC for hidden tabs
           const termState = useAppStore.getState().terminals[terminalKey]?.find(t => t.id === sessionId);
           const cwd = termState?.lastKnownCwd ?? termState?.initialPath;
           return resolveInlineSuggestion({
@@ -803,6 +804,7 @@ export function TerminalComponent({
           const termState = useAppStore.getState().terminals[terminalKey]?.find(t => t.id === sessionId);
           const cwd = termState?.lastKnownCwd ?? termState?.initialPath;
           const preferPath = shouldPreferPathSuggestion(line);
+          if (!isVisibleRef.current) return; // P2: skip IPC for hidden tabs
           void resolvePopupCandidates({
             line,
             cwd,
@@ -865,6 +867,7 @@ export function TerminalComponent({
         }
         const termState = useAppStore.getState().terminals[terminalKey]?.find(t => t.id === sessionId);
         const cwd = termState?.lastKnownCwd ?? termState?.initialPath;
+        if (!isVisibleRef.current) return; // P2: skip IPC for hidden tabs
         const outcome = await resolveTabCompletionOutcome({
           line,
           cwd,
@@ -956,21 +959,24 @@ export function TerminalComponent({
         }
 
         // Ghost popup + inline suggestion routing.
-        const handledByGhost = await handleGhostInputEvent({
-          data: data,
-          popup: ghostPopupRef.current,
-          tracker: cached?.ghostTracker,
-          allowTabPopup: ghostSettingsRef.current.popupEnabled,
-          onMovePopupSelection: moveGhostPopupSelection,
-          onAcceptPopupSelection: () => {
-            const popup = ghostPopupRef.current;
-            const suffix = popup.items[popup.selectedIndex] ?? '';
-            acceptGhostSuffix(suffix);
-          },
-          onDismissPopup: closeGhostPopup,
-          onTriggerTabPopup: triggerGhostPopup,
-        });
-        if (handledByGhost) return;
+        // Skip ghost IPC when not visible (P2 polish: avoid work + IPC for hidden tabs).
+        if (isVisibleRef.current) {
+          const handledByGhost = await handleGhostInputEvent({
+            data: data,
+            popup: ghostPopupRef.current,
+            tracker: cached?.ghostTracker,
+            allowTabPopup: ghostSettingsRef.current.popupEnabled,
+            onMovePopupSelection: moveGhostPopupSelection,
+            onAcceptPopupSelection: () => {
+              const popup = ghostPopupRef.current;
+              const suffix = popup.items[popup.selectedIndex] ?? '';
+              acceptGhostSuffix(suffix);
+            },
+            onDismissPopup: closeGhostPopup,
+            onTriggerTabPopup: triggerGhostPopup,
+          });
+          if (handledByGhost) return;
+        }
 
         queueTerminalInput(sessionId, data);
         });
