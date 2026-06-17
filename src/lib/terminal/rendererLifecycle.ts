@@ -3,25 +3,40 @@ import type { TerminalRendererState } from './types.js';
 
 let canvasAddonImport: Promise<typeof import('@xterm/addon-canvas')> | null = null;
 
-export function disposeWebglAddonInternal(state: TerminalRendererState): void {
-  if (!state.webglAddon) return;
-  try {
-    state.webglAddon.dispose();
-  } catch (error) {
-    console.warn('[terminal] Failed to dispose WebGL addon', error);
+function disposeAddonSafely(addon: { dispose: () => void } | undefined): void {
+  if (!addon) {
+    return;
   }
-  state.webglAddon = undefined;
-  state.kind = 'canvas';
+
+  try {
+    addon.dispose();
+  } catch (err) {
+    console.warn('[terminal] addon dispose failed', err);
+    // WebglAddon.dispose reads _core._store._isDisposed without guarding _store.
+  }
 }
 
-export function disposeCanvasAddonInternal(state: TerminalRendererState): void {
-  if (!state.canvasAddon) return;
-  try {
-    state.canvasAddon.dispose();
-  } catch (error) {
-    console.warn('[terminal] Failed to dispose canvas addon', error);
-  }
+export function disposeWebglAddonInternal(
+  state: TerminalRendererState,
+  _term?: Terminal, // reserved for future safe teardown checks
+): void {
+  const addon = state.webglAddon;
+  if (!addon) return;
+
+  state.webglAddon = undefined;
+  state.kind = 'canvas';
+  disposeAddonSafely(addon);
+}
+
+export function disposeCanvasAddonInternal(
+  state: TerminalRendererState,
+  _term?: Terminal, // reserved for future safe teardown checks
+): void {
+  const addon = state.canvasAddon;
+  if (!addon) return;
+
   state.canvasAddon = undefined;
+  disposeAddonSafely(addon);
 }
 
 export function refreshTerminalScreen(term: Terminal): void {
@@ -54,12 +69,12 @@ export async function activateCanvasRenderer(
   state: TerminalRendererState,
 ): Promise<void> {
   const hadWebgl = Boolean(state.webglAddon);
-  disposeWebglAddonInternal(state);
+  disposeWebglAddonInternal(state, term);
   state.desiredKind = 'canvas';
   state.kind = 'canvas';
 
   if (hadWebgl) {
-    disposeCanvasAddonInternal(state);
+    disposeCanvasAddonInternal(state, term);
     try {
       await loadCanvasRenderer(term, state);
     } catch (error) {
@@ -75,22 +90,25 @@ export async function activateCanvasRenderer(
   }
 }
 
-export function ensureCanvasRenderer(state: TerminalRendererState): void {
-  disposeWebglAddonInternal(state);
+export function ensureCanvasRenderer(state: TerminalRendererState, term?: Terminal): void {
+  disposeWebglAddonInternal(state, term);
   state.desiredKind = 'canvas';
   state.kind = 'canvas';
 }
 
-export function disposeTerminalRenderer(state: TerminalRendererState | undefined): void {
+export function disposeTerminalRenderer(
+  state: TerminalRendererState | undefined,
+  term?: Terminal,
+): void {
   if (!state) return;
   if (state.loadPromise) {
     void state.loadPromise.finally(() => {
-      disposeWebglAddonInternal(state);
-      disposeCanvasAddonInternal(state);
+      disposeWebglAddonInternal(state, term);
+      disposeCanvasAddonInternal(state, term);
     });
     state.loadPromise = null;
   } else {
-    disposeWebglAddonInternal(state);
-    disposeCanvasAddonInternal(state);
+    disposeWebglAddonInternal(state, term);
+    disposeCanvasAddonInternal(state, term);
   }
 }

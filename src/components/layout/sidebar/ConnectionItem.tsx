@@ -113,6 +113,7 @@ export const ConnectionItem = memo(function ConnectionItem({ conn, isCollapsed, 
                 )}
                 onClick={(e) => {
                     e.preventDefault();
+                    openTab(conn.id);
                 }}
                 role="button"
                 tabIndex={0}

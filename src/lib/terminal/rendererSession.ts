@@ -1,3 +1,4 @@
+import type { Terminal } from '@xterm/xterm';
 import { disposeTerminalRenderer, ensureCanvasRenderer } from './rendererLifecycle.js';
 import { createInitialRendererState, type TerminalRendererState } from './types.js';
 
@@ -20,9 +21,9 @@ export function ensureCanvasRendererForSession(sessionId: string): void {
   ensureCanvasRenderer(getTerminalRendererState(sessionId));
 }
 
-export function clearTerminalRendererSession(sessionId: string): void {
+export function clearTerminalRendererSession(sessionId: string, term?: Terminal): void {
   const state = rendererSessions.get(sessionId);
   if (!state) return;
-  disposeTerminalRenderer(state);
+  disposeTerminalRenderer(state, term);
   rendererSessions.delete(sessionId);
 }

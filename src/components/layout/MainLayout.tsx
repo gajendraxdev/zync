@@ -325,6 +325,7 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
 
     const isConnecting = connection?.status === 'connecting';
     const isError = connection?.status === 'error';
+    const forceOpaqueShell = isConnecting || isError;
 
     /**
      * Handles selection from the combined tab bar.
@@ -404,17 +405,19 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
     return (
         <div className={cn(
             "absolute inset-0 flex flex-col transition-all",
-            tab.view === 'terminal' && terminalTransparencyEnabled && !isConnecting && !isError ? "bg-transparent" : "bg-app-bg",
+            forceOpaqueShell || !(tab.view === 'terminal' && terminalTransparencyEnabled)
+                ? "bg-app-bg"
+                : "bg-transparent",
             !isActive && "hidden",
-            isActive && "animate-in fade-in slide-in-from-bottom-2 duration-300 ease-out fill-mode-forwards"
+            isActive && !forceOpaqueShell && "animate-in fade-in slide-in-from-bottom-2 duration-300 ease-out fill-mode-forwards"
         )}>
             {isConnecting ? (
-                <div className="flex-1 flex flex-col items-center justify-center space-y-4">
+                <div className="flex-1 flex flex-col items-center justify-center space-y-4 bg-app-bg">
                     <div className="w-8 h-8 border-4 border-[var(--color-app-accent)]/30 border-t-[var(--color-app-accent)] rounded-full animate-spin"></div>
                     <div className="text-[var(--color-app-muted)] animate-pulse">Connecting to server...</div>
                 </div>
             ) : isError ? (
-                <div className="flex-1 flex flex-col items-center justify-center space-y-4">
+                <div className="flex-1 flex flex-col items-center justify-center space-y-4 bg-app-bg">
                     <div className="text-[var(--color-app-danger)] text-4xl mb-4">&#9888;</div>
                     <div className="text-xl font-medium text-[var(--color-app-text)]">Connection Failed</div>
                     <div className="text-[var(--color-app-muted)] text-sm max-w-md text-center">
@@ -508,12 +511,13 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
                                 className={cn(
                                     "absolute inset-0 z-10",
                                     tab.view === 'terminal' ? "block" : "hidden",
-                                    terminalTransparencyEnabled ? "bg-transparent" : "bg-app-bg"
+                                    terminalTransparencyEnabled && !forceOpaqueShell ? "bg-transparent" : "bg-app-bg"
                                 )}
                             >
                                 <TerminalManager
                                     connectionId={tab.connectionId}
-                                    isVisible={isActive && tab.view === 'terminal'}
+                                    isWorkspaceActive={isActive}
+                                    isTerminalView={tab.view === 'terminal'}
                                     hideTabs={true}
                                 />
                                 {/* Snippet overlay sidebar — slides in from right over terminal */}

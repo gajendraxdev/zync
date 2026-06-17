@@ -6,11 +6,29 @@ import { useShallow } from 'zustand/react/shallow';
 import { Terminal as TerminalIcon, Plus, X, Zap } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { once, type UnlistenFn } from '@tauri-apps/api/event';
+import { queueTerminalInput } from '../../lib/terminal';
 
 // TerminalTab interface is now in store/terminalSlice
 // export interface TerminalTab ... removed
 
-export function TerminalManager({ connectionId, isVisible, hideTabs = false }: { connectionId?: string; isVisible?: boolean, hideTabs?: boolean }) {
+export function TerminalManager({
+    connectionId,
+    isVisible,
+    isWorkspaceActive,
+    isTerminalView = true,
+    hideTabs = false,
+}: {
+    connectionId?: string;
+    isVisible?: boolean;
+    /** Sidebar workspace tab is selected (false when another host/local tab is active). */
+    isWorkspaceActive?: boolean;
+    /** This workspace is showing the terminal view (false on Files/Dashboard). */
+    isTerminalView?: boolean;
+    hideTabs?: boolean;
+}) {
+    const workspaceActive = isWorkspaceActive ?? (isVisible !== false);
+    const terminalView = isTerminalView ?? (isVisible !== false);
+    const panelVisible = workspaceActive && terminalView;
     const globalActiveId = useAppStore(state => state.activeConnectionId);
     const activeConnectionId = connectionId || globalActiveId;
 
@@ -56,7 +74,7 @@ export function TerminalManager({ connectionId, isVisible, hideTabs = false }: {
         const handleRunCommand = (e: any) => {
             const { connectionId: targetConnId, command } = e.detail;
             if (targetConnId === activeConnectionId && activeTabIdRef.current) {
-                window.ipcRenderer.send('terminal:write', { termId: activeTabIdRef.current, data: command });
+                queueTerminalInput(activeTabIdRef.current, command);
             }
         };
 
@@ -79,7 +97,7 @@ export function TerminalManager({ connectionId, isVisible, hideTabs = false }: {
                             delete pendingReadyRef.current[newId];
 
                             console.warn(`[TerminalManager] terminal-ready-${newId} timed out, sending command anyway`);
-                            window.ipcRenderer.send('terminal:write', { termId: newId, data: command });
+                            queueTerminalInput(newId, command);
                         }, 5000)
                     };
                     pendingReadyRef.current[newId] = pendingObj;
@@ -90,7 +108,7 @@ export function TerminalManager({ connectionId, isVisible, hideTabs = false }: {
                             obj.sent = true;
                             clearTimeout(obj.timeoutId);
                             delete pendingReadyRef.current[newId];
-                            window.ipcRenderer.send('terminal:write', { termId: newId, data: command });
+                            queueTerminalInput(newId, command);
                         }
                     }).then(unlisten => {
                         const obj = pendingReadyRef.current[newId];
@@ -125,7 +143,7 @@ export function TerminalManager({ connectionId, isVisible, hideTabs = false }: {
             const { connectionId: targetConnId, text } = (e as CustomEvent).detail;
             // If the plugin didn't provide a connectionId, or it matches ours, and we have an active terminal
             if ((!targetConnId || targetConnId === activeConnectionId) && activeTabIdRef.current) {
-                window.ipcRenderer.send('terminal:write', { termId: activeTabIdRef.current, data: text });
+                queueTerminalInput(activeTabIdRef.current, text);
             }
         };
 
@@ -246,8 +264,10 @@ export function TerminalManager({ connectionId, isVisible, hideTabs = false }: {
                                 <TerminalComponent
                                     connectionId={activeConnectionId}
                                     termId={tab.id}
-                                    // Pass isVisible only if parent said so, AND this internal tab is active
-                                    isVisible={(isVisible !== false) && activeTabId === tab.id}
+                                    isWorkspaceActive={workspaceActive}
+                                    isTerminalView={terminalView}
+                                    isActiveTab={activeTabId === tab.id}
+                                    isVisible={panelVisible && activeTabId === tab.id}
                                 />
                             </div>
                         </div>

@@ -111,6 +111,9 @@ export async function syncTerminalRenderer(
         options.onRefit?.();
         notifyTerminalRendererChanged(sessionId);
         return 'canvas';
+      } catch (error) {
+        console.warn('[terminal] Canvas transition failed', error);
+        return 'canvas';
       } finally {
         rendererState.loadPromise = null;
       }
@@ -119,7 +122,7 @@ export async function syncTerminalRenderer(
     return transitionPromise;
   }
 
-  disposeCanvasAddonInternal(rendererState);
+  disposeCanvasAddonInternal(rendererState, term);
 
   if (rendererState.kind === 'webgl' && rendererState.webglAddon) {
     notifyTerminalRendererChanged(sessionId);
@@ -138,6 +141,9 @@ export async function syncTerminalRenderer(
         options.onRefit?.();
       }
       return kind;
+    } catch (error) {
+      console.warn('[terminal] WebGL transition failed', error);
+      return 'canvas';
     } finally {
       rendererState.loadPromise = null;
     }
@@ -167,8 +173,8 @@ export function reactivateTerminalWebgl(
 
   rendererState.loadPromise = (async (): Promise<TerminalRendererKind> => {
     try {
-      disposeCanvasAddonInternal(rendererState);
-      disposeWebglAddonInternal(rendererState);
+      disposeCanvasAddonInternal(rendererState, term);
+      disposeWebglAddonInternal(rendererState, term);
 
       if (!isWebgl2Available()) {
         rendererState.initFailureCount += 1;

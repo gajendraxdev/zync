@@ -1,6 +1,7 @@
 import { clearTerminalRendererSession } from './rendererSession.js';
 import { disposeTerminalLigatures } from './ligatures.js';
 import { clearTerminalPendingInput, terminalCache } from './terminalCache.js';
+import { clearTerminalInputQueue } from './inputQueue.js';
 
 export function getTerminalRecentLines(termId: string, lineCount = 20): string | null {
   if (!termId) {
@@ -29,16 +30,21 @@ export function destroyTerminalInstance(termId: string): void {
   if (!cached) return;
 
   clearTerminalPendingInput(termId);
+  clearTerminalInputQueue(termId);
   cached.ghostTracker?.destroy();
   disposeTerminalLigatures(cached);
   cached.ligaturesEnabled = false;
-  clearTerminalRendererSession(termId);
+  clearTerminalRendererSession(termId, cached.term);
 
   if (cached.unlisten && cached.unlisten.length > 0) {
     cached.unlisten.forEach((fn) => fn());
     cached.unlisten = [];
   }
 
-  cached.term.dispose();
+  try {
+    cached.term.dispose();
+  } catch {
+    // WebGL addon dispose can throw when xterm core is already torn down.
+  }
   terminalCache.delete(termId);
 }

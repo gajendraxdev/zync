@@ -10,7 +10,7 @@ import { cn } from '../../lib/utils';
 import { ContextMenu } from '../ui/ContextMenu';
 import { Button } from '../ui/Button';
 import { Terminal } from 'lucide-react';
-import { listen } from '@tauri-apps/api/event';
+
 import { InputTracker } from '../../lib/ghostSuggestions/inputTracker';
 import {
   acceptGhostCommand,
@@ -29,14 +29,23 @@ import { GhostSuggestionOverlay } from './GhostSuggestionOverlay';
 import { GhostSuggestionListOverlay } from './GhostSuggestionListOverlay';
 import {
   applyTerminalRendererAndLigatures,
+  buildEffectiveRendererSettings,
+  attachTerminalLifecycleListeners,
   clearTerminalPendingInput,
+  enqueueTerminalInputTask,
+  flushPendingInput,
+  queueTerminalInput,
+  resolveLazyPtyAction,
+  safeFitTerminal,
+  spawnTerminalFromStoreContext,
+  suspendTerminalPty,
+  syncTerminalResize,
+  createResizeScheduler,
+  TERMINAL_CONNECTION_WAKEUP_EVENT,
   terminalCache,
+  tryWakeTerminalOnReconnect,
 } from '../../lib/terminal';
 
-const INPUT_BATCH_MS = 4;
-const INPUT_FLUSH_THRESHOLD = 64;
-const inputByteEncoder = new TextEncoder();
-const IMMEDIATE_INPUT_PATTERN = /[\r\n\x03\x04\x1b]/;
 const THEME_PRESETS: Record<string, Record<string, string>> = {
   red: { background: '#1a0b0b', cursor: '#ef4444', selectionBackground: 'rgba(239, 68, 68, 0.3)' },
   blue: { background: '#0b101a', cursor: '#3b82f6', selectionBackground: 'rgba(59, 130, 246, 0.3)' },
@@ -202,110 +211,31 @@ function buildXtermTheme(appBg: string, appText: string, appAccent: string, back
 }
 
 
-/**
- * Sends queued terminal input to the backend as a single IPC write.
- */
-function flushPendingInput(termId: string | null | undefined): void {
-  if (!termId) {
-    return;
-  }
-
-  const cached = terminalCache.get(termId);
-  if (!cached) {
-    return;
-  }
-
-  if (cached.inputFlushTimer !== null) {
-    window.clearTimeout(cached.inputFlushTimer);
-    cached.inputFlushTimer = null;
-  }
-
-  if (!cached.pendingInput) {
-    return;
-  }
-
-  const data = cached.pendingInput;
-  cached.pendingInput = '';
-  window.ipcRenderer.send('terminal:write', { termId, data });
-}
-
-interface TerminalLifecycleEvent {
-  generation: number;
-  exit_code?: number;
-}
-
-interface TerminalOutputEvent extends TerminalLifecycleEvent {
-  data: number[];
-}
-
-function resolveShellSetting(
-  terminalKey: string,
-  terminalTab: { shellOverride?: string } | undefined,
-  globalWindowsShell: string | undefined,
-): string | undefined {
-  return terminalTab?.shellOverride ?? (terminalKey === 'local' ? globalWindowsShell : undefined);
-}
-
-/**
- * Queues terminal input for a short batching window while still flushing
- * immediately for control-sensitive keys and larger chunks.
- */
-function queueTerminalInput(termId: string | null | undefined, data: string): void {
-  if (!termId) {
-    return;
-  }
-
-  const cached = terminalCache.get(termId);
-  if (!cached) {
-    window.ipcRenderer.send('terminal:write', { termId, data });
-    return;
-  }
-
-  cached.pendingInput += data;
-  const bufferedBytes = inputByteEncoder.encode(cached.pendingInput).length;
-  const shouldFlushImmediately = IMMEDIATE_INPUT_PATTERN.test(data) || bufferedBytes >= INPUT_FLUSH_THRESHOLD;
-
-  if (shouldFlushImmediately) {
-    flushPendingInput(termId);
-    return;
-  }
-
-  if (cached.inputFlushTimer === null) {
-    cached.inputFlushTimer = window.setTimeout(() => {
-      flushPendingInput(termId);
-    }, INPUT_BATCH_MS);
-  }
-}
-
-/**
- * Sends a terminal resize only when the row or column count actually changed.
- */
-function syncTerminalResize(termId: string | null | undefined, term: XTerm): void {
-  const nextSize = { rows: term.rows, cols: term.cols };
-  if (!termId) {
-    return;
-  }
-
-  const cached = terminalCache.get(termId);
-
-  if (!cached) {
-    window.ipcRenderer.send('terminal:resize', { termId, ...nextSize });
-    return;
-  }
-
-  if (cached.lastResize?.rows === nextSize.rows && cached.lastResize?.cols === nextSize.cols) {
-    return;
-  }
-
-  cached.lastResize = nextSize;
-  window.ipcRenderer.send('terminal:resize', { termId, ...nextSize });
-}
-
-export function TerminalComponent({ connectionId, termId, isVisible }: { connectionId?: string; termId?: string; isVisible?: boolean }) {
+export function TerminalComponent({
+  connectionId,
+  termId,
+  isVisible,
+  isWorkspaceActive = true,
+  isTerminalView = true,
+  isActiveTab = true,
+}: {
+  connectionId?: string;
+  termId?: string;
+  isVisible?: boolean;
+  /** Sidebar host/local tab is selected (false when another workspace tab is active). */
+  isWorkspaceActive?: boolean;
+  /** Terminal view is active within this workspace (false on Files/Dashboard). */
+  isTerminalView?: boolean;
+  /** This tab is the selected shell tab within the terminal panel. */
+  isActiveTab?: boolean;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
+
+  // Centralized resize scheduler (unifies multiple call sites)
+  const resizeSchedulerRef = useRef<ReturnType<typeof createResizeScheduler> | null>(null);
   
   // Layout transition fast-path tracking
   const isLayoutTransitioning = useRef(false);
@@ -313,10 +243,25 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
   // Layout transition React state for DOM class rendering
   const [layoutTransitioning, setLayoutTransitioning] = useState(false);
   const isVisibleRef = useRef(isVisible);
+  const isWorkspaceActiveRef = useRef(isWorkspaceActive);
+  const isTerminalViewRef = useRef(isTerminalView);
+  const isActiveTabRef = useRef(isActiveTab);
 
   useEffect(() => {
     isVisibleRef.current = isVisible;
   }, [isVisible]);
+
+  useEffect(() => {
+    isWorkspaceActiveRef.current = isWorkspaceActive;
+  }, [isWorkspaceActive]);
+
+  useEffect(() => {
+    isTerminalViewRef.current = isTerminalView;
+  }, [isTerminalView]);
+
+  useEffect(() => {
+    isActiveTabRef.current = isActiveTab;
+  }, [isActiveTab]);
 
   // Search State
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -409,6 +354,8 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
 
   // Use termId if provided, otherwise fallback to terminalKey
   const sessionId = termId || terminalKey;
+  const spawnConnectionId = terminalKey;
+  const remoteReady = isLocal || isConnected;
   const isConnectedRef = useRef(isConnected);
   const sessionIdRef = useRef(sessionId);
 
@@ -451,8 +398,11 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
     const nextHeight = container.clientHeight;
     if (nextWidth <= 0 || nextHeight <= 0) return;
 
+    if (!safeFitTerminal(fit, term)) {
+      return;
+    }
+
     try {
-      fit.fit();
       refreshTerminalScreen(term);
       const shouldSyncBackend = options?.syncBackend ?? true;
       if (shouldSyncBackend) {
@@ -467,6 +417,16 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
     }
   }, [clearLayoutWidthPin, refreshTerminalScreen]);
 
+  // Wire the centralized debounced scheduler to the current refit impl.
+  // Effect ensures we have a live scheduler whenever refitTerminal is (re)created.
+  useEffect(() => {
+    resizeSchedulerRef.current = createResizeScheduler(refitTerminal);
+    return () => {
+      resizeSchedulerRef.current?.cancel();
+      resizeSchedulerRef.current = null;
+    };
+  }, [refitTerminal]);
+
   const finishLayoutTransition = useCallback(() => {
     if (layoutTransitionSafetyTimerRef.current) {
       clearTimeout(layoutTransitionSafetyTimerRef.current);
@@ -477,12 +437,8 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
     setLayoutTransitioning(false);
     clearLayoutWidthPin();
 
-    // Two animation frames let flex layout settle before the final fit/sync.
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        refitTerminal({ forceSync: true });
-      });
-    });
+    // Use the central scheduler (trailing debounce). Force for post-layout settle.
+    resizeSchedulerRef.current?.schedule({ forceSync: true, immediate: true });
   }, [clearLayoutWidthPin, refitTerminal]);
 
   const acceptGhostSuffix = useCallback((suffix: string) => {
@@ -503,31 +459,31 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
     return `${label.slice(0, Math.max(0, max - 1))}…`;
   }, []);
 
-  // Apply Settings Effect
+  const terminalGpuAllowed = Boolean(isVisible && isWorkspaceActive && isTerminalView);
+
+  // Apply settings + GPU policy: only the visible active shell tab may use WebGL.
   useEffect(() => {
-    if (termRef.current) {
-      const term = termRef.current;
-      term.options.fontSize = settings.terminal.fontSize;
-      term.options.fontFamily = settings.terminal.fontFamily;
-      term.options.cursorStyle = settings.terminal.cursorStyle;
-      term.options.lineHeight = settings.terminal.lineHeight;
-      void applyTerminalRendererAndLigatures(
-        sessionId,
-        term,
-        settings.terminal,
-        fitAddonRef.current,
-        syncTerminalResize,
-      );
+    if (!isConnected || !termRef.current) {
+      return;
     }
 
-    if (fitAddonRef.current) {
-      try {
-        fitAddonRef.current.fit();
-      } catch (_e) {
-        // ignore
-      }
-    }
-  }, [sessionId, settings.terminal]);
+    const term = termRef.current;
+    term.options.fontSize = settings.terminal.fontSize;
+    term.options.fontFamily = settings.terminal.fontFamily;
+    term.options.cursorStyle = settings.terminal.cursorStyle;
+    term.options.lineHeight = settings.terminal.lineHeight;
+    void applyTerminalRendererAndLigatures(
+      sessionId,
+      term,
+      buildEffectiveRendererSettings(settings.terminal, terminalGpuAllowed),
+      fitAddonRef.current,
+      syncTerminalResize,
+    ).then(() => {
+      safeFitTerminal(fitAddonRef.current, term);
+    });
+
+    safeFitTerminal(fitAddonRef.current, term);
+  }, [sessionId, settings.terminal, terminalGpuAllowed, isConnected]);
 
   // Force fit and focus when visibility changes (e.g. switching tabs) or connection becomes active
   useEffect(() => {
@@ -537,7 +493,7 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
     const frameId = requestAnimationFrame(() => {
       timer = setTimeout(() => {
         try {
-          refitTerminal({ forceSync: true });
+          resizeSchedulerRef.current?.schedule({ forceSync: true, immediate: true });
           termRef.current?.focus();
         } catch (e) {
           console.warn('Fit/Focus failed on visibility change', e);
@@ -550,6 +506,38 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
       if (timer) clearTimeout(timer);
     };
   }, [isVisible, isConnected, refitTerminal]);
+
+  // Lazy PTY: defer spawn until a shell tab is first selected. Keep PTYs alive when
+  // switching hosts or internal shell tabs; suspend only when leaving terminal view
+  // (Files/Dashboard) within the active workspace.
+  useEffect(() => {
+    if (!isConnected || !sessionId || !termRef.current) return;
+
+    const cached = terminalCache.get(sessionId);
+    const action = resolveLazyPtyAction(
+      { isWorkspaceActive, isTerminalView, isActiveTab },
+      Boolean(cached?.spawned),
+    );
+
+    if (action === 'suspend_panel') {
+      suspendTerminalPty(sessionId, { panelHide: true });
+      return;
+    }
+
+    if (action === 'spawn' && cached) {
+      const store = useAppStore.getState();
+      spawnTerminalFromStoreContext({
+        sessionId,
+        connectionId: spawnConnectionId,
+        terminalKey,
+        term: termRef.current,
+        clearBuffer: false,
+        terminals: store.terminals,
+        windowsShell: store.settings.localTerm?.windowsShell,
+        remoteReady,
+      });
+    }
+  }, [isWorkspaceActive, isTerminalView, isActiveTab, isConnected, sessionId, terminalKey, spawnConnectionId, remoteReady]);
 
   // Layout Transition Listener (Flicker Hardening V2)
   // Keep listener registration stable (no isVisible/session deps) so we never miss
@@ -597,7 +585,7 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
         if (isLayoutTransitioning.current) {
           finishLayoutTransition();
         } else {
-          refitTerminal({ forceSync: true });
+          resizeSchedulerRef.current?.schedule({ forceSync: true });
         }
       }, 100);
     };
@@ -757,13 +745,12 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
         starting: false,
         listenerAttached: false,
         pendingInput: '',
+        pendingInputBytes: 0,
         inputFlushTimer: null,
         lastResize: null,
         ligaturesAddon: undefined,
         ligaturesEnabled: false,
       });
-      void applyTerminalRendererAndLigatures(sessionId, term, settings.terminal, fitAddon, syncTerminalResize);
-
       // Create tracker once per cached terminal; handlers are bound per mount below.
       const ghostTracker = new InputTracker({
         onLineChange: () => {},
@@ -852,11 +839,22 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
     searchAddonRef.current = searchAddon;
     termRef.current = term;
 
-    try {
-      fitAddon.fit();
-    } catch (e) {
-      console.warn('Failed to fit terminal', e);
-    }
+    void applyTerminalRendererAndLigatures(
+      sessionId,
+      term,
+      buildEffectiveRendererSettings(
+        settings.terminal,
+        Boolean(
+          isVisibleRef.current
+          && isWorkspaceActiveRef.current
+          && isTerminalViewRef.current,
+        ),
+      ),
+      fitAddon,
+      syncTerminalResize,
+    ).then(() => {
+      safeFitTerminal(fitAddon, term);
+    });
 
     const triggerGhostPopup = async (tracker: InputTracker) => {
       try {
@@ -922,58 +920,39 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
     }
 
     if (cachedForInput) {
-      cachedForInput.onDataDisposable = term.onData(async (data) => {
+      cachedForInput.onDataDisposable = term.onData((data) => {
+        enqueueTerminalInputTask(sessionId, async () => {
         const cached = terminalCache.get(sessionId);
 
-        // Check if the PTY session has ended and needs restart
+        // Restart only on Enter after an explicit session-end message.
         if (cached && !cached.spawned) {
-          console.log('[Terminal] Session ended, restarting on user input');
+          const isRestartKey = data === '\r' || data === '\n';
+          if (!isRestartKey) {
+            return;
+          }
+          if (!isVisibleRef.current || !isConnectedRef.current || cached.spawnBlocked) {
+            return;
+          }
+          console.log('[Terminal] Session ended, restarting on Enter');
           clearTerminalPendingInput(sessionId);
           cached.lastResize = null;
-          const generation = cached.generation + 1;
-          cached.generation = generation;
-          cached.spawned = true;
-          cached.starting = true;
-
-          // Clear terminal for fresh start
-          term.clear();
-          term.reset();
-
-          // Resolve CWD and per-tab shell override for restart
-          const terminals = useAppStore.getState().terminals;
-          const terminalTab = terminals[terminalKey]?.find(t => t.id === sessionId);
-          const restartCwd = terminalTab?.lastKnownCwd || terminalTab?.initialPath;
-
-          const shellSetting = resolveShellSetting(
+          cached.spawnBlocked = false;
+          const store = useAppStore.getState();
+          spawnTerminalFromStoreContext({
+            sessionId,
+            connectionId: spawnConnectionId,
             terminalKey,
-            terminalTab,
-            useAppStore.getState().settings.localTerm?.windowsShell,
-          );
-
-          // Respawn the terminal session
-          window.ipcRenderer
-            .invoke('terminal:create', {
-              termId: sessionId,
-              connectionId: terminalKey,
-              rows: term.rows,
-              cols: term.cols,
-              shell: shellSetting,
-              cwd: restartCwd,
-              generation,
-            })
-            .catch((err) => {
-              console.error('Failed to restart terminal:', err);
-              term.write(`\r\n\x1b[31mFailed to restart terminal session: ${err}\x1b[0m\r\n`);
-              if (cached.generation === generation) {
-                cached.starting = false;
-                cached.spawned = false;
-              }
-            });
+            term,
+            clearBuffer: true,
+            terminals: store.terminals,
+            windowsShell: store.settings.localTerm?.windowsShell,
+            remoteReady: true,
+          });
           cached.ghostTracker?.reset();
           setGhostSuggestion('');
           closeGhostPopup();
           ghostTabStateRef.current = resetGhostTabState();
-          return; // Don't send the input that triggered restart
+          return;
         }
 
         // Ghost popup + inline suggestion routing.
@@ -994,140 +973,49 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
         if (handledByGhost) return;
 
         queueTerminalInput(sessionId, data);
-      });
-    }
-
-    // Set up Tauri event listener for incoming terminal data - only once per terminal
-    const cachedForListener = terminalCache.get(sessionId);
-    if (cachedForListener && !cachedForListener.listenerAttached) {
-      cachedForListener.listenerAttached = true;
-
-      // Initialize unlisten array if not present
-      if (!cachedForListener.unlisten) {
-        cachedForListener.unlisten = [];
-      }
-
-      // Listen to Tauri event for this specific terminal
-      listen<TerminalOutputEvent>(`terminal-output-${sessionId}`, (event) => {
-        const cached = terminalCache.get(sessionId);
-        if (!cached || event.payload.generation !== cached.generation) {
-          return;
-        }
-        term.write(new Uint8Array(event.payload.data));
-      }).then((unlistenFn) => {
-        // Store the unlisten function
-        if (terminalCache.has(sessionId)) {
-          terminalCache.get(sessionId)!.unlisten!.push(unlistenFn);
-        }
-      });
-
-      listen<TerminalLifecycleEvent>(`terminal-ready-${sessionId}`, (event) => {
-        const cached = terminalCache.get(sessionId);
-        if (cached && event.payload.generation === cached.generation) {
-          cached.starting = false;
-          cached.spawned = true;
-        }
-      }).then((unlistenFn) => {
-        if (terminalCache.has(sessionId)) {
-          terminalCache.get(sessionId)!.unlisten!.push(unlistenFn);
-        }
-      });
-
-      // Listen for terminal exit event to reset the spawned flag
-      listen<TerminalLifecycleEvent>(`terminal-exit-${sessionId}`, (event) => {
-        console.log(`[Terminal] Session ${sessionId} exited`);
-        const cached = terminalCache.get(sessionId);
-        if (cached) {
-          if (event.payload.generation !== cached.generation) {
-            console.log(`[Terminal] Ignoring stale exit for ${sessionId} from generation ${event.payload.generation}`);
-            return;
-          }
-          // Reset spawned flag so terminal can be restarted
-          cached.starting = false;
-          cached.spawned = false;
-          clearTerminalPendingInput(sessionId);
-          cached.lastResize = null;
-          // Clear the terminal buffer and show exit message
-          term.write('\r\n\x1b[33m[Terminal session ended. Press Enter to restart.]\x1b[0m\r\n');
-        }
-      }).then((unlistenFn) => {
-        if (terminalCache.has(sessionId)) {
-          terminalCache.get(sessionId)!.unlisten!.push(unlistenFn);
-        }
-      });
-    }
-
-    // Spawn shell via IPC - only after listeners are attached so we never miss
-    // same-generation ready/output/exit events from a fast PTY startup/exit.
-    const cachedEntry = terminalCache.get(sessionId);
-    if (cachedEntry && !cachedEntry.spawned) {
-      const generation = cachedEntry.generation + 1;
-      cachedEntry.generation = generation;
-      cachedEntry.spawned = true;
-      cachedEntry.starting = true;
-
-      // Clear any existing content from a previous session (fresh start)
-      if (!isNewTerminal) {
-        term.clear();
-        term.reset();
-      }
-
-      // Get initial/current path and per-tab shell override
-      const terminals = useAppStore.getState().terminals;
-      const terminalTab = terminals[terminalKey]?.find(t => t.id === sessionId);
-      const spawnCwd = terminalTab?.lastKnownCwd || terminalTab?.initialPath;
-
-      // Per-tab override takes priority over the global default shell setting
-      const shellSetting = resolveShellSetting(
-        terminalKey,
-        terminalTab,
-        settings.localTerm?.windowsShell,
-      );
-
-      window.ipcRenderer
-        .invoke('terminal:create', {
-          termId: sessionId,
-          connectionId: connectionId || 'local',
-          rows: term.rows,
-          cols: term.cols,
-          shell: shellSetting,
-          cwd: spawnCwd,
-          generation,
-        })
-        .catch((err) => {
-          console.error('Failed to create terminal:', err);
-          term.write(`\r\n\x1b[31mFailed to start terminal session: ${err}\x1b[0m\r\n`);
-          if (cachedEntry.generation === generation) {
-            cachedEntry.starting = false;
-            cachedEntry.spawned = false;
-          }
         });
+      });
     }
 
-    let ipcResizeTimer: any;
+    attachTerminalLifecycleListeners(sessionId, term);
+
+    // Spawn shell via IPC only for the active tab — inactive tabs keep xterm scrollback
+    // without a live PTY until the user switches back (see lazy PTY visibility effect).
+    const cachedEntry = terminalCache.get(sessionId);
+    if (
+      cachedEntry
+      && !cachedEntry.spawned
+      && isWorkspaceActiveRef.current
+      && isTerminalViewRef.current
+      && isActiveTabRef.current
+    ) {
+      const store = useAppStore.getState();
+      spawnTerminalFromStoreContext({
+        sessionId,
+        connectionId: spawnConnectionId,
+        terminalKey,
+        term,
+        clearBuffer: isNewTerminal,
+        terminals: store.terminals,
+        windowsShell: store.settings.localTerm?.windowsShell,
+        remoteReady,
+      });
+    }
+
     const resizeObserver = new ResizeObserver(() => {
       try {
-        if (!term.element || !containerRef.current) return;
+        if (!isVisibleRef.current || !term.element || !containerRef.current) return;
 
         // Only fit if dimensions are valid
         const nextWidth = containerRef.current.clientWidth;
         const nextHeight = containerRef.current.clientHeight;
         if (nextWidth <= 0 || nextHeight <= 0) return;
 
-        // Always keep the canvas in sync with the container. Blocking fit during
-        // layout transitions left a small canvas inside a large viewport (duplicated
-        // / collapsed content). Defer only the PTY resize IPC until layout settles.
-        fitAddon.fit();
-        refreshTerminalScreen(term);
-
         if (isLayoutTransitioning.current) return;
 
-        // Throttle backend PTY resize communication (IPC) to prevent flooding Tauri
-        if (ipcResizeTimer) clearTimeout(ipcResizeTimer);
-        ipcResizeTimer = window.setTimeout(() => {
-          syncTerminalResize(sessionId, term);
-        }, 50);
-
+        // Route EVERY container resize through the unified debounced scheduler.
+        // Scheduler handles safeFit + deduped syncTerminalResize.
+        resizeSchedulerRef.current?.schedule();
       } catch (e) {
         console.warn('Xterm fit resize failed', e);
       }
@@ -1142,7 +1030,7 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
       // and will be cleaned up when destroyTerminalInstance() is called.
       // This prevents duplicate listeners when the component remounts.
       resizeObserver.disconnect();
-      if (ipcResizeTimer) clearTimeout(ipcResizeTimer);
+      resizeSchedulerRef.current?.cancel();
 
       const cachedForCleanup = terminalCache.get(sessionId);
       if (cachedForCleanup?.onDataDisposable) {
@@ -1241,59 +1129,28 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
 
   }, [activeConnectionId, globalActiveId, isVisible]);
 
-  // Handle Automatic Reconnect Sync from File Manager
+  // Spawn PTYs for visible tabs immediately after SSH reconnect (see connectionSlice).
   useEffect(() => {
-    const handleWakeup = (e: any) => {
-      // sessionId can be string | null | undefined, handle it carefully
-      if (sessionId && e.detail === sessionId) {
-        const cached = terminalCache.get(sessionId);
-        if (cached && !cached.spawned) {
-          console.log('[Terminal] Auto-waking terminal from File Manager reconnect');
-          
-          clearTerminalPendingInput(sessionId);
-          cached.lastResize = null;
-          const generation = cached.generation + 1;
-          cached.generation = generation;
-          cached.spawned = true;
-          cached.starting = true;
-          termRef.current?.clear();
-          termRef.current?.reset();
-          
-          const terminals = useAppStore.getState().terminals;
-          const terminalTab = terminals[terminalKey]?.find(t => t.id === sessionId);
-          const wakeCwd = terminalTab?.lastKnownCwd || terminalTab?.initialPath;
+    const handleWakeup = (e: Event) => {
+      if (!sessionId || !termRef.current) return;
+      if ((e as CustomEvent).detail !== sessionId) return;
 
-          const shellSetting = resolveShellSetting(
-            terminalKey,
-            terminalTab,
-            useAppStore.getState().settings.localTerm?.windowsShell
-          );
-
-          window.ipcRenderer
-            .invoke('terminal:create', {
-              termId: sessionId,
-              connectionId: connectionId || 'local',
-              rows: termRef.current?.rows || 24,
-              cols: termRef.current?.cols || 80,
-              shell: shellSetting,
-              cwd: wakeCwd,
-              generation,
-            })
-            .catch((err) => {
-              console.error('Failed to auto-restart terminal:', err);
-              termRef.current?.write(`\r\n\x1b[31mFailed to automatically restart terminal: ${err}\x1b[0m\r\n`);
-              if (cached.generation === generation) {
-                cached.starting = false;
-                cached.spawned = false;
-              }
-            });
-        }
-      }
+      const store = useAppStore.getState();
+      tryWakeTerminalOnReconnect({
+        sessionId,
+        connectionId: spawnConnectionId,
+        terminalKey,
+        term: termRef.current,
+        isVisible: Boolean(isVisibleRef.current),
+        terminals: store.terminals,
+        windowsShell: store.settings.localTerm?.windowsShell,
+        remoteReady: true,
+      });
     };
-    
-    window.addEventListener('connection-wakeup', handleWakeup);
-    return () => window.removeEventListener('connection-wakeup', handleWakeup);
-  }, [sessionId, connectionId, terminalKey]);
+
+    window.addEventListener(TERMINAL_CONNECTION_WAKEUP_EVENT, handleWakeup);
+    return () => window.removeEventListener(TERMINAL_CONNECTION_WAKEUP_EVENT, handleWakeup);
+  }, [sessionId, spawnConnectionId, terminalKey]);
 
   useEffect(() => {
     if (!termRef.current || !activeConnectionId) return;
@@ -1335,7 +1192,7 @@ export function TerminalComponent({ connectionId, termId, isVisible }: { connect
     const hasError = connection?.status === 'error';
 
     return (
-      <div key="disconnected" className="flex flex-col h-full items-center justify-center p-8 text-app-muted gap-4 bg-app-panel z-10 relative">
+      <div key="disconnected" className="flex flex-col h-full items-center justify-center p-8 text-app-muted gap-4 bg-app-bg z-10 relative">
         {isConnecting ? (
           <>
             <div className="animate-spin rounded-full h-5 w-5 border-2 border-app-accent border-t-transparent"></div>

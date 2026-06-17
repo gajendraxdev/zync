@@ -2,6 +2,7 @@ import type { Terminal } from '@xterm/xterm';
 import type { FitAddon } from '@xterm/addon-fit';
 import { reactivateTerminalWebgl, syncTerminalRenderer } from './rendererController.js';
 import { setTerminalLigatures } from './ligatures.js';
+import { isTerminalFitReady, safeFitTerminal } from './terminalFit.js';
 
 export interface TerminalRendererSetupSettings {
   gpuAcceleration?: boolean;
@@ -19,6 +20,18 @@ export function getTerminalRendererPreferences(
   };
 }
 
+/** Only the visible active shell tab should hold a WebGL context. */
+export function buildEffectiveRendererSettings(
+  terminalSettings: TerminalRendererSetupSettings,
+  gpuAllowed: boolean,
+): TerminalRendererSetupSettings {
+  const prefs = getTerminalRendererPreferences(terminalSettings);
+  return {
+    ...terminalSettings,
+    gpuAcceleration: prefs.gpuAcceleration && gpuAllowed,
+  };
+}
+
 export function buildRendererRefitCallback(
   sessionId: string,
   fitAddon: FitAddon | null,
@@ -27,12 +40,15 @@ export function buildRendererRefitCallback(
 ) {
   return () => {
     try {
-      fitAddon?.fit();
-      if (term) {
-        const lastRow = Math.max(0, term.rows - 1);
-        term.refresh(0, lastRow);
-        syncResize(sessionId, term);
+      if (!term || !isTerminalFitReady(term, fitAddon)) {
+        return;
       }
+      if (!safeFitTerminal(fitAddon, term)) {
+        return;
+      }
+      const lastRow = Math.max(0, term.rows - 1);
+      term.refresh(0, lastRow);
+      syncResize(sessionId, term);
     } catch (error) {
       console.warn('[terminal] Renderer refit failed', error);
     }
@@ -46,20 +62,24 @@ export async function applyTerminalRendererAndLigatures(
   fitAddon: FitAddon | null,
   syncResize: TerminalResizeSync,
 ): Promise<void> {
-  const prefs = getTerminalRendererPreferences(terminalSettings);
-  const onRefit = buildRendererRefitCallback(sessionId, fitAddon, term, syncResize);
-  await syncTerminalRenderer(sessionId, term, {
-    gpuAcceleration: prefs.gpuAcceleration,
-    onRefit,
-  });
-  await setTerminalLigatures(sessionId, term, prefs.fontLigatures);
-  if (prefs.gpuAcceleration && prefs.fontLigatures) {
-    await reactivateTerminalWebgl(sessionId, term, { onRefit });
-  }
   try {
-    const lastRow = Math.max(0, term.rows - 1);
-    term.refresh(0, lastRow);
-  } catch {
-    // Ignore refresh failures; fit below still applies geometry.
+    const prefs = getTerminalRendererPreferences(terminalSettings);
+    const onRefit = buildRendererRefitCallback(sessionId, fitAddon, term, syncResize);
+    await syncTerminalRenderer(sessionId, term, {
+      gpuAcceleration: prefs.gpuAcceleration,
+      onRefit,
+    });
+    await setTerminalLigatures(sessionId, term, prefs.fontLigatures);
+    if (prefs.gpuAcceleration && prefs.fontLigatures) {
+      await reactivateTerminalWebgl(sessionId, term, { onRefit });
+    }
+    try {
+      const lastRow = Math.max(0, term.rows - 1);
+      term.refresh(0, lastRow);
+    } catch {
+      // Ignore refresh failures; geometry already handled by syncTerminalRenderer / refit callback.
+    }
+  } catch (error) {
+    console.warn('[terminal] Renderer setup failed', error);
   }
 }
