@@ -81,6 +81,12 @@ export const createSessionSlice: StateCreator<AppStore, [], [], SessionSlice> = 
                     data.activeTerminalIds?.[scopeId] ?? null,
                 );
             }
+
+            // Restore leaves SSH hosts disconnected — auto-connect the active workspace tab.
+            const { activeConnectionId, showWelcomeScreen } = get();
+            if (!showWelcomeScreen && activeConnectionId) {
+                get().autoConnectIfNeeded(activeConnectionId);
+            }
         } catch (e) {
             console.warn('[Session] Failed to load session:', e);
         } finally {

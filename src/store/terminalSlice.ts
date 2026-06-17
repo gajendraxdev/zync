@@ -59,8 +59,9 @@ export interface TerminalSlice {
     /**
      * Clears all terminal tabs for a specific connection and prunes all associated AI history.
      * @param connectionId The ID of the connection to clear terminals for.
+     * @param options Optional. If preservePendingRestore is true, keep the tab list but mark with pendingRestore=true (for SSH reconnect flow) instead of fully deleting.
      */
-    clearTerminals: (connectionId: string) => void;
+    clearTerminals: (connectionId: string, options?: { preservePendingRestore?: boolean }) => void;
 
     /**
      * Updates the last known CWD of a terminal.
@@ -218,7 +219,7 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
     },
 
     /** @inheritdoc */
-    clearTerminals: (connectionId) => {
+    clearTerminals: (connectionId, options = {}) => {
         set(state => {
             // Kill all known terminals for this connection and destroy cached instances
             const tabs = state.terminals[connectionId] || [];
@@ -226,6 +227,17 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                 ipc.send('terminal:kill', { termId: t.id });
                 destroyTerminalInstance(t.id);
             });
+
+            if (options.preservePendingRestore) {
+                // Preserve tab list with pendingRestore metadata for SSH reconnect/restore flow (roadmap 5.9)
+                // Do not delete active/synced so reconnect can wake the tabs.
+                return {
+                    terminals: {
+                        ...state.terminals,
+                        [connectionId]: tabs.map(t => ({ ...t, pendingRestore: true }))
+                    },
+                };
+            }
 
             const newTerminals = { ...state.terminals };
             delete newTerminals[connectionId];

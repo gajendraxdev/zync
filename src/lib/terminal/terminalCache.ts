@@ -12,8 +12,11 @@ export interface TerminalCache {
   generation: number;
   spawned: boolean;
   starting: boolean;
+  /** Set when the PTY was closed because the terminal panel was hidden (not tab switch). */
+  suspendedByPanel?: boolean;
   listenerAttached: boolean;
   pendingInput: string;
+  pendingInputBytes: number;
   inputFlushTimer: ReturnType<typeof window.setTimeout> | null;
   lastResize: { rows: number; cols: number } | null;
   unlisten?: UnlistenFn[];
@@ -23,6 +26,8 @@ export interface TerminalCache {
   ligaturesEnabled: boolean;
   ligaturesDesiredEnabled?: boolean;
   ligaturesLoadPromise?: Promise<void> | null;
+  /** Set after terminal:create fails for a dead SSH backend; cleared on reconnect/ready. */
+  spawnBlocked?: boolean;
 }
 
 export const terminalCache = new Map<string, TerminalCache>();
@@ -39,4 +44,5 @@ export function clearTerminalPendingInput(termId: string | null | undefined): vo
   }
 
   cached.pendingInput = '';
+  cached.pendingInputBytes = 0;
 }
