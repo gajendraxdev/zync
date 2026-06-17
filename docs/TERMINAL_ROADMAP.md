@@ -1,6 +1,6 @@
 # Zync Terminal — Optimization & Robustness Roadmap
 
-**Last updated:** 2026-06-17
+**Last updated:** 2026-06-17 (P1 5.7/5.8/5.9 + CR fixes landed)
 **Audit basis:** Full-stack review of `terminal/Terminal.tsx`, `TerminalManager.tsx`, `pty.rs`, `terminalSlice.ts`, ghost suggestions, and terminal IPC.
 
 Plans and prioritized work for terminal performance, reliability, and code quality. For ghost-suggestion architecture, see [TERMINAL_GHOST_SUGGESTIONS.md](./TERMINAL_GHOST_SUGGESTIONS.md). For session/tab restore behavior, see [SESSION_PERSISTENCE.md](./SESSION_PERSISTENCE.md).
@@ -74,49 +74,34 @@ xterm on Windows ConPTY disables scrollback reflow by design (`windowsPty` compa
 
 ## 4. P0 — Highest Impact
 
-### 4.1 Lazy PTY spawn (active tab only)
+### 4.1 Lazy PTY spawn (active tab only) — **partial (shipped)**
 
-**Today:** `TerminalManager` mounts every tab; inactive tabs are `invisible` but still spawn PTYs and run ResizeObservers.
+**Shipped behavior (2026-06):**
 
-**Files:** `src/components/terminal/TerminalManager.tsx`, `src/components/terminal/Terminal.tsx`
+- Defer PTY spawn until a shell tab is first selected (`isActiveTab`).
+- Keep PTYs alive when switching **sidebar hosts** or **internal shell tabs** (scrollback + running shells preserved).
+- Suspend only the **active** shell PTY when leaving **Terminal view** for Files/Dashboard within the same workspace (`isTerminalView === false`).
+- Modules: `ptyLifecycle.ts` (`spawnTerminalSession`, `suspendTerminalPty`), `spawnContext.ts`.
 
-**Proposal:** Keep xterm instances mounted for scrollback; spawn PTY only for the active tab. Suspend or close inactive PTY readers on tab blur.
-
-**Impact:** Linear reduction in shells, SSH channels, memory, and IPC with tab count.
-
----
-
-### 4.2 Serialize async `onData` (input reorder fix)
-
-**Today:** `term.onData(async (data) => { ... await handleGhostInputEvent ... })` — concurrent async handlers can interleave at `await` and call `queueTerminalInput` out of order.
-
-**Files:** `src/components/terminal/Terminal.tsx`, `src/lib/ghostSuggestions/runtime.ts`
-
-**Proposal:** Per-session input queue. Ghost logic runs inside the queue worker; PTY writes always leave in order.
-
-**Impact:** Fixes fast-typing corruption during Tab popup / slow ghost IPC.
+**Remaining:** Idle-timer suspend for background hosts is **deferred** — host/shell tab switches intentionally keep PTYs alive to preserve scrollback and running shells.
 
 ---
 
-### 4.3 Gate input on `terminal-ready`
+### 4.2 Serialize async `onData` (input reorder fix) — **done**
 
-**Today:** `spawned = true` is set before `terminal:create` completes. `starting` is written but never read. Early keystrokes can produce silent `"Session not found"` from backend.
-
-**Files:** `src/components/terminal/Terminal.tsx`, `src-tauri/src/pty.rs`, `src-tauri/src/commands.rs`
-
-**Proposal:** Buffer or drop input while `starting === true`; flush after `terminal-ready-${sessionId}` for matching `generation`.
+**Shipped:** `inputQueue.ts` — `enqueueTerminalInputTask` with per-session epoch bump on `clearTerminalInputQueue` (suspend/destroy). Ghost handlers run inside the queue worker.
 
 ---
 
-### 4.4 Batch local PTY output
+### 4.3 Gate input on `terminal-ready` — **done**
 
-**Today:** Local reader emits every `read()` immediately. Remote reader uses 8ms / 4KB batching.
+**Shipped:** `inputPipeline.ts` — buffer while `starting` or `!spawned`; `handleTerminalReady` flushes on matching `generation`. `TerminalManager` snippet/plugin writes use `queueTerminalInput`.
 
-**Files:** `src-tauri/src/pty.rs` (`emit_terminal_output` in local `spawn_blocking` loop ~line 387)
+---
 
-**Proposal:** Mirror `REMOTE_OUTPUT_*` flush logic for local PTY reads.
+### 4.4 Batch local PTY output — **done**
 
-**Impact:** Major IPC reduction for fast local output (`npm install`, large logs).
+**Shipped:** Local reader uses shared `OUTPUT_BATCH_MS` (8ms) / `OUTPUT_FLUSH_THRESHOLD` (4KB) coalescing in `pty.rs`, mirroring the remote path.
 
 ---
 
@@ -124,15 +109,15 @@ xterm on Windows ConPTY disables scrollback reflow by design (`windowsPty` compa
 
 | # | Item | Issue | Proposal |
 |---|------|-------|------------|
-| 5.1 | Hidden-tab resize | `ResizeObserver` runs when `!isVisible` | Skip fit + IPC unless `isVisibleRef.current` |
-| 5.2 | Resize path overlap | 5 mechanisms trigger fit/sync | Single debounced `scheduleResize()` (50–100ms trailing edge) |
-| 5.3 | Spawn duplication | 3 copies of spawn/restart boilerplate | Extract `spawnTerminalSession({ reason })` |
-| 5.4 | Dead `connection-wakeup` | Listener in `terminal/Terminal.tsx`; nothing dispatches event | Remove or wire from file-manager reconnect |
+| 5.1 | Hidden-tab resize | ~~`ResizeObserver` runs when `!isVisible`~~ | **Done:** skip fit + IPC unless `isVisibleRef.current` |
+| 5.2 | Resize path overlap | 5 mechanisms trigger fit/sync | **Done:** `createResizeScheduler` (60ms trailing) + safeFit/sync primitives; ResizeObserver, window, layout, visibility, renderer now all funnel through unified scheduler |
+| 5.3 | Spawn duplication | ~~3 copies of spawn/restart boilerplate~~ | **Done:** `spawnTerminalSession`, `spawnTerminalFromStoreContext`, `attachTerminalLifecycleListeners`, `resolveLazyPtyAction`, `syncTerminalResize` |
+| 5.4 | Dead `connection-wakeup` | ~~Listener in `terminal/Terminal.tsx`; nothing dispatches event~~ | **Done:** `dispatchTerminalConnectionWakeup` from `connectionSlice` on SSH reconnect; `tryWakeTerminalOnReconnect` in `terminalConnectionWakeup.ts` |
 | 5.5 | Store ↔ UI coupling | ~~`terminalSlice` imported lifecycle from React component~~ | **Done (partial):** `terminalCache`, `destroyTerminalInstance`, ligatures, renderer setup in `src/lib/terminal/`; UI shell remains in `terminal/Terminal.tsx` |
-| 5.6 | Split write paths | `TerminalManager` sends `terminal:write` directly for snippets/plugins | Route through shared `queueTerminalInput` |
-| 5.7 | Child cleanup | Local `close()` aborts reader; child kill relies on `Drop` | Explicit `child.kill()` / wait on local handle |
-| 5.8 | Input batch encoding | Full `pendingInput` re-encoded each keystroke | Track `pendingInputBytes` incrementally |
-| 5.9 | Disconnect tab wipe | `clearTerminals` on disconnect destroys cache + PTYs | Document UX; optional preserve `pendingRestore` metadata |
+| 5.6 | Split write paths | ~~`TerminalManager` sends `terminal:write` directly~~ | **Done:** route through `queueTerminalInput` |
+| 5.7 | Child cleanup | Local `close()` aborts reader; child kill relies on `Drop` | **Done:** explicit `child.kill()` in PtyManager::close / close_by_connection (see src-tauri/src/pty.rs) |
+| 5.8 | Input batch encoding | Full `pendingInput` re-encoded each keystroke | **Done:** track `pendingInputBytes` incrementally (encode only delta) |
+| 5.9 | Disconnect tab wipe | `clearTerminals` on disconnect destroys cache + PTYs | **Done (partial):** clearTerminals supports preservePendingRestore; on SSH disconnect we now set pendingRestore on tabs; UX documented in comments (tabs preserved for reconnect, local clears fully) |
 
 ---
 
@@ -141,7 +126,7 @@ xterm on Windows ConPTY disables scrollback reflow by design (`windowsPty` compa
 - **GPU acceleration (WebGL renderer)** — implemented; see [§11](#11-gpu-acceleration-webgl-renderer)
 - Skip ghost suggestion IPC when tab is hidden
 - Binary Tauri event payloads instead of `number[]` serde for output
-- Integration tests: spawn → resize → generation → close sequences
+- ~~Integration tests: spawn → resize → generation → close sequences~~ — done (`terminalLifecycleIntegration.test.mjs`)
 - Split `Terminal.tsx` into `TerminalHost`, lifecycle hook, input pipeline, theme hook
 - Central terminal service API for store (`terminalService.destroy(id)`)
 - Optional `reflowCursorLine` / `windowsPty` tuning for Windows ConPTY edge cases
@@ -174,23 +159,27 @@ xterm on Windows ConPTY disables scrollback reflow by design (`windowsPty` compa
 ## 8. Suggested Implementation Order
 
 ```
-Phase 1 (1–2 days)
-  - Input queue (4.2)
-  - Ready gating (4.3)
-  - Hidden-tab resize gate (5.1)
+Phase 1 — **shipped** (see §10 exit criteria)
+  - Input queue (4.2) ✓
+  - Ready gating (4.3) ✓
+  - Hidden-tab resize gate (5.1) ✓
+  - Local output batching (4.4) ✓
+  - TerminalManager writes via queueTerminalInput (5.6) ✓
 
-Phase 2 (2–3 days)
-  - Lazy PTY spawn (4.1)
-  - Local output batching (4.4)
+Phase 2 — **shipped** (see §10 exit criteria)
+  - Lazy PTY policy (4.1) ✓
+  - Spawn/lifecycle extraction (5.3) ✓
+  - Integration tests (spawn/resize/close/generation) ✓
+  - connection-wakeup wired (5.4) ✓
 
 Phase 3 (2–3 days)
-  - Spawn helper (5.3)
   - ~~terminalCache module extraction (5.5)~~ — done (cache, ligatures, instance API, renderer setup)
-  - Dead code cleanup (5.4)
 
 Phase 4 (ongoing)
-  - Resize unification (5.2)
-  - Child kill (5.7)
+  - ~~Resize unification (5.2)~~ — done via createResizeScheduler + call site consolidation
+  - ~~Child kill (5.7)~~ — done with explicit `child.kill()`
+  - ~~Input batch encoding (5.8)~~ — done
+  - ~~Disconnect tab wipe (5.9)~~ — clearTerminals preserve option + set pendingRestore on disconnect
   - Integration tests
 
 Phase 5 — **done**
@@ -217,6 +206,15 @@ Phase 5 — **done**
 | `src/lib/terminal/rendererSetup.ts` | GPU + ligatures activation orchestration |
 | `src/lib/terminal/instanceApi.ts` | `destroyTerminalInstance`, `getTerminalRecentLines` |
 | `src/lib/terminal/renderer*.ts` | GPU policy, WebGL load, canvas fallback, diagnostics |
+| `src/lib/terminal/inputPipeline.ts` | Input batching, ready gating, flush |
+| `src/lib/terminal/inputQueue.ts` | Serialized async onData / ghost middleware |
+| `src/lib/terminal/ptyLifecycle.ts` | `spawnTerminalSession`, `suspendTerminalPty` |
+| `src/lib/terminal/spawnContext.ts` | CWD/shell resolution for spawn |
+| `src/lib/terminal/terminalSpawn.ts` | Store-aware `spawnTerminalFromStoreContext` |
+| `src/lib/terminal/terminalLazyPty.ts` | Lazy PTY visibility policy (`resolveLazyPtyAction`) |
+| `src/lib/terminal/terminalConnectionWakeup.ts` | Reconnect wakeup dispatch + handler |
+| `src/lib/terminal/terminalLifecycleListeners.ts` | Generation-gated output/ready/exit listeners |
+| `src/lib/terminal/terminalResizeSync.ts` | Deduped PTY resize IPC |
 | `src/lib/terminal/index.ts` | Public API for UI + store |
 | `@xterm/addon-webgl` | Loaded lazily by `rendererController.ts` |
 | `@xterm/addon-canvas` | Loaded on WebGL → canvas transitions |
@@ -227,17 +225,23 @@ Phase 5 — **done**
 
 Terminal optimization work can be considered **Phase 1 complete** when:
 
-- [ ] Keystrokes cannot reorder under fast typing + ghost Tab resolution
-- [ ] No silent `"Session not found"` on input immediately after tab open
-- [ ] Hidden tabs do not trigger fit or PTY resize IPC
-- [ ] Local fast output does not saturate IPC (batched comparable to remote)
+- [x] Keystrokes cannot reorder under fast typing + ghost Tab resolution (`inputQueue.ts` + agent tests)
+- [x] No silent `"Session not found"` on input immediately after tab open (`inputPipeline.ts` ready/suspend gating)
+- [x] Hidden tabs do not trigger fit or PTY resize IPC (`isVisibleRef` gate on `ResizeObserver`)
+- [x] Local fast output does not saturate IPC (batched comparable to remote)
 
 **Phase 2 complete** when:
 
-- [ ] Only the active tab holds a live PTY (xterm scrollback preserved for inactive tabs)
-- [ ] `Terminal.tsx` lifecycle/spawn logic lives in a testable module
-- [ ] `connection-wakeup` removed or wired
-- [ ] Basic integration tests cover spawn/resize/close/generation
+- [x] Lazy PTY policy finalized (defer spawn + view suspend; idle-host suspend deferred)
+- [x] `Terminal.tsx` spawn/lifecycle extracted to `lib/terminal/` (`terminalSpawn`, `terminalLazyPty`, `terminalConnectionWakeup`, `terminalLifecycleListeners`, `terminalResizeSync`)
+- [x] `connection-wakeup` wired from `connectionSlice` on SSH reconnect
+- [x] Basic integration tests cover spawn/resize/close/generation (`terminalLifecycleIntegration.test.mjs`)
+
+**Phase 2 shipped modules:**
+
+- [x] Core lifecycle modules (`ptyLifecycle`, `spawnContext`, `inputPipeline`, `inputQueue`)
+- [x] Defer spawn + view suspend; host/shell tab switches keep PTYs alive
+- [x] `resolveLazyPtyAction`, `dispatchTerminalConnectionWakeup`, `tryWakeTerminalOnReconnect`
 
 **GPU acceleration (Phase 5) complete** when:
 
