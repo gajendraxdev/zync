@@ -491,6 +491,7 @@ export function useTerminalLifecycle({
     let fitAddon: FitAddon;
     let searchAddon: SearchAddon;
     let isNewTerminal = false;
+    let focusTimer: ReturnType<typeof setTimeout> | undefined;
 
     const cached = terminalCache.get(sessionId);
     if (cached) {
@@ -506,7 +507,7 @@ export function useTerminalLifecycle({
           term.open(containerRef.current);
         }
         if (isVisibleRef.current) {
-          setTimeout(() => term.focus(), 50);
+          focusTimer = setTimeout(() => term.focus(), 50);
         }
       }
     } else {
@@ -572,7 +573,7 @@ export function useTerminalLifecycle({
       onCreateTerminalRef.current?.(term);
 
       if (isVisibleRef.current) {
-        setTimeout(() => term.focus(), 100);
+        focusTimer = setTimeout(() => term.focus(), 100);
       }
     }
 
@@ -655,6 +656,9 @@ export function useTerminalLifecycle({
     }
 
     return () => {
+      if (focusTimer !== undefined) {
+        clearTimeout(focusTimer);
+      }
       resizeObserver.disconnect();
       resizeSchedulerRef.current?.cancel();
 

@@ -113,7 +113,9 @@ export function AiSidebar({ connectionId, activeTermId: activeTermIdProp, onRunC
     const activeTermIdFromStore = useAppStore(
         state => (connectionId ? state.activeTerminalIds[connectionId] ?? null : null),
     );
-    const activeTermId = activeTermIdProp ?? activeTermIdFromStore;
+    const activeTermId = activeTermIdProp !== undefined
+        ? activeTermIdProp
+        : activeTermIdFromStore;
 
     // ── Store: UI & Ask ──────────────────────────────────────────────────
     const isOpen              = useAppStore(s => s.isAiSidebarOpen);

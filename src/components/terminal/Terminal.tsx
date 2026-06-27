@@ -57,7 +57,7 @@ function terminalPropsEqual(prev: TerminalComponentProps, next: TerminalComponen
 export const TerminalComponent = memo(function TerminalComponent({
   connectionId,
   termId,
-  isVisible,
+  isVisible = true,
   isWorkspaceActive = true,
   isTerminalView = true,
   isActiveTab = true,
@@ -69,6 +69,7 @@ export const TerminalComponent = memo(function TerminalComponent({
 
   // Search State
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const isSearchOpenRef = useRef(isSearchOpen);
   const [searchText, setSearchText] = useState('');
   const [ghostSuggestion, setGhostSuggestion] = useState('');
   const {
@@ -125,10 +126,13 @@ export const TerminalComponent = memo(function TerminalComponent({
     terminalSettingsRef.current = settings.terminal;
   }, [settings.terminal]);
 
-  // Helper for terminal settings update if needed, though usually we update global settings
-  const updateTerminalSettings = (newSettings: Partial<typeof settings.terminal>) => {
+  useEffect(() => {
+    isSearchOpenRef.current = isSearchOpen;
+  }, [isSearchOpen]);
+
+  const updateTerminalSettings = useCallback((newSettings: Partial<typeof settings.terminal>) => {
     updateSettings({ terminal: { ...terminalSettingsRef.current, ...newSettings } });
-  };
+  }, [updateSettings]);
 
   const activeConnectionId = connectionId || globalActiveId;
   const terminalKey = activeConnectionId || 'local';
@@ -232,7 +236,7 @@ export const TerminalComponent = memo(function TerminalComponent({
         }
 
         if (e.key === 'Escape') {
-          if (isSearchOpen) {
+          if (isSearchOpenRef.current) {
             setIsSearchOpen(false);
             term.focus();
             return false;
@@ -249,7 +253,7 @@ export const TerminalComponent = memo(function TerminalComponent({
       onHistoryCommit: () => {},
     });
     terminalCache.get(sessionId)!.ghostTracker = ghostTracker;
-  }, [sessionId, isSearchOpen, updateTerminalSettings]);
+  }, [sessionId, updateTerminalSettings]);
 
   const onBindMount = useCallback(({ term, sessionId: mountSessionId }: { term: XTerm; sessionId: string; isNewTerminal: boolean }) => {
     const cachedGhostTracker = terminalCache.get(mountSessionId)?.ghostTracker;

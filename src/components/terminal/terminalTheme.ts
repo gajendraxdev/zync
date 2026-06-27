@@ -61,7 +61,12 @@ export function withAlpha(color: string, alpha: number): string {
     }
   }
 
-  return clampedAlpha >= 1 ? normalized : `rgba(15, 17, 26, ${clampedAlpha})`;
+  if (clampedAlpha >= 1) {
+    return normalized;
+  }
+
+  const fallbackRgb = isLightTheme() ? '248, 250, 252' : '15, 17, 26';
+  return `rgba(${fallbackRgb}, ${clampedAlpha})`;
 }
 
 export function buildTerminalHostBackground(opacity: number): string {

@@ -268,6 +268,7 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                 aiDisplayHistory: nextDisplay
             };
         });
+        scheduleSaveSession(() => get().saveSession());
     },
 
     /** @inheritdoc */

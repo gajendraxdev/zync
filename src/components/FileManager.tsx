@@ -48,7 +48,8 @@ export interface Conflict {
 }
 
 function isFileManagerPanelShown(container: HTMLDivElement | null): boolean {
-  return container?.offsetParent !== null;
+  if (!container) return false;
+  return container.offsetParent !== null;
 }
 
 export const FileManager = memo(function FileManager({ connectionId }: { connectionId?: string }) {

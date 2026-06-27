@@ -77,6 +77,7 @@ export function useTerminalTheme({
       terminalTransparency,
     );
   }, [
+    sessionId,
     settings.theme,
     settings.accentColor,
     settings.enableVibrancy,

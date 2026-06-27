@@ -911,7 +911,11 @@ export function MainLayout({ children }: { children: ReactNode }) {
 
                 {/* AI Assistant Right Sidebar */}
                 <AiSidebar
-                    connectionId={activeWorkspaceTab?.connectionId ?? null}
+                    connectionId={
+                        showWelcomeScreen || !activeWorkspaceTab
+                            ? null
+                            : activeWorkspaceTab.connectionId ?? null
+                    }
                     onRunCommand={handleAiRunCommand}
                 />
             </div>
