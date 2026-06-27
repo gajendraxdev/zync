@@ -4,6 +4,8 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.17.0] - 2026-06-27
+
 ### Added
 - **Terminal P2 Output IPC**: PTY output events encode payload as base64 instead of JSON `number[]`; frontend `decodeTerminalOutputData()` accepts base64 and legacy array payloads. ([5e87642])
 - **Terminal Panel Restore**: `restoreTerminalDisplay` and `isTerminalDomMeasurable` refit/redraw xterm after Files/Dashboard overlay; agent tests for panel restore and scrollback preserve. ([5e87642])
@@ -19,11 +21,15 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Terminal Roadmap**: `docs/TERMINAL_ROADMAP.md` — optimization/robustness audit, P0/P1 priorities, and GPU implementation notes. ([15576ab])
 
 ### Fixed
+- **Tab Switch Performance**: Shell ↔ Files and shell-tab switches are much faster by mounting one active workspace UI, one active shell terminal, and keeping FileManager warm after first visit (CSS hide + memo) instead of remounting heavy panels on every switch. Background shells and running apps stay alive in `terminalCache`/PTY. ([e6e9e3f])
+- **Session Data Directory**: Custom `dataPath` no longer caches a default fallback after a transient create failure; stale invalid paths log once and retry until settings are corrected. ([e6e9e3f])
+- **Terminal Accent Theme**: Non-hex accent colors (`rgb()`, etc.) no longer produce invalid xterm selection and highlight colors. ([e6e9e3f])
+- **Shell Tab UI State**: Search, ghost suggestion, and context-menu state reset when switching shell tabs without remounting the terminal component. ([e6e9e3f])
 - **Terminal Files Scrollback**: Returning from Files/Dashboard no longer blanks the active shell — PTYs stay alive under the overlay, display restore runs only for the visible tab, and GPU refit avoids tearing down WebGL on panel return. ([5e87642])
 - **Terminal Ghost IPC (P2)**: Ghost suggestion handlers skip IPC when the shell tab is hidden. ([47cfc18])
-- **Connecting Screen Transparency**: Host connection loading no longer flashes fully transparent when vibrancy/terminal transparency is enabled — connecting and error states use an opaque shell and skip the tab fade-in animation.
-- **Terminal External Writes**: Snippet, plugin, and command-palette terminal injections now route through `queueTerminalInput` (ready/suspend gating) instead of direct `terminal:write` IPC.
-- **Input Queue Drain**: `clearTerminalInputQueue` bumps a per-session epoch so in-flight ghost tasks cannot apply stale input after suspend/destroy.
+- **Connecting Screen Transparency**: Host connection loading no longer flashes fully transparent when vibrancy/terminal transparency is enabled — connecting and error states use an opaque shell and skip the tab fade-in animation. ([e6e9e3f])
+- **Terminal External Writes**: Snippet, plugin, and command-palette terminal injections now route through `queueTerminalInput` (ready/suspend gating) instead of direct `terminal:write` IPC. ([d15f536])
+- **Input Queue Drain**: `clearTerminalInputQueue` bumps a per-session epoch so in-flight ghost tasks cannot apply stale input after suspend/destroy. ([d15f536])
 - **Terminal Child Cleanup (5.7)**: Local PTY sessions now explicitly `child.kill()` on close instead of relying on Drop. ([8d17335])
 - **Input Batching Perf (5.8)**: `pendingInputBytes` is tracked incrementally; avoids full re-encode of pending input on each keystroke. ([1fd77d5])
 - **Reconnect Tab Preservation (5.9)**: `clearTerminals` now supports `preservePendingRestore`; SSH disconnect marks tabs with `pendingRestore` so they survive for restore flow. ([1fd77d5])
@@ -34,7 +40,9 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **WebGL Reactivate Races**: `reactivateTerminalWebgl` coalesces concurrent loads through the shared `loadPromise` used by `syncTerminalRenderer`. ([15576ab])
 
 ### Changed
-- **Terminal Files Overlay Layout**: Terminal panel stays laid out under Files/Dashboard (`invisible` overlay) instead of `display: none`, preserving xterm geometry and renderer state. ([5e87642])
+- **Active Workspace UI**: Main content mounts one `TabContent` for the selected host tab; terminal React UI mounts only for the active shell on Terminal view while xterm/GPU state stays in `terminalCache` when opening Files or Dashboard. ([e6e9e3f])
+- **Terminal Lifecycle Split**: `useTerminalLifecycle` and `useTerminalTheme` extracted from `Terminal.tsx`; `WorkspaceTabBar` isolates shell-tab store subscriptions from feature panel renders. ([e6e9e3f])
+- **Terminal Files Overlay Layout**: Terminal panel stays laid out under Files/Dashboard (`invisible` overlay) instead of `display: none`, preserving xterm geometry and renderer state. Superseded for tab-switch perf by cache + selective mount above. ([5e87642], [e6e9e3f])
 - **Terminal Module Layout**: Moved `Terminal.tsx` to `src/components/terminal/`; extracted `terminalCache`, ligatures, renderer setup, and instance lifecycle (`destroyTerminalInstance`, `getTerminalRecentLines`) into `src/lib/terminal/`. Store and AI context now import from `lib/terminal` instead of the React component. ([b0cfd5f], [d15f536])
 - **CodeRabbit review**: addressed all remaining findings (duplicate headings, reconnect lock ordering, child cleanup, input/queue races, listener error handling, renderer reconciliation, etc.). ([579efb4])
 
@@ -714,8 +722,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 - Auto-updates
 - Multiple themes (Dark, Light, Dracula)
 
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.16.1...HEAD
-[2.16.1]: https://github.com/zync-sh/zync/compare/v2.16.0...v2.16.1
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.17.0...HEAD
 [c10c082]: https://github.com/zync-sh/zync/commit/c10c082
 [15576ab]: https://github.com/zync-sh/zync/commit/15576ab
 [b0cfd5f]: https://github.com/zync-sh/zync/commit/b0cfd5f
@@ -815,6 +822,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 [8faf6ef]: https://github.com/zync-sh/zync/commit/8faf6ef
 [480a8f9]: https://github.com/zync-sh/zync/commit/480a8f9
 [b915006]: https://github.com/zync-sh/zync/commit/b915006
+[e6e9e3f]: https://github.com/zync-sh/zync/commit/e6e9e3f
+[d15f536]: https://github.com/zync-sh/zync/commit/d15f536
+[2.17.0]: https://github.com/zync-sh/zync/compare/v2.16.1...v2.17.0
+[2.16.1]: https://github.com/zync-sh/zync/compare/v2.16.0...v2.16.1
 [2.16.0]: https://github.com/zync-sh/zync/compare/v2.15.1...v2.16.0
 [2.15.1]: https://github.com/zync-sh/zync/compare/v2.15.0...v2.15.1
 [2.15.0]: https://github.com/zync-sh/zync/compare/v2.14.1...v2.15.0
