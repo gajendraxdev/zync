@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../../lib/utils';
@@ -10,6 +10,7 @@ import { ShellIcon } from '../icons/ShellIcon';
 import { FEATURE_META, formatFeatureShortcut, type FeatureId } from './featureMeta';
 import { Tooltip } from '../ui/Tooltip';
 import { TopbarDropdown } from '../ui/TopbarDropdown';
+
 
 interface CombinedTabBarProps {
     connectionId: string;
@@ -93,7 +94,7 @@ function getContextMenuItems(
     ];
 }
 
-export function CombinedTabBar({
+export const CombinedTabBar = memo(function CombinedTabBar({
     connectionId,
     activeView,
     activeTerminalId,
@@ -223,7 +224,7 @@ export function CombinedTabBar({
                                 }}
                                 data-tauri-drag-region="false"
                                 className={cn(
-                                    "flex items-center gap-2 px-3 py-1.5 h-7 text-xs font-medium rounded-md transition-all cursor-pointer min-w-[100px] max-w-[200px] group border border-transparent drag-none shrink-0",
+                                    "flex items-center gap-2 px-3 py-1.5 h-7 text-xs font-medium rounded-md transition-colors duration-100 cursor-pointer min-w-[100px] max-w-[200px] group border border-transparent drag-none shrink-0 active:scale-[0.98]",
                                     isActive
                                         ? "bg-app-surface text-app-text shadow-sm border-app-border/50"
                                         : "text-app-muted hover:bg-app-surface/50 hover:text-app-text"
@@ -267,7 +268,7 @@ export function CombinedTabBar({
                             }}
                             data-tauri-drag-region="false"
                             className={cn(
-                                "flex items-center gap-2 px-3 py-1.5 h-7 text-xs font-medium rounded-md transition-all cursor-pointer min-w-[90px] group border border-transparent relative drag-none shrink-0",
+                                "flex items-center gap-2 px-3 py-1.5 h-7 text-xs font-medium rounded-md transition-colors duration-100 cursor-pointer min-w-[90px] group border border-transparent relative drag-none shrink-0 active:scale-[0.98]",
                                 isActive
                                     ? "bg-app-surface text-app-text shadow-sm border-app-border/50"
                                     : "text-app-muted hover:bg-app-surface/50 hover:text-app-text"
@@ -319,7 +320,7 @@ export function CombinedTabBar({
                             }}
                             data-tauri-drag-region="false"
                             className={cn(
-                                "flex items-center gap-2 px-3 py-1.5 h-7 text-xs font-medium rounded-md transition-all cursor-pointer min-w-[90px] group border border-transparent relative drag-none shrink-0",
+                                "flex items-center gap-2 px-3 py-1.5 h-7 text-xs font-medium rounded-md transition-colors duration-100 cursor-pointer min-w-[90px] group border border-transparent relative drag-none shrink-0 active:scale-[0.98]",
                                 isActive
                                     ? "bg-app-surface text-app-text shadow-sm border-app-border/50"
                                     : "text-app-muted hover:bg-app-surface/50 hover:text-app-text"
@@ -365,11 +366,10 @@ export function CombinedTabBar({
                                     const spaceRight = window.innerWidth - rect.left;
                                     setDropdownAlign(spaceRight >= 208 ? 'left' : 'right');
                                 }
-                                // Trigger a shell-list fetch every time the dropdown is
-                                // opened. The hook coalesces concurrent calls and
-                                // localStorage cache makes the first paint instant.
-                                if (opening) onRefetchShells?.();
                                 setIsDropdownOpen(opening);
+                                if (opening && onRefetchShells) {
+                                    requestAnimationFrame(() => onRefetchShells());
+                                }
                             }}
                             className={cn(
                                 "h-6 w-6 flex items-center justify-center rounded hover:bg-app-surface transition-colors",
@@ -543,4 +543,4 @@ export function CombinedTabBar({
             )}
         </div>
     );
-}
+});

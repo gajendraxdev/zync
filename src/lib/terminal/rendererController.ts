@@ -193,7 +193,9 @@ export function reactivateTerminalWebgl(
   rendererState.loadPromise = (async (): Promise<TerminalRendererKind> => {
     try {
       disposeCanvasAddonInternal(rendererState, term);
-      disposeWebglAddonInternal(rendererState, term);
+      disposeWebglAddonInternal(rendererState, term, {
+        contextAlreadyLost: rendererState.webglContextLossBlocked,
+      });
 
       if (!isWebgl2Available()) {
         rendererState.initFailureCount += 1;

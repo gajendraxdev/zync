@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { useEffect, useRef, useState, useCallback, memo } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
-import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { useAppStore, Connection } from '../../store/useAppStore';
 import { Search, ArrowUp, ArrowDown, X, Copy, Clipboard as ClipboardIcon, Trash2, Scissors } from 'lucide-react';
@@ -27,245 +26,46 @@ import { handleGhostInputEvent } from '../../lib/ghostSuggestions/runtime';
 import { useGhostPopupState } from '../../lib/ghostSuggestions/uiState';
 import { GhostSuggestionOverlay } from './GhostSuggestionOverlay';
 import { GhostSuggestionListOverlay } from './GhostSuggestionListOverlay';
+import { useTerminalTheme } from './useTerminalTheme';
+import { useTerminalLifecycle } from './useTerminalLifecycle';
 import {
-  activateCanvasRenderer,
-  applyTerminalRendererAndLigatures,
-  buildEffectiveRendererSettings,
-  getTerminalRendererState,
-  attachTerminalLifecycleListeners,
   clearTerminalPendingInput,
   enqueueTerminalInputTask,
-  flushPendingInput,
   queueTerminalInput,
-  resolveLazyPtyAction,
-  isTerminalDomMeasurable,
-  restoreTerminalDisplay,
-  safeFitTerminal,
   spawnTerminalFromStoreContext,
-  suspendTerminalPty,
-  syncTerminalResize,
-  createResizeScheduler,
-  TERMINAL_CONNECTION_WAKEUP_EVENT,
   terminalCache,
-  tryWakeTerminalOnReconnect,
 } from '../../lib/terminal';
 
-const THEME_PRESETS: Record<string, Record<string, string>> = {
-  red: { background: '#1a0b0b', cursor: '#ef4444', selectionBackground: 'rgba(239, 68, 68, 0.3)' },
-  blue: { background: '#0b101a', cursor: '#3b82f6', selectionBackground: 'rgba(59, 130, 246, 0.3)' },
-  green: { background: '#0b1a10', cursor: '#10b981', selectionBackground: 'rgba(16, 185, 129, 0.3)' },
-  orange: { background: '#1a120b', cursor: '#f97316', selectionBackground: 'rgba(249, 115, 22, 0.3)' },
-  purple: { background: '#160b1a', cursor: '#d946ef', selectionBackground: 'rgba(217, 70, 239, 0.3)' },
-};
-
-/** Returns true when the active app theme has a light background */
-function isLightTheme(): boolean {
-  const classes = document.body.classList;
-  if (classes.contains('light') || classes.contains('light-warm')) return true;
-  // For system theme: check media query
-  const dataTheme = document.body.getAttribute('data-theme') ?? '';
-  if (dataTheme === 'light') return true;
-  return false;
+interface TerminalComponentProps {
+  connectionId?: string;
+  termId?: string;
+  isVisible?: boolean;
+  isWorkspaceActive?: boolean;
+  isTerminalView?: boolean;
+  isActiveTab?: boolean;
 }
 
-type TerminalTransparencySettings = {
-  enableVibrancy?: boolean;
-  windowOpacity?: number;
-};
-
-/**
- * Maps the legacy appearance keys onto the terminal-only transparency behavior.
- * The persisted setting names stay the same for compatibility, but only the
- * terminal viewport consumes them now.
- */
-function resolveTerminalTransparency(settings: TerminalTransparencySettings) {
-  const opacity = Math.max(0, Math.min(1, settings.windowOpacity ?? 1));
-  return {
-    enabled: Boolean(settings.enableVibrancy) && opacity < 1,
-    opacity: Boolean(settings.enableVibrancy) ? opacity : 1,
-  };
+function terminalPropsEqual(prev: TerminalComponentProps, next: TerminalComponentProps): boolean {
+  return prev.connectionId === next.connectionId
+    && prev.termId === next.termId
+    && prev.isVisible === next.isVisible
+    && prev.isWorkspaceActive === next.isWorkspaceActive
+    && prev.isTerminalView === next.isTerminalView
+    && prev.isActiveTab === next.isActiveTab;
 }
 
-/**
- * Converts a theme color into an RGBA string so xterm can render with a real
- * alpha background while leaving the rest of the app fully opaque.
- */
-function withAlpha(color: string, alpha: number): string {
-  const clampedAlpha = Math.max(0, Math.min(1, alpha));
-  if (clampedAlpha <= 0) return 'rgba(0, 0, 0, 0)';
-  if (!color) return `rgba(15, 17, 26, ${clampedAlpha})`;
-
-  const normalized = color.trim();
-  const hexMatch = normalized.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
-  if (hexMatch) {
-    const hex = hexMatch[1].length === 3
-      ? hexMatch[1].split('').map(ch => ch + ch).join('')
-      : hexMatch[1];
-    const r = parseInt(hex.slice(0, 2), 16);
-    const g = parseInt(hex.slice(2, 4), 16);
-    const b = parseInt(hex.slice(4, 6), 16);
-    return `rgba(${r}, ${g}, ${b}, ${clampedAlpha})`;
-  }
-
-  const rgbMatch = normalized.match(/^rgba?\(([^)]+)\)$/i);
-  if (rgbMatch) {
-    const channels = rgbMatch[1].split(',').map(part => part.trim());
-    if (channels.length >= 3) {
-      return `rgba(${channels[0]}, ${channels[1]}, ${channels[2]}, ${clampedAlpha})`;
-    }
-  }
-
-  return clampedAlpha >= 1 ? normalized : `rgba(15, 17, 26, ${clampedAlpha})`;
-}
-/**
- * Builds the background for the outer terminal host. Applying the slider here
- * keeps the opacity behavior consistent across xterm renderer modes.
- */
-function buildTerminalHostBackground(opacity: number): string {
-  const clampedPercent = Math.max(0, Math.min(100, Math.round(opacity * 100)));
-  return `color-mix(in srgb, var(--color-app-bg) ${clampedPercent}%, transparent)`;
-}
-
-/**
- * Resolves the xterm theme background color. When terminal transparency is
- * active the host element owns the translucent fill, so xterm itself stays
- * transparent and does not double-apply the opacity.
- */
-function buildTerminalBackground(appBg: string, opacity: number, useHostBackground = false): string {
-  if (useHostBackground) {
-    return 'rgba(0, 0, 0, 0)';
-  }
-
-  const light = isLightTheme();
-  const fallback = light ? '#f8fafc' : '#0f111a';
-  return withAlpha(appBg || fallback, opacity);
-}
-
-/**
- * Merges an optional connection theme preset without reintroducing an opaque
- * background when terminal transparency is active.
- */
-function mergeTerminalThemePreset<T extends Record<string, string>>(
-  theme: T,
-  preset: Record<string, string>,
-  transparencyEnabled: boolean,
-  opacity: number,
-): T {
-  if (!transparencyEnabled) {
-    return { ...theme, ...preset } as T;
-  }
-
-  // When transparency is enabled, we apply the current opacity to the preset's background
-  // instead of stripping it entirely.
-  const themeWithAlpha = { ...theme, ...preset } as any;
-  if (preset.background) {
-    themeWithAlpha.background = withAlpha(preset.background, opacity);
-  }
-
-  return themeWithAlpha as T;
-}
-
-/**
- * Computes a blended color value directly for compatibility.
- * Blends the given hex color with white based on the provided ratio.
- */
-function blendWithWhite(hexColor: string, ratio: number): string {
-  let hex = hexColor.replace('#', '');
-  if (hex.length === 3) {
-    hex = hex.split('').map(c => c + c).join('');
-  }
-  const r = parseInt(hex.slice(0, 2), 16);
-  const g = parseInt(hex.slice(2, 4), 16);
-  const b = parseInt(hex.slice(4, 6), 16);
-  const blendR = Math.round(r * ratio + 255 * (1 - ratio));
-  const blendG = Math.round(g * ratio + 255 * (1 - ratio));
-  const blendB = Math.round(b * ratio + 255 * (1 - ratio));
-  return `#${blendR.toString(16).padStart(2, '0')}${blendG.toString(16).padStart(2, '0')}${blendB.toString(16).padStart(2, '0')}`;
-}
-
-/**
- * Build an xterm theme object from current CSS variables.
- * In light mode the ANSI "white" colors are swapped to dark so they remain
- * visible against the light background.
- */
-function buildXtermTheme(appBg: string, appText: string, appAccent: string, backgroundOpacity = 1, useHostBackground = false) {
-  const light = isLightTheme();
-  return {
-    background: buildTerminalBackground(appBg, backgroundOpacity, useHostBackground),
-    foreground: appText || (light ? '#18181b' : '#e2e8f0'),
-    cursor: appAccent || '#6366f1',
-    selectionBackground: appAccent ? `${appAccent}33` : 'rgba(99, 102, 241, 0.3)',
-    black: light ? '#3f3f46' : '#000000',
-    red: '#ef4444',
-    green: '#10b981',
-    yellow: appAccent || '#d97706',
-    blue: '#3b82f6',
-    magenta: '#d946ef',
-    cyan: '#0891b2',
-    white: light ? '#18181b' : '#ffffff',
-    brightBlack: light ? '#71717a' : '#64748b',
-    brightRed: '#fca5a5',
-    brightGreen: '#86efac',
-    brightYellow: appAccent ? blendWithWhite(appAccent, 0.8) : '#fcd34d',
-    brightBlue: '#93c5fd',
-    brightMagenta: '#f0abfc',
-    brightCyan: '#67e8f9',
-    brightWhite: light ? '#09090b' : '#f8fafc',
-  };
-}
-
-
-export function TerminalComponent({
+export const TerminalComponent = memo(function TerminalComponent({
   connectionId,
   termId,
   isVisible,
   isWorkspaceActive = true,
   isTerminalView = true,
   isActiveTab = true,
-}: {
-  connectionId?: string;
-  termId?: string;
-  isVisible?: boolean;
-  /** Sidebar host/local tab is selected (false when another workspace tab is active). */
-  isWorkspaceActive?: boolean;
-  /** Terminal view is active within this workspace (false on Files/Dashboard). */
-  isTerminalView?: boolean;
-  /** This tab is the selected shell tab within the terminal panel. */
-  isActiveTab?: boolean;
-}) {
+}: TerminalComponentProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
-
-  // Centralized resize scheduler (unifies multiple call sites)
-  const resizeSchedulerRef = useRef<ReturnType<typeof createResizeScheduler> | null>(null);
-  
-  // Layout transition fast-path tracking
-  const isLayoutTransitioning = useRef(false);
-  const layoutTransitionSafetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Layout transition React state for DOM class rendering
-  const [layoutTransitioning, setLayoutTransitioning] = useState(false);
-  const isVisibleRef = useRef(isVisible);
-  const isWorkspaceActiveRef = useRef(isWorkspaceActive);
-  const isTerminalViewRef = useRef(isTerminalView);
-  const isActiveTabRef = useRef(isActiveTab);
-
-  useEffect(() => {
-    isVisibleRef.current = isVisible;
-  }, [isVisible]);
-
-  useEffect(() => {
-    isWorkspaceActiveRef.current = isWorkspaceActive;
-  }, [isWorkspaceActive]);
-
-  useEffect(() => {
-    isTerminalViewRef.current = isTerminalView;
-  }, [isTerminalView]);
-
-  useEffect(() => {
-    isActiveTabRef.current = isActiveTab;
-  }, [isActiveTab]);
 
   // Search State
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -304,13 +104,6 @@ export function TerminalComponent({
   const connections = useAppStore(state => state.connections);
   const connect = useAppStore(state => state.connect);
   const settings = useAppStore(state => state.settings);
-  const terminalTransparency = resolveTerminalTransparency(settings);
-  const terminalHostStyle = terminalTransparency.enabled
-    ? {
-      backgroundColor: 'var(--color-app-bg)',
-      background: buildTerminalHostBackground(terminalTransparency.opacity),
-    }
-    : undefined;
   const updateSettings = useAppStore(state => state.updateSettings);
   const ghostSettings = settings.ghostSuggestions;
   const ghostSettingsRef = useRef(ghostSettings);
@@ -360,91 +153,42 @@ export function TerminalComponent({
   const sessionId = termId || terminalKey;
   const spawnConnectionId = terminalKey;
   const remoteReady = isLocal || isConnected;
+
+  // Shell-tab switch reuses one component instance — reset per-shell UI chrome (not xterm/cache).
+  useEffect(() => {
+    setIsSearchOpen(false);
+    setSearchText('');
+    setGhostSuggestion('');
+    setContextMenu(null);
+    closeGhostPopup();
+    ghostTabStateRef.current = resetGhostTabState();
+    try {
+      searchAddonRef.current?.clearDecorations();
+    } catch {
+      // Search addon may not be bound yet on first mount.
+    }
+  }, [sessionId, closeGhostPopup]);
+
+  const { terminalTransparency, terminalHostStyle, resolveInitialTheme } = useTerminalTheme({
+    containerRef,
+    termRef,
+    settings,
+    connection,
+    activeConnectionId,
+    sessionId,
+    isConnected,
+  });
+
+  const isVisibleRef = useRef(isVisible);
   const isConnectedRef = useRef(isConnected);
-  const sessionIdRef = useRef(sessionId);
+
+  useEffect(() => {
+    isVisibleRef.current = isVisible;
+  }, [isVisible]);
 
   useEffect(() => {
     isConnectedRef.current = isConnected;
   }, [isConnected]);
-
-  useEffect(() => {
-    sessionIdRef.current = sessionId;
-  }, [sessionId]);
-
-  const clearLayoutWidthPin = useCallback(() => {
-    if (!containerRef.current) return;
-    containerRef.current.style.width = '';
-    containerRef.current.style.flexShrink = '';
-    containerRef.current.style.height = '';
-    containerRef.current.style.maxHeight = '';
-  }, []);
-
-  const refreshTerminalScreen = useCallback((term: XTerm) => {
-    try {
-      const bufferLength = term.buffer?.active?.length ?? 0;
-      const lastRow = Math.max(0, Math.max(term.rows - 1, bufferLength - 1));
-      term.refresh(0, lastRow);
-    } catch {
-      // Ignore refresh failures; geometry is still updated by fit().
-    }
-  }, []);
-
-  const refitTerminal = useCallback((options?: { forceSync?: boolean; syncBackend?: boolean }) => {
-    if (!isVisibleRef.current || !isConnectedRef.current) return;
-
-    const fit = fitAddonRef.current;
-    const term = termRef.current;
-    const container = containerRef.current;
-    if (!fit || !term || !container) return;
-
-    clearLayoutWidthPin();
-
-    const nextWidth = container.clientWidth;
-    const nextHeight = container.clientHeight;
-    if (nextWidth <= 0 || nextHeight <= 0) return;
-
-    if (!safeFitTerminal(fit, term)) {
-      return;
-    }
-
-    try {
-      refreshTerminalScreen(term);
-      const shouldSyncBackend = options?.syncBackend ?? true;
-      if (shouldSyncBackend) {
-        if (options?.forceSync) {
-          const cached = terminalCache.get(sessionIdRef.current);
-          if (cached) cached.lastResize = null;
-        }
-        syncTerminalResize(sessionIdRef.current, term);
-      }
-    } catch (e) {
-      console.warn('Terminal refit failed', e);
-    }
-  }, [clearLayoutWidthPin, refreshTerminalScreen]);
-
-  // Wire the centralized debounced scheduler to the current refit impl.
-  // Effect ensures we have a live scheduler whenever refitTerminal is (re)created.
-  useEffect(() => {
-    resizeSchedulerRef.current = createResizeScheduler(refitTerminal);
-    return () => {
-      resizeSchedulerRef.current?.cancel();
-      resizeSchedulerRef.current = null;
-    };
-  }, [refitTerminal]);
-
-  const finishLayoutTransition = useCallback(() => {
-    if (layoutTransitionSafetyTimerRef.current) {
-      clearTimeout(layoutTransitionSafetyTimerRef.current);
-      layoutTransitionSafetyTimerRef.current = null;
-    }
-
-    isLayoutTransitioning.current = false;
-    setLayoutTransitioning(false);
-    clearLayoutWidthPin();
-
-    // Use the central scheduler (trailing debounce). Force for post-layout settle.
-    resizeSchedulerRef.current?.schedule({ forceSync: true, immediate: true });
-  }, [clearLayoutWidthPin, refitTerminal]);
 
   const acceptGhostSuffix = useCallback((suffix: string) => {
     if (!suffix) return;
@@ -464,428 +208,64 @@ export function TerminalComponent({
     return `${label.slice(0, Math.max(0, max - 1))}…`;
   }, []);
 
-  const terminalGpuAllowed = Boolean(isVisible && isWorkspaceActive && isTerminalView);
-  const terminalRendererSettingsKey = useMemo(
-    () => [
-      settings.terminal.gpuAcceleration,
-      settings.terminal.fontLigatures,
-      settings.terminal.fontFamily,
-      settings.terminal.fontSize,
-      settings.terminal.lineHeight,
-      settings.terminal.cursorStyle,
-    ].join('|'),
-    [
-      settings.terminal.gpuAcceleration,
-      settings.terminal.fontLigatures,
-      settings.terminal.fontFamily,
-      settings.terminal.fontSize,
-      settings.terminal.lineHeight,
-      settings.terminal.cursorStyle,
-    ],
-  );
-  const lastAppliedRendererSettingsKeyRef = useRef<string | null>(null);
-
-  // Typography updates apply to every cached shell tab (including hidden ones).
-  useEffect(() => {
-    if (!isConnected || !termRef.current) {
-      return;
-    }
-
-    const term = termRef.current;
-    term.options.fontSize = settings.terminal.fontSize;
-    term.options.fontFamily = settings.terminal.fontFamily;
-    term.options.cursorStyle = settings.terminal.cursorStyle;
-    term.options.lineHeight = settings.terminal.lineHeight;
-  }, [sessionId, settings.terminal, isConnected]);
-
-  // GPU + ligatures: only the visible active shell tab. On Files→Terminal return, refit
-  // only — never tear down WebGL (dispose blanks the screen while scrollback stays in memory).
-  useEffect(() => {
-    if (!isConnected || !termRef.current || !isVisible || !terminalGpuAllowed) {
-      return;
-    }
-
-    const term = termRef.current;
-    const rendererState = getTerminalRendererState(sessionId);
-    const settingsChanged = lastAppliedRendererSettingsKeyRef.current !== terminalRendererSettingsKey;
-    const rendererInitialized = (
-      (rendererState.kind === 'webgl' && Boolean(rendererState.webglAddon))
-      || Boolean(rendererState.canvasAddon)
-      || rendererState.webglContextLossBlocked
-    );
-
-    if (rendererInitialized && !settingsChanged) {
-      if (rendererState.webglContextLossBlocked && !rendererState.canvasAddon) {
-        void activateCanvasRenderer(term, rendererState).then(() => {
-          restoreTerminalDisplay(term, fitAddonRef.current);
-        });
-      } else {
-        restoreTerminalDisplay(term, fitAddonRef.current);
-      }
-      return;
-    }
-
-    lastAppliedRendererSettingsKeyRef.current = terminalRendererSettingsKey;
-
-    void applyTerminalRendererAndLigatures(
-      sessionId,
-      term,
-      buildEffectiveRendererSettings(settings.terminal, terminalGpuAllowed),
-      fitAddonRef.current,
-      syncTerminalResize,
-    ).then(() => {
-      safeFitTerminal(fitAddonRef.current, term);
-    });
-
-    safeFitTerminal(fitAddonRef.current, term);
-  }, [sessionId, terminalRendererSettingsKey, terminalGpuAllowed, isConnected, isVisible]);
-
-  // Refit after tab switch or returning from Files/Dashboard (panel was display:none).
-  useEffect(() => {
-    if (!isVisible || !isConnected || !isTerminalView) return;
-
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>;
-    let frame2 = 0;
-
-    const frame1 = requestAnimationFrame(() => {
-      frame2 = requestAnimationFrame(() => {
-        if (cancelled) return;
-        timer = setTimeout(() => {
-          if (cancelled) return;
-          try {
-            resizeSchedulerRef.current?.schedule({ forceSync: true, immediate: true });
-            const term = termRef.current;
-            if (term) {
-              refreshTerminalScreen(term);
-            }
-            term?.focus();
-          } catch (e) {
-            console.warn('Fit/Focus failed on visibility change', e);
-          }
-        }, 100);
-      });
-    });
-
-    return () => {
-      cancelled = true;
-      cancelAnimationFrame(frame1);
-      if (frame2) cancelAnimationFrame(frame2);
-      if (timer) clearTimeout(timer);
-    };
-  }, [isVisible, isConnected, isTerminalView, refitTerminal]);
-
-  // Redraw the visible shell when the terminal panel is foregrounded again (Files/Dashboard).
-  // Inactive shell tabs must not refit while hidden — that corrupts their display on tab switch.
-  useEffect(() => {
-    if (!isTerminalView || !isConnected || !isVisible) return;
-
-    let cancelled = false;
-    let frame2 = 0;
-    const frame1 = requestAnimationFrame(() => {
-      frame2 = requestAnimationFrame(() => {
-        if (cancelled) return;
-        restoreTerminalDisplay(termRef.current, fitAddonRef.current);
-      });
-    });
-
-    return () => {
-      cancelled = true;
-      cancelAnimationFrame(frame1);
-      if (frame2) cancelAnimationFrame(frame2);
-    };
-  }, [isTerminalView, isConnected, sessionId, isVisible]);
-
-  // Lazy PTY: defer spawn until a shell tab is first selected. Keep PTYs alive when
-  // switching hosts or internal shell tabs; suspend only when leaving terminal view
-  // (Files/Dashboard) within the active workspace.
-  useEffect(() => {
-    if (!isConnected || !sessionId || !termRef.current) return;
-
-    const cached = terminalCache.get(sessionId);
-    const action = resolveLazyPtyAction(
-      { isWorkspaceActive, isTerminalView, isActiveTab },
-      Boolean(cached?.spawned),
-    );
-
-    if (action === 'suspend_panel') {
-      suspendTerminalPty(sessionId, { panelHide: true });
-      return;
-    }
-
-    if (action === 'spawn' && cached) {
-      const store = useAppStore.getState();
-      let frame = 0;
-      let attempts = 0;
-      const trySpawn = () => {
-        const term = termRef.current;
-        if (!term || !terminalCache.get(sessionId)) {
-          return;
+  const onCreateTerminal = useCallback((term: XTerm) => {
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type === 'keydown') {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'i') {
+          e.preventDefault();
+          window.dispatchEvent(new CustomEvent('zync:ai-command-bar'));
+          return false;
         }
-        if (!isTerminalDomMeasurable(term)) {
-          attempts += 1;
-          if (attempts < 30) {
-            frame = requestAnimationFrame(trySpawn);
-          }
-          return;
+
+        if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
+          e.preventDefault();
+          const currentSize = currentFontSizeRef.current;
+          updateTerminalSettings({ fontSize: Math.min(currentSize + 1, 32) });
+          return false;
         }
-        spawnTerminalFromStoreContext({
-          sessionId,
-          connectionId: spawnConnectionId,
-          terminalKey,
-          term,
-          clearBuffer: false,
-          terminals: store.terminals,
-          windowsShell: store.settings.localTerm?.windowsShell,
-          remoteReady,
-        });
-      };
-      trySpawn();
-      return () => {
-        if (frame) cancelAnimationFrame(frame);
-      };
-    }
-  }, [isWorkspaceActive, isTerminalView, isActiveTab, isConnected, sessionId, terminalKey, spawnConnectionId, remoteReady]);
 
-  // Layout Transition Listener (Flicker Hardening V2)
-  // Keep listener registration stable (no isVisible/session deps) so we never miss
-  // layout-transition-end while the effect is re-subscribing.
-  useEffect(() => {
-    const handleStart = () => {
-      isLayoutTransitioning.current = true;
-      setLayoutTransitioning(true);
-      // Clear any legacy inline dimension pins from older builds.
-      clearLayoutWidthPin();
-
-      if (layoutTransitionSafetyTimerRef.current) {
-        clearTimeout(layoutTransitionSafetyTimerRef.current);
-      }
-      layoutTransitionSafetyTimerRef.current = setTimeout(() => {
-        layoutTransitionSafetyTimerRef.current = null;
-        if (isLayoutTransitioning.current) {
-          console.warn('[Terminal] Layout transition safety timeout — forcing refit');
-          finishLayoutTransition();
+        if ((e.ctrlKey || e.metaKey) && e.key === '-') {
+          e.preventDefault();
+          const currentSize = currentFontSizeRef.current;
+          updateTerminalSettings({ fontSize: Math.max(currentSize - 1, 8) });
+          return false;
         }
-      }, 500);
-    };
-    const handleEnd = () => {
-      finishLayoutTransition();
-    };
 
-    window.addEventListener('zync:layout-transition-start', handleStart);
-    window.addEventListener('zync:layout-transition-end', handleEnd);
-    return () => {
-      window.removeEventListener('zync:layout-transition-start', handleStart);
-      window.removeEventListener('zync:layout-transition-end', handleEnd);
-      if (layoutTransitionSafetyTimerRef.current) {
-        clearTimeout(layoutTransitionSafetyTimerRef.current);
-        layoutTransitionSafetyTimerRef.current = null;
-      }
-    };
-  }, [clearLayoutWidthPin, finishLayoutTransition]);
-
-  // Window maximize/restore and other OS-level resizes do not emit layout-transition-end.
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout>;
-    const handleWindowResize = () => {
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        if (isLayoutTransitioning.current) {
-          finishLayoutTransition();
-        } else {
-          resizeSchedulerRef.current?.schedule({ forceSync: true });
-        }
-      }, 100);
-    };
-
-    window.addEventListener('resize', handleWindowResize);
-    return () => {
-      window.removeEventListener('resize', handleWindowResize);
-      clearTimeout(timer);
-    };
-  }, [finishLayoutTransition, refitTerminal]);
-
-  useEffect(() => {
-    if (!containerRef.current || !activeConnectionId || !sessionId || !isConnected) return;
-
-    let term: XTerm;
-    let fitAddon: FitAddon;
-    let searchAddon: SearchAddon;
-    let isNewTerminal = false;
-
-    // Check if we have a cached terminal instance
-    const cached = terminalCache.get(sessionId);
-    if (cached) {
-      // Reuse existing terminal - preserves history!
-      term = cached.term;
-      fitAddon = cached.fitAddon;
-      searchAddon = cached.searchAddon;
-      // Reattach cached xterm DOM when remounting after route/view changes.
-      // xterm.open() is a one-time operation; for already-opened terminals we
-      // must move the existing element instead of calling open() again.
-      if (containerRef.current) {
-        if (term.element) {
-          if (!containerRef.current.contains(term.element)) {
-            containerRef.current.appendChild(term.element);
-          }
-        } else {
-          term.open(containerRef.current);
-        }
-        if (isVisible) {
-          setTimeout(() => term.focus(), 50);
-        }
-      }
-    } else {
-      // Create new terminal instance
-      isNewTerminal = true;
-
-      const computedStyle = getComputedStyle(containerRef.current ?? document.body);
-      const appBg = computedStyle.getPropertyValue('--color-app-bg').trim();
-      const appText = computedStyle.getPropertyValue('--color-app-text').trim();
-      const appAccent = computedStyle.getPropertyValue('--color-app-accent').trim();
-      const themePreset = connection?.theme && THEME_PRESETS[connection.theme]
-        ? THEME_PRESETS[connection.theme]
-        : null;
-      const initialTheme = themePreset
-        ? mergeTerminalThemePreset(
-          buildXtermTheme(appBg, appText, appAccent, terminalTransparency.opacity, terminalTransparency.enabled),
-          themePreset,
-          terminalTransparency.enabled,
-          terminalTransparency.opacity,
-        )
-        : buildXtermTheme(appBg, appText, appAccent, terminalTransparency.opacity, terminalTransparency.enabled);
-
-      term = new XTerm({
-        cursorBlink: true,
-        fontSize: settings.terminal.fontSize,
-        fontFamily: settings.terminal.fontFamily,
-        cursorStyle: settings.terminal.cursorStyle,
-        lineHeight: settings.terminal.lineHeight,
-        allowTransparency: true,
-        allowProposedApi: true,
-        theme: initialTheme,
-      });
-
-      // Initialize Addons
-      fitAddon = new FitAddon();
-      const webLinksAddon = new WebLinksAddon();
-      searchAddon = new SearchAddon();
-
-      term.loadAddon(fitAddon);
-      term.loadAddon(webLinksAddon);
-      term.loadAddon(searchAddon);
-
-      // OSC 7 CWD tracking — fired by shells that support shell integration
-      // (bash w/ PROMPT_COMMAND, zsh precmd, fish, starship, oh-my-posh, etc.)
-      term.parser.registerOscHandler(7, (data) => {
-        try {
-          // Format: "file://hostname/path"  or  "file:///path"  or just "/path"
-          let path = data;
-          if (path.startsWith('file://')) {
-            // Strip scheme + authority: file://hostname/path → /path
-            path = path.replace(/^file:\/\/[^/]*/, '');
-          }
-          // Decode percent-encoded chars regardless of whether the file:// prefix was present.
-          path = decodeURIComponent(path);
-          // Windows absolute paths arrive as /C:/Users/... — strip leading slash.
-          if (/^\/[a-zA-Z]:/.test(path)) {
-            path = path.slice(1);
-          }
-          if (path) {
-            useAppStore.getState().setTerminalCwd(terminalKey, sessionId, path);
-          }
-        } catch { /* ignore malformed OSC 7 */ }
-        return true; // consumed — do not pass to xterm default handler
-      });
-
-      term.open(containerRef.current);
-
-      // Focus immediately for new terminals
-      if (isVisible) {
-        setTimeout(() => term.focus(), 100);
-      }
-
-      // Custom Key Handler
-      term.attachCustomKeyEventHandler((e) => {
-        if (e.type === 'keydown') {
-
-          // AI Command Bar: Ctrl/Cmd + I
-          if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'i') {
-            e.preventDefault();
-            window.dispatchEvent(new CustomEvent('zync:ai-command-bar'));
+        if (e.key === 'Escape') {
+          if (isSearchOpen) {
+            setIsSearchOpen(false);
+            term.focus();
             return false;
           }
-
-          // Zoom In: Ctrl + = or Ctrl + +
-          if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
-            e.preventDefault();
-            const currentSize = currentFontSizeRef.current;
-            updateTerminalSettings({ fontSize: Math.min(currentSize + 1, 32) });
-            return false;
-          }
-
-          // Zoom Out: Ctrl + -
-          if ((e.ctrlKey || e.metaKey) && e.key === '-') {
-            e.preventDefault();
-            const currentSize = currentFontSizeRef.current;
-            updateTerminalSettings({ fontSize: Math.max(currentSize - 1, 8) });
-            return false;
-          }
-
-          if (e.key === 'Escape') {
-            if (isSearchOpen) {
-              setIsSearchOpen(false);
-              term.focus();
-              return false;
-            }
-          }
         }
-        return true;
-      });
+      }
+      return true;
+    });
 
-      // Store in cache
-      terminalCache.set(sessionId, {
-        term,
-        fitAddon,
-        searchAddon,
-        generation: 0,
-        spawned: false,
-        starting: false,
-        listenerAttached: false,
-        pendingInput: '',
-        pendingInputBytes: 0,
-        inputFlushTimer: null,
-        lastResize: null,
-        ligaturesAddon: undefined,
-        ligaturesEnabled: false,
-      });
-      // Create tracker once per cached terminal; handlers are bound per mount below.
-      const ghostTracker = new InputTracker({
-        onLineChange: () => {},
-        onAccept: () => {},
-        onDismiss: () => {},
-        onHistoryCommit: () => {},
-      });
-      terminalCache.get(sessionId)!.ghostTracker = ghostTracker;
-    }
+    const ghostTracker = new InputTracker({
+      onLineChange: () => {},
+      onAccept: () => {},
+      onDismiss: () => {},
+      onHistoryCommit: () => {},
+    });
+    terminalCache.get(sessionId)!.ghostTracker = ghostTracker;
+  }, [sessionId, isSearchOpen, updateTerminalSettings]);
 
-    // Bind ghost suggestion handlers for this mount (prevents stale React callbacks
-    // when the terminal instance survives remounts via terminalCache).
-    const cachedGhostTracker = terminalCache.get(sessionId)?.ghostTracker;
+  const onBindMount = useCallback(({ term, sessionId: mountSessionId }: { term: XTerm; sessionId: string; isNewTerminal: boolean }) => {
+    const cachedGhostTracker = terminalCache.get(mountSessionId)?.ghostTracker;
     ghostTrackerRef.current = cachedGhostTracker ?? null;
-    // If inline suggestions are already disabled at mount time, clear any stale
-    // active suffix that survived from a previous session.
     if (!ghostSettingsRef.current.inlineEnabled) {
       ghostTrackerRef.current?.clearSuggestion();
     }
+
     const unbindGhostTracker = cachedGhostTracker
       ? bindGhostTrackerRuntime({
         tracker: cachedGhostTracker,
         debounceMs: 30,
         resolveInlineSuggestion: async (line) => {
           if (!ghostSettingsRef.current.inlineEnabled) return '';
-          if (!isVisibleRef.current) return ''; // P2: skip IPC for hidden tabs
-          const termState = useAppStore.getState().terminals[terminalKey]?.find(t => t.id === sessionId);
+          if (!isVisibleRef.current) return '';
+          const termState = useAppStore.getState().terminals[terminalKey]?.find(t => t.id === mountSessionId);
           const cwd = termState?.lastKnownCwd ?? termState?.initialPath;
           return resolveInlineSuggestion({
             line,
@@ -901,18 +281,16 @@ export function TerminalComponent({
             setGhostSuggestion('');
           }
 
-          // Always close immediately so stale results from a previous async
-          // call never remain visible while the new request is in-flight.
           closeGhostPopup();
 
           if (!ghostSettingsRef.current.popupEnabled || line.trim().length < 2) {
             return;
           }
 
-          const termState = useAppStore.getState().terminals[terminalKey]?.find(t => t.id === sessionId);
+          const termState = useAppStore.getState().terminals[terminalKey]?.find(t => t.id === mountSessionId);
           const cwd = termState?.lastKnownCwd ?? termState?.initialPath;
           const preferPath = shouldPreferPathSuggestion(line);
-          if (!isVisibleRef.current) return; // P2: skip IPC for hidden tabs
+          if (!isVisibleRef.current) return;
           void resolvePopupCandidates({
             line,
             cwd,
@@ -922,7 +300,6 @@ export function TerminalComponent({
             providers: ghostSettingsRef.current.providers,
           }).then((items) => {
             if (!cachedGhostTracker || cachedGhostTracker.getLineBuffer() !== line) return;
-            // Re-check live setting — user may have disabled popup while resolution was in flight.
             if (!ghostSettingsRef.current.popupEnabled) return;
             if (items.length > 1) openGhostPopup(items, line);
             else closeGhostPopup();
@@ -931,7 +308,7 @@ export function TerminalComponent({
           });
         },
         onAccept: (suffix, lineAfterAccept) => {
-          queueTerminalInput(sessionId, suffix);
+          queueTerminalInput(mountSessionId, suffix);
           acceptGhostCommand(lineAfterAccept, ghostScope).catch(() => {});
         },
         onHistoryCommit: (cmd) => {
@@ -945,37 +322,16 @@ export function TerminalComponent({
       })
       : () => {};
 
-    fitAddonRef.current = fitAddon;
-    searchAddonRef.current = searchAddon;
-    termRef.current = term;
-
-    void applyTerminalRendererAndLigatures(
-      sessionId,
-      term,
-      buildEffectiveRendererSettings(
-        settings.terminal,
-        Boolean(
-          isVisibleRef.current
-          && isWorkspaceActiveRef.current
-          && isTerminalViewRef.current,
-        ),
-      ),
-      fitAddon,
-      syncTerminalResize,
-    ).then(() => {
-      safeFitTerminal(fitAddon, term);
-    });
-
     const triggerGhostPopup = async (tracker: InputTracker) => {
       try {
         const line = tracker.getLineBuffer();
         if (!ghostSettingsRef.current.popupEnabled) {
-          queueTerminalInput(sessionId, '\t');
+          queueTerminalInput(mountSessionId, '\t');
           return;
         }
-        const termState = useAppStore.getState().terminals[terminalKey]?.find(t => t.id === sessionId);
+        const termState = useAppStore.getState().terminals[terminalKey]?.find(t => t.id === mountSessionId);
         const cwd = termState?.lastKnownCwd ?? termState?.initialPath;
-        if (!isVisibleRef.current) return; // P2: skip IPC for hidden tabs
+        if (!isVisibleRef.current) return;
         const outcome = await resolveTabCompletionOutcome({
           line,
           cwd,
@@ -986,7 +342,6 @@ export function TerminalComponent({
           providers: ghostSettingsRef.current.providers,
         });
 
-        // Stale-result guard: discard if the user typed more while we were awaiting.
         if (tracker.getLineBuffer() !== line) {
           ghostTabStateRef.current = resetGhostTabState();
           closeGhostPopup();
@@ -999,11 +354,10 @@ export function TerminalComponent({
           return;
         }
         if (outcome.kind === 'show_list') {
-          // Re-check: user may have disabled popups while the async call was in flight.
           if (!ghostSettingsRef.current.popupEnabled) {
             ghostTabStateRef.current = resetGhostTabState();
             closeGhostPopup();
-            queueTerminalInput(sessionId, '\t');
+            queueTerminalInput(mountSessionId, '\t');
             return;
           }
           ghostTabStateRef.current = outcome.nextState;
@@ -1013,18 +367,16 @@ export function TerminalComponent({
 
         closeGhostPopup();
         ghostTabStateRef.current = resetGhostTabState();
-        // No custom candidates: fall back to shell-native tab completion.
-        queueTerminalInput(sessionId, '\t');
+        queueTerminalInput(mountSessionId, '\t');
       } catch (error) {
         console.warn('[Ghost] Tab popup resolution failed:', error);
         ghostTabStateRef.current = resetGhostTabState();
         closeGhostPopup();
-        queueTerminalInput(sessionId, '\t');
+        queueTerminalInput(mountSessionId, '\t');
       }
     };
 
-    // Rebind input handler per mount so callbacks always use current React state.
-    const cachedForInput = terminalCache.get(sessionId);
+    const cachedForInput = terminalCache.get(mountSessionId);
     if (cachedForInput?.onDataDisposable) {
       cachedForInput.onDataDisposable.dispose();
       cachedForInput.onDataDisposable = undefined;
@@ -1032,149 +384,93 @@ export function TerminalComponent({
 
     if (cachedForInput) {
       cachedForInput.onDataDisposable = term.onData((data) => {
-        enqueueTerminalInputTask(sessionId, async () => {
-        const cached = terminalCache.get(sessionId);
+        enqueueTerminalInputTask(mountSessionId, async () => {
+          const cached = terminalCache.get(mountSessionId);
 
-        // Restart only on Enter after an explicit session-end message.
-        if (cached && !cached.spawned) {
-          const isRestartKey = data === '\r' || data === '\n';
-          if (!isRestartKey) {
+          if (cached && !cached.spawned) {
+            const isRestartKey = data === '\r' || data === '\n';
+            if (!isRestartKey) {
+              return;
+            }
+            if (!isVisibleRef.current || !isConnectedRef.current || cached.spawnBlocked) {
+              return;
+            }
+            console.log('[Terminal] Session ended, restarting on Enter');
+            clearTerminalPendingInput(mountSessionId);
+            cached.lastResize = null;
+            cached.spawnBlocked = false;
+            const store = useAppStore.getState();
+            spawnTerminalFromStoreContext({
+              sessionId: mountSessionId,
+              connectionId: spawnConnectionId,
+              terminalKey,
+              term,
+              clearBuffer: true,
+              terminals: store.terminals,
+              windowsShell: store.settings.localTerm?.windowsShell,
+              remoteReady: true,
+            });
+            cached.ghostTracker?.reset();
+            setGhostSuggestion('');
+            closeGhostPopup();
+            ghostTabStateRef.current = resetGhostTabState();
             return;
           }
-          if (!isVisibleRef.current || !isConnectedRef.current || cached.spawnBlocked) {
-            return;
+
+          if (isVisibleRef.current) {
+            const handledByGhost = await handleGhostInputEvent({
+              data: data,
+              popup: ghostPopupRef.current,
+              tracker: cached?.ghostTracker,
+              allowTabPopup: ghostSettingsRef.current.popupEnabled,
+              onMovePopupSelection: moveGhostPopupSelection,
+              onAcceptPopupSelection: () => {
+                const popup = ghostPopupRef.current;
+                const suffix = popup.items[popup.selectedIndex] ?? '';
+                acceptGhostSuffix(suffix);
+              },
+              onDismissPopup: closeGhostPopup,
+              onTriggerTabPopup: triggerGhostPopup,
+            });
+            if (handledByGhost) return;
           }
-          console.log('[Terminal] Session ended, restarting on Enter');
-          clearTerminalPendingInput(sessionId);
-          cached.lastResize = null;
-          cached.spawnBlocked = false;
-          const store = useAppStore.getState();
-          spawnTerminalFromStoreContext({
-            sessionId,
-            connectionId: spawnConnectionId,
-            terminalKey,
-            term,
-            clearBuffer: true,
-            terminals: store.terminals,
-            windowsShell: store.settings.localTerm?.windowsShell,
-            remoteReady: true,
-          });
-          cached.ghostTracker?.reset();
-          setGhostSuggestion('');
-          closeGhostPopup();
-          ghostTabStateRef.current = resetGhostTabState();
-          return;
-        }
 
-        // Ghost popup + inline suggestion routing.
-        // Skip ghost IPC when not visible (P2 polish: avoid work + IPC for hidden tabs).
-        if (isVisibleRef.current) {
-          const handledByGhost = await handleGhostInputEvent({
-            data: data,
-            popup: ghostPopupRef.current,
-            tracker: cached?.ghostTracker,
-            allowTabPopup: ghostSettingsRef.current.popupEnabled,
-            onMovePopupSelection: moveGhostPopupSelection,
-            onAcceptPopupSelection: () => {
-              const popup = ghostPopupRef.current;
-              const suffix = popup.items[popup.selectedIndex] ?? '';
-              acceptGhostSuffix(suffix);
-            },
-            onDismissPopup: closeGhostPopup,
-            onTriggerTabPopup: triggerGhostPopup,
-          });
-          if (handledByGhost) return;
-        }
-
-        queueTerminalInput(sessionId, data);
+          queueTerminalInput(mountSessionId, data);
         });
       });
     }
 
-    attachTerminalLifecycleListeners(sessionId, term);
-
-    // Spawn shell via IPC only for the active tab — inactive tabs keep xterm scrollback
-    // without a live PTY until the user switches back (see lazy PTY visibility effect).
-    const cachedEntry = terminalCache.get(sessionId);
-    if (
-      cachedEntry
-      && !cachedEntry.spawned
-      && isWorkspaceActiveRef.current
-      && isTerminalViewRef.current
-      && isActiveTabRef.current
-    ) {
-      const store = useAppStore.getState();
-      spawnTerminalFromStoreContext({
-        sessionId,
-        connectionId: spawnConnectionId,
-        terminalKey,
-        term,
-        clearBuffer: isNewTerminal,
-        terminals: store.terminals,
-        windowsShell: store.settings.localTerm?.windowsShell,
-        remoteReady,
-      });
-    }
-
-    const resizeObserver = new ResizeObserver(() => {
-      try {
-        if (!isVisibleRef.current || !term.element || !containerRef.current) return;
-
-        // Only fit if dimensions are valid
-        const nextWidth = containerRef.current.clientWidth;
-        const nextHeight = containerRef.current.clientHeight;
-        if (nextWidth <= 0 || nextHeight <= 0) return;
-
-        if (isLayoutTransitioning.current) return;
-
-        // Route EVERY container resize through the unified debounced scheduler.
-        // Scheduler handles safeFit + deduped syncTerminalResize.
-        resizeSchedulerRef.current?.schedule();
-      } catch (e) {
-        console.warn('Xterm fit resize failed', e);
-      }
-    });
-
-    if (containerRef.current) {
-      resizeObserver.observe(containerRef.current);
-    }
-
-    return () => {
-      // NOTE: We do NOT remove the IPC listener here - it's stored in the cache
-      // and will be cleaned up when destroyTerminalInstance() is called.
-      // This prevents duplicate listeners when the component remounts.
-      resizeObserver.disconnect();
-      resizeSchedulerRef.current?.cancel();
-
-      const cachedForCleanup = terminalCache.get(sessionId);
-      if (cachedForCleanup?.onDataDisposable) {
-        cachedForCleanup.onDataDisposable.dispose();
-        cachedForCleanup.onDataDisposable = undefined;
-      }
-      if (cachedForCleanup?.spawned) {
-        flushPendingInput(sessionId);
-      } else {
-        clearTerminalPendingInput(sessionId);
-      }
-      unbindGhostTracker();
-
-      // NOTE: We do NOT dispose the terminal here!
-      // The terminal instance stays in cache to preserve history.
-      // It will only be disposed when destroyTerminalInstance() is called
-      // from terminalSlice.closeTerminal()
-
-      termRef.current = null;
-      fitAddonRef.current = null;
-      searchAddonRef.current = null;
-    };
+    return unbindGhostTracker;
   }, [
-    activeConnectionId,
-    sessionId,
-    isConnected,
-    refreshTerminalScreen,
-    // Settings dependencies removed to prevent re-spawning on theme/font changes.
+    terminalKey,
+    ghostScope,
+    spawnConnectionId,
+    acceptGhostSuffix,
+    closeGhostPopup,
+    openGhostPopup,
+    moveGhostPopupSelection,
   ]);
 
+  const { layoutTransitioning } = useTerminalLifecycle({
+    containerRef,
+    termRef,
+    fitAddonRef,
+    searchAddonRef,
+    activeConnectionId,
+    sessionId,
+    terminalKey,
+    spawnConnectionId,
+    isConnected,
+    isVisible,
+    isWorkspaceActive,
+    isTerminalView,
+    isActiveTab,
+    remoteReady,
+    terminalSettings: settings.terminal,
+    resolveInitialTheme,
+    onCreateTerminal,
+    onBindMount,
+  });
   // Handle Global Shortcuts (Copy, Paste, Find)
   useEffect(() => {
     const handleGlobalCopy = async () => {
@@ -1242,62 +538,6 @@ export function TerminalComponent({
     };
 
   }, [activeConnectionId, globalActiveId, isVisible]);
-
-  // Spawn PTYs for visible tabs immediately after SSH reconnect (see connectionSlice).
-  useEffect(() => {
-    const handleWakeup = (e: Event) => {
-      if (!sessionId || !termRef.current) return;
-      if ((e as CustomEvent).detail !== sessionId) return;
-
-      const store = useAppStore.getState();
-      tryWakeTerminalOnReconnect({
-        sessionId,
-        connectionId: spawnConnectionId,
-        terminalKey,
-        term: termRef.current,
-        isVisible: Boolean(isVisibleRef.current),
-        terminals: store.terminals,
-        windowsShell: store.settings.localTerm?.windowsShell,
-        remoteReady: true,
-      });
-    };
-
-    window.addEventListener(TERMINAL_CONNECTION_WAKEUP_EVENT, handleWakeup);
-    return () => window.removeEventListener(TERMINAL_CONNECTION_WAKEUP_EVENT, handleWakeup);
-  }, [sessionId, spawnConnectionId, terminalKey]);
-
-  useEffect(() => {
-    if (!termRef.current || !activeConnectionId) return;
-
-    // Calculate effective theme
-    const computedStyle = getComputedStyle(containerRef.current ?? document.body);
-    const appBg = computedStyle.getPropertyValue('--color-app-bg').trim();
-    const appText = computedStyle.getPropertyValue('--color-app-text').trim();
-    const appAccent = computedStyle.getPropertyValue('--color-app-accent').trim();
-
-    // Default Theme
-    let themeObj = buildXtermTheme(appBg, appText, appAccent, terminalTransparency.opacity, terminalTransparency.enabled);
-
-    // Apply Override if exists
-    if (connection?.theme && THEME_PRESETS[connection.theme]) {
-      themeObj = mergeTerminalThemePreset(
-        themeObj,
-        THEME_PRESETS[connection.theme],
-        terminalTransparency.enabled,
-        terminalTransparency.opacity,
-      );
-    }
-
-    termRef.current.options.theme = themeObj;
-
-  }, [
-    settings.theme,
-    settings.accentColor,
-    settings.enableVibrancy,
-    settings.windowOpacity,
-    connection?.theme,
-    activeConnectionId,
-  ]);
 
   if (!activeConnectionId) return <div className="p-8 text-gray-400">Please connect to a server first.</div>;
 
@@ -1513,7 +753,7 @@ export function TerminalComponent({
       </div>
     </div>
   );
-}
+}, terminalPropsEqual);
 
 
 

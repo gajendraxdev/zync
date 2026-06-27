@@ -3,6 +3,12 @@ import type { TerminalRendererState } from './types.js';
 
 let canvasAddonImport: Promise<typeof import('@xterm/addon-canvas')> | null = null;
 
+function isWebglDisposeBenignError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.includes('_isDisposed')
+    || message.includes("Cannot read properties of undefined (reading '_isDisposed')");
+}
+
 function disposeAddonSafely(addon: { dispose: () => void } | undefined): void {
   if (!addon) {
     return;
@@ -11,7 +17,9 @@ function disposeAddonSafely(addon: { dispose: () => void } | undefined): void {
   try {
     addon.dispose();
   } catch (err) {
-    console.warn('[terminal] addon dispose failed', err);
+    if (!isWebglDisposeBenignError(err)) {
+      console.warn('[terminal] addon dispose failed', err);
+    }
   }
 }
 
@@ -40,6 +48,9 @@ export function disposeWebglAddonInternal(
   try {
     addon.dispose();
   } catch (err) {
+    if (isWebglDisposeBenignError(err)) {
+      return;
+    }
     disposeFailed = true;
     console.warn('[terminal] addon dispose failed', err);
   }

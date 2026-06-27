@@ -134,7 +134,7 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                 syncedTerminalId: nextSyncedIds
             };
         });
-        get().saveSession();
+        scheduleSaveSession(() => get().saveSession());
         return newId;
     },
 
@@ -156,7 +156,7 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                 [connectionId]: fallbackId,
             },
         }));
-        get().saveSession();
+        scheduleSaveSession(() => get().saveSession());
         return fallbackId;
     },
 
@@ -215,7 +215,7 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                 [connectionId]: termId
             }
         }));
-        get().saveSession();
+        scheduleSaveSession(() => get().saveSession());
     },
 
     /** @inheritdoc */

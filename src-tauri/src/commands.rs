@@ -6,6 +6,8 @@ use anyhow::Result;
 use russh::client::{Handle, Msg};
 use russh::Channel;
 use std::collections::{HashMap, HashSet};
+use std::io::ErrorKind;
+use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, LazyLock, Mutex as StdMutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -22,6 +24,31 @@ const MAX_CONNECTION_IMPORT_BYTES: u64 = 5 * 1024 * 1024; // 5 MiB
 const SETTINGS_CHANGED_ON_DISK_ERROR_CODE: &str = "SETTINGS_CHANGED_ON_DISK";
 const MAX_SFTP_RETRIES: u8 = 3;
 static DATA_DIR_CACHE: StdMutex<Option<std::path::PathBuf>> = StdMutex::new(None);
+static DATA_DIR_WARNED: StdMutex<Option<String>> = StdMutex::new(None);
+
+fn warn_data_dir_fallback(custom_dir: &Path, error: &std::io::Error, default_dir: &Path) {
+    let key = custom_dir.display().to_string();
+    let mut warned = DATA_DIR_WARNED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if warned.as_deref() == Some(key.as_str()) {
+        return;
+    }
+    *warned = Some(key);
+    eprintln!(
+        "[DataDir] Could not create custom dataPath {:?} ({}). Using default {:?}.",
+        custom_dir,
+        error,
+        default_dir
+    );
+}
+
+fn is_transient_data_dir_error(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        ErrorKind::PermissionDenied | ErrorKind::Interrupted | ErrorKind::WouldBlock
+    )
+}
 static PLUGIN_WINDOW_TEMP_FILES: LazyLock<StdMutex<HashMap<String, std::path::PathBuf>>> =
     LazyLock::new(|| StdMutex::new(HashMap::new()));
 static SETTINGS_MUTATION_LOCK: LazyLock<tokio::sync::Mutex<()>> =
@@ -355,23 +382,43 @@ pub fn get_data_dir(app: &AppHandle) -> std::path::PathBuf {
     let merged_settings =
         read_effective_settings(app).unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
 
-    let resolved = if let Some(data_path) = merged_settings.get("dataPath").and_then(|v| v.as_str())
+    let (resolved, cache_result) = if let Some(data_path) = merged_settings.get("dataPath").and_then(|v| v.as_str())
     {
         if !data_path.is_empty() {
             let custom_dir = std::path::PathBuf::from(data_path);
-            if !custom_dir.exists() {
-                let _ = std::fs::create_dir_all(&custom_dir);
+            if custom_dir.is_file() {
+                eprintln!(
+                    "[DataDir] Custom dataPath is a file, not a directory: {:?}. Using default.",
+                    custom_dir
+                );
+                (default_dir.clone(), true)
+            } else if custom_dir.is_dir() {
+                (custom_dir, true)
+            } else if let Err(e) = std::fs::create_dir_all(&custom_dir) {
+                warn_data_dir_fallback(&custom_dir, &e, &default_dir);
+                // Retry on transient I/O errors; cache default for stale/invalid paths.
+                (default_dir.clone(), !is_transient_data_dir_error(&e))
+            } else {
+                (custom_dir, true)
             }
-            custom_dir
         } else {
-            default_dir
+            (default_dir.clone(), true)
         }
     } else {
-        default_dir
+        (default_dir.clone(), true)
     };
 
-    if let Ok(mut cache) = DATA_DIR_CACHE.lock() {
-        *cache = Some(resolved.clone());
+    if let Err(e) = std::fs::create_dir_all(&resolved) {
+        eprintln!(
+            "[DataDir] Warning: could not create data directory {:?}: {}",
+            resolved, e
+        );
+    }
+
+    if cache_result {
+        if let Ok(mut cache) = DATA_DIR_CACHE.lock() {
+            *cache = Some(resolved.clone());
+        }
     }
 
     resolved
@@ -380,6 +427,9 @@ pub fn get_data_dir(app: &AppHandle) -> std::path::PathBuf {
 fn clear_data_dir_cache() {
     if let Ok(mut cache) = DATA_DIR_CACHE.lock() {
         *cache = None;
+    }
+    if let Ok(mut warned) = DATA_DIR_WARNED.lock() {
+        *warned = None;
     }
 }
 

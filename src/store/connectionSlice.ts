@@ -1,5 +1,6 @@
 import { StateCreator } from 'zustand';
 import type { AppStore } from './useAppStore';
+import { scheduleSaveSession } from './sessionSlice';
 import type { Connection, CoreTabView, Folder, Tab } from '../features/connections/domain/types.js';
 import {
     addFolderToState,
@@ -716,8 +717,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
             };
         });
         if (!didActivate) return;
-        // Dirty-checked in sessionSlice — redundant calls are harmless.
-        get().saveSession();
+        scheduleSaveSession(() => get().saveSession());
         if (connectionIdToConnect) {
             void get().connect(connectionIdToConnect);
         }

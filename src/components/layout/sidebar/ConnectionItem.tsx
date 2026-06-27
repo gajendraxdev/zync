@@ -5,6 +5,7 @@ import { Settings } from 'lucide-react';
 import { OSIcon } from '../../icons/OSIcon';
 import { cn } from '../../../lib/utils';
 
+
 interface ConnectionItemComponentProps {
     conn: Connection;
     isCollapsed: boolean;

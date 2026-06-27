@@ -251,28 +251,21 @@ export function TerminalManager({
                         <p>No active terminals</p>
                         <button onClick={handleNewTab} className="mt-4 text-app-accent hover:underline">Open New Terminal</button>
                     </div>
-                ) : (
-                    tabs.map(tab => (
-                        <div
-                            key={tab.id}
-                            className={cn("absolute inset-0", activeTabId === tab.id ? "z-10" : "z-0 invisible")}
-                        >
-                            {/* We keep the component mounted but use CSS visibility to hide it.
-                                This preserves the XTerm state/buffer but stops it from rendering.
-                            */}
-                            <div className="h-full w-full">
-                                <TerminalComponent
-                                    connectionId={activeConnectionId}
-                                    termId={tab.id}
-                                    isWorkspaceActive={workspaceActive}
-                                    isTerminalView={terminalView}
-                                    isActiveTab={activeTabId === tab.id}
-                                    isVisible={panelVisible && activeTabId === tab.id}
-                                />
-                            </div>
+                ) : activeTabId && terminalView ? (
+                    <div className="absolute inset-0 z-10">
+                        {/* Mount only the active shell while terminal view is shown — xterm stays in terminalCache. */}
+                        <div className="h-full w-full">
+                            <TerminalComponent
+                                connectionId={activeConnectionId}
+                                termId={activeTabId}
+                                isWorkspaceActive={workspaceActive}
+                                isTerminalView
+                                isActiveTab
+                                isVisible={panelVisible}
+                            />
                         </div>
-                    ))
-                )}
+                    </div>
+                ) : null}
             </div>
         </div>
     );
