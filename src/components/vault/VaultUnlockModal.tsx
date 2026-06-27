@@ -244,6 +244,7 @@ export function VaultUnlockModal({ isOpen, onClose }: Props) {
           showSecret={showPass}
           onToggleShow={() => setShowPass((v) => !v)}
           autoFocus
+          autoComplete="off"
           placeholder="Enter recovery key"
         />
       ) : (
@@ -254,6 +255,7 @@ export function VaultUnlockModal({ isOpen, onClose }: Props) {
           showSecret={showPass}
           onToggleShow={() => setShowPass((v) => !v)}
           autoFocus
+          autoComplete={isUninitialized ? 'new-password' : 'current-password'}
           placeholder={isUninitialized ? 'Create a strong passphrase' : 'Enter passphrase'}
         />
       )}
@@ -264,6 +266,7 @@ export function VaultUnlockModal({ isOpen, onClose }: Props) {
           type={showPass ? 'text' : 'password'}
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}
+          autoComplete="new-password"
           placeholder="Repeat your passphrase"
         />
       )}

@@ -95,6 +95,7 @@ export function RecoveryKeyModal({
       closeOnEsc={false}
       closeOnOverlayClick={false}
       showCloseButton={false}
+      explicitDismissOnly
     >
       <div className="space-y-5">
         {/* Warning banner */}

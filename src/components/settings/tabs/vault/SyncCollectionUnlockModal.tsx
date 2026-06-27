@@ -121,6 +121,7 @@ export function SyncCollectionUnlockModal({
         showSecret={showSecret}
         onToggleShow={() => setShowSecret(value => !value)}
         autoFocus
+        autoComplete={mode === 'recovery-key' ? 'off' : 'current-password'}
         placeholder={
           mode === 'recovery-key'
             ? 'Enter recovery key'

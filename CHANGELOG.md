@@ -38,13 +38,17 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Dev Single-Instance Focus Steal**: `tauri dev` no longer focuses the installed production app — single-instance guard is release-only (`debug_assertions` off) because dev and production share the same app identifier. ([c10c082])
 - **GPU Off Blank Terminal**: Turning off GPU acceleration no longer wipes the active terminal — WebGL dispose now loads the explicit canvas renderer and refreshes the buffer so existing tabs stay visible and usable. ([15576ab])
 - **WebGL Reactivate Races**: `reactivateTerminalWebgl` coalesces concurrent loads through the shared `loadPromise` used by `syncTerminalRenderer`. ([15576ab])
+- **FileManager Visibility Guard**: Keyboard and sync effects no longer run when the files panel container ref is missing.
+- **Welcome Screen AI Targeting**: AI sidebar clears connection targeting while the welcome screen is shown.
+- **Terminal Session Polish**: Theme reapplies when swapping cached xterm instances; focus timers clear on detach; `clearTerminals` persists session state; search Escape handler stays in sync on cached terminals.
+- **Vault Passphrase Autocomplete**: Vault and Google sync unlock/setup password fields set appropriate `autocomplete` attributes.
+- **Recovery Key Modal**: Dismiss only via the in-content confirmation action — no forced header close button or dev accessibility warning.
 
 ### Changed
 - **Active Workspace UI**: Main content mounts one `TabContent` for the selected host tab; terminal React UI mounts only for the active shell on Terminal view while xterm/GPU state stays in `terminalCache` when opening Files or Dashboard. ([e6e9e3f])
 - **Terminal Lifecycle Split**: `useTerminalLifecycle` and `useTerminalTheme` extracted from `Terminal.tsx`; `WorkspaceTabBar` isolates shell-tab store subscriptions from feature panel renders. ([e6e9e3f])
 - **Terminal Files Overlay Layout**: Terminal panel stays laid out under Files/Dashboard (`invisible` overlay) instead of `display: none`, preserving xterm geometry and renderer state. Superseded for tab-switch perf by cache + selective mount above. ([5e87642], [e6e9e3f])
 - **Terminal Module Layout**: Moved `Terminal.tsx` to `src/components/terminal/`; extracted `terminalCache`, ligatures, renderer setup, and instance lifecycle (`destroyTerminalInstance`, `getTerminalRecentLines`) into `src/lib/terminal/`. Store and AI context now import from `lib/terminal` instead of the React component. ([b0cfd5f], [d15f536])
-- **CodeRabbit review**: addressed all remaining findings (duplicate headings, reconnect lock ordering, child cleanup, input/queue races, listener error handling, renderer reconciliation, etc.). ([579efb4])
 
 ## [2.16.1] - 2026-06-15
 

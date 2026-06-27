@@ -19,6 +19,8 @@ interface ModalProps {
   closeOnEsc?: boolean;
   closeOnOverlayClick?: boolean;
   showCloseButton?: boolean;
+  /** When true, dismiss is only via in-content actions (no header X forced). */
+  explicitDismissOnly?: boolean;
 }
 
 /**
@@ -37,6 +39,7 @@ interface ModalProps {
  * @param closeOnEsc - Whether pressing Escape closes the modal (default true).
  * @param closeOnOverlayClick - Whether clicking the overlay closes the modal (default true).
  * @param showCloseButton - Whether to render the close button in the header (default true).
+ * @param explicitDismissOnly - When true, only in-content actions dismiss the modal (no forced header X).
  * @returns The modal element mounted into the ZPortal target when `isOpen` is true, otherwise null.
  */
 export function Modal({
@@ -53,17 +56,20 @@ export function Modal({
   closeOnEsc = true,
   closeOnOverlayClick = true,
   showCloseButton = true,
+  explicitDismissOnly = false,
 }: ModalProps) {
   const hasCloseMechanism = closeOnEsc || closeOnOverlayClick || showCloseButton;
-  const effectiveShowCloseButton = hasCloseMechanism ? showCloseButton : true;
+  const effectiveShowCloseButton = explicitDismissOnly
+    ? showCloseButton
+    : (hasCloseMechanism ? showCloseButton : true);
 
   useEffect(() => {
-    if (import.meta.env.DEV && !hasCloseMechanism) {
+    if (import.meta.env.DEV && !explicitDismissOnly && !hasCloseMechanism) {
       console.warn(
         '[Modal] closeOnEsc, closeOnOverlayClick, and showCloseButton are all false; forcing close button for accessibility.'
       );
     }
-  }, [hasCloseMechanism]);
+  }, [explicitDismissOnly, hasCloseMechanism]);
 
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
