@@ -178,7 +178,7 @@ export const TerminalComponent = memo(function TerminalComponent({
     onOpenSearch: openSearch,
   });
 
-  if (!activeConnectionId) {
+  if (!isLocal && !activeConnectionId) {
     return <div className="p-8 text-gray-400">Please connect to a server first.</div>;
   }
 

@@ -21,10 +21,13 @@ export const TerminalSearchBar = memo(function TerminalSearchBar({
   onPrev,
   onClose,
 }: TerminalSearchBarProps) {
+  if (!isOpen) {
+    return null;
+  }
+
   return (
     <div className={cn(
-      'absolute top-4 right-4 z-50 flex items-center gap-1 p-1 bg-app-panel backdrop-blur-xl border border-app-border rounded-lg shadow-xl transition-all duration-200 ease-out origin-top-right',
-      isOpen ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 -translate-y-2 pointer-events-none',
+      'absolute top-4 right-4 z-50 flex items-center gap-1 p-1 bg-app-panel backdrop-blur-xl border border-app-border rounded-lg shadow-xl transition-all duration-200 ease-out origin-top-right opacity-100 scale-100 translate-y-0',
     )}>
       <div className="relative flex items-center">
         <Search className="absolute left-2 w-3.5 h-3.5 text-app-muted" />

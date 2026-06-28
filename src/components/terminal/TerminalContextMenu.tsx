@@ -5,6 +5,10 @@ import { ContextMenu } from '../ui/ContextMenu';
 import type { GhostPopupState } from '../../lib/ghostSuggestions/types';
 import type { AppSettings } from '../../store/settingsSlice';
 import { terminalCache } from '../../lib/terminal';
+import {
+  readTerminalClipboardText,
+  writeTerminalClipboardText,
+} from '../../lib/terminal/terminalClipboard.js';
 
 export interface TerminalContextMenuProps {
   position: { x: number; y: number };
@@ -64,7 +68,9 @@ export const TerminalContextMenu = memo(function TerminalContextMenu({
           icon: <Copy className="w-4 h-4" />,
           action: () => {
             const selection = termRef.current?.getSelection();
-            if (selection) navigator.clipboard.writeText(selection);
+            if (selection) {
+              void writeTerminalClipboardText(selection).catch(console.error);
+            }
           },
           disabled: !termRef.current?.hasSelection(),
         },
@@ -72,11 +78,9 @@ export const TerminalContextMenu = memo(function TerminalContextMenu({
           label: 'Paste',
           icon: <ClipboardIcon className="w-4 h-4" />,
           action: async () => {
-            try {
-              const text = await navigator.clipboard.readText();
-              if (text) termRef.current?.paste(text);
-            } catch (err) {
-              console.error('Failed to paste', err);
+            const text = await readTerminalClipboardText();
+            if (text) {
+              termRef.current?.paste(text);
             }
           },
         },

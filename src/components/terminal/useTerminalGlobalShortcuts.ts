@@ -1,5 +1,9 @@
 import { useEffect, type RefObject } from 'react';
 import type { Terminal as XTerm } from '@xterm/xterm';
+import {
+  readTerminalClipboardText,
+  writeTerminalClipboardText,
+} from '../../lib/terminal/terminalClipboard.js';
 
 export interface UseTerminalGlobalShortcutsOptions {
   isVisible: boolean;
@@ -17,33 +21,16 @@ export function useTerminalGlobalShortcuts({
       if (isVisible && termRef.current?.hasSelection()) {
         const selection = termRef.current.getSelection();
         if (selection) {
-          try {
-            const { writeText } = await import('@tauri-apps/plugin-clipboard-manager');
-            await writeText(selection);
-          } catch (e) {
-            console.error('Tauri copy failed, falling back to navigator:', e);
-            navigator.clipboard.writeText(selection).catch(console.error);
-          }
+          await writeTerminalClipboardText(selection).catch(console.error);
         }
       }
     };
 
     const handleGlobalPaste = async () => {
       if (!isVisible) return;
-      try {
-        const { readText } = await import('@tauri-apps/plugin-clipboard-manager');
-        const text = await readText();
-        if (text && termRef.current) {
-          termRef.current.paste(text);
-        }
-      } catch (e) {
-        console.error('Paste failed:', e);
-        try {
-          const text = await navigator.clipboard.readText();
-          if (text && termRef.current) termRef.current.paste(text);
-        } catch (e2) {
-          console.error('Fallback paste failed:', e2);
-        }
+      const text = await readTerminalClipboardText();
+      if (text && termRef.current) {
+        termRef.current.paste(text);
       }
     };
 

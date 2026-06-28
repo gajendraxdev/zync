@@ -4,6 +4,17 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Added
+- **Idle host PTY suspend (opt-in)**: Settings → Terminal → **Suspend idle host shells** suspends background workspace host PTYs after a configurable idle timeout (scrollback preserved; press Enter to resume). Shells with output or buffered input since the host was backgrounded stay alive until quiet. ([3b05fec])
+
+### Fixed
+- **Idle suspend message**: Suspend banner writes synchronously (PTY kill does not emit `terminal-exit`); idle guard clears only after `terminal-ready`.
+- **Idle suspend timers**: Pending jobs cancel when the setting is disabled; idle timeout minutes clamped at the settings store boundary.
+- **Terminal spawn errors**: Unreachable host / offline network failures show a user-friendly reconnect message instead of raw OS error codes.
+- **Local terminal gate**: Local shell mounts without a remote `activeConnectionId`.
+- **Terminal clipboard**: Context menu Copy/Paste uses the shared Tauri-with-browser-fallback clipboard path.
+- **Terminal search focus**: Closed search bar is removed from the DOM so it cannot receive keyboard focus.
+
 ### Changed
 - **Terminal module layout**: Split `Terminal.tsx` into focused hooks and components; route tab destroy through `terminalService`; remove deprecated canvas renderer aliases. ([d872b3d])
 - **Terminal xterm options**: Centralized xterm 6 init in `xtermOptions.ts`; scrollback increased to 5000 rows; local Windows ConPTY uses `windowsPty` heuristics. ([ae2af4c])
