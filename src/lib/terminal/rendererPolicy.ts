@@ -16,11 +16,11 @@ export interface TerminalRendererPolicyContext extends TerminalRendererPreferenc
 export function resolveDesiredTerminalRenderer(
   context: TerminalRendererPolicyContext,
 ): TerminalRendererKind {
-  if (!context.gpuAcceleration) return 'canvas';
-  if (context.webglContextLossBlocked) return 'canvas';
+  if (!context.gpuAcceleration) return 'dom';
+  if (context.webglContextLossBlocked) return 'dom';
   return 'webgl';
 }
 
 export function rendererKindLabel(kind: TerminalRendererKind): string {
-  return kind === 'webgl' ? 'GPU (WebGL)' : 'Canvas';
+  return kind === 'webgl' ? 'GPU (WebGL)' : 'DOM';
 }

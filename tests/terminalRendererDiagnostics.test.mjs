@@ -21,19 +21,20 @@ runTest('reports gpu-active when WebGL renderer is active', () => {
   assert.equal(result.summary, 'GPU acceleration is active');
 });
 
-runTest('reports canvas-expected when GPU is disabled in settings', () => {
+runTest('reports dom-expected when GPU is disabled in settings', () => {
   const state = createInitialRendererState();
   const result = describeTerminalRendererState(state, { gpuAcceleration: false });
-  assert.equal(result.health, 'canvas-expected');
+  assert.equal(result.health, 'dom-expected');
   assert.match(result.summary, /GPU off/);
 });
 
-runTest('reports canvas-fallback with context-loss detail', () => {
+runTest('reports dom-fallback with context-loss detail', () => {
   const state = createInitialRendererState();
   state.webglContextLossBlocked = true;
   state.desiredKind = 'webgl';
   const result = describeTerminalRendererState(state, { gpuAcceleration: true });
-  assert.equal(result.health, 'canvas-fallback');
+  assert.equal(result.health, 'dom-fallback');
+  assert.equal(result.summary, 'DOM fallback (GPU not active)');
   assert.match(result.detail ?? '', /context was lost/i);
 });
 

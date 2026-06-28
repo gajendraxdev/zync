@@ -1,8 +1,7 @@
 /**
- * Terminal renderer kinds supported by Zync.
- * Extend this union when adding new xterm renderer addons (e.g. explicit canvas).
+ * Terminal renderer kinds supported by Zync (xterm 6: WebGL or built-in DOM).
  */
-export type TerminalRendererKind = 'webgl' | 'canvas';
+export type TerminalRendererKind = 'webgl' | 'dom';
 
 export interface TerminalRendererState {
   /** Active renderer after the last successful apply. */
@@ -10,7 +9,6 @@ export interface TerminalRendererState {
   /** Last renderer target requested by policy/settings. */
   desiredKind: TerminalRendererKind;
   webglAddon?: { dispose: () => void };
-  canvasAddon?: { dispose: () => void };
   loadPromise: Promise<TerminalRendererKind> | null;
   /**
    * Set only after WebGL context loss — skip GPU for remainder of session.
@@ -26,8 +24,8 @@ export interface TerminalRendererState {
 
 export function createInitialRendererState(): TerminalRendererState {
   return {
-    kind: 'canvas',
-    desiredKind: 'canvas',
+    kind: 'dom',
+    desiredKind: 'dom',
     loadPromise: null,
     webglContextLossBlocked: false,
     contextLossCount: 0,

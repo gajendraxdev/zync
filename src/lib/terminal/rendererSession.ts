@@ -1,5 +1,5 @@
 import type { Terminal } from '@xterm/xterm';
-import { disposeTerminalRenderer, ensureCanvasRenderer } from './rendererLifecycle.js';
+import { disposeTerminalRenderer, ensureDomRenderer } from './rendererLifecycle.js';
 import { createInitialRendererState, type TerminalRendererState } from './types.js';
 
 const rendererSessions = new Map<string, TerminalRendererState>();
@@ -17,9 +17,12 @@ export function hasTerminalRendererSession(sessionId: string): boolean {
   return rendererSessions.has(sessionId);
 }
 
-export function ensureCanvasRendererForSession(sessionId: string): void {
-  ensureCanvasRenderer(getTerminalRendererState(sessionId));
+export function ensureDomRendererForSession(sessionId: string): void {
+  ensureDomRenderer(getTerminalRendererState(sessionId));
 }
+
+/** @deprecated Use ensureDomRendererForSession */
+export const ensureCanvasRendererForSession = ensureDomRendererForSession;
 
 export function clearTerminalRendererSession(sessionId: string, term?: Terminal): void {
   const state = rendererSessions.get(sessionId);

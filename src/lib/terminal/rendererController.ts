@@ -1,7 +1,6 @@
 import type { Terminal } from '@xterm/xterm';
 import {
-  activateCanvasRenderer,
-  disposeCanvasAddonInternal,
+  activateDomRenderer,
   disposeWebglAddonInternal,
 } from './rendererLifecycle.js';
 import { isTerminalDomMeasurable } from './terminalFit.js';
@@ -27,6 +26,10 @@ export interface SyncTerminalRendererOptions extends TerminalRendererPreferences
   onRefit?: () => void;
 }
 
+function shouldAbortWebglLoad(state: TerminalRendererState): boolean {
+  return state.desiredKind !== 'webgl' || state.webglContextLossBlocked;
+}
+
 async function loadWebglRenderer(
   sessionId: string,
   term: Terminal,
@@ -38,11 +41,15 @@ async function loadWebglRenderer(
     return 'webgl';
   }
 
+  if (shouldAbortWebglLoad(state)) {
+    return 'dom';
+  }
+
   if (!isWebgl2Available()) {
     state.initFailureCount += 1;
     state.lastError = 'webgl2_unavailable';
-    state.kind = 'canvas';
-    return 'canvas';
+    await activateDomRenderer(term, state);
+    return 'dom';
   }
 
   try {
@@ -50,17 +57,21 @@ async function loadWebglRenderer(
       webglAddonImport = import('@xterm/addon-webgl');
     }
     const { WebglAddon } = await webglAddonImport;
+    if (shouldAbortWebglLoad(state)) {
+      return 'dom';
+    }
+
     const addon = new WebglAddon();
 
     addon.onContextLoss(() => {
-      console.warn('[terminal] WebGL context lost — falling back to canvas for this session');
+      console.warn('[terminal] WebGL context lost — falling back to DOM for this session');
       state.contextLossCount += 1;
       state.webglContextLossBlocked = true;
       state.lastError = 'webgl_context_lost';
-      state.kind = 'canvas';
+      state.kind = 'dom';
       disposeWebglAddonInternal(state, term, { contextAlreadyLost: true });
 
-      // Panel hidden (Files/Dashboard) uses display:none — canvas recovery here can
+      // Panel hidden (Files/Dashboard) uses display:none — DOM recovery here can
       // wipe scrollback. Defer until the terminal host has measurable layout.
       if (!isTerminalDomMeasurable(term)) {
         notifyTerminalRendererChanged(sessionId);
@@ -68,11 +79,16 @@ async function loadWebglRenderer(
       }
 
       void (async () => {
-        await activateCanvasRenderer(term, state);
+        await activateDomRenderer(term, state);
         onRefit?.();
         notifyTerminalRendererChanged(sessionId);
       })();
     });
+
+    if (shouldAbortWebglLoad(state)) {
+      addon.dispose();
+      return 'dom';
+    }
 
     term.loadAddon(addon);
     state.webglAddon = addon;
@@ -81,11 +97,11 @@ async function loadWebglRenderer(
     return 'webgl';
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn('[terminal] WebGL renderer unavailable, using canvas', error);
+    console.warn('[terminal] WebGL renderer unavailable, using DOM', error);
     state.initFailureCount += 1;
     state.lastError = message;
-    state.kind = 'canvas';
-    return 'canvas';
+    await activateDomRenderer(term, state);
+    return 'dom';
   }
 }
 
@@ -106,38 +122,43 @@ export async function syncTerminalRenderer(
 
   rendererState.desiredKind = desired;
 
-  if (desired === 'canvas') {
-    if (rendererState.kind === 'canvas' && !rendererState.webglAddon) {
+  if (desired === 'dom') {
+    if (
+      rendererState.kind === 'dom'
+      && !rendererState.webglAddon
+      && !rendererState.loadPromise
+    ) {
       notifyTerminalRendererChanged(sessionId);
-      return 'canvas';
+      return 'dom';
     }
 
-    if (rendererState.loadPromise) {
-      // Do not return stale loadPromise if desiredKind changed while the previous transition was in-flight.
-      if (rendererState.kind === rendererState.desiredKind) {
-        return rendererState.loadPromise;
-      }
-      // fall through to start transition for the new desiredKind
-    }
-
-    const transitionPromise: Promise<TerminalRendererKind> = (async (): Promise<TerminalRendererKind> => {
+    let transitionPromise!: Promise<TerminalRendererKind>;
+    transitionPromise = (async (): Promise<TerminalRendererKind> => {
+      const priorLoad = rendererState.loadPromise;
       try {
-        await activateCanvasRenderer(term, rendererState);
+        if (priorLoad) {
+          try {
+            await priorLoad;
+          } catch {
+            // Force DOM even if the prior renderer transition failed.
+          }
+        }
+        await activateDomRenderer(term, rendererState);
         options.onRefit?.();
         notifyTerminalRendererChanged(sessionId);
-        return 'canvas';
+        return 'dom';
       } catch (error) {
-        console.warn('[terminal] Canvas transition failed', error);
-        return 'canvas';
+        console.warn('[terminal] DOM transition failed', error);
+        return 'dom';
       } finally {
-        rendererState.loadPromise = null;
+        if (rendererState.loadPromise === transitionPromise) {
+          rendererState.loadPromise = null;
+        }
       }
     })();
     rendererState.loadPromise = transitionPromise;
     return transitionPromise;
   }
-
-  disposeCanvasAddonInternal(rendererState, term);
 
   if (rendererState.kind === 'webgl' && rendererState.webglAddon) {
     notifyTerminalRendererChanged(sessionId);
@@ -145,11 +166,9 @@ export async function syncTerminalRenderer(
   }
 
   if (rendererState.loadPromise) {
-    // Do not return stale loadPromise if desiredKind changed while the previous transition was in-flight.
     if (rendererState.kind === rendererState.desiredKind) {
       return rendererState.loadPromise;
     }
-    // fall through to start transition for the new desiredKind
   }
 
   rendererState.loadPromise = (async () => {
@@ -162,7 +181,7 @@ export async function syncTerminalRenderer(
       return kind;
     } catch (error) {
       console.warn('[terminal] WebGL transition failed', error);
-      return 'canvas';
+      return 'dom';
     } finally {
       rendererState.loadPromise = null;
     }
@@ -183,7 +202,7 @@ export function reactivateTerminalWebgl(
   const rendererState = getTerminalRendererState(sessionId);
   if (rendererState.webglContextLossBlocked) {
     notifyTerminalRendererChanged(sessionId);
-    return Promise.resolve('canvas');
+    return Promise.resolve('dom');
   }
 
   if (rendererState.loadPromise) {
@@ -192,7 +211,6 @@ export function reactivateTerminalWebgl(
 
   rendererState.loadPromise = (async (): Promise<TerminalRendererKind> => {
     try {
-      disposeCanvasAddonInternal(rendererState, term);
       disposeWebglAddonInternal(rendererState, term, {
         contextAlreadyLost: rendererState.webglContextLossBlocked,
       });
@@ -200,8 +218,9 @@ export function reactivateTerminalWebgl(
       if (!isWebgl2Available()) {
         rendererState.initFailureCount += 1;
         rendererState.lastError = 'webgl2_unavailable';
+        await activateDomRenderer(term, rendererState);
         notifyTerminalRendererChanged(sessionId);
-        return 'canvas';
+        return 'dom';
       }
 
       const kind = await loadWebglRenderer(sessionId, term, rendererState, options.onRefit);

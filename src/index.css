@@ -156,9 +156,23 @@ body {
     transition: color 0.2s;
 }
 
+/* xterm 6 defaults viewport/composition to #000; host shell supplies the visible background */
+.xterm,
+.xterm .xterm-viewport,
+.xterm .xterm-screen,
+.xterm .xterm-screen canvas {
+    background-color: transparent !important;
+}
+
 .terminal-transparent .xterm,
-.terminal-transparent .xterm-viewport {
-    background-color: transparent;
+.terminal-transparent .xterm .xterm-viewport,
+.terminal-transparent .xterm .xterm-screen,
+.terminal-transparent .xterm .xterm-screen canvas {
+    background-color: transparent !important;
+}
+
+.xterm .composition-view {
+    background: transparent !important;
 }
 
 .xterm .xterm-viewport {

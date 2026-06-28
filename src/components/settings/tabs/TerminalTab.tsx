@@ -147,7 +147,7 @@ export function TerminalTab({
                     <div className="rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/40 p-3 space-y-3">
                         <Toggle
                             label="GPU Acceleration (WebGL)"
-                            description="Faster rendering for large output. Works with font ligatures when both are enabled. Falls back to canvas if WebGL is unavailable."
+                            description="Faster rendering for large output. Works with font ligatures when both are enabled. Falls back to DOM if WebGL is unavailable."
                             checked={settings.terminal.gpuAcceleration ?? DEFAULT_TERMINAL_GPU_ACCELERATION}
                             onChange={(v) => updateTerminalSettings({ gpuAcceleration: v })}
                         />

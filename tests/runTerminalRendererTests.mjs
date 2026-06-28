@@ -6,6 +6,7 @@ const tests = [
   'tests/terminalRendererSession.test.mjs',
   'tests/terminalRendererController.test.mjs',
   'tests/terminalRendererDiagnostics.test.mjs',
+  'tests/terminalRendererSetup.test.mjs',
   'tests/terminalInputPipeline.test.mjs',
   'tests/terminalInputQueue.test.mjs',
   'tests/terminalPtyLifecycle.test.mjs',

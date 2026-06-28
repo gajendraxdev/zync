@@ -4,6 +4,25 @@ import { reactivateTerminalWebgl, syncTerminalRenderer } from './rendererControl
 import { setTerminalLigatures } from './ligatures.js';
 import { getTerminalRendererState } from './rendererSession.js';
 import { isTerminalFitReady, safeFitTerminal } from './terminalFit.js';
+import type { TerminalRendererState } from './types.js';
+
+/**
+ * True when renderer policy does not match session state (e.g. fresh `dom` default
+ * while GPU is on, or WebGL still loaded after GPU was turned off).
+ */
+export function needsTerminalRendererSetup(
+  state: TerminalRendererState,
+  gpuDesired: boolean,
+): boolean {
+  const webglActive = state.kind === 'webgl' && Boolean(state.webglAddon);
+  if (state.webglContextLossBlocked) {
+    return false;
+  }
+  if (gpuDesired) {
+    return !webglActive;
+  }
+  return webglActive;
+}
 
 function buildWebglLigaturesStamp(fontLigatures: boolean, fontFamily: string | undefined): string {
   return `${fontLigatures}:${fontFamily ?? ''}`;

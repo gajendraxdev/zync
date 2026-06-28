@@ -24,7 +24,7 @@ export interface AppSettings {
         fontSize: number;
         fontFamily: string;
         fontLigatures: boolean;
-        /** WebGL2 GPU renderer; falls back to canvas when unavailable. */
+        /** WebGL2 GPU renderer; falls back to DOM when unavailable. */
         gpuAcceleration: boolean;
         cursorStyle: 'block' | 'underline' | 'bar';
         lineHeight: number;

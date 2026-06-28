@@ -30,7 +30,7 @@ function healthStyles(health: TerminalRendererHealth): { dot: string; text: stri
         dot: 'bg-emerald-400',
         text: 'text-emerald-300',
       };
-    case 'canvas-fallback':
+    case 'dom-fallback':
       return {
         dot: 'bg-amber-400',
         text: 'text-amber-300',

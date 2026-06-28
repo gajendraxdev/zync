@@ -3,7 +3,10 @@ import { getTerminalRendererState, hasTerminalRendererSession } from './renderer
 import type { TerminalRendererKind, TerminalRendererState } from './types.js';
 import { isWebgl2Available } from './webglCapability.js';
 
-export type TerminalRendererHealth = 'gpu-active' | 'canvas-expected' | 'canvas-fallback' | 'loading';
+export type TerminalRendererHealth = 'gpu-active' | 'dom-expected' | 'dom-fallback' | 'loading';
+
+/** @deprecated Use dom-expected */
+export type LegacyTerminalRendererHealth = TerminalRendererHealth | 'canvas-expected' | 'canvas-fallback';
 
 export interface TerminalRendererDiagnostics {
   activeKind: TerminalRendererKind;
@@ -27,13 +30,13 @@ function describeFallbackReason(
     return 'GPU acceleration is turned off in settings.';
   }
   if (state.webglContextLossBlocked) {
-    return 'WebGL context was lost in this session; using canvas until the tab is closed.';
+    return 'WebGL context was lost in this session; using DOM until the tab is closed.';
   }
   if (state.lastError === 'webgl2_unavailable') {
     return 'WebGL2 is not available in this environment.';
   }
   if (state.lastError === 'webgl_context_lost') {
-    return 'WebGL context was lost; fell back to canvas.';
+    return 'WebGL context was lost; fell back to DOM.';
   }
   if (state.lastError) {
     return `WebGL init failed: ${state.lastError}`;
@@ -41,8 +44,8 @@ function describeFallbackReason(
   if (state.loadPromise) {
     return 'WebGL renderer is still loading.';
   }
-  if (state.desiredKind === 'webgl' && state.kind === 'canvas') {
-    return 'GPU was requested but the canvas renderer is active.';
+  if (state.desiredKind === 'webgl' && state.kind === 'dom') {
+    return 'GPU was requested but the DOM renderer is active.';
   }
   return undefined;
 }
@@ -85,8 +88,8 @@ export function describeTerminalRendererState(
       activeKind: state.kind,
       desiredKind: state.desiredKind,
       label,
-      health: 'canvas-expected',
-      summary: 'Canvas renderer (GPU off)',
+      health: 'dom-expected',
+      summary: 'DOM renderer (GPU off)',
       detail: 'Enable GPU acceleration above to use WebGL.',
       webgl2Available,
     };
@@ -97,8 +100,8 @@ export function describeTerminalRendererState(
     activeKind: state.kind,
     desiredKind: state.desiredKind,
     label,
-    health: 'canvas-fallback',
-    summary: 'Canvas fallback (GPU not active)',
+    health: 'dom-fallback',
+    summary: 'DOM fallback (GPU not active)',
     detail,
     webgl2Available,
   };

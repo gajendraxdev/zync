@@ -20,6 +20,7 @@ export {
 
 export {
   clearTerminalRendererSession,
+  ensureDomRendererForSession,
   ensureCanvasRendererForSession,
   getTerminalRendererState,
   hasTerminalRendererSession,
@@ -38,8 +39,10 @@ export {
   getTerminalRendererDiagnostics,
 } from './rendererDiagnostics.js';
 export {
+  activateDomRenderer,
   activateCanvasRenderer,
   disposeTerminalRenderer,
+  ensureDomRenderer,
   ensureCanvasRenderer,
   refreshTerminalScreen,
 } from './rendererLifecycle.js';
@@ -58,6 +61,7 @@ export {
   buildEffectiveRendererSettings,
   buildRendererRefitCallback,
   getTerminalRendererPreferences,
+  needsTerminalRendererSetup,
 } from './rendererSetup.js';
 
 export { destroyTerminalInstance, getTerminalRecentLines } from './instanceApi.js';

@@ -67,17 +67,25 @@ export function useTerminalTheme({
   }, [sessionId, settings.terminal, isConnected, termRef]);
 
   useEffect(() => {
-    if (!termRef.current || !activeConnectionId) {
+    if (!isConnected || !termRef.current || !activeConnectionId) {
       return;
     }
 
-    termRef.current.options.theme = resolveXtermTheme(
+    const term = termRef.current;
+    term.options.theme = resolveXtermTheme(
       containerRef.current,
       connection?.theme,
       terminalTransparency,
     );
+    try {
+      const lastRow = Math.max(0, term.rows - 1);
+      term.refresh(0, lastRow);
+    } catch {
+      // Ignore refresh failures during renderer transitions.
+    }
   }, [
     sessionId,
+    isConnected,
     settings.theme,
     settings.accentColor,
     settings.enableVibrancy,

@@ -24,13 +24,13 @@ const SESSION = 'test-renderer-controller';
 const mockTerm = { loadAddon: () => {}, rows: 24, refresh: () => {} };
 
 async function runAll() {
-  await runTest('sync falls back to canvas when WebGL2 is unavailable (Node)', async () => {
+  await runTest('sync falls back to dom when WebGL2 is unavailable (Node)', async () => {
     clearTerminalRendererSession(SESSION);
     const kind = await syncTerminalRenderer(SESSION, mockTerm, {
       gpuAcceleration: true,
     });
     const state = getTerminalRendererState(SESSION);
-    assert.equal(kind, 'canvas');
+    assert.equal(kind, 'dom');
     assert.equal(state.webglContextLossBlocked, false);
     assert.equal(state.initFailureCount, 1);
     assert.equal(state.lastError, 'webgl2_unavailable');
@@ -45,24 +45,49 @@ async function runAll() {
     const kind = await syncTerminalRenderer(SESSION, mockTerm, {
       gpuAcceleration: true,
     });
-    assert.equal(kind, 'canvas');
+    assert.equal(kind, 'dom');
     assert.equal(getTerminalRendererState(SESSION).webglContextLossBlocked, false);
     clearTerminalRendererSession(SESSION);
   });
 
-  await runTest('context loss block keeps canvas even when GPU is enabled', async () => {
+  await runTest('context loss block keeps dom even when GPU is enabled', async () => {
     clearTerminalRendererSession(SESSION);
     const state = getTerminalRendererState(SESSION);
     state.webglContextLossBlocked = true;
     const kind = await syncTerminalRenderer(SESSION, mockTerm, {
       gpuAcceleration: true,
     });
-    assert.equal(kind, 'canvas');
+    assert.equal(kind, 'dom');
     assert.equal(getTerminalRendererState(SESSION).webglContextLossBlocked, true);
     clearTerminalRendererSession(SESSION);
   });
 
-  await runTest('gpu off after WebGL loads explicit canvas renderer', async () => {
+  await runTest('gpu off during in-flight WebGL load settles on dom', async () => {
+    clearTerminalRendererSession(SESSION);
+    const state = getTerminalRendererState(SESSION);
+    let releaseWebgl;
+    const inFlightWebgl = new Promise((resolve) => {
+      releaseWebgl = () => resolve('webgl');
+    });
+    state.loadPromise = inFlightWebgl;
+    state.kind = 'dom';
+    state.desiredKind = 'webgl';
+
+    const domPromise = syncTerminalRenderer(SESSION, mockTerm, {
+      gpuAcceleration: false,
+    });
+    assert.notEqual(domPromise, inFlightWebgl);
+
+    releaseWebgl();
+    const kind = await domPromise;
+    assert.equal(kind, 'dom');
+    assert.equal(state.kind, 'dom');
+    assert.equal(state.webglAddon, undefined);
+    assert.equal(state.desiredKind, 'dom');
+    clearTerminalRendererSession(SESSION);
+  });
+
+  await runTest('gpu off after WebGL loads explicit dom renderer', async () => {
     clearTerminalRendererSession(SESSION);
     const state = getTerminalRendererState(SESSION);
     state.webglAddon = { dispose: () => {} };
@@ -71,8 +96,8 @@ async function runAll() {
     const kind = await syncTerminalRenderer(SESSION, mockTerm, {
       gpuAcceleration: false,
     });
-    assert.equal(kind, 'canvas');
-    assert.equal(state.kind, 'canvas');
+    assert.equal(kind, 'dom');
+    assert.equal(state.kind, 'dom');
     assert.equal(state.webglAddon, undefined);
     clearTerminalRendererSession(SESSION);
   });
@@ -82,7 +107,7 @@ async function runAll() {
     const state = getTerminalRendererState(SESSION);
     let release;
     const inFlight = new Promise((resolve) => {
-      release = () => resolve('canvas');
+      release = () => resolve('dom');
     });
     state.loadPromise = inFlight;
 
@@ -90,15 +115,15 @@ async function runAll() {
     assert.equal(concurrent, inFlight);
 
     release();
-    assert.equal(await concurrent, 'canvas');
+    assert.equal(await concurrent, 'dom');
     clearTerminalRendererSession(SESSION);
   });
 
-  await runTest('reactivate falls back to canvas when WebGL2 is unavailable (Node)', async () => {
+  await runTest('reactivate falls back to dom when WebGL2 is unavailable (Node)', async () => {
     clearTerminalRendererSession(SESSION);
     const kind = await reactivateTerminalWebgl(SESSION, mockTerm, {});
     const state = getTerminalRendererState(SESSION);
-    assert.equal(kind, 'canvas');
+    assert.equal(kind, 'dom');
     assert.equal(state.initFailureCount, 1);
     clearTerminalRendererSession(SESSION);
   });

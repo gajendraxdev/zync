@@ -1,26 +1,10 @@
 import type { Terminal } from '@xterm/xterm';
 import type { TerminalRendererState } from './types.js';
 
-let canvasAddonImport: Promise<typeof import('@xterm/addon-canvas')> | null = null;
-
 function isWebglDisposeBenignError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
   return message.includes('_isDisposed')
     || message.includes("Cannot read properties of undefined (reading '_isDisposed')");
-}
-
-function disposeAddonSafely(addon: { dispose: () => void } | undefined): void {
-  if (!addon) {
-    return;
-  }
-
-  try {
-    addon.dispose();
-  } catch (err) {
-    if (!isWebglDisposeBenignError(err)) {
-      console.warn('[terminal] addon dispose failed', err);
-    }
-  }
 }
 
 export interface DisposeWebglAddonOptions {
@@ -37,7 +21,7 @@ export function disposeWebglAddonInternal(
   if (!addon) return;
 
   state.webglAddon = undefined;
-  state.kind = 'canvas';
+  state.kind = 'dom';
   state.webglLigaturesStamp = undefined;
 
   if (options?.contextAlreadyLost) {
@@ -56,19 +40,8 @@ export function disposeWebglAddonInternal(
   }
 
   if (disposeFailed && term) {
-    void activateCanvasRenderer(term, state);
+    void activateDomRenderer(term, state);
   }
-}
-
-export function disposeCanvasAddonInternal(
-  state: TerminalRendererState,
-  _term?: Terminal,
-): void {
-  const addon = state.canvasAddon;
-  if (!addon) return;
-
-  state.canvasAddon = undefined;
-  disposeAddonSafely(addon);
 }
 
 export function refreshTerminalScreen(term: Terminal): void {
@@ -81,39 +54,16 @@ export function refreshTerminalScreen(term: Terminal): void {
   }
 }
 
-async function loadCanvasRenderer(term: Terminal, state: TerminalRendererState): Promise<void> {
-  if (state.canvasAddon) return;
-
-  if (!canvasAddonImport) {
-    canvasAddonImport = import('@xterm/addon-canvas');
-  }
-  const { CanvasAddon } = await canvasAddonImport;
-  const addon = new CanvasAddon();
-  term.loadAddon(addon);
-  state.canvasAddon = addon;
-}
-
 /**
- * Switches away from WebGL to an explicit canvas renderer and redraws the buffer.
- * Required after WebGL dispose — the default DOM renderer can leave the screen blank.
+ * Switches away from WebGL to xterm's built-in DOM renderer and redraws the buffer.
  */
-export async function activateCanvasRenderer(
+export async function activateDomRenderer(
   term: Terminal,
   state: TerminalRendererState,
 ): Promise<void> {
-  const hadWebgl = Boolean(state.webglAddon);
   disposeWebglAddonInternal(state, term);
-  state.desiredKind = 'canvas';
-  state.kind = 'canvas';
-
-  if (hadWebgl) {
-    disposeCanvasAddonInternal(state, term);
-    try {
-      await loadCanvasRenderer(term, state);
-    } catch (error) {
-      console.warn('[terminal] Canvas renderer unavailable after WebGL dispose', error);
-    }
-  }
+  state.desiredKind = 'dom';
+  state.kind = 'dom';
 
   refreshTerminalScreen(term);
   if (typeof requestAnimationFrame !== 'undefined') {
@@ -123,11 +73,17 @@ export async function activateCanvasRenderer(
   }
 }
 
-export function ensureCanvasRenderer(state: TerminalRendererState, term?: Terminal): void {
+export function ensureDomRenderer(state: TerminalRendererState, term?: Terminal): void {
   disposeWebglAddonInternal(state, term);
-  state.desiredKind = 'canvas';
-  state.kind = 'canvas';
+  state.desiredKind = 'dom';
+  state.kind = 'dom';
 }
+
+/** @deprecated Use activateDomRenderer */
+export const activateCanvasRenderer = activateDomRenderer;
+
+/** @deprecated Use ensureDomRenderer */
+export const ensureCanvasRenderer = ensureDomRenderer;
 
 export function disposeTerminalRenderer(
   state: TerminalRendererState | undefined,
@@ -137,11 +93,9 @@ export function disposeTerminalRenderer(
   if (state.loadPromise) {
     void state.loadPromise.finally(() => {
       disposeWebglAddonInternal(state, term);
-      disposeCanvasAddonInternal(state, term);
     });
     state.loadPromise = null;
   } else {
     disposeWebglAddonInternal(state, term);
-    disposeCanvasAddonInternal(state, term);
   }
 }

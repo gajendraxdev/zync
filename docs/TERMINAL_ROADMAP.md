@@ -1,6 +1,6 @@
 # Zync Terminal — Optimization & Robustness Roadmap
 
-**Last updated:** 2026-06-22 (P2 in progress)
+**Last updated:** 2026-06-28 (Phase 6 — xterm 6.x terminal milestone next)
 **Audit basis:** Full-stack review of `terminal/Terminal.tsx`, `TerminalManager.tsx`, `pty.rs`, `terminalSlice.ts`, ghost suggestions, and terminal IPC.
 
 Plans and prioritized work for terminal performance, reliability, and code quality. For ghost-suggestion architecture, see [TERMINAL_GHOST_SUGGESTIONS.md](./TERMINAL_GHOST_SUGGESTIONS.md). For session/tab restore behavior, see [SESSION_PERSISTENCE.md](./SESSION_PERSISTENCE.md).
@@ -18,6 +18,7 @@ Plans and prioritized work for terminal performance, reliability, and code quali
 9. [Key File Map](#9-key-file-map)
 10. [Exit Criteria](#10-exit-criteria)
 11. [GPU Acceleration (WebGL Renderer)](#11-gpu-acceleration-webgl-renderer)
+12. [Phase 6 — xterm 6.x Terminal Milestone](#12-phase-6--xterm-6x-terminal-milestone)
 
 ---
 
@@ -36,6 +37,8 @@ The largest remaining costs are:
 | **Resize** | Five overlapping fit/resize paths; hidden tabs still observe resize |
 
 Recent hardening (commit `c10c082`): layout-transition safety timeout, always-on visual fit during transitions, window-resize refit, dev single-instance disabled in debug builds.
+
+**Next priority (post-2.17.0):** **xterm 6.x terminal milestone** — upgrade `@xterm/xterm` and all addons together, remove deprecated `@xterm/addon-canvas`, adopt **WebGL → DOM** fallback, fix ghost/cursor internal API usage, and run the full renderer QA matrix. See [§12](#12-phase-6--xterm-6x-terminal-milestone).
 
 ---
 
@@ -123,6 +126,7 @@ xterm on Windows ConPTY disables scrollback reflow by design (`windowsPty` compa
 
 ## 6. P2 — Polish & Longer-Term
 
+- **xterm 6.x upgrade (Phase 6)** — **next**; bundled terminal milestone (canvas removal, DOM fallback, addon bumps, internal API fixes). See [§12](#12-phase-6--xterm-6x-terminal-milestone).
 - **GPU acceleration (WebGL renderer)** — implemented; see [§11](#11-gpu-acceleration-webgl-renderer)
 - Skip ghost suggestion IPC when tab is hidden — **done** (guarded behind `isVisibleRef`)
 - Binary Tauri event payloads instead of `number[]` serde for output — **done (base64)**; `pty.rs` emits `data` as base64; frontend `decodeTerminalOutputData()` in `terminalOutputPayload.ts`. True Tauri `Channel` streaming remains optional follow-up.
@@ -130,7 +134,7 @@ xterm on Windows ConPTY disables scrollback reflow by design (`windowsPty` compa
 - Split `Terminal.tsx` into `TerminalHost`, lifecycle hook, input pipeline, theme hook
 - Central terminal service API for store (`terminalService.destroy(id)`)
 - Optional `reflowCursorLine` / `windowsPty` tuning for Windows ConPTY edge cases
-- Replace private xterm `_core._renderService` usage in `cursorPosition.ts` when upgrading xterm
+- ~~Replace private xterm `_core._renderService` usage in `cursorPosition.ts` when upgrading xterm~~ — **Phase 6** (§12)
 
 ---
 
@@ -183,8 +187,18 @@ Phase 4 — **done**
   - ~~Integration tests~~ — done (terminalLifecycleIntegration, terminalPtyLifecycle, terminalReconnect*, terminalSpawn*, etc.)
 
 Phase 5 — **done**
-  - WebGL renderer with canvas fallback (§11)
+  - WebGL renderer with canvas fallback (§11) — fallback path to be replaced in Phase 6
   - Settings toggle + context-loss recovery + renderer status panel
+
+Phase 6 — **next** (see §12) — xterm 6.x terminal milestone
+  - Bump `@xterm/xterm` + all addons to 6.x-compatible versions
+  - Remove `@xterm/addon-canvas`; WebGL → DOM fallback
+  - Fix `cursorPosition.ts` / ghost overlay internal API usage
+  - Renderer policy, diagnostics, tests, manual QA matrix
+
+Phase 7 — after Phase 6
+  - Optional P2: `Terminal.tsx` split, terminal service layer, idle-host PTY suspend
+  - Optional xterm 6 features: `reflowCursorLine`, synchronized output tuning
 ```
 
 ---
@@ -217,7 +231,8 @@ Phase 5 — **done**
 | `src/lib/terminal/terminalResizeSync.ts` | Deduped PTY resize IPC |
 | `src/lib/terminal/index.ts` | Public API for UI + store |
 | `@xterm/addon-webgl` | Loaded lazily by `rendererController.ts` |
-| `@xterm/addon-canvas` | Loaded on WebGL → canvas transitions |
+| `@xterm/addon-canvas` | **Phase 6 remove** (gone in xterm 6.0) — replace WebGL fallback with DOM renderer |
+| `src/lib/ghostSuggestions/cursorPosition.ts` | **Phase 6** — replace `_core._renderService` usage for xterm 6 |
 
 ---
 
@@ -246,7 +261,7 @@ Terminal optimization work can be considered **Phase 1 complete** when:
 **GPU acceleration (Phase 5) complete** when:
 
 - [x] WebGL renderer active by default on supported Tauri/WebView2 targets (`gpuAcceleration: true`)
-- [x] Automatic fallback to canvas when WebGL init or context loss occurs
+- [x] Automatic fallback when WebGL init or context loss occurs (DOM on xterm 6)
 - [x] Ligatures + GPU compatible (WebGL → ligatures → WebGL reactivate)
 - [x] WebGL2 probe before load; init failure vs context-loss split
 - [x] Renderer session ownership in `lib/terminal/rendererSession.ts`
@@ -257,9 +272,9 @@ Terminal optimization work can be considered **Phase 1 complete** when:
 
 ## 11. GPU Acceleration (WebGL Renderer)
 
-### Status: implemented (modular)
+### Status: implemented on xterm 5.5; Phase 6 upgrades to xterm 6.x (§12)
 
-GPU rendering is implemented via `src/lib/terminal/` and wired from `terminal/Terminal.tsx`.
+GPU rendering is implemented via `src/lib/terminal/` and wired from `terminal/Terminal.tsx`. **Phase 6** bumps to xterm 6.x and replaces the canvas-addon fallback with the built-in DOM renderer.
 
 | Module | Role |
 |--------|------|
@@ -317,7 +332,7 @@ WebGL does **not** fix scrollback reflow on maximize (that remains correct termi
 |---------|--------|
 | **Font ligatures** | `LigaturesAddon` uses character joiners; WebGL renderer handles joined ranges. Activation order: WebGL → ligatures → WebGL reactivate (texture atlas picks up `font-feature-settings`). |
 | **Transparency** | Zync uses `allowTransparency: true` and host-level `color-mix` backgrounds. Test WebGL + transparent host on Windows WebView2; fall back if alpha compositing glitches. |
-| **Context loss** | Browser/GPU can drop WebGL context (OOM, sleep/resume, driver reset). Must handle `webglcontextlost` — dispose `WebglAddon`, fall back to canvas, optionally retry on next focus. |
+| **Context loss** | Browser/GPU can drop WebGL context (OOM, sleep/resume, driver reset). Must handle `webglcontextlost` — dispose `WebglAddon`, fall back to DOM (Phase 6; today canvas addon), optionally retry on next focus. |
 | **Tauri WebView2** | WebGL2 is generally available on Windows 10+; still probe at runtime and never assume success. |
 | **Ghost overlays** | `GhostSuggestionOverlay` reads cell metrics from xterm internals — re-test pixel alignment under WebGL. |
 
@@ -333,7 +348,7 @@ Mirror the existing lazy `LigaturesAddon` pattern in `Terminal.tsx`:
    addon.onContextLoss(() => { /* dispose, mark cache webgl=false, canvas fallback */ });
    term.loadAddon(addon);
    ```
-3. **Fallback chain** — `WebGL → Canvas (default) → log warning`; never brick the terminal.
+3. **Fallback chain** — `WebGL → DOM` (Phase 6 target; shipped as `WebGL → @xterm/addon-canvas` on 5.5); never brick the terminal.
 4. **Ligatures gate** — if `fontLigatures && gpuAcceleration`, prefer ligatures and skip WebGL (document in Settings UI).
 5. **Cache fields** — extend `TerminalCache` with `webglAddon?`, `renderer: 'webgl' | 'canvas'`, `webglLoadPromise?`.
 6. **Dispose** — `destroyTerminalInstance` must dispose WebGL addon before `term.dispose()`.
@@ -354,7 +369,7 @@ Add toggle under Typography or a new "Performance" group:
 | Enable ligatures | WebGL off; ligatures render |
 | Enable terminal transparency | No double-alpha or black flash |
 | Sleep / resume laptop | Context loss recovers or falls back without blank terminal |
-| Integrated GPU + remote desktop | Graceful canvas fallback |
+| Integrated GPU + remote desktop | Graceful DOM fallback (Phase 6) |
 
 ### Priority
 
@@ -362,7 +377,7 @@ Add toggle under Typography or a new "Performance" group:
 
 ### Future-proofing notes
 
-- Policy is pure (`rendererPolicy.ts`) — easy to unit test and extend (e.g. explicit `@xterm/addon-canvas`, Metal renderer).
+- Policy is pure (`rendererPolicy.ts`) — easy to unit test; Phase 6 retargets non-WebGL kind to DOM (rename `canvas` → `dom` in types/diagnostics as needed).
 - `webglContextLossBlocked` prevents retry loops after GPU context loss only; init/probe failures remain retryable.
 - `isWebgl2Available()` probes before loading the addon.
 - Renderer state lives in `rendererSession.ts`, not on `TerminalCache`.
@@ -373,7 +388,91 @@ Add toggle under Typography or a new "Performance" group:
 
 - [@xterm/addon-webgl README](https://github.com/xtermjs/xterm.js/tree/master/addons/addon-webgl) — context loss handling
 - [@xterm/addon-ligatures README](https://github.com/xtermjs/xterm.js/tree/master/addons/addon-ligatures) — canvas renderer requirement
-- `package.json` — `@xterm/addon-webgl`, `@xterm/addon-canvas` already listed
+- `package.json` — `@xterm/addon-webgl`, `@xterm/addon-canvas` (canvas removed in xterm 6.0; see §12)
+
+---
+
+## 12. Phase 6 — xterm 6.x Terminal Milestone
+
+**Status:** in progress (post-2.17.0)  
+**Estimate:** 2–4 days focused work + manual QA  
+**Current:** `@xterm/xterm` ^6.0.0, `@xterm/addon-webgl` ^0.19.0 — `@xterm/addon-canvas` removed
+
+### Goal
+
+Single focused milestone: upgrade to **xterm 6.x**, remove deprecated canvas addon, keep WebGL as primary renderer with **DOM fallback**, and re-validate ghost overlays + tab-switch perf on Windows WebView2.
+
+### Why one milestone (not canvas-on-5.5 first)
+
+- xterm **6.0** removed `@xterm/addon-canvas` — DOM or WebGL only.
+- Bumping 5.5 → 6.x and swapping canvas → DOM in one pass avoids duplicate renderer migration work.
+- P0/P1/P2 lifecycle and perf work (2.17.0) is shipped; renderer stack is modular enough to absorb the bump.
+
+### xterm 6 breaking changes to handle
+
+| Area | Detail |
+|------|--------|
+| **Canvas addon** | Removed — WebGL → **DOM** fallback only |
+| **Viewport / scrollbar** | Reworked — re-test fit, resize, Files ↔ Terminal overlay |
+| **`ITerminalOptions.overviewRuler`** | Moved under `overviewRuler` object (if used) |
+| **Alt+arrow → Ctrl+arrow hack** | Removed — add explicit keybindings if Zync relied on it |
+| **`windowsMode` / `fastScrollModifier`** | Removed from options |
+| **Private APIs** | `cursorPosition.ts`, `GhostSuggestionListOverlay.tsx` use `_core._renderService` — fix or replace on 6.x |
+
+### Target renderer behavior (unchanged intent)
+
+| Situation | Renderer |
+|-----------|----------|
+| GPU on, WebGL2 available | `@xterm/addon-webgl` |
+| GPU off, WebGL unavailable, context lost, inactive-tab GPU release | xterm **DOM renderer** |
+
+**Fallback chain:** `WebGL → DOM → log warning` — never blank the terminal.
+
+### Work packages
+
+**1. Dependencies** (`package.json`, lockfile)
+
+- Bump `@xterm/xterm` to **^6.0.0**
+- Bump all `@xterm/addon-*` to versions peer-compatible with xterm 6 (install together, one `npm install`)
+- **Remove** `@xterm/addon-canvas`
+
+**2. Renderer stack** (`src/lib/terminal/renderer*.ts`, `useTerminalLifecycle.ts`)
+
+- Delete `CanvasAddon` load/dispose paths
+- `activateCanvasRenderer` → DOM fallback (dispose WebGL + `refreshTerminalScreen`)
+- Rename types/diagnostics: `canvas` → `dom` where user-facing
+- Re-run context-loss + inactive-tab GPU release paths
+
+**3. Ghost / cursor overlays**
+
+- `src/lib/ghostSuggestions/cursorPosition.ts` — stop depending on `_core._renderService` if 6.x moves it; prefer public APIs or documented dimensions
+- `GhostSuggestionListOverlay.tsx` — same for cell width
+- Re-test inline + popup ghost alignment under WebGL and DOM
+
+**4. Terminal options audit**
+
+- Grep for removed options (`windowsMode`, `fastScrollModifier`, old `overviewRulerWidth`)
+- Review `Terminal.tsx` / `useTerminalLifecycle.ts` `ITerminalOptions` for 6.x compatibility
+
+**5. Tests + QA**
+
+- `npm run build`
+- `npm run test:terminal-renderer`
+- `npm run test:all-agent` (terminal-related)
+- Manual matrix (§11 testing table): WebGL default, GPU off, ligatures, transparency, resize/maximize, context loss, Files ↔ Terminal, tab switch perf, large `cat`
+
+### Exit criteria
+
+- [x] All `@xterm/*` packages on xterm 6–compatible versions; `@xterm/addon-canvas` removed
+- [x] WebGL primary; DOM fallback on GPU off / init failure / context loss (code path; manual smoke pending)
+- [x] Ghost cursor positioning uses layout-derived cell dimensions (no `_core._renderService`)
+- [ ] Tab switch perf not regressed vs 2.17.0 (~65–115ms Shell ↔ Files)
+- [x] `npm run test:terminal-renderer` + terminal agent tests pass
+- [ ] Manual QA matrix (§11) signed off on Windows WebView2
+
+### After Phase 6
+
+**Phase 7** — optional maintainability (Terminal.tsx split, service layer, idle-host suspend) and optional xterm 6 features (`reflowCursorLine`, synchronized output).
 
 ---
 

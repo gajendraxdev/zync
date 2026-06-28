@@ -1,7 +1,7 @@
 import { useLayoutEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Terminal } from '@xterm/xterm';
-import { getCursorPixelPosition } from '../../lib/ghostSuggestions/cursorPosition';
+import { getCursorPixelPosition, getTerminalCellDimensions } from '../../lib/ghostSuggestions/cursorPosition';
 
 interface Props {
   term: Terminal;
@@ -59,8 +59,7 @@ export function GhostSuggestionListOverlay({
 
   if (!items.length) return null;
 
-  // xterm does not expose public cell width API in 5.x; this uses internal dimensions.
-  const cellWidth = ((term as any)?._core?._renderService?.dimensions?.css?.cell?.width as number | undefined) ?? 0;
+  const cellWidth = getTerminalCellDimensions(term)?.width ?? 0;
   const alignedLeft = Math.max(0, pos.left - (anchorLine.length * cellWidth));
   const clampedIndex = Math.max(0, Math.min(selectedIndex, items.length - 1));
   const start = Math.max(

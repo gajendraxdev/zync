@@ -5,10 +5,11 @@ import { SearchAddon } from '@xterm/addon-search';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { useAppStore } from '../../store/useAppStore';
 import {
-  activateCanvasRenderer,
+  activateDomRenderer,
   applyTerminalRendererAndLigatures,
   attachTerminalLifecycleListeners,
   buildEffectiveRendererSettings,
+  needsTerminalRendererSetup,
   clearTerminalPendingInput,
   createResizeScheduler,
   flushPendingInput,
@@ -101,6 +102,16 @@ export function useTerminalLifecycle({
     resolveInitialThemeRef.current = resolveInitialTheme;
   }, [resolveInitialTheme]);
 
+  const syncTerminalTheme = useCallback((term: XTerm) => {
+    term.options.theme = resolveInitialThemeRef.current();
+    try {
+      const lastRow = Math.max(0, term.rows - 1);
+      term.refresh(0, lastRow);
+    } catch {
+      // Ignore refresh failures during renderer transitions.
+    }
+  }, []);
+
   useEffect(() => {
     terminalSettingsRef.current = terminalSettings;
   }, [terminalSettings]);
@@ -115,7 +126,7 @@ export function useTerminalLifecycle({
   const isActiveTabRef = useRef(isActiveTab);
   const isConnectedRef = useRef(isConnected);
   const sessionIdRef = useRef(sessionId);
-  const lastAppliedRendererSettingsKeyRef = useRef<string | null>(null);
+  const lastAppliedRendererSettingsBySessionRef = useRef(new Map<string, string>());
 
   useEffect(() => {
     isVisibleRef.current = isVisible;
@@ -234,11 +245,11 @@ export function useTerminalLifecycle({
   );
 
   useEffect(() => {
-    if (!isConnected || !termRef.current) {
+    const term = termRef.current ?? terminalCache.get(sessionId)?.term ?? null;
+    if (!isConnected || !term) {
       return;
     }
 
-    const term = termRef.current;
     const rendererState = getTerminalRendererState(sessionId);
 
     // Inactive shell tabs: release WebGL so we do not exhaust browser context limits.
@@ -246,7 +257,7 @@ export function useTerminalLifecycle({
     if (isTerminalView && !isVisible) {
       if (rendererState.webglAddon) {
         deferAfterPaint(() => {
-          void activateCanvasRenderer(term, rendererState);
+          void activateDomRenderer(term, rendererState);
         });
       }
       return;
@@ -258,19 +269,13 @@ export function useTerminalLifecycle({
 
     const effectiveSettings = buildEffectiveRendererSettings(terminalSettings, terminalGpuAllowed);
     const gpuDesired = Boolean(effectiveSettings.gpuAcceleration);
-    const settingsChanged = lastAppliedRendererSettingsKeyRef.current !== terminalRendererSettingsKey;
-    const rendererInitialized = (
-      (rendererState.kind === 'webgl' && Boolean(rendererState.webglAddon))
-      || Boolean(rendererState.canvasAddon)
-      || rendererState.webglContextLossBlocked
-    );
-    const needsWebglRestore = gpuDesired
-      && !rendererState.webglAddon
-      && !rendererState.webglContextLossBlocked;
+    const lastAppliedKey = lastAppliedRendererSettingsBySessionRef.current.get(sessionId);
+    const settingsChanged = lastAppliedKey !== terminalRendererSettingsKey;
+    const needsSetup = needsTerminalRendererSetup(rendererState, gpuDesired);
 
-    if (rendererInitialized && !settingsChanged && !needsWebglRestore) {
-      if (rendererState.webglContextLossBlocked && !rendererState.canvasAddon) {
-        void activateCanvasRenderer(term, rendererState).then(() => {
+    if (!needsSetup && !settingsChanged) {
+      if (rendererState.webglContextLossBlocked && rendererState.kind !== 'dom') {
+        void activateDomRenderer(term, rendererState).then(() => {
           restoreTerminalDisplay(term, fitAddonRef.current);
         });
       } else {
@@ -278,8 +283,6 @@ export function useTerminalLifecycle({
       }
       return;
     }
-
-    lastAppliedRendererSettingsKeyRef.current = terminalRendererSettingsKey;
 
     deferAfterPaint(() => {
       void applyTerminalRendererAndLigatures(
@@ -289,12 +292,14 @@ export function useTerminalLifecycle({
         fitAddonRef.current,
         syncTerminalResize,
       ).then(() => {
+        lastAppliedRendererSettingsBySessionRef.current.set(sessionId, terminalRendererSettingsKey);
         safeFitTerminal(fitAddonRef.current, term);
+        syncTerminalTheme(term);
       });
 
       safeFitTerminal(fitAddonRef.current, term);
     });
-  }, [sessionId, terminalRendererSettingsKey, terminalGpuAllowed, isConnected, isVisible, isTerminalView, termRef, fitAddonRef, terminalSettings]);
+  }, [sessionId, terminalRendererSettingsKey, terminalGpuAllowed, isConnected, isVisible, isTerminalView, termRef, fitAddonRef, terminalSettings, syncTerminalTheme]);
 
   const prevIsVisibleRef = useRef(isVisible);
   const prevIsTerminalViewRef = useRef(isTerminalView);
@@ -582,36 +587,38 @@ export function useTerminalLifecycle({
     fitAddonRef.current = fitAddon;
     searchAddonRef.current = searchAddon;
     termRef.current = term;
+    syncTerminalTheme(term);
 
     attachTerminalLifecycleListeners(sessionId, term);
 
     const rendererState = getTerminalRendererState(sessionId);
-    const rendererInitialized = (
-      (rendererState.kind === 'webgl' && Boolean(rendererState.webglAddon))
-      || Boolean(rendererState.canvasAddon)
-      || rendererState.webglContextLossBlocked
+    const gpuAllowed = Boolean(
+      isVisibleRef.current
+      && isWorkspaceActiveRef.current
+      && isTerminalViewRef.current,
     );
+    const effectiveSettings = buildEffectiveRendererSettings(
+      terminalSettingsRef.current,
+      gpuAllowed,
+    );
+    const gpuDesired = Boolean(effectiveSettings.gpuAcceleration);
 
-    if (rendererInitialized) {
-      safeFitTerminal(fitAddon, term);
-      restoreTerminalDisplay(term, fitAddon);
-    } else {
+    if (needsTerminalRendererSetup(rendererState, gpuDesired)) {
       void applyTerminalRendererAndLigatures(
         sessionId,
         term,
-        buildEffectiveRendererSettings(
-          terminalSettingsRef.current,
-          Boolean(
-            isVisibleRef.current
-            && isWorkspaceActiveRef.current
-            && isTerminalViewRef.current,
-          ),
-        ),
+        effectiveSettings,
         fitAddon,
         syncTerminalResize,
       ).then(() => {
+        lastAppliedRendererSettingsBySessionRef.current.set(sessionId, terminalRendererSettingsKey);
         safeFitTerminal(fitAddon, term);
+        syncTerminalTheme(term);
       });
+    } else {
+      lastAppliedRendererSettingsBySessionRef.current.set(sessionId, terminalRendererSettingsKey);
+      safeFitTerminal(fitAddon, term);
+      restoreTerminalDisplay(term, fitAddon);
     }
 
     const cachedEntry = terminalCache.get(sessionId);
@@ -694,6 +701,8 @@ export function useTerminalLifecycle({
     terminalKey,
     spawnConnectionId,
     remoteReady,
+    syncTerminalTheme,
+    terminalRendererSettingsKey,
   ]);
 
   useEffect(() => {

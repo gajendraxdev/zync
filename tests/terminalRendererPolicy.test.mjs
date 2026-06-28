@@ -21,26 +21,26 @@ runTest('prefers WebGL when GPU acceleration is enabled', () => {
   );
 });
 
-runTest('forces canvas when GPU acceleration is disabled', () => {
+runTest('forces dom when GPU acceleration is disabled', () => {
   assert.equal(
     resolveDesiredTerminalRenderer({ gpuAcceleration: false }),
-    'canvas',
+    'dom',
   );
 });
 
-runTest('forces canvas when WebGL context loss blocked the session', () => {
+runTest('forces dom when WebGL context loss blocked the session', () => {
   assert.equal(
     resolveDesiredTerminalRenderer({
       gpuAcceleration: true,
       webglContextLossBlocked: true,
     }),
-    'canvas',
+    'dom',
   );
 });
 
 runTest('rendererKindLabel maps kinds to user-facing labels', () => {
   assert.equal(rendererKindLabel('webgl'), 'GPU (WebGL)');
-  assert.equal(rendererKindLabel('canvas'), 'Canvas');
+  assert.equal(rendererKindLabel('dom'), 'DOM');
 });
 
 console.log('Terminal renderer policy tests passed.');
