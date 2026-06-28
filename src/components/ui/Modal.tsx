@@ -63,15 +63,20 @@ export function Modal({
   const effectiveShowCloseButton = explicitDismissOnly
     ? false
     : (closeOnEsc || closeOnOverlayClick || showCloseButton ? showCloseButton : true);
-  const hasCloseMechanism = effectiveCloseOnEsc || effectiveCloseOnOverlayClick || effectiveShowCloseButton;
 
   useEffect(() => {
-    if (import.meta.env.DEV && !explicitDismissOnly && !hasCloseMechanism) {
+    if (
+      import.meta.env.DEV
+      && !explicitDismissOnly
+      && !closeOnEsc
+      && !closeOnOverlayClick
+      && !showCloseButton
+    ) {
       console.warn(
         '[Modal] closeOnEsc, closeOnOverlayClick, and showCloseButton are all false; forcing close button for accessibility.'
       );
     }
-  }, [explicitDismissOnly, hasCloseMechanism]);
+  }, [explicitDismissOnly, closeOnEsc, closeOnOverlayClick, showCloseButton]);
 
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
