@@ -64,6 +64,13 @@ export {
 export { destroyTerminalInstance, getTerminalRecentLines } from './instanceApi.js';
 export { terminalService } from './terminalService.js';
 export {
+  buildXtermOptions,
+  shouldUseWindowsLocalPtyOptions,
+  TERMINAL_SCROLLBACK_ROWS,
+} from './xtermOptions.js';
+export type { BuildXtermOptionsParams, TerminalXtermSettings } from './xtermOptions.js';
+
+export {
   cancelAllIdlePtySuspends,
   cancelIdlePtySuspend,
   DEFAULT_IDLE_PTY_SUSPEND_MS,

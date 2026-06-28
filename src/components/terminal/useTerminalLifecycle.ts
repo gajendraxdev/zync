@@ -24,6 +24,8 @@ import {
   TERMINAL_CONNECTION_WAKEUP_EVENT,
   terminalCache,
   tryWakeTerminalOnReconnect,
+  buildXtermOptions,
+  shouldUseWindowsLocalPtyOptions,
 } from '../../lib/terminal';
 import type { TerminalSettingsSlice } from './useTerminalTheme';
 
@@ -521,16 +523,11 @@ export function useTerminalLifecycle({
       const settings = terminalSettingsRef.current;
       const initialTheme = resolveInitialThemeRef.current();
 
-      term = new XTerm({
-        cursorBlink: true,
-        fontSize: settings.fontSize,
-        fontFamily: settings.fontFamily,
-        cursorStyle: settings.cursorStyle,
-        lineHeight: settings.lineHeight,
-        allowTransparency: true,
-        allowProposedApi: true,
+      term = new XTerm(buildXtermOptions({
+        settings,
         theme: initialTheme,
-      });
+        windowsLocalPty: shouldUseWindowsLocalPtyOptions(terminalKey),
+      }));
 
       fitAddon = new FitAddon();
       const webLinksAddon = new WebLinksAddon();

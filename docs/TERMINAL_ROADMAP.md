@@ -1,6 +1,6 @@
 # Zync Terminal — Optimization & Robustness Roadmap
 
-**Last updated:** 2026-06-28 (Phase 6 shipped v2.18.0; Phase 7 in progress)
+**Last updated:** 2026-06-28 (Phase 7 complete except deferred idle-host suspend)
 **Audit basis:** Full-stack review of `terminal/Terminal.tsx`, `TerminalManager.tsx`, `pty.rs`, `terminalSlice.ts`, ghost suggestions, and terminal IPC.
 
 Plans and prioritized work for terminal performance, reliability, and code quality. For ghost-suggestion architecture, see [TERMINAL_GHOST_SUGGESTIONS.md](./TERMINAL_GHOST_SUGGESTIONS.md). For session/tab restore behavior, see [SESSION_PERSISTENCE.md](./SESSION_PERSISTENCE.md).
@@ -197,11 +197,11 @@ Phase 6 — **shipped v2.18.0** (see §12)
   - Renderer policy, diagnostics, tests ✓
   - Manual QA signed off (Windows WebView2)
 
-Phase 7 — **in progress** (see §13)
+Phase 7 — **complete** except 7.2 deferred (see §13)
   - Terminal service layer (`terminalService.ts`) ✓
-  - Idle-host PTY suspend (`terminalIdlePty.ts`) — deferred (SSH UX)
-  - `Terminal.tsx` split (search/ghost extraction) ✓
-  - Optional xterm 6 features: `reflowCursorLine`, synchronized output tuning
+  - Idle-host PTY suspend — deferred (SSH UX)
+  - `Terminal.tsx` split ✓
+  - xterm 6 options (`xtermOptions.ts`) ✓
 ```
 
 ---
@@ -224,7 +224,8 @@ Phase 7 — **in progress** (see §13)
 | `src/lib/terminal/instanceApi.ts` | `destroyTerminalInstance`, `getTerminalRecentLines` |
 | `src/lib/terminal/renderer*.ts` | GPU policy, WebGL load, DOM fallback, diagnostics |
 | `src/lib/terminal/terminalService.ts` | Store-facing destroy/suspend API (Phase 7) |
-| `src/lib/terminal/terminalIdlePty.ts` | Idle-timer PTY suspend on workspace host switch (Phase 7) |
+| `src/lib/terminal/terminalIdlePty.ts` | Idle-timer PTY suspend scaffold (deferred, not wired) |
+| `src/lib/terminal/xtermOptions.ts` | Central `ITerminalOptions` builder for xterm 6 (Phase 7.4) |
 | `src/lib/terminal/inputPipeline.ts` | Input batching, ready gating, flush |
 | `src/lib/terminal/inputQueue.ts` | Serialized async onData / ghost middleware |
 | `src/lib/terminal/ptyLifecycle.ts` | `spawnTerminalSession`, `suspendTerminalPty` |
@@ -486,8 +487,8 @@ Single focused milestone: upgrade to **xterm 6.x**, remove deprecated canvas add
 
 ## 13. Phase 7 — Maintainability & Scale
 
-**Status:** in progress (post-2.18.0)  
-**Estimate:** 3–5 days focused work
+**Status:** **complete** except 7.2 idle-host suspend (deferred)  
+**Shipped:** post-2.18.0 (refactor + xterm 6 options audit)
 
 ### Goal
 
@@ -500,7 +501,7 @@ Reduce terminal module coupling, reclaim resources from background workspace hos
 | 7.1 | Terminal service layer | **done** | `terminalService.ts` — `destroy`, `getRecentLines`, `suspendAllForConnection`; `terminalSlice` routes through service |
 | 7.2 | Idle-host PTY suspend | **deferred** | `terminalIdlePty.ts` scaffold only — not wired; remote SSH respawn shows duplicate `Last login` / poor scrollback UX |
 | 7.3 | `Terminal.tsx` split | **done** | `useTerminalSearch`, `useTerminalGhost`, `useTerminalKeybindings`, `TerminalSearchBar`, `TerminalDisconnectedView`, `TerminalContextMenu` |
-| 7.4 | xterm 6 options | pending | Evaluate `reflowCursorLine`, synchronized output tuning for Windows ConPTY |
+| 7.4 | xterm 6 options | **done** | `xtermOptions.ts` — `reflowCursorLine: false` (§3), `scrollback: 5000`, `windowsPty.conpty` for local Windows only; synchronized output is runtime DECSET (no init option) |
 | 7.5 | Legacy canvas aliases | **done** | Removed `activateCanvasRenderer` / `ensureCanvasRenderer*` re-exports |
 
 ### Idle-host suspend behavior

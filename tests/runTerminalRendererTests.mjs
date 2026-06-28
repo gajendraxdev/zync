@@ -14,6 +14,7 @@ const tests = [
   'tests/terminalSpawnErrors.test.mjs',
   'tests/terminalLazyPty.test.mjs',
   'tests/terminalIdlePty.test.mjs',
+  'tests/terminalXtermOptions.test.mjs',
   'tests/terminalResizeSync.test.mjs',
   'tests/terminalReconnectReset.test.mjs',
   'tests/terminalReconnectFlow.test.mjs',

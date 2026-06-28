@@ -6,6 +6,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Changed
 - **Terminal module layout**: Split `Terminal.tsx` into focused hooks and components; route tab destroy through `terminalService`; remove deprecated canvas renderer aliases. ([d872b3d])
+- **Terminal xterm options**: Centralized xterm 6 init in `xtermOptions.ts`; scrollback increased to 5000 rows; local Windows ConPTY uses `windowsPty` heuristics. ([379c323])
 
 ## [2.18.0] - 2026-06-28
 
@@ -741,6 +742,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 [Unreleased]: https://github.com/zync-sh/zync/compare/v2.18.0...HEAD
 [2.18.0]: https://github.com/zync-sh/zync/compare/v2.17.0...v2.18.0
+[379c323]: https://github.com/zync-sh/zync/commit/379c323
 [d872b3d]: https://github.com/zync-sh/zync/commit/d872b3d
 [21a2c5d]: https://github.com/zync-sh/zync/commit/21a2c5d
 [571fe5f]: https://github.com/zync-sh/zync/commit/571fe5f
