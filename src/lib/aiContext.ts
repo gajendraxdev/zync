@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { getTerminalRecentLines } from '../components/Terminal';
+import { getTerminalRecentLines } from './terminal';
 import type { AiContext } from '../ai/types/common';
 import { attachAiContext } from '../ai/lib/requestContext';
 import { redactSensitiveOutput } from '../ai/lib/redactContext';

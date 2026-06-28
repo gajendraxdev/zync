@@ -1,4 +1,4 @@
-import { ReactNode, lazy, Suspense, useState, useEffect, memo, useCallback, useRef } from 'react';
+import { ReactNode, lazy, Suspense, useState, useEffect, memo, useCallback, useRef, useMemo } from 'react';
 import { Sidebar } from './Sidebar';
 import { useAppStore, Tab } from '../../store/useAppStore';
 import type { CoreTabView } from '../../features/connections/domain/types';
@@ -9,8 +9,7 @@ import { StatusBar } from './StatusBar';
 import { TabBar } from './TabBar';
 import { ShortcutManager } from '../managers/ShortcutManager';
 import { CommandPalette } from './CommandPalette';
-import { CombinedTabBar } from './CombinedTabBar';
-import { useAvailableShells } from '../../hooks/useAvailableShells';
+import { WorkspaceTabBar } from './WorkspaceTabBar';
 import type { ShellEntry } from '../../lib/shells/types';
 import { GLOBAL_SNIPPETS_CONNECTION_ID, LOCAL_TERMINAL_CONNECTION_ID } from '../../features/connections/application/tabService';
 import { listen } from '@tauri-apps/api/event';
@@ -23,6 +22,7 @@ import { SetupWizard } from '../onboarding/SetupWizard';
 import { useFileSystemEvents } from '../../hooks/useFileSystemEvents';
 import { AiSidebar } from '../ai/AiSidebar';
 import { ModalRoot } from '../ui/ModalRoot';
+
 
 // Side-effect imports — these register each modal into the registry at startup.
 // Add new modals here. Plugins register their own modals in their entry point.
@@ -177,16 +177,15 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
 
     // Plugin panels
     const { panels: pluginPanels } = usePlugins();
+    const workspacePluginPanels = useMemo(
+        () => pluginPanels.map(p => ({ id: p.id, title: p.title })),
+        [pluginPanels],
+    );
 
     // Terminal Store Selectors - Optimized
-    const activeTermId = useAppStore(state => tab.connectionId ? (state.activeTerminalIds[tab.connectionId] || null) : null);
     const createTerminal = useAppStore(state => state.createTerminal);
     const closeTerminal = useAppStore(state => state.closeTerminal);
     const setActiveTerminal = useAppStore(state => state.setActiveTerminal);
-
-    const hostIsWindows = tab.connectionId === LOCAL_TERMINAL_CONNECTION_ID && window.electronUtils?.platform === 'win32';
-    const { shells: availableShells, isLoading: shellsLoading, error: shellsError, refetch: refetchShells } = useAvailableShells({ isWindows: hostIsWindows, connectionId: tab.connectionId });
-    const defaultWindowsShell = useAppStore(state => state.settings.localTerm?.windowsShell);
 
     // Feature Pinning
     const toggleConnectionFeature = useAppStore(state => state.toggleConnectionFeature);
@@ -194,6 +193,9 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
 
     // Local state for open feature tabs
     const [openFeatures, setOpenFeatures] = useState<string[]>([]);
+    /** Heavy panels stay mounted after first visit; CSS hide avoids remount + reconcile cost. */
+    const [filesPanelMounted, setFilesPanelMounted] = useState(tab.view === 'files');
+    const [dashboardPanelMounted, setDashboardPanelMounted] = useState(tab.view === 'dashboard');
 
     // Snippet quick access overlay state
     const [isSnippetSidebarOpen, setIsSnippetSidebarOpen] = useState(false);
@@ -212,6 +214,16 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
             });
         }
     }, [tab.view, pinnedFeatures]);
+
+    useEffect(() => {
+        if (tab.view === 'files') {
+            setFilesPanelMounted(true);
+            window.dispatchEvent(new CustomEvent('zync:files-panel-show'));
+        }
+        if (tab.view === 'dashboard') {
+            setDashboardPanelMounted(true);
+        }
+    }, [tab.view]);
 
     // Listen for keyboard shortcut events to open features
     const handleOpenFeature = useCallback((feature: string) => {
@@ -325,6 +337,7 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
 
     const isConnecting = connection?.status === 'connecting';
     const isError = connection?.status === 'error';
+    const forceOpaqueShell = isConnecting || isError;
 
     /**
      * Handles selection from the combined tab bar.
@@ -352,11 +365,25 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
             }
         }
 
+        const isShellTabSwitch = view === 'terminal' && Boolean(termId);
+        if (isShellTabSwitch && termId && tab.connectionId) {
+            const currentView = useAppStore.getState().tabs.find(t => t.id === tab.id)?.view;
+            if (currentView !== 'terminal') {
+                setTabView(tab.id, 'terminal');
+            }
+            setActiveTerminal(tab.connectionId, termId);
+            return;
+        }
+        if (view === 'files') {
+            setFilesPanelMounted(true);
+        } else if (view === 'dashboard') {
+            setDashboardPanelMounted(true);
+        }
         setTabView(tab.id, view);
         if (view === 'terminal' && termId && tab.connectionId) {
             setActiveTerminal(tab.connectionId, termId);
         }
-    }, [pluginPanels, setTabView, tab.id, tab.connectionId, setActiveTerminal]);
+    }, [pluginPanels, setTabView, tab.id, tab.connectionId, tab.view, setActiveTerminal]);
 
     const handleFeatureClose = useCallback((feature: string) => {
         setOpenFeatures(prev => prev.filter(f => f !== feature));
@@ -404,17 +431,19 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
     return (
         <div className={cn(
             "absolute inset-0 flex flex-col transition-all",
-            tab.view === 'terminal' && terminalTransparencyEnabled && !isConnecting && !isError ? "bg-transparent" : "bg-app-bg",
+            forceOpaqueShell || !(tab.view === 'terminal' && terminalTransparencyEnabled)
+                ? "bg-app-bg"
+                : "bg-transparent",
             !isActive && "hidden",
-            isActive && "animate-in fade-in slide-in-from-bottom-2 duration-300 ease-out fill-mode-forwards"
+            isActive && !forceOpaqueShell && "animate-in fade-in duration-150 ease-out fill-mode-forwards"
         )}>
             {isConnecting ? (
-                <div className="flex-1 flex flex-col items-center justify-center space-y-4">
+                <div className="flex-1 flex flex-col items-center justify-center space-y-4 bg-app-bg">
                     <div className="w-8 h-8 border-4 border-[var(--color-app-accent)]/30 border-t-[var(--color-app-accent)] rounded-full animate-spin"></div>
                     <div className="text-[var(--color-app-muted)] animate-pulse">Connecting to server...</div>
                 </div>
             ) : isError ? (
-                <div className="flex-1 flex flex-col items-center justify-center space-y-4">
+                <div className="flex-1 flex flex-col items-center justify-center space-y-4 bg-app-bg">
                     <div className="text-[var(--color-app-danger)] text-4xl mb-4">&#9888;</div>
                     <div className="text-xl font-medium text-[var(--color-app-text)]">Connection Failed</div>
                     <div className="text-[var(--color-app-muted)] text-sm max-w-md text-center">
@@ -441,18 +470,12 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
                 <>
                     {/* Unified Tab Bar — not shown for the standalone global snippets tab */}
                     {tab.connectionId !== GLOBAL_SNIPPETS_CONNECTION_ID && (
-                        <CombinedTabBar
+                        <WorkspaceTabBar
                             connectionId={tab.connectionId}
                             activeView={tab.view}
-                            activeTerminalId={activeTermId}
                             openFeatures={openFeatures}
                             pinnedFeatures={pinnedFeatures}
-                            pluginPanels={pluginPanels.map(p => ({ id: p.id, title: p.title }))}
-                            availableShells={availableShells}
-                            shellsLoading={shellsLoading}
-                            shellsError={shellsError}
-                            onRefetchShells={refetchShells}
-                                        defaultShellId={tab.connectionId === LOCAL_TERMINAL_CONNECTION_ID ? defaultWindowsShell : undefined}
+                            pluginPanels={workspacePluginPanels}
                             onTabSelect={handleTabSelect}
                             onFeatureClose={handleFeatureClose}
                             onTerminalClose={handleTerminalClose}
@@ -465,12 +488,28 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
                     {/* Content Area */}
                     <div className="flex-1 overflow-hidden relative flex flex-col">
                         <Suspense fallback={<TabLoading />}>
-                            <div className={cn("absolute inset-0 z-10 bg-app-bg", tab.view === 'files' ? "block" : "hidden")}>
-                                <FileManager connectionId={tab.connectionId} isVisible={isActive && tab.view === 'files'} />
-                            </div>
-                            <div className={cn("absolute inset-0 z-10 bg-app-bg", tab.view === 'dashboard' ? "block" : "hidden")}>
-                                <Dashboard connectionId={tab.connectionId} isVisible={isActive && tab.view === 'dashboard'} />
-                            </div>
+                            {filesPanelMounted && (
+                                <div
+                                    className={cn(
+                                        "absolute inset-0 z-30 bg-app-bg",
+                                        tab.view !== 'files' && "hidden",
+                                    )}
+                                    inert={tab.view !== 'files' ? true : undefined}
+                                >
+                                    <FileManager connectionId={tab.connectionId} />
+                                </div>
+                            )}
+                            {dashboardPanelMounted && (
+                                <div
+                                    className={cn(
+                                        "absolute inset-0 z-30 bg-app-bg",
+                                        tab.view !== 'dashboard' && "hidden",
+                                    )}
+                                    inert={tab.view !== 'dashboard' ? true : undefined}
+                                >
+                                    <Dashboard connectionId={tab.connectionId} isVisible={tab.view === 'dashboard' && isActive} />
+                                </div>
+                            )}
                             {/* Tunnels & Snippets */}
                             {tab.view === 'port-forwarding' && (
                                 <div className="absolute inset-0 z-10 bg-app-bg">
@@ -506,14 +545,15 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
                             */}
                             <div
                                 className={cn(
-                                    "absolute inset-0 z-10",
-                                    tab.view === 'terminal' ? "block" : "hidden",
-                                    terminalTransparencyEnabled ? "bg-transparent" : "bg-app-bg"
+                                    "absolute inset-0",
+                                    tab.view === 'terminal' ? "z-20" : "z-0 invisible pointer-events-none",
+                                    terminalTransparencyEnabled && !forceOpaqueShell ? "bg-transparent" : "bg-app-bg"
                                 )}
                             >
                                 <TerminalManager
                                     connectionId={tab.connectionId}
-                                    isVisible={isActive && tab.view === 'terminal'}
+                                    isWorkspaceActive={isActive}
+                                    isTerminalView={tab.view === 'terminal'}
                                     hideTabs={true}
                                 />
                                 {/* Snippet overlay sidebar — slides in from right over terminal */}
@@ -537,7 +577,10 @@ export function MainLayout({ children }: { children: ReactNode }) {
 
     const tabs = useAppStore(state => state.tabs);
     const activeTabId = useAppStore(state => state.activeTabId);
-    const activeTerminalIds = useAppStore(state => state.activeTerminalIds);
+    const activeWorkspaceTab = useMemo(
+        () => (activeTabId !== null ? tabs.find((t: Tab) => t.id === activeTabId) : undefined),
+        [tabs, activeTabId],
+    );
     const showWelcomeScreen = useAppStore(state => state.showWelcomeScreen);
     const isLoadingSettings = useAppStore(state => state.isLoadingSettings);
     const sessionLoaded = useAppStore(state => state.sessionLoaded);
@@ -854,14 +897,12 @@ export function MainLayout({ children }: { children: ReactNode }) {
                 <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
                     {/* Main Content Area */}
                     <div className="flex-1 overflow-hidden relative flex flex-col">
-                        {tabs.length > 0 && !showWelcomeScreen && activeTabId !== null ? (
-                            tabs.map((tab: Tab) => (
-                                <TabContent
-                                    key={tab.id}
-                                    tab={tab}
-                                    isActive={tab.id === activeTabId}
-                                />
-                            ))
+                        {tabs.length > 0 && !showWelcomeScreen && activeWorkspaceTab ? (
+                            <TabContent
+                                key={activeWorkspaceTab.id}
+                                tab={activeWorkspaceTab}
+                                isActive
+                            />
                         ) : (
                             <div className="flex-1 bg-app-bg">{children}</div>
                         )}
@@ -869,18 +910,14 @@ export function MainLayout({ children }: { children: ReactNode }) {
                 </div>
 
                 {/* AI Assistant Right Sidebar */}
-                {(() => {
-                    const activeTab = tabs.find(t => t.id === activeTabId);
-                    const connId = activeTab?.connectionId ?? null;
-                    const activeTermId = connId ? (activeTerminalIds[connId] || null) : null;
-                    return (
-                        <AiSidebar
-                            connectionId={connId}
-                            activeTermId={activeTermId}
-                            onRunCommand={handleAiRunCommand}
-                        />
-                    );
-                })()}
+                <AiSidebar
+                    connectionId={
+                        showWelcomeScreen || !activeWorkspaceTab
+                            ? null
+                            : activeWorkspaceTab.connectionId ?? null
+                    }
+                    onRunCommand={handleAiRunCommand}
+                />
             </div>
 
             {/* Bottom Unified Status Bar (Full Width) */}

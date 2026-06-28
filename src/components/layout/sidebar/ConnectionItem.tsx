@@ -5,6 +5,7 @@ import { Settings } from 'lucide-react';
 import { OSIcon } from '../../icons/OSIcon';
 import { cn } from '../../../lib/utils';
 
+
 interface ConnectionItemComponentProps {
     conn: Connection;
     isCollapsed: boolean;
@@ -113,6 +114,7 @@ export const ConnectionItem = memo(function ConnectionItem({ conn, isCollapsed, 
                 )}
                 onClick={(e) => {
                     e.preventDefault();
+                    openTab(conn.id);
                 }}
                 role="button"
                 tabIndex={0}

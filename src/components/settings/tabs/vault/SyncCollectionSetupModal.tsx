@@ -303,6 +303,7 @@ export function SyncCollectionSetupModal({
           showSecret={showPassphrase}
           onToggleShow={() => setShowPassphrase(value => !value)}
           autoFocus={!requiresCollectionSelection}
+          autoComplete={isLocalPassphrasePolicy(mode) ? 'current-password' : 'new-password'}
           placeholder={
             isLocalPassphrasePolicy(mode)
               ? 'Enter your local vault passphrase'
@@ -316,6 +317,7 @@ export function SyncCollectionSetupModal({
             type={showPassphrase ? 'text' : 'password'}
             value={confirmPassphrase}
             onChange={(event) => setConfirmPassphrase(event.target.value)}
+            autoComplete="new-password"
             placeholder="Repeat Google encryption passphrase"
           />
         )}

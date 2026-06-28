@@ -3,7 +3,8 @@ import { OSIcon } from '../icons/OSIcon';
 import { useAppStore, Tab, Connection } from '../../store/useAppStore'; // Updated Import
 import { cn } from '../../lib/utils';
 import { WindowControls } from './WindowControls';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+
 import { Button } from '../ui/Button';
 import { Tooltip } from '../ui/Tooltip';
 import { ConfirmModal } from '../ui/ConfirmModal';
@@ -140,6 +141,9 @@ export function TabBar() {
     const tabs = useAppStore(state => state.tabs);
     const activeTabId = useAppStore(state => state.activeTabId);
     const activateTab = useAppStore(state => state.activateTab);
+    const handleActivateTab = useCallback((tabId: string) => {
+        activateTab(tabId);
+    }, [activateTab]);
     const closeTab = useAppStore(state => state.closeTab);
     const connections = useAppStore(state => state.connections);
     const reorderTabs = useAppStore(state => state.reorderTabs);
@@ -403,7 +407,7 @@ export function TabBar() {
                                     key={tab.id}
                                     tab={tab}
                                     isActive={activeTabId === tab.id}
-                                    onActivate={activateTab}
+                                    onActivate={handleActivateTab}
                                     onClose={handleCloseTab}
                                     connections={connections}
                                 />

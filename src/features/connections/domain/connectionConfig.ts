@@ -174,13 +174,8 @@ export const connectionUsesVaultAuth = (
     return connectConfigUsesVaultAuth(result.config);
 };
 
-/** Opening a tab should not auto-connect vault-backed hosts; user must reconnect explicitly. */
+/** Auto-connect when opening or activating a tab that is not yet live. Vault hosts prompt unlock via connect(). */
 export const shouldAutoConnectOnOpenTab = (
-    connections: Connection[],
+    _connections: Connection[],
     connection: Connection,
-): boolean => {
-    if (connection.status !== 'disconnected' && connection.status !== 'error') {
-        return false;
-    }
-    return !connectionUsesVaultAuth(connections, connection.id);
-};
+): boolean => connection.status === 'disconnected' || connection.status === 'error';

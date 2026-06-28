@@ -4,6 +4,62 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.18.0] - 2026-06-28
+
+### Added
+- **Terminal xterm 6.x Upgrade**: Bump `@xterm/xterm` to 6.x; remove deprecated `@xterm/addon-canvas`. WebGL remains primary; GPU-off, init failure, and context loss fall back to xterm's built-in **DOM renderer**. Renderer types, diagnostics, and Settings → Terminal labels updated from canvas to DOM. Theme and vibrancy/transparency align with xterm 6 CSS; WebGL restores on active shell tab switch; ghost overlays use subpixel char-measure sizing; renderer setup is hardened for in-flight WebGL→DOM transitions, per-session settings cache, and `desiredKind` policy owned by `syncTerminalRenderer()` only. ([21a2c5d], [571fe5f])
+- **Terminal Renderer Tests**: `needsTerminalRendererSetup()` helper, `tests/terminalRendererSetup.test.mjs`, and expanded controller/diagnostics coverage. ([21a2c5d])
+
+### Changed
+- **Modal `explicitDismissOnly`**: When set, Escape, overlay click, and header close are disabled so dismissal is only via in-content actions. ([571fe5f])
+- **Terminal Roadmap**: `docs/TERMINAL_ROADMAP.md` updated for the xterm 6 upgrade and DOM fallback renderer. ([21a2c5d])
+
+## [2.17.0] - 2026-06-27
+
+### Added
+- **Terminal P2 Output IPC**: PTY output events encode payload as base64 instead of JSON `number[]`; frontend `decodeTerminalOutputData()` accepts base64 and legacy array payloads. ([5e87642])
+- **Terminal Panel Restore**: `restoreTerminalDisplay` and `isTerminalDomMeasurable` refit/redraw xterm after Files/Dashboard overlay; agent tests for panel restore and scrollback preserve. ([5e87642])
+- **Terminal Phase 2 Lifecycle Extraction**: `spawnTerminalFromStoreContext`, `resolveLazyPtyAction`, `attachTerminalLifecycleListeners`, `syncTerminalResize`, and `terminalConnectionWakeup` modules; `connection-wakeup` dispatched on SSH reconnect; integration tests for spawn → ready → resize → suspend → respawn generation chain. ([d15f536], [a684bb5])
+- **Terminal Phase 1 Hardening**: Serialized async `onData` via per-session input queue; input gated on `terminal-ready` and suspended PTY state; hidden-tab `ResizeObserver` skips fit/IPC; local PTY output batching (8ms / 4KB) mirroring remote path. ([d15f536], [a684bb5])
+- **Lazy PTY Spawn**: PTYs spawn when a shell tab is first selected. Switching hosts, local terminal, internal shell tabs, or Files/Dashboard overlays keeps shells and scrollback alive. ([d15f536], [5e87642])
+- **Terminal PTY Lifecycle Module**: `spawnTerminalSession` / `suspendTerminalPty` in `src/lib/terminal/ptyLifecycle.ts` with agent tests for spawn, suspend, and input-pipeline buffering. ([d15f536], [a684bb5])
+- **Terminal Resize Unification (roadmap 5.2)**: `createResizeScheduler` (60ms trailing edge) + `safeFitTerminal`/`syncTerminalResize` primitives in `src/lib/terminal/terminalFit.ts`; all fit/sync triggers now funnel through the scheduler. ([d15f536])
+- **Terminal GPU Acceleration (WebGL)**: Modular `src/lib/terminal/` renderer stack — policy, WebGL2 probe, lazy `@xterm/addon-webgl` load, session-scoped state, context-loss handling, and canvas fallback via `@xterm/addon-canvas`. Settings → Terminal adds a **GPU Acceleration** toggle (default on). ([15576ab])
+- **GPU + Font Ligatures**: WebGL and `LigaturesAddon` can run together using xterm’s recommended activation order (WebGL → ligatures → WebGL reactivate for texture-atlas font features). ([15576ab])
+- **Terminal Renderer Status**: Settings → Terminal shows live renderer health for the active tab (GPU active, canvas fallback, or GPU off) with WebGL2 availability and a refresh control. ([15576ab])
+- **Terminal Renderer Tests**: `npm run test:terminal-renderer` and agent-test coverage for policy, WebGL probe cache, session ownership, controller sync/reactivate, and diagnostics. ([15576ab])
+- **Terminal Roadmap**: `docs/TERMINAL_ROADMAP.md` — optimization/robustness audit, P0/P1 priorities, and GPU implementation notes. ([15576ab])
+
+### Fixed
+- **Tab Switch Performance**: Shell ↔ Files and shell-tab switches are much faster by mounting one active workspace UI, one active shell terminal, and keeping FileManager warm after first visit (CSS hide + memo) instead of remounting heavy panels on every switch. Background shells and running apps stay alive in `terminalCache`/PTY. ([e6e9e3f])
+- **Session Data Directory**: Custom `dataPath` no longer caches a default fallback after a transient create failure; stale invalid paths log once and retry until settings are corrected. ([e6e9e3f])
+- **Terminal Accent Theme**: Non-hex accent colors (`rgb()`, etc.) no longer produce invalid xterm selection and highlight colors. ([e6e9e3f])
+- **Shell Tab UI State**: Search, ghost suggestion, and context-menu state reset when switching shell tabs without remounting the terminal component. ([e6e9e3f])
+- **Terminal Files Scrollback**: Returning from Files/Dashboard no longer blanks the active shell — PTYs stay alive under the overlay, display restore runs only for the visible tab, and GPU refit avoids tearing down WebGL on panel return. ([5e87642])
+- **Terminal Ghost IPC (P2)**: Ghost suggestion handlers skip IPC when the shell tab is hidden. ([47cfc18])
+- **Connecting Screen Transparency**: Host connection loading no longer flashes fully transparent when vibrancy/terminal transparency is enabled — connecting and error states use an opaque shell and skip the tab fade-in animation. ([e6e9e3f])
+- **Terminal External Writes**: Snippet, plugin, and command-palette terminal injections now route through `queueTerminalInput` (ready/suspend gating) instead of direct `terminal:write` IPC. ([d15f536])
+- **Input Queue Drain**: `clearTerminalInputQueue` bumps a per-session epoch so in-flight ghost tasks cannot apply stale input after suspend/destroy. ([d15f536])
+- **Terminal Child Cleanup (5.7)**: Local PTY sessions now explicitly `child.kill()` on close instead of relying on Drop. ([8d17335])
+- **Input Batching Perf (5.8)**: `pendingInputBytes` is tracked incrementally; avoids full re-encode of pending input on each keystroke. ([1fd77d5])
+- **Reconnect Tab Preservation (5.9)**: `clearTerminals` now supports `preservePendingRestore`; SSH disconnect marks tabs with `pendingRestore` so they survive for restore flow. ([1fd77d5])
+- **Reconnect race & handle cleanup**: Added `reconnect_lock` guard; only drop handles on full success path; removed stray console.log of connection config. ([8d17335], [1fd77d5])
+- **Terminal Resize Hardening**: Layout transitions always run visual `fit()` while deferring PTY resize IPC until settle; removed legacy width pinning; added window-resize refit, post-fit screen refresh, layout-transition safety timeout, and terminal container fill CSS to keep the xterm canvas aligned with its host. ([c10c082])
+- **Dev Single-Instance Focus Steal**: `tauri dev` no longer focuses the installed production app — single-instance guard is release-only (`debug_assertions` off) because dev and production share the same app identifier. ([c10c082])
+- **GPU Off Blank Terminal**: Turning off GPU acceleration no longer wipes the active terminal — WebGL dispose now loads the explicit canvas renderer and refreshes the buffer so existing tabs stay visible and usable. ([15576ab])
+- **WebGL Reactivate Races**: `reactivateTerminalWebgl` coalesces concurrent loads through the shared `loadPromise` used by `syncTerminalRenderer`. ([15576ab])
+- **FileManager Visibility Guard**: Keyboard and sync effects no longer run when the files panel container ref is missing.
+- **Welcome Screen AI Targeting**: AI sidebar clears connection targeting while the welcome screen is shown.
+- **Terminal Session Polish**: Theme reapplies when swapping cached xterm instances; focus timers clear on detach; `clearTerminals` persists session state; search Escape handler stays in sync on cached terminals.
+- **Vault Passphrase Autocomplete**: Vault and Google sync unlock/setup password fields set appropriate `autocomplete` attributes.
+- **Recovery Key Modal**: Dismiss only via the in-content confirmation action — no forced header close button or dev accessibility warning.
+
+### Changed
+- **Active Workspace UI**: Main content mounts one `TabContent` for the selected host tab; terminal React UI mounts only for the active shell on Terminal view while xterm/GPU state stays in `terminalCache` when opening Files or Dashboard. ([e6e9e3f])
+- **Terminal Lifecycle Split**: `useTerminalLifecycle` and `useTerminalTheme` extracted from `Terminal.tsx`; `WorkspaceTabBar` isolates shell-tab store subscriptions from feature panel renders. ([e6e9e3f])
+- **Terminal Files Overlay Layout**: Terminal panel stays laid out under Files/Dashboard (`invisible` overlay) instead of `display: none`, preserving xterm geometry and renderer state. Superseded for tab-switch perf by cache + selective mount above. ([5e87642], [e6e9e3f])
+- **Terminal Module Layout**: Moved `Terminal.tsx` to `src/components/terminal/`; extracted `terminalCache`, ligatures, renderer setup, and instance lifecycle (`destroyTerminalInstance`, `getTerminalRecentLines`) into `src/lib/terminal/`. Store and AI context now import from `lib/terminal` instead of the React component. ([b0cfd5f], [d15f536])
+
 ## [2.16.1] - 2026-06-15
 
 ### Fixed
@@ -680,8 +736,13 @@ All notable changes to Zync are documented in this file. The format is based on 
 - Auto-updates
 - Multiple themes (Dark, Light, Dracula)
 
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.16.1...HEAD
-[2.16.1]: https://github.com/zync-sh/zync/compare/v2.16.0...v2.16.1
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.18.0...HEAD
+[2.18.0]: https://github.com/zync-sh/zync/compare/v2.17.0...v2.18.0
+[21a2c5d]: https://github.com/zync-sh/zync/commit/21a2c5d
+[571fe5f]: https://github.com/zync-sh/zync/commit/571fe5f
+[c10c082]: https://github.com/zync-sh/zync/commit/c10c082
+[15576ab]: https://github.com/zync-sh/zync/commit/15576ab
+[b0cfd5f]: https://github.com/zync-sh/zync/commit/b0cfd5f
 [ce57b8e]: https://github.com/zync-sh/zync/commit/ce57b8e
 [dec2bc1]: https://github.com/zync-sh/zync/commit/dec2bc1
 [018063c]: https://github.com/zync-sh/zync/commit/018063c
@@ -778,6 +839,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 [8faf6ef]: https://github.com/zync-sh/zync/commit/8faf6ef
 [480a8f9]: https://github.com/zync-sh/zync/commit/480a8f9
 [b915006]: https://github.com/zync-sh/zync/commit/b915006
+[e6e9e3f]: https://github.com/zync-sh/zync/commit/e6e9e3f
+[d15f536]: https://github.com/zync-sh/zync/commit/d15f536
+[2.17.0]: https://github.com/zync-sh/zync/compare/v2.16.1...v2.17.0
+[2.16.1]: https://github.com/zync-sh/zync/compare/v2.16.0...v2.16.1
 [2.16.0]: https://github.com/zync-sh/zync/compare/v2.15.1...v2.16.0
 [2.15.1]: https://github.com/zync-sh/zync/compare/v2.15.0...v2.15.1
 [2.15.0]: https://github.com/zync-sh/zync/compare/v2.14.1...v2.15.0

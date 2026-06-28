@@ -1,5 +1,6 @@
 import { StateCreator } from 'zustand';
 import type { AppStore } from './useAppStore';
+import { scheduleSaveSession } from './sessionSlice';
 import type { Connection, CoreTabView, Folder, Tab } from '../features/connections/domain/types.js';
 import {
     addFolderToState,
@@ -45,8 +46,18 @@ import { useVaultStore } from '../vault/useVaultStore';
 import { isVaultInUseError, VAULT_IN_USE_USER_MESSAGE } from '../vault/vaultLoading';
 import { isVaultLockedError } from '../vault/vaultUnlockPrompt';
 import { connectIpc, disconnectIpc, getRemoteCwdIpc } from '../features/connections/infrastructure/connectionIpc';
+import { runSerializedConnectionOp } from '../features/connections/infrastructure/connectionOpQueue';
+import {
+    markConnectionBackendLive,
+    markConnectionBackendOffline,
+} from '../lib/terminal/connectionBackend';
+import { suspendAllTerminalsForConnection } from '../lib/terminal/suspendAllTerminals';
 import { loadConnectionsIpc, saveConnectionsIpc, type LoadConnectionsIpcResult } from '../features/connections/infrastructure/connectionPersistence';
 import { clearRemoteShellCache } from '../lib/shells/cache';
+import {
+    dispatchTerminalConnectionWakeup,
+    resetTerminalPtyForReconnect,
+} from '../lib/terminal';
 import type { TabSnapshot } from './sessionPersistence';
 import { DEFAULT_VAULT_PROFILE_ID, isVaultProfileId, type VaultProfileId } from '../vault/profileTypes';
 export type { Connection, Folder, Tab } from '../features/connections/domain/types.js';
@@ -77,6 +88,8 @@ export interface ConnectionSlice {
     // Connection Actions
     connect: (id: string, options?: { skipVaultPrompt?: boolean }) => Promise<void>;
     disconnect: (id: string) => Promise<void>;
+    /** Connect when a host tab is opened or restored and the SSH session is not live. */
+    autoConnectIfNeeded: (connectionId: string) => void;
 
     // Tab Actions
     openTab: (connectionId: string, startView?: CoreTabView) => void;
@@ -382,6 +395,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
     },
 
     connect: async (id, options) => {
+        return runSerializedConnectionOp(id, async () => {
         const skipVaultPrompt = options?.skipVaultPrompt ?? false;
 
         // Optimistic update
@@ -426,9 +440,8 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                 }
             }
 
-            console.log('[CONNECT] Connecting with config:', fullConfig);
-
             const response = await connectIpc(fullConfig);
+            markConnectionBackendLive(id);
 
             // Fetch home path after connection
             let homePath = '/';
@@ -446,7 +459,12 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
 
             // Clear pendingRestore so SSH terminal tabs can now spawn their PTYs.
             get().clearPendingRestore(id);
-
+            get().ensureTerminal(id);
+            const termIds = (get().terminals[id] ?? []).map((tab) => tab.id);
+            for (const termId of termIds) {
+                resetTerminalPtyForReconnect(termId);
+            }
+            dispatchTerminalConnectionWakeup(termIds);
 
             // Auto-start tunnels
             try {
@@ -495,25 +513,58 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                 return { connections: nextConnections };
             });
         }
+        });
     },
 
     disconnect: async (id) => {
+        return runSerializedConnectionOp(id, async () => {
+        markConnectionBackendOffline(id);
+
         try {
             await disconnectIpc(id);
         } catch (error) {
             console.error('Failed to disconnect backend:', error);
         } finally {
-            // Clear terminals for this connection to ensure fresh terminals on reconnect
-            get().clearTerminals(id);
+            // Suspend PTYs but keep xterm scrollback/tabs — avoids WebGL teardown blank screens.
+            suspendAllTerminalsForConnection(get().terminals[id]);
+        }
 
-            // Always update state to disconnected to ensure UI reflects closure
-            set(state => ({
-                connections: markConnectionStatus(state.connections, id, 'disconnected')
-            }));
+        // Preserve pendingRestore metadata on SSH tabs so reconnect can respawn PTY without losing tab list (roadmap 5.9)
+        // (moved out of finally so return does not suppress prior exceptions)
+        if (id !== 'local') {
+            const tabs = get().terminals[id] || [];
+            if (tabs.length > 0) {
+                set(state => ({
+                    connections: markConnectionStatus(state.connections, id, 'disconnected'),
+                    terminals: {
+                        ...state.terminals,
+                        [id]: tabs.map(t => ({ ...t, pendingRestore: true })),
+                    },
+                }));
+                return;  // avoid double set
+            }
+        }
+
+        set(state => ({
+            connections: markConnectionStatus(state.connections, id, 'disconnected')
+        }));
+        });
+    },
+
+    autoConnectIfNeeded: (connectionId) => {
+        if (connectionId === LOCAL_TERMINAL_CONNECTION_ID) {
+            return;
+        }
+        const state = get();
+        const conn = state.connections.find(c => c.id === connectionId);
+        if (conn && shouldAutoConnectOnOpenTab(state.connections, conn)) {
+            void get().connect(connectionId);
         }
     },
 
     openTab: (connectionId, startView: CoreTabView = 'terminal') => {
+        let connectAfterOpen: string | null = null;
+
         set(state => {
             if (connectionId === LOCAL_TERMINAL_CONNECTION_ID) {
                 return { ...createLocalTerminalTabState(state.tabs), lastRealConnectionId: LOCAL_TERMINAL_CONNECTION_ID, showWelcomeScreen: false };
@@ -525,22 +576,23 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                 return state;
             }
 
+            if (shouldAutoConnectOnOpenTab(state.connections, conn)) {
+                connectAfterOpen = conn.id;
+            }
+
             const existingTab = findConnectionTab(state.tabs, conn.id);
 
             if (existingTab) {
-                if (shouldAutoConnectOnOpenTab(state.connections, conn)) {
-                    get().connect(conn.id);
-                }
-
                 return { ...activateExistingConnectionTab(state.tabs, existingTab, startView), lastRealConnectionId: conn.id, showWelcomeScreen: false };
-            }
-
-            if (shouldAutoConnectOnOpenTab(state.connections, conn)) {
-                get().connect(conn.id);
             }
 
             return { ...createConnectionTabState(state.tabs, conn, startView), lastRealConnectionId: conn.id, showWelcomeScreen: false };
         });
+
+        if (connectAfterOpen) {
+            void get().connect(connectAfterOpen);
+        }
+
         // Dirty-checked in sessionSlice — redundant calls are harmless.
         get().saveSession();
     },
@@ -638,12 +690,25 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
 
     activateTab: (tabId) => {
         let didActivate = false;
+        let connectionIdToConnect: string | null = null;
         set(state => {
             const tab = state.tabs.find(t => t.id === tabId);
             if (!tab) return state;
             didActivate = true;
             const newConnId = tab.connectionId || null;
             const isReal = newConnId !== null && newConnId !== GLOBAL_SNIPPETS_CONNECTION_ID;
+
+            if (
+                newConnId
+                && newConnId !== LOCAL_TERMINAL_CONNECTION_ID
+                && tab.type === 'connection'
+            ) {
+                const conn = state.connections.find(c => c.id === newConnId);
+                if (conn && shouldAutoConnectOnOpenTab(state.connections, conn)) {
+                    connectionIdToConnect = newConnId;
+                }
+            }
+
             return {
                 activeTabId: tabId,
                 activeConnectionId: newConnId,
@@ -652,8 +717,10 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
             };
         });
         if (!didActivate) return;
-        // Dirty-checked in sessionSlice — redundant calls are harmless.
-        get().saveSession();
+        scheduleSaveSession(() => get().saveSession());
+        if (connectionIdToConnect) {
+            void get().connect(connectionIdToConnect);
+        }
     },
 
     goHome: () => {

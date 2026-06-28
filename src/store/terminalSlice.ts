@@ -1,6 +1,6 @@
 import { StateCreator } from 'zustand';
 import type { AppStore } from './useAppStore';
-import { destroyTerminalInstance } from '../components/Terminal';
+import { destroyTerminalInstance } from '../lib/terminal';
 import type { TerminalTabSnapshot } from './sessionPersistence';
 import { scheduleSaveSession } from './sessionSlice';
 
@@ -59,8 +59,9 @@ export interface TerminalSlice {
     /**
      * Clears all terminal tabs for a specific connection and prunes all associated AI history.
      * @param connectionId The ID of the connection to clear terminals for.
+     * @param options Optional. If preservePendingRestore is true, keep the tab list but mark with pendingRestore=true (for SSH reconnect flow) instead of fully deleting.
      */
-    clearTerminals: (connectionId: string) => void;
+    clearTerminals: (connectionId: string, options?: { preservePendingRestore?: boolean }) => void;
 
     /**
      * Updates the last known CWD of a terminal.
@@ -133,7 +134,7 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                 syncedTerminalId: nextSyncedIds
             };
         });
-        get().saveSession();
+        scheduleSaveSession(() => get().saveSession());
         return newId;
     },
 
@@ -155,7 +156,7 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                 [connectionId]: fallbackId,
             },
         }));
-        get().saveSession();
+        scheduleSaveSession(() => get().saveSession());
         return fallbackId;
     },
 
@@ -214,18 +215,32 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                 [connectionId]: termId
             }
         }));
-        get().saveSession();
+        scheduleSaveSession(() => get().saveSession());
     },
 
     /** @inheritdoc */
-    clearTerminals: (connectionId) => {
+    clearTerminals: (connectionId, options = {}) => {
         set(state => {
-            // Kill all known terminals for this connection and destroy cached instances
             const tabs = state.terminals[connectionId] || [];
-            tabs.forEach(t => {
-                ipc.send('terminal:kill', { termId: t.id });
-                destroyTerminalInstance(t.id);
-            });
+
+            if (!options.preservePendingRestore) {
+                // Kill/destroy only when not preserving (for reconnect/restore flow).
+                tabs.forEach(t => {
+                    ipc.send('terminal:kill', { termId: t.id });
+                    destroyTerminalInstance(t.id);
+                });
+            }
+
+            if (options.preservePendingRestore) {
+                // Preserve tab list with pendingRestore metadata for SSH reconnect/restore flow (roadmap 5.9)
+                // Do not delete active/synced so reconnect can wake the tabs.
+                return {
+                    terminals: {
+                        ...state.terminals,
+                        [connectionId]: tabs.map(t => ({ ...t, pendingRestore: true }))
+                    },
+                };
+            }
 
             const newTerminals = { ...state.terminals };
             delete newTerminals[connectionId];
@@ -253,6 +268,7 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                 aiDisplayHistory: nextDisplay
             };
         });
+        scheduleSaveSession(() => get().saveSession());
     },
 
     /** @inheritdoc */

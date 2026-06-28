@@ -1,3 +1,4 @@
+import { type InputHTMLAttributes } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import { Input } from '../ui/Input';
 
@@ -9,6 +10,7 @@ interface SecretFieldProps {
   onToggleShow: () => void;
   placeholder?: string;
   autoFocus?: boolean;
+  autoComplete?: InputHTMLAttributes<HTMLInputElement>['autoComplete'];
 }
 
 export function SecretField({
@@ -19,6 +21,7 @@ export function SecretField({
   onToggleShow,
   placeholder,
   autoFocus,
+  autoComplete,
 }: SecretFieldProps) {
   return (
     <Input
@@ -27,6 +30,7 @@ export function SecretField({
       value={value}
       onChange={(event) => onChange(event.target.value)}
       autoFocus={autoFocus}
+      autoComplete={autoComplete}
       placeholder={placeholder}
       rightElement={(
         <button

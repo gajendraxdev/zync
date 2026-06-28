@@ -18,7 +18,7 @@ import {
   Info,
 } from 'lucide-react';
 import { ConfirmModal } from './ui/ConfirmModal';
-import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { useAppStore, Connection } from '../store/useAppStore';
 import { isMatch } from '../lib/keyboard';
 import { FileEditor } from './FileEditor';
@@ -47,7 +47,12 @@ export interface Conflict {
   sourceConnectionId: string;
 }
 
-export function FileManager({ connectionId, isVisible }: { connectionId?: string; isVisible?: boolean }) {
+function isFileManagerPanelShown(container: HTMLDivElement | null): boolean {
+  if (!container) return false;
+  return container.offsetParent !== null;
+}
+
+export const FileManager = memo(function FileManager({ connectionId }: { connectionId?: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const globalActiveId = useAppStore(state => state.activeConnectionId);
   const activeTabId = useAppStore(state => state.activeTabId);
@@ -169,13 +174,13 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
 
   // Sync terminal to FM navigation if a synced terminal is active
   useEffect(() => {
-    if (syncedTerminalId && currentPath && isVisible) {
+    if (syncedTerminalId && currentPath && isFileManagerPanelShown(containerRef.current)) {
       // Use the safe navigation IPC instead of manual string injection
       window.ipcRenderer.invoke('terminal:navigate', { termId: syncedTerminalId, path: currentPath });
       // Update store tracking
       useAppStore.getState().setTerminalCwd(activeConnectionId || 'local', syncedTerminalId, currentPath);
     }
-  }, [currentPath, syncedTerminalId, activeConnectionId, isVisible]);
+  }, [currentPath, syncedTerminalId, activeConnectionId]);
 
   // Combine store loading and local processing
   const isLoading = loading || isProcessing;
@@ -1391,7 +1396,7 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't interfere with background tabs, modals, inputs, or when strict focus is needed
-      if (!isVisible || isNewFolderModalOpen || isNewFileModalOpen || isRenameModalOpen || editingFile || isCopyModalOpen || isPropertiesOpen) return;
+      if (!isFileManagerPanelShown(containerRef.current) || isNewFolderModalOpen || isNewFileModalOpen || isRenameModalOpen || editingFile || isCopyModalOpen || isPropertiesOpen) return;
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
         // Special case: Allow arrow keys and Enter to pass through if we are in the search input
         // so that users can navigate results while typing.
@@ -1630,15 +1635,19 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
   }, [
     activeConnectionId, searchTerm, isSearchOpen, files, settings, isNewFolderModalOpen, isNewFileModalOpen, isRenameModalOpen,
     editingFile, selectedFiles, focusedFile, handleNavigate, handleCopy, handlePaste,
-    handleDelete, navigateBack, navigateForward, isVisible, isCopyModalOpen, isPropertiesOpen, viewMode
+    handleDelete, navigateBack, navigateForward, isCopyModalOpen, isPropertiesOpen, viewMode
   ]);
 
-  // Focus management
+  // Focus when the files panel is shown (dispatched from TabContent — avoids isVisible prop churn).
   useEffect(() => {
-    if (isVisible && containerRef.current) {
-      containerRef.current.focus();
-    }
-  }, [isVisible]);
+    const handlePanelShow = () => {
+      if (isFileManagerPanelShown(containerRef.current)) {
+        containerRef.current?.focus();
+      }
+    };
+    window.addEventListener('zync:files-panel-show', handlePanelShow);
+    return () => window.removeEventListener('zync:files-panel-show', handlePanelShow);
+  }, []);
 
   useEffect(() => {
     if (!editingFile) return;
@@ -1913,4 +1922,4 @@ export function FileManager({ connectionId, isVisible }: { connectionId?: string
       />
     </div>
   );
-}
+});

@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use russh::client::Msg;
 use russh::{Channel, ChannelMsg};
@@ -12,10 +13,15 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc, Mutex};
 use tokio::time::{Duration, Instant};
 
-/// Maximum time to hold remote SSH output before emitting a combined frontend event.
-const REMOTE_OUTPUT_BATCH_MS: u64 = 8;
-/// Flush buffered remote output immediately once it reaches this many bytes.
-const REMOTE_OUTPUT_FLUSH_THRESHOLD: usize = 4096;
+/// Maximum time to hold PTY output before emitting a combined frontend event.
+const OUTPUT_BATCH_MS: u64 = 8;
+/// Flush buffered PTY output immediately once it reaches this many bytes.
+const OUTPUT_FLUSH_THRESHOLD: usize = 4096;
+
+enum LocalReaderEvent {
+    Data(Vec<u8>),
+    Finished { exit_code: Option<u32> },
+}
 
 fn remote_shell_login_flag(shell_override: &str) -> Option<&'static str> {
     let token = shell_override.split_whitespace().next().unwrap_or(shell_override);
@@ -130,7 +136,8 @@ struct TerminalLifecycleEvent {
 #[derive(Clone, Serialize)]
 struct TerminalOutputEvent {
     generation: u32,
-    data: Vec<u8>,
+    /// Base64-encoded PTY bytes. Avoids JSON `number[]` expansion for batched output.
+    data: String,
 }
 
 /// Emits a terminal output chunk to the frontend without changing the existing event contract.
@@ -140,7 +147,7 @@ struct TerminalOutputEvent {
 fn emit_terminal_output(app_handle: &AppHandle, term_id: &str, generation: u32, payload: &[u8]) {
     let event = TerminalOutputEvent {
         generation,
-        data: payload.to_vec(),
+        data: STANDARD.encode(payload),
     };
     if let Err(e) = app_handle.emit(&format!("terminal-output-{}", term_id), event) {
         eprintln!("[PTY] Failed to emit output: {}", e);
@@ -173,7 +180,6 @@ pub enum TerminalHandle {
         /// Aborted on session close so it can't write to a dead PTY.
         inject_handle: Option<tokio::task::JoinHandle<()>>,
         master: Box<dyn MasterPty + Send>,
-        #[allow(dead_code)]
         child: Box<dyn portable_pty::Child + Send>,
     },
     Remote {
@@ -382,37 +388,74 @@ impl PtyManager {
         let term_id_clone = term_id.clone();
         let app_handle_clone = app_handle.clone();
         let (reader_start_tx, reader_start_rx) = std_mpsc::channel::<()>();
-        let reader_handle = tokio::task::spawn_blocking(move || {
+        let (output_tx, mut output_rx) = tokio::sync::mpsc::channel::<LocalReaderEvent>(64);
+
+        tokio::task::spawn_blocking(move || {
             let _ = reader_start_rx.recv();
             let mut buf = [0u8; 8192];
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => {
-                        // Notify frontend that terminal exited
-                        let _ = app_handle_clone.emit(
-                            &format!("terminal-exit-{}", term_id_clone),
-                            TerminalLifecycleEvent {
-                                generation,
-                                exit_code: None,
-                            },
-                        );
+                        let _ = output_tx.blocking_send(LocalReaderEvent::Finished { exit_code: None });
                         break;
-                    } // EOF
+                    }
                     Ok(n) => {
-                        // Emit as binary (Vec<u8>) to avoid UTF-8 corruption on chunk boundaries
-                        emit_terminal_output(&app_handle_clone, &term_id_clone, generation, &buf[..n]);
+                        if output_tx
+                            .blocking_send(LocalReaderEvent::Data(buf[..n].to_vec()))
+                            .is_err()
+                        {
+                            break;
+                        }
                     }
                     Err(e) => {
                         eprintln!("Error reading from PTY: {}", e);
-                        // Notify frontend that terminal exited due to error
-                        let _ = app_handle_clone.emit(
-                            &format!("terminal-exit-{}", term_id_clone),
-                            TerminalLifecycleEvent {
-                                generation,
-                                exit_code: None,
-                            },
-                        );
+                        let _ = output_tx.blocking_send(LocalReaderEvent::Finished { exit_code: None });
                         break;
+                    }
+                }
+            }
+        });
+
+        let reader_handle = tokio::spawn(async move {
+            let mut pending_output = Vec::new();
+            let mut flush_deadline: Option<Instant> = None;
+
+            loop {
+                tokio::select! {
+                    event = output_rx.recv() => {
+                        match event {
+                            Some(LocalReaderEvent::Data(chunk)) => {
+                                pending_output.extend_from_slice(&chunk);
+
+                                if pending_output.len() >= OUTPUT_FLUSH_THRESHOLD {
+                                    flush_pending_output(&app_handle_clone, &term_id_clone, generation, &mut pending_output);
+                                    flush_deadline = None;
+                                } else if flush_deadline.is_none() {
+                                    flush_deadline = Some(Instant::now() + Duration::from_millis(OUTPUT_BATCH_MS));
+                                }
+                            }
+                            Some(LocalReaderEvent::Finished { exit_code }) => {
+                                flush_pending_output(&app_handle_clone, &term_id_clone, generation, &mut pending_output);
+                                let _ = app_handle_clone.emit(
+                                    &format!("terminal-exit-{}", term_id_clone),
+                                    TerminalLifecycleEvent {
+                                        generation,
+                                        exit_code,
+                                    },
+                                );
+                                break;
+                            }
+                            None => break,
+                        }
+                    }
+
+                    _ = async {
+                        if let Some(deadline) = flush_deadline {
+                            tokio::time::sleep_until(deadline).await;
+                        }
+                    }, if flush_deadline.is_some() => {
+                        flush_pending_output(&app_handle_clone, &term_id_clone, generation, &mut pending_output);
+                        flush_deadline = None;
                     }
                 }
             }
@@ -579,11 +622,11 @@ impl PtyManager {
                             Some(ChannelMsg::Data { ref data }) => {
                                 pending_output.extend_from_slice(data.as_ref());
 
-                                if pending_output.len() >= REMOTE_OUTPUT_FLUSH_THRESHOLD {
+                                if pending_output.len() >= OUTPUT_FLUSH_THRESHOLD {
                                     flush_pending_output(&app_handle, &term_id_clone, generation, &mut pending_output);
                                     flush_deadline = None;
                                 } else if flush_deadline.is_none() {
-                                    flush_deadline = Some(Instant::now() + Duration::from_millis(REMOTE_OUTPUT_BATCH_MS));
+                                    flush_deadline = Some(Instant::now() + Duration::from_millis(OUTPUT_BATCH_MS));
                                 }
                             }
                             Some(ChannelMsg::ExitStatus { exit_status }) => {
@@ -624,7 +667,7 @@ impl PtyManager {
                     }
 
                     _ = async {
-                        if let Some(deadline) = flush_deadline.clone() {
+                        if let Some(deadline) = flush_deadline {
                             tokio::time::sleep_until(deadline).await;
                         }
                     }, if flush_deadline.is_some() => {
@@ -735,13 +778,16 @@ impl PtyManager {
         let mut sessions = self.sessions.lock().await;
         if let Some(mut session) = sessions.remove(term_id) {
             match &mut session.handle {
-                TerminalHandle::Local { reader_handle, inject_handle, .. } => {
+                TerminalHandle::Local { reader_handle, inject_handle, child, .. } => {
                     if let Some(handle) = inject_handle.take() {
                         handle.abort();
                     }
                     if let Some(handle) = reader_handle.take() {
                         handle.abort();
                     }
+                    // Explicitly kill the child process instead of relying on Drop (see roadmap 5.7)
+                    let _ = child.kill();
+                    // Note: wait() could be used here for reaping, but would block; consider spawn_blocking if needed
                 }
                 TerminalHandle::Remote { task_handle, .. } => {
                     if let Some(handle) = task_handle.take() {
@@ -766,13 +812,15 @@ impl PtyManager {
         for id in ids_to_remove {
             if let Some(mut session) = sessions.remove(&id) {
                 match &mut session.handle {
-                    TerminalHandle::Local { reader_handle, inject_handle, .. } => {
+                    TerminalHandle::Local { reader_handle, inject_handle, child, .. } => {
                         if let Some(handle) = inject_handle.take() {
                             handle.abort();
                         }
                         if let Some(handle) = reader_handle.take() {
                             handle.abort();
                         }
+                        // Explicitly kill the child process (same as close(); see roadmap 5.7 and close_by_connection review)
+                        let _ = child.kill();
                     }
                     TerminalHandle::Remote { task_handle, .. } => {
                         if let Some(handle) = task_handle.take() {

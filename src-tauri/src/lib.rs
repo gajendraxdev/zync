@@ -22,18 +22,24 @@ use tauri::{Emitter, Manager};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let mut builder = tauri::Builder::default();
-
-    #[cfg(desktop)]
-    {
-        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.unminimize();
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
-        }));
-    }
+    // Release builds only: dev (`tauri dev`) shares the same app identifier as the
+    // installed app, so single-instance would focus the production window instead of
+    // launching the dev instance.
+    let builder = {
+        #[cfg_attr(debug_assertions, allow(unused_mut))]
+        let mut builder = tauri::Builder::default();
+        #[cfg(all(desktop, not(debug_assertions)))]
+        {
+            builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.unminimize();
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }));
+        }
+        builder
+    };
 
     builder
         .plugin(tauri_plugin_opener::init())

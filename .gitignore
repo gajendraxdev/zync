@@ -28,3 +28,8 @@ src-tauri/target-agent-check/
 release/
 .tmp-agent-tests/
 .npm-cache/
+# Added by code-review-graph
+.code-review-graph/
+/AGENTS.md
+/CLAUDE.md
+/GEMINI.md

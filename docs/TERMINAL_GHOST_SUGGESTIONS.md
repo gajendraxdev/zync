@@ -24,7 +24,7 @@ This document describes the fish-style terminal suggestion system in Zync:
 
 ### Frontend UI (terminal overlays)
 
-- `src/components/Terminal.tsx`
+- `src/components/terminal/Terminal.tsx`
   - Integrates xterm input handling with ghost runtime.
   - Accepts/dismisses suggestions, opens popup, routes Tab/arrow keys.
   - Wires right-click menu actions to accept ghost candidates.
@@ -126,6 +126,11 @@ This document describes the fish-style terminal suggestion system in Zync:
   - Dismiss popup.
 - `Enter`
   - Commits command; history score updated.
+
+## Related Documents
+
+- [TERMINAL_ROADMAP.md](./TERMINAL_ROADMAP.md) — terminal performance, robustness, and refactor priorities
+- [SESSION_PERSISTENCE.md](./SESSION_PERSISTENCE.md) — tab/terminal session restore
 
 ## Notes For Future Changes
 

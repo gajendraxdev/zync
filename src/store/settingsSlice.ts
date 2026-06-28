@@ -24,6 +24,8 @@ export interface AppSettings {
         fontSize: number;
         fontFamily: string;
         fontLigatures: boolean;
+        /** WebGL2 GPU renderer; falls back to DOM when unavailable. */
+        gpuAcceleration: boolean;
         cursorStyle: 'block' | 'underline' | 'bar';
         lineHeight: number;
         padding: number;
@@ -128,6 +130,7 @@ export const defaultSettings: AppSettings = {
         fontSize: 14,
         fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
         fontLigatures: false,
+        gpuAcceleration: true,
         cursorStyle: 'block',
         lineHeight: 1.2,
         padding: 12

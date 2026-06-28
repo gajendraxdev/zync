@@ -8,8 +8,10 @@ import {
     DEFAULT_TERMINAL_FONT_SIZE,
     DEFAULT_TERMINAL_PADDING,
     DEFAULT_TERMINAL_LINE_HEIGHT,
-    DEFAULT_TERMINAL_LIGATURES
+    DEFAULT_TERMINAL_LIGATURES,
+    DEFAULT_TERMINAL_GPU_ACCELERATION,
 } from '../constants/defaults';
+import { TerminalRendererStatus } from './TerminalRendererStatus';
 
 interface TerminalTabProps {
     settings: AppSettings;
@@ -142,12 +144,21 @@ export function TerminalTab({
                         </div>
                     </div>
 
-                    <div className="rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/40 p-3">
+                    <div className="rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/40 p-3 space-y-3">
+                        <Toggle
+                            label="GPU Acceleration (WebGL)"
+                            description="Faster rendering for large output. Works with font ligatures when both are enabled. Falls back to DOM if WebGL is unavailable."
+                            checked={settings.terminal.gpuAcceleration ?? DEFAULT_TERMINAL_GPU_ACCELERATION}
+                            onChange={(v) => updateTerminalSettings({ gpuAcceleration: v })}
+                        />
                         <Toggle
                             label="Enable Font Ligatures"
-                            description="Use programming ligatures in terminal when the selected font supports them."
+                            description="Use programming ligatures in terminal when the selected font supports them. Compatible with GPU acceleration."
                             checked={settings.terminal.fontLigatures ?? false}
                             onChange={(v) => updateTerminalSettings({ fontLigatures: v })}
+                        />
+                        <TerminalRendererStatus
+                            gpuAcceleration={settings.terminal.gpuAcceleration ?? DEFAULT_TERMINAL_GPU_ACCELERATION}
                         />
                     </div>
 
@@ -169,6 +180,7 @@ export function TerminalTab({
                                     padding: DEFAULT_TERMINAL_PADDING,
                                     lineHeight: DEFAULT_TERMINAL_LINE_HEIGHT,
                                     fontLigatures: DEFAULT_TERMINAL_LIGATURES,
+                                    gpuAcceleration: DEFAULT_TERMINAL_GPU_ACCELERATION,
                                 });
                             }}
                             className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-[var(--color-app-border)] hover:bg-[var(--color-app-surface)]"

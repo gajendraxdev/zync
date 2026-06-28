@@ -6,6 +6,8 @@ use anyhow::Result;
 use russh::client::{Handle, Msg};
 use russh::Channel;
 use std::collections::{HashMap, HashSet};
+use std::io::ErrorKind;
+use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, LazyLock, Mutex as StdMutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -22,6 +24,31 @@ const MAX_CONNECTION_IMPORT_BYTES: u64 = 5 * 1024 * 1024; // 5 MiB
 const SETTINGS_CHANGED_ON_DISK_ERROR_CODE: &str = "SETTINGS_CHANGED_ON_DISK";
 const MAX_SFTP_RETRIES: u8 = 3;
 static DATA_DIR_CACHE: StdMutex<Option<std::path::PathBuf>> = StdMutex::new(None);
+static DATA_DIR_WARNED: StdMutex<Option<String>> = StdMutex::new(None);
+
+fn warn_data_dir_fallback(custom_dir: &Path, error: &std::io::Error, default_dir: &Path) {
+    let key = custom_dir.display().to_string();
+    let mut warned = DATA_DIR_WARNED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if warned.as_deref() == Some(key.as_str()) {
+        return;
+    }
+    *warned = Some(key);
+    eprintln!(
+        "[DataDir] Could not create custom dataPath {:?} ({}). Using default {:?}.",
+        custom_dir,
+        error,
+        default_dir
+    );
+}
+
+fn is_transient_data_dir_error(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        ErrorKind::PermissionDenied | ErrorKind::Interrupted | ErrorKind::WouldBlock
+    )
+}
 static PLUGIN_WINDOW_TEMP_FILES: LazyLock<StdMutex<HashMap<String, std::path::PathBuf>>> =
     LazyLock::new(|| StdMutex::new(HashMap::new()));
 static SETTINGS_MUTATION_LOCK: LazyLock<tokio::sync::Mutex<()>> =
@@ -355,23 +382,43 @@ pub fn get_data_dir(app: &AppHandle) -> std::path::PathBuf {
     let merged_settings =
         read_effective_settings(app).unwrap_or_else(|_| Value::Object(serde_json::Map::new()));
 
-    let resolved = if let Some(data_path) = merged_settings.get("dataPath").and_then(|v| v.as_str())
+    let (resolved, cache_result) = if let Some(data_path) = merged_settings.get("dataPath").and_then(|v| v.as_str())
     {
         if !data_path.is_empty() {
             let custom_dir = std::path::PathBuf::from(data_path);
-            if !custom_dir.exists() {
-                let _ = std::fs::create_dir_all(&custom_dir);
+            if custom_dir.is_file() {
+                eprintln!(
+                    "[DataDir] Custom dataPath is a file, not a directory: {:?}. Using default.",
+                    custom_dir
+                );
+                (default_dir.clone(), true)
+            } else if custom_dir.is_dir() {
+                (custom_dir, true)
+            } else if let Err(e) = std::fs::create_dir_all(&custom_dir) {
+                warn_data_dir_fallback(&custom_dir, &e, &default_dir);
+                // Retry on transient I/O errors; cache default for stale/invalid paths.
+                (default_dir.clone(), !is_transient_data_dir_error(&e))
+            } else {
+                (custom_dir, true)
             }
-            custom_dir
         } else {
-            default_dir
+            (default_dir.clone(), true)
         }
     } else {
-        default_dir
+        (default_dir.clone(), true)
     };
 
-    if let Ok(mut cache) = DATA_DIR_CACHE.lock() {
-        *cache = Some(resolved.clone());
+    if let Err(e) = std::fs::create_dir_all(&resolved) {
+        eprintln!(
+            "[DataDir] Warning: could not create data directory {:?}: {}",
+            resolved, e
+        );
+    }
+
+    if cache_result {
+        if let Ok(mut cache) = DATA_DIR_CACHE.lock() {
+            *cache = Some(resolved.clone());
+        }
     }
 
     resolved
@@ -380,6 +427,9 @@ pub fn get_data_dir(app: &AppHandle) -> std::path::PathBuf {
 fn clear_data_dir_cache() {
     if let Ok(mut cache) = DATA_DIR_CACHE.lock() {
         *cache = None;
+    }
+    if let Ok(mut warned) = DATA_DIR_WARNED.lock() {
+        *warned = None;
     }
 }
 
@@ -464,6 +514,8 @@ pub struct ConnectionHandle {
     pub uses_vault_auth: bool,
     /// Bumped on each new connect/reconnect; stale in-flight reconnects must match before replacing.
     pub reconnect_generation: u64,
+    /// Serializes reconnect attempts for this connection to prevent races.
+    pub reconnect_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// Internal helper: establishes a full SSH connection (session + SFTP + OS detection)
@@ -601,6 +653,7 @@ async fn reconnect_connection(
         detected_shell,
         uses_vault_auth: config_uses_vault_auth(config),
         reconnect_generation: 0,
+        reconnect_lock: Arc::new(tokio::sync::Mutex::new(())),
     })
 }
 
@@ -1113,12 +1166,11 @@ pub async fn ssh_disconnect_vault_backed(
         errors.push(format!("Tunnel stop failed: {error}"));
     }
 
-    let mut connections = state.connections.lock().await;
-    for id in &ids {
-        connections.remove(id);
-    }
-
     if errors.is_empty() {
+        let mut connections = state.connections.lock().await;
+        for id in &ids {
+            connections.remove(id);
+        }
         Ok(ids)
     } else {
         Err(errors.join("; "))
@@ -1835,6 +1887,16 @@ async fn reconnect_stored_connection(
     original_config: ConnectionConfig,
     state: &State<'_, AppState>,
 ) -> Result<(), String> {
+    // Acquire per-connection reconnect lock *without* holding connections lock across await (avoids deadlock with concurrent ops needing connections).
+    let reconnect_lock = {
+        let connections = state.connections.lock().await;
+        connections
+            .get(connection_id)
+            .map(|h| h.reconnect_lock.clone())
+            .ok_or_else(|| format!("Connection {connection_id} was disconnected during reconnect"))?
+    };
+    let _reconnect_guard = reconnect_lock.clone().lock_owned().await;
+
     let expected_generation = {
         let connections = state.connections.lock().await;
         connections
@@ -1885,6 +1947,8 @@ async fn reconnect_stored_connection(
     match connections.get(connection_id) {
         Some(existing) if existing.reconnect_generation == expected_generation => {
             new_handle.reconnect_generation = expected_generation.wrapping_add(1);
+            // Preserve the *same* reconnect_lock Arc so any concurrent waiters on the old handle continue to serialize against this instance.
+            new_handle.reconnect_lock = reconnect_lock.clone();
             connections.insert(connection_id.to_string(), new_handle);
             Ok(())
         }
@@ -1895,6 +1959,11 @@ async fn reconnect_stored_connection(
             "Connection {connection_id} was disconnected during reconnect"
         )),
     }
+}
+
+/// Machine-readable prefix — must stay in sync with `TERMINAL_SPAWN_CONNECTION_NOT_READY` in TS.
+fn connection_not_ready_error(connection_id: &str) -> String {
+    format!("CONNECTION_NOT_READY:{connection_id}")
 }
 
 async fn get_live_ssh_session(
@@ -1916,7 +1985,7 @@ async fn get_live_ssh_session(
         connections
             .get(connection_id)
             .map(|c| c.config.clone())
-            .ok_or_else(|| format!("Connection config for {} not found", connection_id))?
+            .ok_or_else(|| connection_not_ready_error(connection_id))?
     };
 
     reconnect_stored_connection(connection_id, config, state).await?;

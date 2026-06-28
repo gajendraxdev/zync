@@ -104,7 +104,9 @@ pub async fn session_save(app: AppHandle, mut data: SessionData) -> Result<(), S
     data.version = SESSION_VERSION;
 
     let dir = crate::commands::get_data_dir(&app);
-    tokio::fs::create_dir_all(&dir).await.map_err(|e| e.to_string())?;
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| format!("failed to create session directory {:?}: {}", dir, e))?;
 
     let json = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
 

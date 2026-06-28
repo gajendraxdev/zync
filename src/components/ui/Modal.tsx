@@ -19,6 +19,8 @@ interface ModalProps {
   closeOnEsc?: boolean;
   closeOnOverlayClick?: boolean;
   showCloseButton?: boolean;
+  /** When true, only in-content actions dismiss the modal (no Escape, overlay, or header X). */
+  explicitDismissOnly?: boolean;
 }
 
 /**
@@ -37,6 +39,7 @@ interface ModalProps {
  * @param closeOnEsc - Whether pressing Escape closes the modal (default true).
  * @param closeOnOverlayClick - Whether clicking the overlay closes the modal (default true).
  * @param showCloseButton - Whether to render the close button in the header (default true).
+ * @param explicitDismissOnly - When true, only in-content actions dismiss the modal (Escape, overlay, and header X are disabled).
  * @returns The modal element mounted into the ZPortal target when `isOpen` is true, otherwise null.
  */
 export function Modal({
@@ -53,28 +56,33 @@ export function Modal({
   closeOnEsc = true,
   closeOnOverlayClick = true,
   showCloseButton = true,
+  explicitDismissOnly = false,
 }: ModalProps) {
-  const hasCloseMechanism = closeOnEsc || closeOnOverlayClick || showCloseButton;
-  const effectiveShowCloseButton = hasCloseMechanism ? showCloseButton : true;
+  const effectiveCloseOnEsc = explicitDismissOnly ? false : closeOnEsc;
+  const effectiveCloseOnOverlayClick = explicitDismissOnly ? false : closeOnOverlayClick;
+  const effectiveShowCloseButton = explicitDismissOnly
+    ? false
+    : (closeOnEsc || closeOnOverlayClick || showCloseButton ? showCloseButton : true);
+  const hasCloseMechanism = effectiveCloseOnEsc || effectiveCloseOnOverlayClick || effectiveShowCloseButton;
 
   useEffect(() => {
-    if (import.meta.env.DEV && !hasCloseMechanism) {
+    if (import.meta.env.DEV && !explicitDismissOnly && !hasCloseMechanism) {
       console.warn(
         '[Modal] closeOnEsc, closeOnOverlayClick, and showCloseButton are all false; forcing close button for accessibility.'
       );
     }
-  }, [hasCloseMechanism]);
+  }, [explicitDismissOnly, hasCloseMechanism]);
 
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
       if (document.querySelector('[data-zync-select-open="true"]')) return;
       if (e.key === 'Escape') onClose();
     };
-    if (isOpen && closeOnEsc) {
+    if (isOpen && effectiveCloseOnEsc) {
       window.addEventListener('keydown', handleEsc, { capture: true });
     }
     return () => window.removeEventListener('keydown', handleEsc, { capture: true });
-  }, [closeOnEsc, isOpen, onClose]);
+  }, [effectiveCloseOnEsc, isOpen, onClose]);
 
   return (
     <ZPortal>
@@ -86,7 +94,7 @@ export function Modal({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.15 }}
-              onClick={closeOnOverlayClick ? onClose : undefined}
+              onClick={effectiveCloseOnOverlayClick ? onClose : undefined}
               className="absolute inset-0 bg-black/70 backdrop-blur-md"
             />
             <motion.div

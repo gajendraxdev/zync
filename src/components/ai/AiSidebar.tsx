@@ -109,7 +109,13 @@ interface AiSidebarProps {
     onRunCommand?: (connectionId: string, command: string) => void;
 }
 
-export function AiSidebar({ connectionId, activeTermId, onRunCommand }: AiSidebarProps) {
+export function AiSidebar({ connectionId, activeTermId: activeTermIdProp, onRunCommand }: AiSidebarProps) {
+    const activeTermIdFromStore = useAppStore(
+        state => (connectionId ? state.activeTerminalIds[connectionId] ?? null : null),
+    );
+    const activeTermId = activeTermIdProp !== undefined
+        ? activeTermIdProp
+        : activeTermIdFromStore;
 
     // ── Store: UI & Ask ──────────────────────────────────────────────────
     const isOpen              = useAppStore(s => s.isAiSidebarOpen);
