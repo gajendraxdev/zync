@@ -27,15 +27,17 @@ export function useTerminalGlobalShortcuts({
     };
 
     const handleGlobalPaste = async () => {
-      if (!isVisible) return;
+      if (!isVisible || !termRef.current) {
+        return;
+      }
       const text = await readTerminalClipboardText();
-      if (text && termRef.current) {
+      if (text) {
         termRef.current.paste(text);
       }
     };
 
     const handleGlobalFind = () => {
-      if (isVisible) {
+      if (isVisible && termRef.current) {
         onOpenSearch();
       }
     };

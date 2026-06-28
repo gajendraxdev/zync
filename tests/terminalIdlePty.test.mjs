@@ -80,19 +80,43 @@ runTest('resolveIdleHostPtySuspendDelayMs converts minutes to ms', () => {
 runTest('flushIdlePtySuspend skips busy tabs with recent shell activity', () => {
   terminalCache.clear();
   const suspended = [];
+  let suspendCalls = 0;
   seedBusyTab('shell-busy');
 
   scheduleIdlePtySuspend('conn-busy', [{ id: 'shell-busy' }], {
     delayMs: 60_000,
     backgroundedAt: 1_000,
     onSuspend: (tabs) => {
+      suspendCalls += 1;
       suspended.push(...tabs.map((tab) => tab.id));
     },
   });
 
   touchTerminalActivity('shell-busy', 2_000);
   flushIdlePtySuspend('conn-busy');
+  assert.equal(suspendCalls, 0);
   assert.deepEqual(suspended, []);
+});
+
+runTest('flushIdlePtySuspend suspends after busy tab goes quiet', () => {
+  terminalCache.clear();
+  const suspended = [];
+  seedBusyTab('shell-quiet-later');
+
+  scheduleIdlePtySuspend('conn-quiet', [{ id: 'shell-quiet-later' }], {
+    delayMs: 0,
+    backgroundedAt: 1_000,
+    onSuspend: (tabs) => {
+      suspended.push(...tabs.map((tab) => tab.id));
+    },
+  });
+
+  touchTerminalActivity('shell-quiet-later', 2_000);
+  flushIdlePtySuspend('conn-quiet');
+  assert.deepEqual(suspended, []);
+
+  flushIdlePtySuspend('conn-quiet');
+  assert.deepEqual(suspended, ['shell-quiet-later']);
 });
 
 function seedBusyTab(id) {

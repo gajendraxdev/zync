@@ -46,4 +46,9 @@ runTest('formatTerminalSpawnError returns friendly guidance for unreachable host
   assert.doesNotMatch(formatted, /os error 10065/i);
 });
 
+runTest('formatTerminalSpawnError keeps connection refused as raw error', () => {
+  const formatted = formatTerminalSpawnError('connection refused');
+  assert.equal(formatted, 'connection refused');
+});
+
 console.log('Terminal spawn error tests passed.');

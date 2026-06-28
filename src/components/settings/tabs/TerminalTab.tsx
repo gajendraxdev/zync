@@ -171,13 +171,14 @@ export function TerminalTab({
                         {(settings.terminal.suspendIdleHostPtys ?? DEFAULT_SUSPEND_IDLE_HOST_PTYS) && (
                             <div className="flex items-center justify-between gap-3 rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/30 px-3 py-2.5">
                                 <div>
-                                    <p className="text-sm font-medium text-[var(--color-app-text)]">Idle timeout</p>
+                                    <p id="idle-host-pty-timeout-label" className="text-sm font-medium text-[var(--color-app-text)]">Idle timeout</p>
                                     <p className="text-[11px] text-[var(--color-app-muted)]">Minutes before background host PTYs suspend</p>
                                 </div>
                                 <input
                                     type="number"
                                     min={1}
                                     max={60}
+                                    aria-labelledby="idle-host-pty-timeout-label"
                                     value={settings.terminal.idleHostPtySuspendMinutes ?? DEFAULT_IDLE_HOST_PTY_SUSPEND_MINUTES}
                                     onChange={(e) => {
                                         const minutes = Math.max(1, Math.min(60, Number(e.target.value) || 1));

@@ -92,6 +92,7 @@ function runIdleSuspendAttempt(connectionId: string): void {
 
   if (busyTabs.length > 0) {
     job.tabs = busyTabs;
+    job.backgroundedAt = getLatestTerminalActivityAt(busyTabs, job.backgroundedAt);
     scheduleNextIdleSuspendAttempt(connectionId, busyTabs, job.backgroundedAt, job.delayMs);
     return;
   }

@@ -26,20 +26,14 @@ function isHostUnreachableError(message: string): boolean {
     || lower.includes('network is unreachable')
     || lower.includes('no route to host')
     || lower.includes('os error 10065')
-    || lower.includes('os error 10051')
-    || lower.includes('os error 10060')
-    || lower.includes('timed out')
-    || lower.includes('connection refused')
-    || lower.includes('connection reset')
     || lower.includes('name or service not known')
     || lower.includes('failed to lookup address')
+    || lower.includes('temporary failure in name resolution')
     || (lower.includes('failed to connect') && (
       lower.includes('unreachable')
-      || lower.includes('timeout')
-      || lower.includes('refused')
       || lower.includes('10065')
-      || lower.includes('10051')
-      || lower.includes('10060')
+      || lower.includes('no route')
+      || lower.includes('network is unreachable')
     ))
   );
 }

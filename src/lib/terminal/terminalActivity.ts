@@ -24,7 +24,7 @@ export function isTerminalBusyForIdleSuspend(termId: string, sinceMs: number): b
   }
 
   const lastActivityAt = cached.lastActivityAt ?? 0;
-  return lastActivityAt >= sinceMs;
+  return lastActivityAt > sinceMs;
 }
 
 /** Latest shell activity across tabs, floored at the background baseline. */
