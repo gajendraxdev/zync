@@ -4,6 +4,8 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.18.0] - 2026-06-28
+
 ### Added
 - **Terminal xterm 6.x Upgrade**: Bump `@xterm/xterm` to 6.x; remove deprecated `@xterm/addon-canvas`. WebGL remains primary; GPU-off, init failure, and context loss fall back to xterm's built-in **DOM renderer**. Renderer types, diagnostics, and Settings → Terminal labels updated from canvas to DOM. Theme and vibrancy/transparency align with xterm 6 CSS; WebGL restores on active shell tab switch; ghost overlays use subpixel char-measure sizing; renderer setup is hardened for in-flight WebGL→DOM transitions, per-session settings cache, and `desiredKind` policy owned by `syncTerminalRenderer()` only. ([21a2c5d], [571fe5f])
 - **Terminal Renderer Tests**: `needsTerminalRendererSetup()` helper, `tests/terminalRendererSetup.test.mjs`, and expanded controller/diagnostics coverage. ([21a2c5d])
@@ -734,7 +736,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 - Auto-updates
 - Multiple themes (Dark, Light, Dracula)
 
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.17.0...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.18.0...HEAD
+[2.18.0]: https://github.com/zync-sh/zync/compare/v2.17.0...v2.18.0
+[21a2c5d]: https://github.com/zync-sh/zync/commit/21a2c5d
+[571fe5f]: https://github.com/zync-sh/zync/commit/571fe5f
 [c10c082]: https://github.com/zync-sh/zync/commit/c10c082
 [15576ab]: https://github.com/zync-sh/zync/commit/15576ab
 [b0cfd5f]: https://github.com/zync-sh/zync/commit/b0cfd5f
