@@ -14,6 +14,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Local terminal gate**: Local shell mounts without a remote `activeConnectionId`. ([238e3fd])
 - **Terminal clipboard**: Context menu Copy/Paste uses the shared Tauri-with-browser-fallback clipboard path. ([238e3fd])
 - **Terminal search focus**: Closed search bar is removed from the DOM so it cannot receive keyboard focus. ([238e3fd])
+- **Idle suspend busy deferral**: Background shells with past activity no longer stay busy forever; quiet baseline advances after each deferral. ([5504a33])
+- **Terminal spawn error matching**: Unreachable-host message limited to DNS/network failures; reachable-host errors (e.g. connection refused) keep raw backend text. ([5504a33])
+- **Idle timeout accessibility**: Idle suspend minutes input exposes an accessible name for screen readers. ([5504a33])
+- **Terminal shortcut guards**: Global paste/find skip when no xterm instance is mounted (e.g. disconnected view). ([5504a33])
 
 ### Changed
 - **Terminal module layout**: Split `Terminal.tsx` into focused hooks and components; route tab destroy through `terminalService`; remove deprecated canvas renderer aliases. ([d872b3d])
@@ -753,6 +757,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 [Unreleased]: https://github.com/zync-sh/zync/compare/v2.18.0...HEAD
 [2.18.0]: https://github.com/zync-sh/zync/compare/v2.17.0...v2.18.0
+[5504a33]: https://github.com/zync-sh/zync/commit/5504a33
 [238e3fd]: https://github.com/zync-sh/zync/commit/238e3fd
 [3b05fec]: https://github.com/zync-sh/zync/commit/3b05fec
 [ae2af4c]: https://github.com/zync-sh/zync/commit/ae2af4c
