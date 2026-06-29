@@ -4,30 +4,19 @@ import { Select } from '../../ui/Select';
 import { Section } from '../common/Section';
 import { Toggle } from '../common/Toggle';
 import {
-    DEFAULT_TERMINAL_FONT_STACK,
-    DEFAULT_TERMINAL_FONT_STACK_WIN32,
-    DEFAULT_TERMINAL_FONT_WEIGHT,
-    DEFAULT_TERMINAL_FONT_WEIGHT_WIN32,
-
-    DEFAULT_TERMINAL_PADDING,
-    DEFAULT_TERMINAL_LINE_HEIGHT,
-    DEFAULT_TERMINAL_LIGATURES,
     DEFAULT_TERMINAL_GPU_ACCELERATION,
     DEFAULT_SUSPEND_IDLE_HOST_PTYS,
     DEFAULT_IDLE_HOST_PTY_SUSPEND_MINUTES,
-    TERMINAL_FONT_WEIGHT_OPTIONS,
-    resolveDefaultTerminalTypography,
-    type TerminalFontWeightSetting,
 } from '../constants/defaults';
-import { resolveTerminalFontWeightBold } from '../../../lib/terminal/terminalTypography';
 import { TerminalRendererStatus } from './TerminalRendererStatus';
+import { TerminalTabIntro } from './TerminalTabIntro';
 
 interface TerminalTabProps {
     settings: AppSettings;
-    terminalFontDraft: string;
-    setTerminalFontDraft: (value: string) => void;
     wslDistros: string[];
     isWindows: boolean;
+    onOpenAppearanceTerminal: () => void;
+    onOpenAppearanceApp: () => void;
     updateTerminalSettings: (updates: Partial<AppSettings['terminal']>) => Promise<void>;
     updateLocalTermSettings: (updates: Partial<AppSettings['localTerm']>) => Promise<void>;
     setGhostSuggestionsField: (patch: Partial<AppSettings['ghostSuggestions']>) => void;
@@ -36,254 +25,46 @@ interface TerminalTabProps {
 
 export function TerminalTab({
     settings,
-    terminalFontDraft,
-    setTerminalFontDraft,
     wslDistros,
     isWindows,
+    onOpenAppearanceTerminal,
+    onOpenAppearanceApp,
     updateTerminalSettings,
     updateLocalTermSettings,
     setGhostSuggestionsField,
-    setGhostProviderField
+    setGhostProviderField,
 }: TerminalTabProps) {
-    const recommendedTypography = resolveDefaultTerminalTypography();
-    const recommendedFontStack = isWindows
-        ? DEFAULT_TERMINAL_FONT_STACK_WIN32
-        : DEFAULT_TERMINAL_FONT_STACK;
-    const recommendedFontWeight = isWindows
-        ? DEFAULT_TERMINAL_FONT_WEIGHT_WIN32
-        : DEFAULT_TERMINAL_FONT_WEIGHT;
-
     return (
         <div className="space-y-6">
-            <Section title="Typography">
-                <div className="space-y-4">
-                    <div className="rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/40 p-4 space-y-3">
-                        <Select
-                            label="Font Family"
-                            value={settings.terminal.fontFamily}
-                            onChange={(val) => updateTerminalSettings({ fontFamily: val })}
-                            options={[
-                                {
-                                    value: recommendedFontStack,
-                                    label: isWindows ? "Windows Monospace (Recommended)" : "System Monospace (Recommended)",
-                                    description: isWindows
-                                        ? "Consolas and Cascadia Mono — heavier and clearer on Windows"
-                                        : "Best cross-platform default using built-in monospace fonts",
-                                },
-                                {
-                                    value: "'Fira Code', 'Fira Code VF', 'FiraCode Nerd Font', 'FiraCode NFM', 'Cascadia Code', Consolas, 'Courier New', monospace",
-                                    label: "Fira Code",
-                                    description: "Supports Fira Code + common Nerd Font variants",
-                                },
-                                {
-                                    value: "'JetBrains Mono', 'JetBrainsMono Nerd Font', 'JetBrainsMono NFM', 'Cascadia Mono', Consolas, 'Courier New', monospace",
-                                    label: "JetBrains Mono",
-                                    description: "Supports JetBrains Mono + common Nerd Font variants",
-                                },
-                                {
-                                    value: "Menlo, Monaco, Consolas, 'Courier New', monospace",
-                                    label: "Menlo",
-                                    description: "Uses Menlo on macOS; falls back to Monaco/Consolas on Windows",
-                                },
-                                { value: "'Courier New', monospace", label: "Courier New", description: "Classic typewriter" }
-                            ]}
-                            triggerClassName="bg-app-bg/50"
-                        />
-                        <div className="space-y-2">
-                            <label className="text-xs font-semibold uppercase tracking-wide text-[var(--color-app-muted)]">Custom Font Stack</label>
-                            <div className="grid grid-cols-[1fr_auto] gap-2 items-stretch">
-                                <input
-                                    type="text"
-                                    value={terminalFontDraft}
-                                    onChange={(e) => setTerminalFontDraft(e.target.value)}
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End') {
-                                            e.stopPropagation();
-                                        }
-                                        if (e.key === 'Enter') {
-                                            const next = terminalFontDraft.trim();
-                                            if (next) void updateTerminalSettings({ fontFamily: next });
-                                        }
-                                    }}
-                                    placeholder="e.g. 'Cascadia Code', Consolas, monospace"
-                                    className="w-full min-h-[44px] bg-[var(--color-app-bg)] border border-[var(--color-app-border)] rounded-lg px-3 py-2.5 text-[14px] font-mono text-[var(--color-app-text)] focus:outline-none focus:border-[var(--color-app-accent)]"
-                                />
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        const next = terminalFontDraft.trim();
-                                        if (next) void updateTerminalSettings({ fontFamily: next });
-                                    }}
-                                    className="min-w-[88px] px-4 py-2.5 rounded-lg text-sm font-semibold border border-[var(--color-app-border)] hover:bg-[var(--color-app-surface)]"
-                                >
-                                    Apply
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/40 p-4 space-y-4">
-                        <Select
-                            label="Font Weight"
-                            value={String(settings.terminal.fontWeight ?? recommendedFontWeight)}
-                            onChange={(val) => {
-                                const fontWeight = val === 'normal'
-                                    ? 'normal'
-                                    : (Number(val) as TerminalFontWeightSetting);
-                                void updateTerminalSettings({ fontWeight });
-                            }}
-                            options={TERMINAL_FONT_WEIGHT_OPTIONS.map((option) => ({
-                                value: String(option.value),
-                                label: option.label,
-                                description: option.description,
-                            }))}
-                            triggerClassName="bg-app-bg/50"
-                        />
-
-                        <div className="space-y-2">
-                            <div className="flex justify-between items-center">
-                                <label className="text-sm font-medium text-[var(--color-app-text)]">Font Size</label>
-                                <span className="text-sm text-[var(--color-app-accent)] font-mono">{settings.terminal.fontSize}px</span>
-                            </div>
-                            <input
-                                type="range" min="10" max="24" step="1"
-                                className="w-full accent-[var(--color-app-accent)] h-2 bg-[var(--color-app-surface)] rounded-lg appearance-none cursor-pointer"
-                                value={settings.terminal.fontSize}
-                                onChange={(e) => updateTerminalSettings({ fontSize: parseInt(e.target.value, 10) })}
-                            />
-                        </div>
-
-                        <div className="space-y-2">
-                            <div className="flex justify-between items-center">
-                                <label className="text-sm font-medium text-[var(--color-app-text)]">Internal Padding</label>
-                                <span className="text-sm text-[var(--color-app-accent)] font-mono">{settings.terminal.padding ?? 12}px</span>
-                            </div>
-                            <input
-                                type="range" min="0" max="48" step="4"
-                                className="w-full accent-[var(--color-app-accent)] h-2 bg-[var(--color-app-surface)] rounded-lg appearance-none cursor-pointer"
-                                value={settings.terminal.padding ?? 12}
-                                onChange={(e) => updateTerminalSettings({ padding: parseInt(e.target.value, 10) })}
-                            />
-                        </div>
-
-                        <div className="space-y-2">
-                            <div className="flex justify-between items-center">
-                                <label className="text-sm font-medium text-[var(--color-app-text)]">Line Height</label>
-                                <span className="text-sm text-[var(--color-app-accent)] font-mono">{(settings.terminal.lineHeight ?? 1.2).toFixed(2)}</span>
-                            </div>
-                            <input
-                                type="range" min="1" max="2" step="0.05"
-                                className="w-full accent-[var(--color-app-accent)] h-2 bg-[var(--color-app-surface)] rounded-lg appearance-none cursor-pointer"
-                                value={settings.terminal.lineHeight ?? 1.2}
-                                onChange={(e) => updateTerminalSettings({ lineHeight: parseFloat(e.target.value) })}
-                            />
-                        </div>
-                    </div>
-
-                    <div className="text-[11px] leading-relaxed text-[var(--color-app-muted)] rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/30 px-3 py-2.5">
-                        Note: If a selected font looks unchanged, make sure that font is installed on your system.
-                        Font weight changes need a font with multiple weights installed — for Fira Code, use
-                        {' '}<span className="font-mono text-[var(--color-app-text)]/80">Fira Code VF</span>
-                        {' '}(variable) or the Medium/SemiBold/Bold static files. Single-weight Nerd Font builds ignore weight settings.
-                        Ligatures require a ligature-capable font.
-                    </div>
-
-                    <div className="flex items-center justify-between rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/30 px-3 py-2.5">
-                        <p className="text-[11px] text-[var(--color-app-muted)]">
-                            Reset terminal typography to recommended defaults.
-                        </p>
-                        <button
-                            type="button"
-                            onClick={() => {
-                                void updateTerminalSettings({
-                                    fontFamily: recommendedTypography.fontFamily,
-                                    fontSize: recommendedTypography.fontSize,
-                                    fontWeight: recommendedTypography.fontWeight,
-                                    fontWeightBold: resolveTerminalFontWeightBold(recommendedTypography.fontWeight),
-                                    padding: DEFAULT_TERMINAL_PADDING,
-                                    lineHeight: DEFAULT_TERMINAL_LINE_HEIGHT,
-                                    fontLigatures: DEFAULT_TERMINAL_LIGATURES,
-                                });
-                            }}
-                            className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-[var(--color-app-border)] hover:bg-[var(--color-app-surface)]"
-                        >
-                            Reset
-                        </button>
-                    </div>
-
-                    <div className="rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/40 p-3 space-y-3">
-                        <Toggle
-                            label="GPU Acceleration (WebGL)"
-                            description="Faster rendering for large output. On Windows, GPU text is rasterized to a canvas and can look sharper/thinner than DOM mode, which uses native ClearType. Font weight and size changes always apply to both renderers."
-                            checked={settings.terminal.gpuAcceleration ?? DEFAULT_TERMINAL_GPU_ACCELERATION}
-                            onChange={(v) => updateTerminalSettings({ gpuAcceleration: v })}
-                        />
-                        <Toggle
-                            label="Enable Font Ligatures"
-                            description="Use programming ligatures in terminal when the selected font supports them. Compatible with GPU acceleration."
-                            checked={settings.terminal.fontLigatures ?? false}
-                            onChange={(v) => updateTerminalSettings({ fontLigatures: v })}
-                        />
-                        <TerminalRendererStatus
-                            gpuAcceleration={settings.terminal.gpuAcceleration ?? DEFAULT_TERMINAL_GPU_ACCELERATION}
-                        />
-                        <Toggle
-                            label="Suspend idle host shells"
-                            description="After switching away from a workspace host, suspend its PTYs once quiet (scrollback preserved). Shells still producing output stay alive. Press Enter on return to resume. Off by default — SSH hosts show a fresh login on auto-respawn."
-                            checked={settings.terminal.suspendIdleHostPtys ?? DEFAULT_SUSPEND_IDLE_HOST_PTYS}
-                            onChange={(v) => updateTerminalSettings({ suspendIdleHostPtys: v })}
-                        />
-                        {(settings.terminal.suspendIdleHostPtys ?? DEFAULT_SUSPEND_IDLE_HOST_PTYS) && (
-                            <div className="flex items-center justify-between gap-3 rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/30 px-3 py-2.5">
-                                <div>
-                                    <p id="idle-host-pty-timeout-label" className="text-sm font-medium text-[var(--color-app-text)]">Idle timeout</p>
-                                    <p className="text-[11px] text-[var(--color-app-muted)]">Minutes before background host PTYs suspend</p>
-                                </div>
-                                <input
-                                    type="number"
-                                    min={1}
-                                    max={60}
-                                    inputMode="numeric"
-                                    aria-labelledby="idle-host-pty-timeout-label"
-                                    value={settings.terminal.idleHostPtySuspendMinutes ?? DEFAULT_IDLE_HOST_PTY_SUSPEND_MINUTES}
-                                    onChange={(e) => {
-                                        const minutes = Math.max(1, Math.min(60, Number(e.target.value) || 1));
-                                        void updateTerminalSettings({ idleHostPtySuspendMinutes: minutes });
-                                    }}
-                                    className="w-16 min-h-[36px] rounded-lg border border-[var(--color-app-border)] bg-[var(--color-app-bg)]/50 px-2 py-1.5 text-sm text-center text-[var(--color-app-text)] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none focus:outline-none focus:border-[var(--color-app-accent)] focus:ring-1 focus:ring-[var(--color-app-accent)]/20"
-                                />
-                            </div>
-                        )}
-                    </div>
-                </div>
-            </Section>
-
-            <div className="h-px bg-[var(--color-app-border)]/20 my-2" />
+            <TerminalTabIntro
+                onOpenAppearanceTerminal={onOpenAppearanceTerminal}
+                onOpenAppearanceApp={onOpenAppearanceApp}
+            />
 
             {isWindows && (
                 <>
-                    <Section title="Local Terminal (Windows)">
+                    <Section title="Local shell (Windows)">
                         <div className="space-y-3">
                             <Select
                                 label="Default Shell"
                                 value={settings.localTerm?.windowsShell || 'default'}
-                                onChange={(val) => updateLocalTermSettings({ windowsShell: val })}
+                                onChange={(value) => { void updateLocalTermSettings({ windowsShell: value }); }}
                                 options={[
                                     { value: 'default', label: 'Default', icon: <Terminal size={14} />, description: 'System Decision' },
                                     { value: 'powershell', label: 'PowerShell', icon: <Terminal size={14} /> },
                                     { value: 'cmd', label: 'Command Prompt', icon: <Terminal size={14} /> },
                                     { value: 'gitbash', label: 'Git Bash', icon: <Terminal size={14} /> },
                                     { value: 'wsl', label: 'WSL (Default)', icon: <Terminal size={14} /> },
-                                    ...wslDistros.map(distro => ({
+                                    ...wslDistros.map((distro) => ({
                                         value: `wsl:${distro}`,
                                         label: `WSL: ${distro}`,
-                                        icon: <Terminal size={14} />
-                                    }))
+                                        icon: <Terminal size={14} />,
+                                    })),
                                 ]}
                                 className="bg-app-bg/50"
                             />
                             <div className="text-[10px] text-[var(--color-app-muted)] pl-1">
-                                Note: Changes take effect on new split panes or tabs.
+                                Changes take effect on new split panes or tabs.
                             </div>
                         </div>
                     </Section>
@@ -292,50 +73,75 @@ export function TerminalTab({
                 </>
             )}
 
-            <Section title="Cursor">
-                <div className="grid grid-cols-3 gap-4">
-                    {(['block', 'bar', 'underline'] as const).map(style => (
-                        <button
-                            key={style}
-                            onClick={() => updateTerminalSettings({ cursorStyle: style })}
-                            className={`p-4 rounded-lg border flex flex-col items-center gap-3 transition-all h-32 justify-center ${settings.terminal.cursorStyle === style
-                                ? 'bg-[var(--color-app-accent)]/20 border-[var(--color-app-accent)] text-[var(--color-app-text)] ring-1 ring-[var(--color-app-accent)]'
-                                : 'border-[var(--color-app-border)] hover:bg-[var(--color-app-surface)] text-[var(--color-app-muted)]'
-                                }`}
-                        >
-                            <div className="h-12 w-24 bg-black/20 rounded border border-[var(--color-app-border)] flex items-center justify-center relative overflow-hidden font-mono text-xs">
-                                <span className="text-[var(--color-app-muted)]">_</span>
-                                <div className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-[var(--color-app-accent)]
-                                    ${style === 'underline' ? 'h-0.5 w-2 mt-2' : style === 'bar' ? 'w-0.5 h-4' : 'w-2 h-4'}
-                                `} />
-                            </div>
-                            <span className="capitalize text-sm font-medium">{style}</span>
-                        </button>
-                    ))}
+            <Section title="Rendering">
+                <div className="rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/40 p-3 space-y-3">
+                    <Toggle
+                        label="GPU Acceleration (WebGL)"
+                        description="Faster rendering for large output. On Windows, GPU text is rasterized to a canvas and can look sharper/thinner than DOM mode, which uses native ClearType."
+                        checked={settings.terminal.gpuAcceleration ?? DEFAULT_TERMINAL_GPU_ACCELERATION}
+                        onChange={(value) => { void updateTerminalSettings({ gpuAcceleration: value }); }}
+                    />
+                    <TerminalRendererStatus
+                        gpuAcceleration={settings.terminal.gpuAcceleration ?? DEFAULT_TERMINAL_GPU_ACCELERATION}
+                    />
                 </div>
             </Section>
 
             <div className="h-px bg-[var(--color-app-border)]/20 my-2" />
 
-            <Section title="Ghost Suggestions">
+            <Section title="Background hosts">
+                <div className="rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/40 p-3 space-y-3">
+                    <Toggle
+                        label="Suspend idle host shells"
+                        description="After switching away from a workspace host, suspend its PTYs once quiet (scrollback preserved). Shells still producing output stay alive. Press Enter on return to resume. Off by default — SSH hosts show a fresh login on auto-respawn."
+                        checked={settings.terminal.suspendIdleHostPtys ?? DEFAULT_SUSPEND_IDLE_HOST_PTYS}
+                        onChange={(value) => { void updateTerminalSettings({ suspendIdleHostPtys: value }); }}
+                    />
+                    {(settings.terminal.suspendIdleHostPtys ?? DEFAULT_SUSPEND_IDLE_HOST_PTYS) && (
+                        <div className="flex items-center justify-between gap-3 rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/30 px-3 py-2.5">
+                            <div>
+                                <p id="idle-host-pty-timeout-label" className="text-sm font-medium text-[var(--color-app-text)]">Idle timeout</p>
+                                <p className="text-[11px] text-[var(--color-app-muted)]">Minutes before background host PTYs suspend</p>
+                            </div>
+                            <input
+                                type="number"
+                                min={1}
+                                max={60}
+                                inputMode="numeric"
+                                aria-labelledby="idle-host-pty-timeout-label"
+                                value={settings.terminal.idleHostPtySuspendMinutes ?? DEFAULT_IDLE_HOST_PTY_SUSPEND_MINUTES}
+                                onChange={(e) => {
+                                    const minutes = Math.max(1, Math.min(60, Number(e.target.value) || 1));
+                                    void updateTerminalSettings({ idleHostPtySuspendMinutes: minutes });
+                                }}
+                                className="w-16 min-h-[36px] rounded-lg border border-[var(--color-app-border)] bg-[var(--color-app-bg)]/50 px-2 py-1.5 text-sm text-center text-[var(--color-app-text)] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none focus:outline-none focus:border-[var(--color-app-accent)] focus:ring-1 focus:ring-[var(--color-app-accent)]/20"
+                            />
+                        </div>
+                    )}
+                </div>
+            </Section>
+
+            <div className="h-px bg-[var(--color-app-border)]/20 my-2" />
+
+            <Section title="Ghost suggestions">
                 <div className="space-y-1">
                     <Toggle
                         label="Inline ghost text"
                         description="Show faded fish-style inline completion while typing."
                         checked={settings.ghostSuggestions?.inlineEnabled ?? true}
-                        onChange={(v) => setGhostSuggestionsField({ inlineEnabled: v })}
+                        onChange={(value) => { setGhostSuggestionsField({ inlineEnabled: value }); }}
                     />
                     <Toggle
                         label="Tab popup suggestions"
                         description="Use Tab to open/navigate completion list before falling back to shell completion."
                         checked={settings.ghostSuggestions?.popupEnabled ?? true}
-                        onChange={(v) => setGhostSuggestionsField({ popupEnabled: v })}
+                        onChange={(value) => { setGhostSuggestionsField({ popupEnabled: value }); }}
                     />
                     <Toggle
                         label="Context-menu suggestion actions"
                         description="Show suggestion actions in terminal right-click context menu."
                         checked={settings.ghostSuggestions?.contextMenuEnabled ?? false}
-                        onChange={(v) => setGhostSuggestionsField({ contextMenuEnabled: v })}
+                        onChange={(value) => { setGhostSuggestionsField({ contextMenuEnabled: value }); }}
                     />
 
                     <div className="rounded-lg border border-[var(--color-app-border)]/50 bg-[var(--color-app-bg)]/25 px-1 pt-3 pb-1 mt-2">
@@ -346,13 +152,13 @@ export function TerminalTab({
                             label="History"
                             description="Suggest commands based on your past usage for this server/session scope."
                             checked={settings.ghostSuggestions?.providers?.history ?? true}
-                            onChange={(v) => setGhostProviderField({ history: v })}
+                            onChange={(value) => { setGhostProviderField({ history: value }); }}
                         />
                         <Toggle
                             label="Filesystem paths"
                             description="Suggest local/remote path candidates for commands like cd."
                             checked={settings.ghostSuggestions?.providers?.filesystem ?? true}
-                            onChange={(v) => setGhostProviderField({ filesystem: v })}
+                            onChange={(value) => { setGhostProviderField({ filesystem: value }); }}
                         />
                     </div>
                 </div>

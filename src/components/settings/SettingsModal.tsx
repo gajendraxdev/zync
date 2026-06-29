@@ -78,6 +78,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     };
 
     const [activeTab, setActiveTab] = useState<Tab>('terminal');
+    const [appearanceView, setAppearanceView] = useState<'app' | 'terminal'>('app');
     const [pluginTab, setPluginTab] = useState<'installed' | 'marketplace' | 'developer'>('installed');
     const [isTransitioning, setIsTransitioning] = useState(false);
     const [wslDistros, setWslDistros] = useState<string[]>([]);
@@ -264,8 +265,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 return;
             }
 
-            // Arrow keys for tab navigation
+            // Arrow keys for tab navigation (skip when inner tablists already handled the key)
             if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+                if (e.defaultPrevented) {
+                    return;
+                }
                 e.preventDefault();
                 const tabs: Tab[] = ['general', 'terminal', 'appearance', 'fileManager', 'shortcuts', 'plugins', 'ai', 'about'];
                 const currentIndex = tabs.indexOf(activeTab);
@@ -293,6 +297,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             setActiveTab(newTab);
             setIsTransitioning(false);
         }, 150);
+    };
+
+    const openAppearance = (view: 'app' | 'terminal') => {
+        setAppearanceView(view);
+        if (activeTab !== 'appearance') {
+            handleTabChange('appearance');
+        }
     };
 
     const renderPluginInstalled = () => (
@@ -440,10 +451,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         {activeTab === 'terminal' && (
                             <TerminalTab
                                 settings={settings}
-                                terminalFontDraft={terminalFontDraft}
-                                setTerminalFontDraft={setTerminalFontDraft}
                                 wslDistros={wslDistros}
                                 isWindows={isWindows}
+                                onOpenAppearanceTerminal={() => { openAppearance('terminal'); }}
+                                onOpenAppearanceApp={() => { openAppearance('app'); }}
                                 updateTerminalSettings={updateTerminalSettings}
                                 updateLocalTermSettings={updateLocalTermSettings}
                                 setGhostSuggestionsField={setGhostSuggestionsField}
@@ -457,7 +468,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                 plugins={plugins}
                                 globalFontDraft={globalFontDraft}
                                 setGlobalFontDraft={setGlobalFontDraft}
+                                terminalFontDraft={terminalFontDraft}
+                                setTerminalFontDraft={setTerminalFontDraft}
+                                isWindows={isWindows}
+                                activeView={appearanceView}
+                                onActiveViewChange={setAppearanceView}
                                 updateSettings={updateSettings}
+                                updateTerminalSettings={updateTerminalSettings}
                             />
                         )}
 
