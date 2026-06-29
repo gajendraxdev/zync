@@ -1,4 +1,5 @@
 import { useEffect, useState, type FocusEvent } from 'react';
+import { Monitor } from 'lucide-react';
 import type { AppSettings } from '../../../store/settingsSlice';
 import { useAppStore } from '../../../store/useAppStore';
 import { getPluginCategory } from '../../editor/providers';
@@ -61,6 +62,31 @@ function normalizeHexColor(value: string | null | undefined): string | null {
         return `#${fullMatch[1]}`.toLowerCase();
     }
     return null;
+}
+
+function SystemThemeSwatch() {
+    return (
+        <div className="w-12 h-12 rounded-lg shadow-inner flex items-center justify-center shrink-0 border border-[var(--color-app-border)] overflow-hidden relative">
+            <div className="absolute inset-0 flex" aria-hidden>
+                <div className="w-1/2 h-full bg-[#09090b]" />
+                <div className="w-1/2 h-full bg-[#fafafa]" />
+            </div>
+            <div className="relative z-10 size-[18px]" aria-hidden>
+                <Monitor
+                    size={18}
+                    className="absolute inset-0 text-white"
+                    strokeWidth={2}
+                    style={{ clipPath: 'polygon(0 0, 50% 0, 50% 100%, 0 100%)' }}
+                />
+                <Monitor
+                    size={18}
+                    className="absolute inset-0 text-[#09090b]"
+                    strokeWidth={2}
+                    style={{ clipPath: 'polygon(50% 0, 100% 0, 100% 100%, 50% 100%)' }}
+                />
+            </div>
+        </div>
+    );
 }
 
 function ThemeButton({ plugin, isSelected, onClick }: ThemeButtonProps) {
@@ -226,12 +252,7 @@ export function AppearanceTab({
                                     : 'bg-[var(--color-app-bg)]/40 border-[var(--color-app-border)] hover:bg-[var(--color-app-bg)]/60 hover:border-[var(--color-app-border)]'
                                     }`}
                             >
-                                <div
-                                    className="w-12 h-12 rounded-lg shadow-inner flex items-center justify-center shrink-0 border border-white/10"
-                                    style={{ background: 'linear-gradient(135deg, #09090b 50%, #ffffff 50%)' }}
-                                >
-                                    <div className="w-3 h-3 rounded-full shadow-sm" style={{ backgroundColor: '#6366f1' }} />
-                                </div>
+                                <SystemThemeSwatch />
                                 <div>
                                     <div className="font-semibold text-[var(--color-app-text)] text-sm">System</div>
                                     <div className="text-xs text-[var(--color-app-muted)] mt-0.5">Auto-detect</div>
