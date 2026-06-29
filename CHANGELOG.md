@@ -5,6 +5,17 @@ All notable changes to Zync are documented in this file. The format is based on 
 ## [Unreleased]
 
 ### Added
+- **Terminal font weight**: Settings → Terminal → **Font Weight** (Regular / Medium / Semi-bold / Bold); bold ANSI text uses a paired heavier weight. ([c0a8f2e])
+- **Windows terminal typography defaults**: Recommended reset uses Consolas-first stack, 15px size, and medium (500) weight. ([c0a8f2e])
+
+### Fixed
+- **Terminal live theme sync**: Theme and accent changes apply to open terminals immediately without reload. ([6183150])
+- **Light theme terminal colors**: Gruvbox Light, Solarized Light, Catppuccin Latte, and other `mode: light` themes use a high-contrast ANSI palette so prompts and errors stay readable. ([6183150])
+- **Theme variant detection**: Terminal palette follows each theme plugin manifest `mode` field (with luminance fallback). ([6183150])
+- **Custom accent on theme change**: Selecting a new theme clears a custom accent so the theme default applies. ([6183150])
+- **Terminal font weight on GPU**: Font weight changes rebuild the WebGL glyph atlas and apply on DOM fallback. ([c0a8f2e])
+
+### Added
 - **Idle host PTY suspend (opt-in)**: Settings → Terminal → **Suspend idle host shells** suspends background workspace host PTYs after a configurable idle timeout (scrollback preserved; press Enter to resume). Shells with output or buffered input since the host was backgrounded stay alive until quiet. ([3b05fec])
 - **PTY output channel streaming**: `terminal:create` accepts a Tauri `Channel`; batched PTY output is framed as u32 LE generation + raw bytes. `terminal-output-*` events removed. ([517ff30])
 - **Process-aware idle suspend probe**: `terminal_has_active_processes` IPC uses a local sysinfo child-tree scan (fail-closed) to defer idle suspend while child processes are running. ([517ff30])

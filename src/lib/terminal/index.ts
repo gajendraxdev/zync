@@ -133,6 +133,13 @@ export type { ConnectionWakeupContext } from './terminalConnectionWakeup.js';
 export { tryWakeTerminalOnReconnect } from './terminalConnectionWakeup.js';
 
 export { LOCAL_TERMINAL_CONNECTION_ID } from './connectionIds.js';
+export {
+  applyTerminalTypography,
+  buildWebglTypographyStamp,
+  refreshAllCachedTerminalTypography,
+  resolveTerminalFontWeightBold,
+  resolveTerminalLetterSpacing,
+} from './terminalTypography.js';
 export type { TerminalLifecycleEvent } from './terminalLifecycleListeners.js';
 export { attachTerminalLifecycleListeners } from './terminalLifecycleListeners.js';
 

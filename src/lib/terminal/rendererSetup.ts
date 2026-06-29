@@ -4,6 +4,8 @@ import { reactivateTerminalWebgl, syncTerminalRenderer } from './rendererControl
 import { setTerminalLigatures } from './ligatures.js';
 import { getTerminalRendererState } from './rendererSession.js';
 import { isTerminalFitReady, safeFitTerminal } from './terminalFit.js';
+import { applyTerminalTypography, buildWebglTypographyStamp } from './terminalTypography.js';
+import { useAppStore } from '../../store/useAppStore.js';
 import type { TerminalRendererState } from './types.js';
 
 /**
@@ -91,12 +93,29 @@ export async function applyTerminalRendererAndLigatures(
     const onRefit = buildRendererRefitCallback(sessionId, fitAddon, term, syncResize);
     const rendererState = getTerminalRendererState(sessionId);
     const ligaturesStamp = buildWebglLigaturesStamp(prefs.fontLigatures, term.options.fontFamily);
+    const typographyStamp = buildWebglTypographyStamp(term, sessionId);
+    const typographyChanged = rendererState.webglTypographyStamp !== typographyStamp;
 
     await syncTerminalRenderer(sessionId, term, {
       gpuAcceleration: prefs.gpuAcceleration,
       onRefit,
     });
     await setTerminalLigatures(sessionId, term, prefs.fontLigatures);
+
+    if (prefs.gpuAcceleration && rendererState.kind === 'webgl' && rendererState.webglAddon && typographyChanged) {
+      const webglAddon = rendererState.webglAddon as { clearTextureAtlas?: () => void };
+      if (typeof webglAddon.clearTextureAtlas === 'function') {
+        webglAddon.clearTextureAtlas();
+        rendererState.webglTypographyStamp = typographyStamp;
+        onRefit();
+      } else {
+        const kind = await reactivateTerminalWebgl(sessionId, term, { onRefit });
+        if (kind === 'webgl') {
+          rendererState.webglTypographyStamp = typographyStamp;
+          onRefit();
+        }
+      }
+    }
 
     if (prefs.gpuAcceleration && prefs.fontLigatures) {
       const webglReady = rendererState.kind === 'webgl' && Boolean(rendererState.webglAddon);
@@ -113,6 +132,13 @@ export async function applyTerminalRendererAndLigatures(
     } else {
       rendererState.webglLigaturesStamp = undefined;
     }
+
+    if (!rendererState.webglTypographyStamp) {
+      rendererState.webglTypographyStamp = typographyStamp;
+    }
+
+    const { terminal } = useAppStore.getState().settings;
+    applyTerminalTypography(sessionId, term, terminal);
 
     try {
       const lastRow = Math.max(0, term.rows - 1);

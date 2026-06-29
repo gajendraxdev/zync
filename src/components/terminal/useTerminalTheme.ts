@@ -1,7 +1,10 @@
 import { useEffect, useMemo, type RefObject } from 'react';
-import type { Terminal as XTerm } from '@xterm/xterm';
+import type { FontWeight, Terminal as XTerm } from '@xterm/xterm';
+import type { TerminalFontWeightSetting } from '../settings/constants/defaults';
 import type { Connection } from '../../store/useAppStore';
+import { refreshAllCachedTerminalTypography } from '../../lib/terminal/terminalTypography.js';
 import {
+  applyXtermTheme,
   buildTerminalHostStyle,
   resolveTerminalTransparency,
   resolveXtermTheme,
@@ -11,6 +14,8 @@ import {
 export interface TerminalSettingsSlice {
   fontSize: number;
   fontFamily: string;
+  fontWeight?: TerminalFontWeightSetting;
+  fontWeightBold?: FontWeight;
   cursorStyle: 'block' | 'underline' | 'bar';
   lineHeight: number;
 }
@@ -54,35 +59,51 @@ export function useTerminalTheme({
     terminalTransparency,
   );
 
+  const typography = useMemo(() => ({
+    fontSize: settings.terminal.fontSize,
+    fontFamily: settings.terminal.fontFamily,
+    fontWeight: settings.terminal.fontWeight,
+    fontWeightBold: settings.terminal.fontWeightBold,
+    cursorStyle: settings.terminal.cursorStyle,
+    lineHeight: settings.terminal.lineHeight,
+  }), [settings.terminal]);
+
   useEffect(() => {
-    if (!isConnected || !termRef.current) {
+    if (!isConnected) {
       return;
     }
 
-    const term = termRef.current;
-    term.options.fontSize = settings.terminal.fontSize;
-    term.options.fontFamily = settings.terminal.fontFamily;
-    term.options.cursorStyle = settings.terminal.cursorStyle;
-    term.options.lineHeight = settings.terminal.lineHeight;
-  }, [sessionId, settings.terminal, isConnected, termRef]);
+    refreshAllCachedTerminalTypography(typography);
+  }, [sessionId, typography, isConnected]);
+
+  useEffect(() => {
+    if (!isConnected) {
+      return;
+    }
+
+    const handleRendererChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ sessionId?: string }>).detail;
+      if (detail?.sessionId && detail.sessionId !== sessionId) {
+        return;
+      }
+      refreshAllCachedTerminalTypography(typography);
+    };
+
+    window.addEventListener('zync:terminal-renderer-changed', handleRendererChanged);
+    return () => window.removeEventListener('zync:terminal-renderer-changed', handleRendererChanged);
+  }, [sessionId, typography, isConnected]);
 
   useEffect(() => {
     if (!isConnected || !termRef.current || !activeConnectionId) {
       return;
     }
 
-    const term = termRef.current;
-    term.options.theme = resolveXtermTheme(
+    applyXtermTheme(
+      termRef.current,
       containerRef.current,
       connection?.theme,
       terminalTransparency,
     );
-    try {
-      const lastRow = Math.max(0, term.rows - 1);
-      term.refresh(0, lastRow);
-    } catch {
-      // Ignore refresh failures during renderer transitions.
-    }
   }, [
     sessionId,
     isConnected,

@@ -1,8 +1,11 @@
-import type { ITerminalOptions, ITheme } from '@xterm/xterm';
+import type { FontWeight, ITerminalOptions, ITheme } from '@xterm/xterm';
+import { isLightTheme } from '../../components/terminal/terminalTheme.js';
 
 export interface TerminalXtermSettings {
   fontSize: number;
   fontFamily: string;
+  fontWeight?: FontWeight;
+  fontWeightBold?: FontWeight;
   cursorStyle: 'block' | 'underline' | 'bar';
   lineHeight: number;
 }
@@ -35,10 +38,13 @@ export function buildXtermOptions({
     cursorBlink: true,
     fontSize: settings.fontSize,
     fontFamily: settings.fontFamily,
+    fontWeight: settings.fontWeight ?? 'normal',
+    fontWeightBold: settings.fontWeightBold ?? 'bold',
     cursorStyle: settings.cursorStyle,
     lineHeight: settings.lineHeight,
     allowTransparency: true,
     allowProposedApi: true,
+    minimumContrastRatio: isLightTheme() ? 4.5 : 1,
     theme,
     reflowCursorLine: false,
     scrollback: TERMINAL_SCROLLBACK_ROWS,

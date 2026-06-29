@@ -5,14 +5,21 @@ import { Section } from '../common/Section';
 import { Toggle } from '../common/Toggle';
 import {
     DEFAULT_TERMINAL_FONT_STACK,
-    DEFAULT_TERMINAL_FONT_SIZE,
+    DEFAULT_TERMINAL_FONT_STACK_WIN32,
+    DEFAULT_TERMINAL_FONT_WEIGHT,
+    DEFAULT_TERMINAL_FONT_WEIGHT_WIN32,
+
     DEFAULT_TERMINAL_PADDING,
     DEFAULT_TERMINAL_LINE_HEIGHT,
     DEFAULT_TERMINAL_LIGATURES,
     DEFAULT_TERMINAL_GPU_ACCELERATION,
     DEFAULT_SUSPEND_IDLE_HOST_PTYS,
     DEFAULT_IDLE_HOST_PTY_SUSPEND_MINUTES,
+    TERMINAL_FONT_WEIGHT_OPTIONS,
+    resolveDefaultTerminalTypography,
+    type TerminalFontWeightSetting,
 } from '../constants/defaults';
+import { resolveTerminalFontWeightBold } from '../../../lib/terminal/terminalTypography';
 import { TerminalRendererStatus } from './TerminalRendererStatus';
 
 interface TerminalTabProps {
@@ -38,6 +45,14 @@ export function TerminalTab({
     setGhostSuggestionsField,
     setGhostProviderField
 }: TerminalTabProps) {
+    const recommendedTypography = resolveDefaultTerminalTypography();
+    const recommendedFontStack = isWindows
+        ? DEFAULT_TERMINAL_FONT_STACK_WIN32
+        : DEFAULT_TERMINAL_FONT_STACK;
+    const recommendedFontWeight = isWindows
+        ? DEFAULT_TERMINAL_FONT_WEIGHT_WIN32
+        : DEFAULT_TERMINAL_FONT_WEIGHT;
+
     return (
         <div className="space-y-6">
             <Section title="Typography">
@@ -49,12 +64,14 @@ export function TerminalTab({
                             onChange={(val) => updateTerminalSettings({ fontFamily: val })}
                             options={[
                                 {
-                                    value: DEFAULT_TERMINAL_FONT_STACK,
-                                    label: "System Monospace (Recommended)",
-                                    description: "Best cross-platform default using built-in monospace fonts",
+                                    value: recommendedFontStack,
+                                    label: isWindows ? "Windows Monospace (Recommended)" : "System Monospace (Recommended)",
+                                    description: isWindows
+                                        ? "Consolas and Cascadia Mono — heavier and clearer on Windows"
+                                        : "Best cross-platform default using built-in monospace fonts",
                                 },
                                 {
-                                    value: "'Fira Code', 'FiraCode Nerd Font', 'FiraCode NFM', 'Cascadia Code', Consolas, 'Courier New', monospace",
+                                    value: "'Fira Code', 'Fira Code VF', 'FiraCode Nerd Font', 'FiraCode NFM', 'Cascadia Code', Consolas, 'Courier New', monospace",
                                     label: "Fira Code",
                                     description: "Supports Fira Code + common Nerd Font variants",
                                 },
@@ -106,6 +123,23 @@ export function TerminalTab({
                     </div>
 
                     <div className="rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/40 p-4 space-y-4">
+                        <Select
+                            label="Font Weight"
+                            value={String(settings.terminal.fontWeight ?? recommendedFontWeight)}
+                            onChange={(val) => {
+                                const fontWeight = val === 'normal'
+                                    ? 'normal'
+                                    : (Number(val) as TerminalFontWeightSetting);
+                                void updateTerminalSettings({ fontWeight });
+                            }}
+                            options={TERMINAL_FONT_WEIGHT_OPTIONS.map((option) => ({
+                                value: String(option.value),
+                                label: option.label,
+                                description: option.description,
+                            }))}
+                            triggerClassName="bg-app-bg/50"
+                        />
+
                         <div className="space-y-2">
                             <div className="flex justify-between items-center">
                                 <label className="text-sm font-medium text-[var(--color-app-text)]">Font Size</label>
@@ -148,7 +182,10 @@ export function TerminalTab({
 
                     <div className="text-[11px] leading-relaxed text-[var(--color-app-muted)] rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/30 px-3 py-2.5">
                         Note: If a selected font looks unchanged, make sure that font is installed on your system.
-                        For ligatures, the selected font must support ligatures.
+                        Font weight changes need a font with multiple weights installed — for Fira Code, use
+                        {' '}<span className="font-mono text-[var(--color-app-text)]/80">Fira Code VF</span>
+                        {' '}(variable) or the Medium/SemiBold/Bold static files. Single-weight Nerd Font builds ignore weight settings.
+                        Ligatures require a ligature-capable font.
                     </div>
 
                     <div className="flex items-center justify-between rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/30 px-3 py-2.5">
@@ -159,8 +196,10 @@ export function TerminalTab({
                             type="button"
                             onClick={() => {
                                 void updateTerminalSettings({
-                                    fontFamily: DEFAULT_TERMINAL_FONT_STACK,
-                                    fontSize: DEFAULT_TERMINAL_FONT_SIZE,
+                                    fontFamily: recommendedTypography.fontFamily,
+                                    fontSize: recommendedTypography.fontSize,
+                                    fontWeight: recommendedTypography.fontWeight,
+                                    fontWeightBold: resolveTerminalFontWeightBold(recommendedTypography.fontWeight),
                                     padding: DEFAULT_TERMINAL_PADDING,
                                     lineHeight: DEFAULT_TERMINAL_LINE_HEIGHT,
                                     fontLigatures: DEFAULT_TERMINAL_LIGATURES,
@@ -175,7 +214,7 @@ export function TerminalTab({
                     <div className="rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/40 p-3 space-y-3">
                         <Toggle
                             label="GPU Acceleration (WebGL)"
-                            description="Faster rendering for large output. Works with font ligatures when both are enabled. Falls back to DOM if WebGL is unavailable."
+                            description="Faster rendering for large output. On Windows, GPU text is rasterized to a canvas and can look sharper/thinner than DOM mode, which uses native ClearType. Font weight and size changes always apply to both renderers."
                             checked={settings.terminal.gpuAcceleration ?? DEFAULT_TERMINAL_GPU_ACCELERATION}
                             onChange={(v) => updateTerminalSettings({ gpuAcceleration: v })}
                         />

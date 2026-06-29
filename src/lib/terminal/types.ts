@@ -8,7 +8,7 @@ export interface TerminalRendererState {
   kind: TerminalRendererKind;
   /** Last renderer target requested by policy/settings. */
   desiredKind: TerminalRendererKind;
-  webglAddon?: { dispose: () => void };
+  webglAddon?: { dispose: () => void; clearTextureAtlas?: () => void };
   loadPromise: Promise<TerminalRendererKind> | null;
   /**
    * Set only after WebGL context loss — skip GPU for remainder of session.
@@ -20,6 +20,8 @@ export interface TerminalRendererState {
   lastError?: string;
   /** Tracks font/ligature config baked into the current WebGL atlas. */
   webglLigaturesStamp?: string;
+  /** Tracks typography baked into the current WebGL atlas. */
+  webglTypographyStamp?: string;
 }
 
 export function createInitialRendererState(): TerminalRendererState {
