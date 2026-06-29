@@ -9,6 +9,8 @@ export const DEFAULT_SUSPEND_IDLE_HOST_PTYS = false;
 export const DEFAULT_IDLE_HOST_PTY_SUSPEND_MINUTES = 2;
 export const MIN_IDLE_HOST_PTY_SUSPEND_MINUTES = 1;
 export const MAX_IDLE_HOST_PTY_SUSPEND_MINUTES = 60;
+/** Minimum delay before retrying idle suspend when tabs stay process-busy. */
+export const MIN_IDLE_SUSPEND_BUSY_RETRY_MS = 1_000;
 
 export function normalizeIdleHostPtySuspendMinutes(minutes: number | undefined): number {
   if (minutes == null || !Number.isFinite(minutes)) {
@@ -115,7 +117,10 @@ function scheduleNextIdleSuspendAttempt(
   delayMs: number,
 ): void {
   const latestActivity = getLatestTerminalActivityAt(tabs, baselineMs);
-  const waitMs = Math.max(0, latestActivity + delayMs - Date.now());
+  const waitMs = Math.max(
+    MIN_IDLE_SUSPEND_BUSY_RETRY_MS,
+    latestActivity + delayMs - Date.now(),
+  );
   const job = idleSuspendJobs.get(connectionId);
   if (!job) {
     return;
@@ -137,6 +142,10 @@ async function runIdleSuspendAttempt(connectionId: string): Promise<void> {
     job.backgroundedAt,
     job.isProcessBusy,
   );
+
+  if (idleSuspendJobs.get(connectionId) !== job) {
+    return;
+  }
 
   if (idleTabs.length > 0) {
     job.onSuspend(idleTabs);

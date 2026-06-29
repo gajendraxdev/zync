@@ -5,7 +5,7 @@ const THEME_PLUGIN_PREFIX = 'com.zync.theme.';
 const themeModes = new Map<string, ThemeVariant>();
 
 function resolveSystemThemeMode(): ThemeVariant {
-  if (typeof window === 'undefined') {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
     return 'dark';
   }
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';

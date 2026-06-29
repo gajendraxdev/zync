@@ -66,11 +66,6 @@ export const TerminalHost = memo(function TerminalHost({
       )}
       style={terminalHostStyle}
       tabIndex={-1}
-      onClick={() => termRef.current?.focus()}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        onOpenContextMenu({ x: e.clientX, y: e.clientY });
-      }}
     >
       <TerminalSearchBar
         isOpen={isSearchOpen}
@@ -106,7 +101,15 @@ export const TerminalHost = memo(function TerminalHost({
         }}
       >
         <div className="relative h-full w-full">
-          <div ref={containerRef} className="h-full w-full terminal-container pointer-events-auto" />
+          <div
+            ref={containerRef}
+            className="h-full w-full terminal-container pointer-events-auto"
+            onClick={() => termRef.current?.focus()}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              onOpenContextMenu({ x: e.clientX, y: e.clientY });
+            }}
+          />
           {termRef.current && ghostSettings.inlineEnabled && ghostSuggestion && !ghostPopup.visible && (
             <div className="absolute inset-0 pointer-events-none overflow-hidden">
               <GhostSuggestionOverlay term={termRef.current} suggestion={ghostSuggestion} />

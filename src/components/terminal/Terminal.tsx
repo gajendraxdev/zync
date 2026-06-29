@@ -138,7 +138,6 @@ export const TerminalComponent = memo(function TerminalComponent({
     termRef,
     settings,
     connection,
-    activeConnectionId,
     sessionId,
     isConnected,
   });

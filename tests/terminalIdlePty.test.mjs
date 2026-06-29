@@ -154,6 +154,7 @@ await runTest('flushIdlePtySuspend skips tabs with active child processes', asyn
 await runTest('flushIdlePtySuspend suspends after busy tab goes quiet', async () => {
   terminalCache.clear();
   const suspended = [];
+  let suspendCalls = 0;
   seedBusyTab('shell-quiet-later');
 
   scheduleIdlePtySuspend('conn-quiet', [{ id: 'shell-quiet-later' }], {
@@ -161,15 +162,18 @@ await runTest('flushIdlePtySuspend suspends after busy tab goes quiet', async ()
     backgroundedAt: 1_000,
     isProcessBusy: async () => false,
     onSuspend: (tabs) => {
+      suspendCalls += 1;
       suspended.push(...tabs.map((tab) => tab.id));
     },
   });
 
   touchTerminalActivity('shell-quiet-later', 2_000);
   await flushIdlePtySuspend('conn-quiet');
+  assert.equal(suspendCalls, 0);
   assert.deepEqual(suspended, []);
 
   await flushIdlePtySuspend('conn-quiet');
+  assert.equal(suspendCalls, 1);
   assert.deepEqual(suspended, ['shell-quiet-later']);
 });
 

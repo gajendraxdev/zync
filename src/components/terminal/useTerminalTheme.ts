@@ -29,7 +29,6 @@ export interface UseTerminalThemeOptions {
     terminal: TerminalSettingsSlice;
   };
   connection: Connection | null | undefined;
-  activeConnectionId: string | null | undefined;
   sessionId: string;
   isConnected: boolean;
 }
@@ -39,7 +38,6 @@ export function useTerminalTheme({
   termRef,
   settings,
   connection,
-  activeConnectionId,
   sessionId,
   isConnected,
 }: UseTerminalThemeOptions) {
@@ -94,7 +92,7 @@ export function useTerminalTheme({
   }, [sessionId, typography, isConnected]);
 
   useEffect(() => {
-    if (!isConnected || !termRef.current || !activeConnectionId) {
+    if (!isConnected || !termRef.current) {
       return;
     }
 
@@ -112,7 +110,6 @@ export function useTerminalTheme({
     settings.enableVibrancy,
     settings.windowOpacity,
     connection?.theme,
-    activeConnectionId,
     terminalTransparency,
     containerRef,
     termRef,

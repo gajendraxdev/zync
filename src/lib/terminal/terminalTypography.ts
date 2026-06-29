@@ -48,6 +48,25 @@ export function resolveTerminalFontWeightBold(
   }
 }
 
+function resolveTypographyWeights(settings: TerminalXtermSettings): {
+  fontWeight: FontWeight;
+  fontWeightBold: FontWeight;
+} {
+  const nextWeight: FontWeight = settings.fontWeight ?? 'normal';
+  const resolvedRegularWeight = typeof nextWeight === 'number'
+    ? nextWeight
+    : nextWeight === 'bold'
+      ? 700
+      : undefined;
+  const fontWeightBold = settings.fontWeightBold ?? resolveTerminalFontWeightBold(
+    resolvedRegularWeight === 500 || resolvedRegularWeight === 600 || resolvedRegularWeight === 700
+      ? resolvedRegularWeight
+      : 'normal',
+  );
+
+  return { fontWeight: nextWeight, fontWeightBold };
+}
+
 export function buildWebglTypographyStamp(term: Terminal, sessionId: string): string {
   const rendererKind = getTerminalRendererState(sessionId).kind;
   return [
@@ -57,6 +76,24 @@ export function buildWebglTypographyStamp(term: Terminal, sessionId: string): st
     term.options.fontWeightBold ?? '',
     term.options.lineHeight ?? '',
     term.options.letterSpacing ?? 0,
+    rendererKind,
+  ].join('|');
+}
+
+/** Stamp from pending settings — used before term.options are applied. */
+export function buildWebglTypographyStampFromSettings(
+  settings: TerminalXtermSettings,
+  sessionId: string,
+): string {
+  const rendererKind = getTerminalRendererState(sessionId).kind;
+  const { fontWeight, fontWeightBold } = resolveTypographyWeights(settings);
+  return [
+    settings.fontFamily ?? '',
+    settings.fontSize ?? '',
+    fontWeight,
+    fontWeightBold,
+    settings.lineHeight ?? '',
+    resolveTerminalLetterSpacing(rendererKind),
     rendererKind,
   ].join('|');
 }
@@ -72,17 +109,7 @@ export function applyTerminalTypography(
   term: Terminal,
   settings: TerminalXtermSettings,
 ): void {
-  const nextWeight: FontWeight = settings.fontWeight ?? 'normal';
-  const resolvedRegularWeight = typeof nextWeight === 'number'
-    ? nextWeight
-    : nextWeight === 'bold'
-      ? 700
-      : undefined;
-  const nextWeightBold = settings.fontWeightBold ?? resolveTerminalFontWeightBold(
-    resolvedRegularWeight === 500 || resolvedRegularWeight === 600 || resolvedRegularWeight === 700
-      ? resolvedRegularWeight
-      : 'normal',
-  );
+  const { fontWeight: nextWeight, fontWeightBold: nextWeightBold } = resolveTypographyWeights(settings);
 
   const rendererState = getTerminalRendererState(sessionId);
   const rendererKind = rendererState.kind;

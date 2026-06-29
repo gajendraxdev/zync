@@ -853,7 +853,8 @@ impl PtyManager {
         let child_pid = {
             let sessions = self.sessions.lock().await;
             let Some(session) = sessions.get(term_id) else {
-                return false;
+                // Missing session during start/teardown — treat as busy so idle suspend defers.
+                return true;
             };
 
             match &session.handle {

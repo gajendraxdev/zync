@@ -4,7 +4,10 @@ import { reactivateTerminalWebgl, syncTerminalRenderer } from './rendererControl
 import { setTerminalLigatures } from './ligatures.js';
 import { getTerminalRendererState } from './rendererSession.js';
 import { isTerminalFitReady, safeFitTerminal } from './terminalFit.js';
-import { applyTerminalTypography, buildWebglTypographyStamp } from './terminalTypography.js';
+import {
+  applyTerminalTypography,
+  buildWebglTypographyStampFromSettings,
+} from './terminalTypography.js';
 import { useAppStore } from '../../store/useAppStore.js';
 import type { TerminalRendererState } from './types.js';
 
@@ -92,8 +95,9 @@ export async function applyTerminalRendererAndLigatures(
     const prefs = getTerminalRendererPreferences(terminalSettings);
     const onRefit = buildRendererRefitCallback(sessionId, fitAddon, term, syncResize);
     const rendererState = getTerminalRendererState(sessionId);
+    const { terminal } = useAppStore.getState().settings;
     const ligaturesStamp = buildWebglLigaturesStamp(prefs.fontLigatures, term.options.fontFamily);
-    const typographyStamp = buildWebglTypographyStamp(term, sessionId);
+    const typographyStamp = buildWebglTypographyStampFromSettings(terminal, sessionId);
     const typographyChanged = rendererState.webglTypographyStamp !== typographyStamp;
 
     await syncTerminalRenderer(sessionId, term, {
@@ -137,7 +141,6 @@ export async function applyTerminalRendererAndLigatures(
       rendererState.webglTypographyStamp = typographyStamp;
     }
 
-    const { terminal } = useAppStore.getState().settings;
     applyTerminalTypography(sessionId, term, terminal);
 
     try {

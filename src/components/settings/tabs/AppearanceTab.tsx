@@ -48,7 +48,11 @@ function getThemeAccent(plugin: ThemePlugin | undefined, themeName: string): str
     if (themeName === 'dark') return '#797bce';
     if (themeName === 'light') return '#6366f1';
     if (themeName === 'system') {
-        if (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        if (
+            typeof window !== 'undefined'
+            && typeof window.matchMedia === 'function'
+            && window.matchMedia('(prefers-color-scheme: dark)').matches
+        ) {
             return '#797bce';
         }
         return '#6366f1';
@@ -191,8 +195,10 @@ export function AppearanceTab({
             ...baseFontOptions,
         ];
     const resolveThemeAccent = (themeId: string) => {
-        const plugin = themePlugins.find((p) => p.manifest.id === `${THEME_PREFIX}${themeId}`);
-        return getThemeAccent(plugin, themeId);
+        const pluginId = themeId.startsWith(THEME_PREFIX) ? themeId : `${THEME_PREFIX}${themeId}`;
+        const plugin = themePlugins.find((p) => p.manifest.id === pluginId);
+        const accentThemeName = themeId.startsWith(THEME_PREFIX) ? getThemeId(themeId) : themeId;
+        return getThemeAccent(plugin, accentThemeName);
     };
 
     const selectTheme = (themeId: string) => {
