@@ -7,8 +7,8 @@ All notable changes to Zync are documented in this file. The format is based on 
 ## [2.19.0] - 2026-06-29
 
 ### Added
-- **Terminal font weight**: Settings → Terminal → **Font Weight** (Regular / Medium / Semi-bold / Bold); bold ANSI text uses a paired heavier weight. ([a5e45f2])
-- **Windows terminal typography defaults**: Recommended reset uses Consolas-first stack, 15px size, and medium (500) weight. ([a5e45f2])
+- **Terminal font weight**: Settings → Appearance → Terminal → **Font Weight** (Regular / Medium / Semi-bold / Bold); bold ANSI text uses a paired heavier weight. ([a5e45f2])
+- **Windows terminal typography defaults**: Settings → Appearance → Terminal recommended reset uses Consolas-first stack, 15px size, and medium (500) weight. ([a5e45f2])
 - **Idle host PTY suspend (opt-in)**: Settings → Terminal → **Suspend idle host shells** suspends background workspace host PTYs after a configurable idle timeout (scrollback preserved; press Enter to resume). Shells with output or buffered input since the host was backgrounded stay alive until quiet. ([3b05fec])
 - **PTY output channel streaming**: `terminal:create` accepts a Tauri `Channel`; batched PTY output is framed as u32 LE generation + raw bytes. `terminal-output-*` events removed. ([517ff30])
 - **Process-aware idle suspend probe**: `terminal_has_active_processes` IPC uses a local sysinfo child-tree scan (fail-closed) to defer idle suspend while child processes are running. ([517ff30])
@@ -35,11 +35,15 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Local terminal theme sync**: Theme and opacity changes apply to the local shell when no workspace connection is active. ([f03aeb5])
 - **Terminal search interaction**: Clicking the search bar no longer steals focus from the input; right-click on search/controls no longer opens the terminal context menu. ([f03aeb5])
 - **Idle host suspend reliability**: Stale suspend jobs are ignored after reactivation; process-busy tabs use a minimum retry delay; missing PTY sessions defer suspend instead of treating as idle. ([f03aeb5])
+- **Settings keyboard navigation**: Arrow keys on the inner App/Terminal control no longer also switch outer settings tabs. ([15f515d])
+- **Settings accessibility**: Theme, accent, and cursor selectors expose selected state via `aria-pressed`. ([15f515d])
 
 ### Changed
 - **Terminal module layout**: Split `Terminal.tsx` into focused hooks and components; route tab destroy through `terminalService`; remove deprecated canvas renderer aliases. ([d872b3d])
 - **Terminal xterm options**: Centralized xterm 6 init in `xtermOptions.ts`; scrollback increased to 5000 rows; local Windows ConPTY uses `windowsPty` heuristics. ([ae2af4c])
 - **Idle host PTY suspend policy**: Local workspace shells are excluded from idle suspend; remote host shell tabs share one idle timer (no immediate kill on sidebar host switch). ([517ff30])
+- **Settings Appearance layout**: App | Terminal segmented control; theme and accent under App; terminal font, ligatures, opacity, transparency, and cursor under Appearance → Terminal. ([15f515d])
+- **Settings Terminal tab**: Behavior-only — GPU rendering, idle host suspend, local default shell (Windows, moved to top), ghost suggestions; intro links jump to Appearance for look-and-feel. ([15f515d])
 
 ### Internal
 
@@ -783,6 +787,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 [2.19.0]: https://github.com/zync-sh/zync/compare/v2.18.0...v2.19.0
 [2.18.0]: https://github.com/zync-sh/zync/compare/v2.17.0...v2.18.0
 [f03aeb5]: https://github.com/zync-sh/zync/commit/f03aeb5
+[15f515d]: https://github.com/zync-sh/zync/commit/15f515d
 [a5e45f2]: https://github.com/zync-sh/zync/commit/a5e45f2
 [6183150]: https://github.com/zync-sh/zync/commit/6183150
 [cad54e4]: https://github.com/zync-sh/zync/commit/cad54e4
