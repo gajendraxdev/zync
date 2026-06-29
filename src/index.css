@@ -179,6 +179,12 @@ body {
     overflow-y: auto !important;
 }
 
+/* DOM renderer draws spans; WebGL uses canvas glyphs — keep ClearType on DOM text. */
+.terminal-container .xterm-rows span {
+    -webkit-font-smoothing: subpixel-antialiased;
+    text-rendering: auto;
+}
+
 /* Hide scrollbar track in terminal to make it clean */
 .xterm .xterm-viewport::-webkit-scrollbar-track {
     background: transparent;

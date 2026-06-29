@@ -1,4 +1,4 @@
-import { ReactNode, lazy, Suspense, useState, useEffect, memo, useCallback, useRef, useMemo } from 'react';
+import { ReactNode, lazy, Suspense, useState, useEffect, useLayoutEffect, memo, useCallback, useRef, useMemo } from 'react';
 import { Sidebar } from './Sidebar';
 import { useAppStore, Tab } from '../../store/useAppStore';
 import type { CoreTabView } from '../../features/connections/domain/types';
@@ -22,6 +22,15 @@ import { SetupWizard } from '../onboarding/SetupWizard';
 import { useFileSystemEvents } from '../../hooks/useFileSystemEvents';
 import { AiSidebar } from '../ai/AiSidebar';
 import { ModalRoot } from '../ui/ModalRoot';
+import {
+    cancelAllIdlePtySuspends,
+    cancelIdlePtySuspend,
+    resolveIdleHostPtySuspendDelayMs,
+    scheduleIdlePtySuspend,
+    shouldIdleSuspendConnection,
+    terminalService,
+} from '../../lib/terminal';
+import { refreshAllCachedTerminalThemes } from '../terminal/terminalTheme';
 
 
 // Side-effect imports — these register each modal into the registry at startup.
@@ -581,6 +590,55 @@ export function MainLayout({ children }: { children: ReactNode }) {
         () => (activeTabId !== null ? tabs.find((t: Tab) => t.id === activeTabId) : undefined),
         [tabs, activeTabId],
     );
+    const suspendIdleHostPtys = useAppStore(
+        state => state.settings.terminal.suspendIdleHostPtys ?? false,
+    );
+    const idleHostPtySuspendMinutes = useAppStore(
+        state => state.settings.terminal.idleHostPtySuspendMinutes ?? 2,
+    );
+    const prevWorkspaceConnectionIdRef = useRef<string | null>(null);
+
+    useEffect(() => {
+        const delayMs = resolveIdleHostPtySuspendDelayMs(
+            suspendIdleHostPtys,
+            idleHostPtySuspendMinutes,
+        );
+        const nextConnectionId = activeWorkspaceTab?.connectionId ?? null;
+        const prevConnectionId = prevWorkspaceConnectionIdRef.current;
+
+        if (delayMs === null) {
+            cancelAllIdlePtySuspends();
+        } else {
+            if (
+                prevConnectionId
+                && prevConnectionId !== nextConnectionId
+                && shouldIdleSuspendConnection(prevConnectionId)
+            ) {
+                const prevTabs = useAppStore.getState().terminals[prevConnectionId];
+                scheduleIdlePtySuspend(prevConnectionId, prevTabs, { delayMs });
+            }
+
+            if (nextConnectionId) {
+                cancelIdlePtySuspend(nextConnectionId);
+            }
+        }
+
+        prevWorkspaceConnectionIdRef.current = nextConnectionId;
+    }, [
+        activeWorkspaceTab?.connectionId,
+        suspendIdleHostPtys,
+        idleHostPtySuspendMinutes,
+    ]);
+
+    useEffect(() => () => cancelAllIdlePtySuspends(), []);
+
+    useEffect(() => {
+        terminalService.setCloseTabHandler((connectionId, termId) => {
+            useAppStore.getState().closeTerminal(connectionId, termId);
+        });
+        return () => terminalService.setCloseTabHandler(null);
+    }, []);
+
     const showWelcomeScreen = useAppStore(state => state.showWelcomeScreen);
     const isLoadingSettings = useAppStore(state => state.isLoadingSettings);
     const sessionLoaded = useAppStore(state => state.sessionLoaded);
@@ -748,7 +806,7 @@ export function MainLayout({ children }: { children: ReactNode }) {
         }
     }, []);
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         if (isLoadingSettings) return;
 
         // Persist for splash screen
@@ -766,12 +824,14 @@ export function MainLayout({ children }: { children: ReactNode }) {
             document.body.setAttribute('data-theme', theme); // Set attribute for new plugin system
         }
 
-        // Apply Custom Accent
+        // Apply custom accent override, or clear inline overrides so theme CSS wins.
         if (accentColor) {
             document.body.style.setProperty('--color-app-accent', accentColor);
+            document.documentElement.style.setProperty('--color-app-accent', accentColor);
             localStorage.setItem('zync-accent-color', accentColor);
         } else {
             document.body.style.removeProperty('--color-app-accent');
+            document.documentElement.style.removeProperty('--color-app-accent');
             localStorage.removeItem('zync-accent-color');
         }
 
@@ -790,8 +850,11 @@ export function MainLayout({ children }: { children: ReactNode }) {
             document.documentElement.style.removeProperty('font-size');
         }
 
+        refreshAllCachedTerminalThemes();
+
         window.requestAnimationFrame(() => {
             persistBootThemeColors();
+            refreshAllCachedTerminalThemes();
         });
         const persistTimer = window.setTimeout(() => {
             persistBootThemeColors();
@@ -808,6 +871,13 @@ export function MainLayout({ children }: { children: ReactNode }) {
 
     }, [theme, accentColor, globalFontFamily, globalFontSize, isLoadingSettings, persistBootThemeColors]);
 
+    useEffect(() => {
+        const refreshAfterRegistry = () => {
+            refreshAllCachedTerminalThemes();
+        };
+        window.addEventListener('zync:theme-registry-ready', refreshAfterRegistry);
+        return () => window.removeEventListener('zync:theme-registry-ready', refreshAfterRegistry);
+    }, []);
 
     const hideBootSplash = useCallback(() => {
         try {

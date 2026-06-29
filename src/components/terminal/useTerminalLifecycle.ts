@@ -24,6 +24,10 @@ import {
   TERMINAL_CONNECTION_WAKEUP_EVENT,
   terminalCache,
   tryWakeTerminalOnReconnect,
+  buildXtermOptions,
+  isTerminalIdleSuspended,
+  shouldUseWindowsLocalPtyOptions,
+  writeIdleHostSuspendNotice,
 } from '../../lib/terminal';
 import type { TerminalSettingsSlice } from './useTerminalTheme';
 
@@ -231,6 +235,8 @@ export function useTerminalLifecycle({
       terminalSettings.fontLigatures,
       terminalSettings.fontFamily,
       terminalSettings.fontSize,
+      terminalSettings.fontWeight,
+      terminalSettings.fontWeightBold,
       terminalSettings.lineHeight,
       terminalSettings.cursorStyle,
     ].join('|'),
@@ -239,6 +245,8 @@ export function useTerminalLifecycle({
       terminalSettings.fontLigatures,
       terminalSettings.fontFamily,
       terminalSettings.fontSize,
+      terminalSettings.fontWeight,
+      terminalSettings.fontWeightBold,
       terminalSettings.lineHeight,
       terminalSettings.cursorStyle,
     ],
@@ -402,7 +410,7 @@ export function useTerminalLifecycle({
       return;
     }
 
-    if (action === 'spawn' && cached) {
+    if (action === 'spawn' && cached && !isTerminalIdleSuspended(sessionId)) {
       const store = useAppStore.getState();
       let frame = 0;
       let attempts = 0;
@@ -521,16 +529,11 @@ export function useTerminalLifecycle({
       const settings = terminalSettingsRef.current;
       const initialTheme = resolveInitialThemeRef.current();
 
-      term = new XTerm({
-        cursorBlink: true,
-        fontSize: settings.fontSize,
-        fontFamily: settings.fontFamily,
-        cursorStyle: settings.cursorStyle,
-        lineHeight: settings.lineHeight,
-        allowTransparency: true,
-        allowProposedApi: true,
+      term = new XTerm(buildXtermOptions({
+        settings,
         theme: initialTheme,
-      });
+        windowsLocalPty: shouldUseWindowsLocalPtyOptions(terminalKey),
+      }));
 
       fitAddon = new FitAddon();
       const webLinksAddon = new WebLinksAddon();
@@ -591,6 +594,10 @@ export function useTerminalLifecycle({
 
     attachTerminalLifecycleListeners(sessionId, term);
 
+    if (terminalCache.get(sessionId)?.suspendedByIdle) {
+      writeIdleHostSuspendNotice(sessionId);
+    }
+
     const rendererState = getTerminalRendererState(sessionId);
     const gpuAllowed = Boolean(
       isVisibleRef.current
@@ -625,6 +632,7 @@ export function useTerminalLifecycle({
     if (
       cachedEntry
       && !cachedEntry.spawned
+      && !cachedEntry.suspendedByIdle
       && isWorkspaceActiveRef.current
       && isTerminalViewRef.current
       && isActiveTabRef.current

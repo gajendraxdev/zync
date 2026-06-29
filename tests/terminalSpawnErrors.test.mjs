@@ -37,4 +37,18 @@ runTest('formatTerminalSpawnError returns reconnect guidance for not-ready error
   assert.doesNotMatch(formatted, /CONNECTION_NOT_READY/);
 });
 
+runTest('formatTerminalSpawnError returns friendly guidance for unreachable hosts', () => {
+  const formatted = formatTerminalSpawnError(
+    'Failed to connect: A socket operation was attempted to an unreachable host. (os error 10065)',
+  );
+  assert.match(formatted, /Cannot reach the host/i);
+  assert.match(formatted, /internet connection/i);
+  assert.doesNotMatch(formatted, /os error 10065/i);
+});
+
+runTest('formatTerminalSpawnError keeps connection refused as raw error', () => {
+  const formatted = formatTerminalSpawnError('connection refused');
+  assert.equal(formatted, 'connection refused');
+});
+
 console.log('Terminal spawn error tests passed.');

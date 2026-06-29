@@ -65,6 +65,7 @@ export function GhostSuggestionOverlay({ term, suggestion }: Props) {
 
   const fontFamily = term.options.fontFamily ?? 'monospace';
   const fontSize   = `${term.options.fontSize   ?? 14}px`;
+  const fontWeight = term.options.fontWeight ?? 'normal';
   const lineHeight = term.options.lineHeight ?? 1.2;
 
   return (
@@ -78,6 +79,7 @@ export function GhostSuggestionOverlay({ term, suggestion }: Props) {
         userSelect:  'none',
         fontFamily,
         fontSize,
+        fontWeight,
         lineHeight,
         color:       'color-mix(in srgb, var(--color-app-muted, #94a3b8) 60%, transparent)',
         whiteSpace:  'pre',

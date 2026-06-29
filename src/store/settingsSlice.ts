@@ -2,6 +2,17 @@ import { StateCreator } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import type { AppStore } from './useAppStore';
 import { CODEMIRROR_EDITOR_ID } from '../components/editor/providers';
+import {
+    DEFAULT_IDLE_HOST_PTY_SUSPEND_MINUTES,
+    DEFAULT_SUSPEND_IDLE_HOST_PTYS,
+    normalizeIdleHostPtySuspendMinutes,
+} from '../lib/terminal/terminalIdlePty.js';
+import type { FontWeight } from '@xterm/xterm';
+import {
+    resolveDefaultTerminalTypography,
+    type TerminalFontWeightSetting,
+} from '../components/settings/constants/defaults';
+import { resolveTerminalFontWeightBold } from '../lib/terminal/terminalTypography.js';
 
 export interface AppSettings {
     theme: string;
@@ -23,9 +34,18 @@ export interface AppSettings {
     terminal: {
         fontSize: number;
         fontFamily: string;
+        fontWeight: TerminalFontWeightSetting;
+        fontWeightBold: FontWeight;
         fontLigatures: boolean;
         /** WebGL2 GPU renderer; falls back to DOM when unavailable. */
         gpuAcceleration: boolean;
+        /**
+         * When enabled, suspend background workspace host PTYs after idleHostPtySuspendMinutes.
+         * Scrollback is preserved; press Enter on return to respawn (off by default — SSH respawn UX).
+         */
+        suspendIdleHostPtys?: boolean;
+        /** Minutes before background host PTYs suspend when suspendIdleHostPtys is enabled. */
+        idleHostPtySuspendMinutes?: number;
         cursorStyle: 'block' | 'underline' | 'bar';
         lineHeight: number;
         padding: number;
@@ -127,10 +147,19 @@ export const defaultSettings: AppSettings = {
     },
     lastSeenVersion: '',
     terminal: {
-        fontSize: 14,
-        fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+        ...(() => {
+            const typography = resolveDefaultTerminalTypography();
+            return {
+                fontSize: typography.fontSize,
+                fontFamily: typography.fontFamily,
+                fontWeight: typography.fontWeight,
+                fontWeightBold: resolveTerminalFontWeightBold(typography.fontWeight),
+            };
+        })(),
         fontLigatures: false,
         gpuAcceleration: true,
+        suspendIdleHostPtys: DEFAULT_SUSPEND_IDLE_HOST_PTYS,
+        idleHostPtySuspendMinutes: DEFAULT_IDLE_HOST_PTY_SUSPEND_MINUTES,
         cursorStyle: 'block',
         lineHeight: 1.2,
         padding: 12
@@ -198,6 +227,38 @@ export const defaultSettings: AppSettings = {
     }
 };
 
+function normalizeTerminalFontWeightBold(fontWeight: unknown): FontWeight | undefined {
+    if (fontWeight === 'normal' || fontWeight === 400 || fontWeight === '400') {
+        return 'normal';
+    }
+    if (fontWeight === 'bold' || fontWeight === 700 || fontWeight === '700') {
+        return 'bold';
+    }
+    if (typeof fontWeight === 'number' && fontWeight >= 100 && fontWeight <= 900) {
+        return fontWeight;
+    }
+    if (typeof fontWeight === 'string' && /^[1-9]00$/.test(fontWeight)) {
+        return fontWeight as FontWeight;
+    }
+    return undefined;
+}
+
+function normalizeTerminalFontWeight(fontWeight: unknown): TerminalFontWeightSetting | undefined {
+    if (fontWeight === 'normal' || fontWeight === 400 || fontWeight === '400') {
+        return 'normal';
+    }
+    if (fontWeight === '500' || fontWeight === 500) {
+        return 500;
+    }
+    if (fontWeight === '600' || fontWeight === 600) {
+        return 600;
+    }
+    if (fontWeight === 'bold' || fontWeight === 700 || fontWeight === '700') {
+        return 700;
+    }
+    return undefined;
+}
+
 function normalizeTerminalFontFamily(fontFamily: string | undefined): string | undefined {
     if (typeof fontFamily !== 'string' || !fontFamily.trim()) return undefined;
     const normalized = fontFamily
@@ -209,7 +270,7 @@ function normalizeTerminalFontFamily(fontFamily: string | undefined): string | u
     const compactFirstFamily = firstFamily.replace(/[-_\s]+/g, '');
 
     if (firstFamily.includes('fira code') || compactFirstFamily.includes('firacode')) {
-        return "'Fira Code', 'FiraCode Nerd Font', 'FiraCode NFM', 'Cascadia Code', Consolas, 'Courier New', monospace";
+        return "'Fira Code', 'Fira Code VF', 'FiraCode Nerd Font', 'FiraCode NFM', 'Cascadia Code', Consolas, 'Courier New', monospace";
     }
     if (firstFamily.includes('jetbrains mono') || compactFirstFamily.includes('jetbrainsmono')) {
         return "'JetBrains Mono', 'JetBrainsMono Nerd Font', 'JetBrainsMono NFM', 'Cascadia Mono', Consolas, 'Courier New', monospace";
@@ -265,6 +326,20 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
                     ...defaultSettings.terminal,
                     ...(loaded?.terminal || {}),
                     fontFamily: normalizeTerminalFontFamily(loaded?.terminal?.fontFamily) ?? defaultSettings.terminal.fontFamily,
+                    fontWeight: (() => {
+                        const resolved = normalizeTerminalFontWeight(loaded?.terminal?.fontWeight)
+                            ?? defaultSettings.terminal.fontWeight;
+                        return resolved;
+                    })(),
+                    fontWeightBold: (() => {
+                        const resolvedFontWeight = normalizeTerminalFontWeight(loaded?.terminal?.fontWeight)
+                            ?? defaultSettings.terminal.fontWeight;
+                        return normalizeTerminalFontWeightBold(loaded?.terminal?.fontWeightBold)
+                            ?? resolveTerminalFontWeightBold(resolvedFontWeight);
+                    })(),
+                    idleHostPtySuspendMinutes: normalizeIdleHostPtySuspendMinutes(
+                        loaded?.terminal?.idleHostPtySuspendMinutes ?? defaultSettings.terminal.idleHostPtySuspendMinutes,
+                    ),
                 },
                 fileManager: { ...defaultSettings.fileManager, ...(loaded?.fileManager || {}) },
                 sidebarSections: {
@@ -294,9 +369,8 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
     updateSettings: async (newSettings) => {
         let actualSettings = { ...newSettings };
 
-        // If theme is changed but accentColor is not explicitly provided in the update,
-        // reset accentColor to null to allow the theme's default to take over.
-        if ('theme' in newSettings && !('accentColor' in newSettings)) {
+        // Theme changes always revert to the active theme's default accent.
+        if ('theme' in newSettings) {
             actualSettings.accentColor = null;
         }
 
@@ -393,14 +467,26 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
 
     updateTerminalSettings: async (updates) => {
         const previous = get().settings;
+        const normalizedUpdates = { ...updates };
+        if ('idleHostPtySuspendMinutes' in normalizedUpdates) {
+            normalizedUpdates.idleHostPtySuspendMinutes = normalizeIdleHostPtySuspendMinutes(
+                normalizedUpdates.idleHostPtySuspendMinutes,
+            );
+        }
+        if ('fontWeight' in normalizedUpdates) {
+            const nextWeight = normalizeTerminalFontWeight(normalizedUpdates.fontWeight)
+                ?? previous.terminal.fontWeight;
+            normalizedUpdates.fontWeight = nextWeight;
+            normalizedUpdates.fontWeightBold = resolveTerminalFontWeightBold(nextWeight);
+        }
         const updated = {
             ...previous,
-            terminal: { ...previous.terminal, ...updates }
+            terminal: { ...previous.terminal, ...normalizedUpdates }
         };
         set({ settings: updated });
-        const changedKeys = Object.keys(updates) as Array<keyof AppSettings['terminal']>;
+        const changedKeys = Object.keys(normalizedUpdates) as Array<keyof AppSettings['terminal']>;
         try {
-            await persistSettings({ terminal: updates });
+            await persistSettings({ terminal: normalizedUpdates });
         } catch (error) {
             console.error('Failed to save terminal settings:', error);
             const current = get().settings;

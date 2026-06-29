@@ -19,10 +19,36 @@ export function isTerminalSpawnConnectionNotReadyError(
   return message === connectionNotReadyError(connectionId);
 }
 
+function isHostUnreachableError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes('unreachable host')
+    || lower.includes('network is unreachable')
+    || lower.includes('no route to host')
+    || lower.includes('os error 10065')
+    || lower.includes('name or service not known')
+    || lower.includes('failed to lookup address')
+    || lower.includes('temporary failure in name resolution')
+    || (lower.includes('failed to connect') && (
+      lower.includes('unreachable')
+      || lower.includes('10065')
+      || lower.includes('no route')
+      || lower.includes('network is unreachable')
+    ))
+  );
+}
+
 /** User-facing message for terminal spawn failures. */
 export function formatTerminalSpawnError(err: unknown): string {
+  const message = String(err);
+
   if (isTerminalSpawnConnectionNotReadyError(err)) {
     return 'SSH connection is not ready. Reconnect to the host, then press Enter to restart the terminal.';
   }
-  return String(err);
+
+  if (isHostUnreachableError(message)) {
+    return 'Cannot reach the host. Check your internet connection or VPN, reconnect to the server, then press Enter to restart the terminal.';
+  }
+
+  return message;
 }

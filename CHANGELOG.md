@@ -4,6 +4,53 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.19.0] - 2026-06-29
+
+### Added
+- **Terminal font weight**: Settings → Appearance → Terminal → **Font Weight** (Regular / Medium / Semi-bold / Bold); bold ANSI text uses a paired heavier weight. ([a5e45f2])
+- **Windows terminal typography defaults**: Settings → Appearance → Terminal recommended reset uses Consolas-first stack, 15px size, and medium (500) weight. ([a5e45f2])
+- **Idle host PTY suspend (opt-in)**: Settings → Terminal → **Suspend idle host shells** suspends background workspace host PTYs after a configurable idle timeout (scrollback preserved; press Enter to resume). Shells with output or buffered input since the host was backgrounded stay alive until quiet. ([3b05fec])
+- **PTY output channel streaming**: `terminal:create` accepts a Tauri `Channel`; batched PTY output is framed as u32 LE generation + raw bytes. `terminal-output-*` events removed. ([517ff30])
+- **Process-aware idle suspend probe**: `terminal_has_active_processes` IPC uses a local sysinfo child-tree scan (fail-closed) to defer idle suspend while child processes are running. ([517ff30])
+- **Shell exit closes tab**: Natural shell `exit` (local reader / remote SSH manager) emits `terminal-exit` and closes the shell tab. ([517ff30])
+
+### Fixed
+- **Terminal live theme sync**: Theme and accent changes apply to open terminals immediately without reload. ([6183150])
+- **Light theme terminal colors**: Gruvbox Light, Solarized Light, Catppuccin Latte, and other `mode: light` themes use a high-contrast ANSI palette so prompts and errors stay readable. ([6183150])
+- **Theme variant detection**: Terminal palette follows each theme plugin manifest `mode` field (with luminance fallback). ([6183150])
+- **Custom accent on theme change**: Selecting a new theme clears a custom accent so the theme default applies. ([6183150])
+- **Terminal font weight on GPU**: Font weight changes rebuild the WebGL glyph atlas and apply on DOM fallback. ([a5e45f2])
+- **Idle suspend message**: Suspend banner writes synchronously (PTY kill does not emit `terminal-exit`); idle guard clears only after `terminal-ready`. ([3b05fec])
+- **Idle suspend timers**: Pending jobs cancel when the setting is disabled; idle timeout minutes clamped at the settings store boundary. ([3b05fec])
+- **Terminal spawn errors**: Unreachable host / offline network failures show a user-friendly reconnect message instead of raw OS error codes. ([238e3fd])
+- **Local terminal gate**: Local shell mounts without a remote `activeConnectionId`. ([238e3fd])
+- **Terminal clipboard**: Context menu Copy/Paste uses the shared Tauri-with-browser-fallback clipboard path. ([238e3fd])
+- **Terminal search focus**: Closed search bar is removed from the DOM so it cannot receive keyboard focus. ([238e3fd])
+- **Idle suspend busy deferral**: Background shells with past activity no longer stay busy forever; quiet baseline advances after each deferral. ([5504a33])
+- **Terminal spawn error matching**: Unreachable-host message limited to DNS/network failures; reachable-host errors (e.g. connection refused) keep raw backend text. ([5504a33])
+- **Idle timeout accessibility**: Idle suspend minutes input exposes an accessible name for screen readers. ([5504a33])
+- **Terminal shortcut guards**: Global paste/find skip when no xterm instance is mounted (e.g. disconnected view). ([5504a33])
+- **Programmatic PTY close**: `close` / `close_by_connection` tear down handles without emitting `terminal-exit` (natural exit paths only). ([517ff30])
+- **Local PTY exit hang**: Local reader waits on the child process in parallel with PTY read so PowerShell `exit` does not stall. ([517ff30])
+- **Local terminal theme sync**: Theme and opacity changes apply to the local shell when no workspace connection is active. ([f03aeb5])
+- **Terminal search interaction**: Clicking the search bar no longer steals focus from the input; right-click on search/controls no longer opens the terminal context menu. ([f03aeb5])
+- **Idle host suspend reliability**: Stale suspend jobs are ignored after reactivation; process-busy tabs use a minimum retry delay; missing PTY sessions defer suspend instead of treating as idle. ([f03aeb5])
+- **Settings keyboard navigation**: Arrow keys on the inner App/Terminal control no longer also switch outer settings tabs. ([15f515d])
+- **Settings accessibility**: Theme, accent, and cursor selectors expose selected state via `aria-pressed`. ([15f515d])
+
+### Changed
+- **Terminal module layout**: Split `Terminal.tsx` into focused hooks and components; route tab destroy through `terminalService`; remove deprecated canvas renderer aliases. ([d872b3d])
+- **Terminal xterm options**: Centralized xterm 6 init in `xtermOptions.ts`; scrollback increased to 5000 rows; local Windows ConPTY uses `windowsPty` heuristics. ([ae2af4c])
+- **Idle host PTY suspend policy**: Local workspace shells are excluded from idle suspend; remote host shell tabs share one idle timer (no immediate kill on sidebar host switch). ([517ff30])
+- **Settings Appearance layout**: App | Terminal segmented control; theme and accent under App; terminal font, ligatures, opacity, transparency, and cursor under Appearance → Terminal. ([15f515d])
+- **Settings Terminal tab**: Behavior-only — GPU rendering, idle host suspend, local default shell (Windows, moved to top), ghost suggestions; intro links jump to Appearance for look-and-feel. ([15f515d])
+
+### Internal
+
+- **PTY output channel teardown (dev)**: Dev HMR revokes output channel callbacks to avoid Tauri "callback id" warnings; production tab close silences the channel without user-visible change. ([517ff30])
+- **PtySession struct cleanup**: Removed unused `term_id`, `generation`, and `app_handle` fields from Rust `PtySession`; silences `dead_code` warning in dev builds. ([cad54e4])
+- **Terminal module layout**: Extracted `TerminalHost.tsx` presentation shell; canonical `LOCAL_TERMINAL_CONNECTION_ID` in `connectionIds.ts` with `tabService` re-export. ([cad54e4])
+
 ## [2.18.0] - 2026-06-28
 
 ### Added
@@ -736,8 +783,20 @@ All notable changes to Zync are documented in this file. The format is based on 
 - Auto-updates
 - Multiple themes (Dark, Light, Dracula)
 
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.18.0...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.19.0...HEAD
+[2.19.0]: https://github.com/zync-sh/zync/compare/v2.18.0...v2.19.0
 [2.18.0]: https://github.com/zync-sh/zync/compare/v2.17.0...v2.18.0
+[f03aeb5]: https://github.com/zync-sh/zync/commit/f03aeb5
+[15f515d]: https://github.com/zync-sh/zync/commit/15f515d
+[a5e45f2]: https://github.com/zync-sh/zync/commit/a5e45f2
+[6183150]: https://github.com/zync-sh/zync/commit/6183150
+[cad54e4]: https://github.com/zync-sh/zync/commit/cad54e4
+[517ff30]: https://github.com/zync-sh/zync/commit/517ff30
+[5504a33]: https://github.com/zync-sh/zync/commit/5504a33
+[238e3fd]: https://github.com/zync-sh/zync/commit/238e3fd
+[3b05fec]: https://github.com/zync-sh/zync/commit/3b05fec
+[ae2af4c]: https://github.com/zync-sh/zync/commit/ae2af4c
+[d872b3d]: https://github.com/zync-sh/zync/commit/d872b3d
 [21a2c5d]: https://github.com/zync-sh/zync/commit/21a2c5d
 [571fe5f]: https://github.com/zync-sh/zync/commit/571fe5f
 [c10c082]: https://github.com/zync-sh/zync/commit/c10c082

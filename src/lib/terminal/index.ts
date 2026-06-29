@@ -21,7 +21,6 @@ export {
 export {
   clearTerminalRendererSession,
   ensureDomRendererForSession,
-  ensureCanvasRendererForSession,
   getTerminalRendererState,
   hasTerminalRendererSession,
 } from './rendererSession.js';
@@ -40,10 +39,8 @@ export {
 } from './rendererDiagnostics.js';
 export {
   activateDomRenderer,
-  activateCanvasRenderer,
   disposeTerminalRenderer,
   ensureDomRenderer,
-  ensureCanvasRenderer,
   refreshTerminalScreen,
 } from './rendererLifecycle.js';
 
@@ -65,6 +62,28 @@ export {
 } from './rendererSetup.js';
 
 export { destroyTerminalInstance, getTerminalRecentLines } from './instanceApi.js';
+export { terminalService } from './terminalService.js';
+export {
+  buildXtermOptions,
+  shouldUseWindowsLocalPtyOptions,
+  TERMINAL_SCROLLBACK_ROWS,
+} from './xtermOptions.js';
+export type { BuildXtermOptionsParams, TerminalXtermSettings } from './xtermOptions.js';
+
+export {
+  cancelAllIdlePtySuspends,
+  cancelIdlePtySuspend,
+  DEFAULT_IDLE_HOST_PTY_SUSPEND_MINUTES,
+  DEFAULT_IDLE_PTY_SUSPEND_MS,
+  DEFAULT_SUSPEND_IDLE_HOST_PTYS,
+  normalizeIdleHostPtySuspendMinutes,
+  partitionBackgroundHostTabs,
+  shouldIdleSuspendConnection,
+  resolveIdleHostPtySuspendDelayMs,
+  scheduleIdlePtySuspend,
+} from './terminalIdlePty.js';
+export { isTerminalSessionProcessBusy } from './terminalProcessActivity.js';
+export { suspendAllTerminalsForConnection } from './suspendAllTerminals.js';
 
 export {
   canSendTerminalInput,
@@ -80,6 +99,7 @@ export {
 
 export type { SpawnTerminalSessionOptions, SuspendTerminalPtyOptions } from './ptyLifecycle.js';
 export {
+  isTerminalIdleSuspended,
   resetTerminalPtyForReconnect,
   spawnTerminalSession,
   suspendTerminalPty,
@@ -112,13 +132,32 @@ export {
 export type { ConnectionWakeupContext } from './terminalConnectionWakeup.js';
 export { tryWakeTerminalOnReconnect } from './terminalConnectionWakeup.js';
 
-export type {
-  TerminalLifecycleEvent,
-  TerminalOutputEvent,
-} from './terminalLifecycleListeners.js';
+export { LOCAL_TERMINAL_CONNECTION_ID } from './connectionIds.js';
+export {
+  applyTerminalTypography,
+  buildWebglTypographyStamp,
+  refreshAllCachedTerminalTypography,
+  resolveTerminalFontWeightBold,
+  resolveTerminalLetterSpacing,
+} from './terminalTypography.js';
+export type { TerminalLifecycleEvent } from './terminalLifecycleListeners.js';
 export { attachTerminalLifecycleListeners } from './terminalLifecycleListeners.js';
+
+export { writeIdleHostSuspendNotice } from './terminalIdleSuspendNotice.js';
 export {
   decodeTerminalOutputData,
   type LegacyTerminalOutputData,
   type TerminalOutputData,
 } from './terminalOutputPayload.js';
+export {
+  attachTerminalOutputChannel,
+  decodeTerminalOutputChannelFrame,
+  type TerminalOutputChannelFrame,
+} from './terminalOutputStream.js';
+export {
+  disposeTerminalOutputChannel,
+  registerTerminalReloadTeardown,
+  revokeTerminalOutputChannel,
+  silenceTerminalOutputChannel,
+  teardownTerminalsBeforeWebviewReload,
+} from './terminalReloadTeardown.js';

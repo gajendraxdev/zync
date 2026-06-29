@@ -71,6 +71,7 @@ export function GhostSuggestionListOverlay({
 
   const fontFamily = term.options.fontFamily ?? 'monospace';
   const fontSize = `${term.options.fontSize ?? 14}px`;
+  const fontWeight = term.options.fontWeight ?? 'normal';
   const lineHeight = String(term.options.lineHeight ?? 1.2);
 
   const panel = (
@@ -85,6 +86,7 @@ export function GhostSuggestionListOverlay({
         userSelect: 'none',
         fontFamily,
         fontSize,
+        fontWeight,
         lineHeight,
         zIndex: 99990,
         minWidth: 220,
