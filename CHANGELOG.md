@@ -4,6 +4,8 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.19.0] - 2026-06-29
+
 ### Added
 - **Terminal font weight**: Settings → Terminal → **Font Weight** (Regular / Medium / Semi-bold / Bold); bold ANSI text uses a paired heavier weight. ([a5e45f2])
 - **Windows terminal typography defaults**: Recommended reset uses Consolas-first stack, 15px size, and medium (500) weight. ([a5e45f2])
@@ -777,7 +779,8 @@ All notable changes to Zync are documented in this file. The format is based on 
 - Auto-updates
 - Multiple themes (Dark, Light, Dracula)
 
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.18.0...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.19.0...HEAD
+[2.19.0]: https://github.com/zync-sh/zync/compare/v2.18.0...v2.19.0
 [2.18.0]: https://github.com/zync-sh/zync/compare/v2.17.0...v2.18.0
 [f03aeb5]: https://github.com/zync-sh/zync/commit/f03aeb5
 [a5e45f2]: https://github.com/zync-sh/zync/commit/a5e45f2
