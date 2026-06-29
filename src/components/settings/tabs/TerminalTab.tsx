@@ -146,6 +146,32 @@ export function TerminalTab({
                         </div>
                     </div>
 
+                    <div className="text-[11px] leading-relaxed text-[var(--color-app-muted)] rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/30 px-3 py-2.5">
+                        Note: If a selected font looks unchanged, make sure that font is installed on your system.
+                        For ligatures, the selected font must support ligatures.
+                    </div>
+
+                    <div className="flex items-center justify-between rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/30 px-3 py-2.5">
+                        <p className="text-[11px] text-[var(--color-app-muted)]">
+                            Reset terminal typography to recommended defaults.
+                        </p>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                void updateTerminalSettings({
+                                    fontFamily: DEFAULT_TERMINAL_FONT_STACK,
+                                    fontSize: DEFAULT_TERMINAL_FONT_SIZE,
+                                    padding: DEFAULT_TERMINAL_PADDING,
+                                    lineHeight: DEFAULT_TERMINAL_LINE_HEIGHT,
+                                    fontLigatures: DEFAULT_TERMINAL_LIGATURES,
+                                });
+                            }}
+                            className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-[var(--color-app-border)] hover:bg-[var(--color-app-surface)]"
+                        >
+                            Reset
+                        </button>
+                    </div>
+
                     <div className="rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/40 p-3 space-y-3">
                         <Toggle
                             label="GPU Acceleration (WebGL)"
@@ -178,43 +204,17 @@ export function TerminalTab({
                                     type="number"
                                     min={1}
                                     max={60}
+                                    inputMode="numeric"
                                     aria-labelledby="idle-host-pty-timeout-label"
                                     value={settings.terminal.idleHostPtySuspendMinutes ?? DEFAULT_IDLE_HOST_PTY_SUSPEND_MINUTES}
                                     onChange={(e) => {
                                         const minutes = Math.max(1, Math.min(60, Number(e.target.value) || 1));
                                         void updateTerminalSettings({ idleHostPtySuspendMinutes: minutes });
                                     }}
-                                    className="w-16 rounded-lg border border-[var(--color-app-border)] bg-app-bg/50 px-2 py-1 text-sm text-center"
+                                    className="w-16 min-h-[36px] rounded-lg border border-[var(--color-app-border)] bg-[var(--color-app-bg)]/50 px-2 py-1.5 text-sm text-center text-[var(--color-app-text)] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none focus:outline-none focus:border-[var(--color-app-accent)] focus:ring-1 focus:ring-[var(--color-app-accent)]/20"
                                 />
                             </div>
                         )}
-                    </div>
-
-                    <div className="text-[11px] leading-relaxed text-[var(--color-app-muted)] rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/30 px-3 py-2.5">
-                        Note: If a selected font looks unchanged, make sure that font is installed on your system.
-                        For ligatures, the selected font must support ligatures.
-                    </div>
-
-                    <div className="flex items-center justify-between rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/30 px-3 py-2.5">
-                        <p className="text-[11px] text-[var(--color-app-muted)]">
-                            Reset terminal typography to recommended defaults.
-                        </p>
-                        <button
-                            type="button"
-                            onClick={() => {
-                                void updateTerminalSettings({
-                                    fontFamily: DEFAULT_TERMINAL_FONT_STACK,
-                                    fontSize: DEFAULT_TERMINAL_FONT_SIZE,
-                                    padding: DEFAULT_TERMINAL_PADDING,
-                                    lineHeight: DEFAULT_TERMINAL_LINE_HEIGHT,
-                                    fontLigatures: DEFAULT_TERMINAL_LIGATURES,
-                                    gpuAcceleration: DEFAULT_TERMINAL_GPU_ACCELERATION,
-                                });
-                            }}
-                            className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-[var(--color-app-border)] hover:bg-[var(--color-app-surface)]"
-                        >
-                            Reset
-                        </button>
                     </div>
                 </div>
             </Section>
