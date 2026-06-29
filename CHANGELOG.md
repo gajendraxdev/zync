@@ -776,6 +776,8 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 [Unreleased]: https://github.com/zync-sh/zync/compare/v2.18.0...HEAD
 [2.18.0]: https://github.com/zync-sh/zync/compare/v2.17.0...v2.18.0
+[a5e45f2]: https://github.com/zync-sh/zync/commit/a5e45f2
+[6183150]: https://github.com/zync-sh/zync/commit/6183150
 [cad54e4]: https://github.com/zync-sh/zync/commit/cad54e4
 [517ff30]: https://github.com/zync-sh/zync/commit/517ff30
 [5504a33]: https://github.com/zync-sh/zync/commit/5504a33
