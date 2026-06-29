@@ -30,6 +30,9 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Terminal shortcut guards**: Global paste/find skip when no xterm instance is mounted (e.g. disconnected view). ([5504a33])
 - **Programmatic PTY close**: `close` / `close_by_connection` tear down handles without emitting `terminal-exit` (natural exit paths only). ([517ff30])
 - **Local PTY exit hang**: Local reader waits on the child process in parallel with PTY read so PowerShell `exit` does not stall. ([517ff30])
+- **Local terminal theme sync**: Theme and opacity changes apply to the local shell when no workspace connection is active. ([f03aeb5])
+- **Terminal search interaction**: Clicking the search bar no longer steals focus from the input; right-click on search/controls no longer opens the terminal context menu. ([f03aeb5])
+- **Idle host suspend reliability**: Stale suspend jobs are ignored after reactivation; process-busy tabs use a minimum retry delay; missing PTY sessions defer suspend instead of treating as idle. ([f03aeb5])
 
 ### Changed
 - **Terminal module layout**: Split `Terminal.tsx` into focused hooks and components; route tab destroy through `terminalService`; remove deprecated canvas renderer aliases. ([d872b3d])
@@ -776,6 +779,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 [Unreleased]: https://github.com/zync-sh/zync/compare/v2.18.0...HEAD
 [2.18.0]: https://github.com/zync-sh/zync/compare/v2.17.0...v2.18.0
+[f03aeb5]: https://github.com/zync-sh/zync/commit/f03aeb5
 [a5e45f2]: https://github.com/zync-sh/zync/commit/a5e45f2
 [6183150]: https://github.com/zync-sh/zync/commit/6183150
 [cad54e4]: https://github.com/zync-sh/zync/commit/cad54e4
