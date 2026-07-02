@@ -13,14 +13,17 @@
   <p>
     <a href="https://zync.thesudoer.in">Website</a>&nbsp;&nbsp;•&nbsp;&nbsp;
     <a href="https://github.com/zync-sh/zync/releases">Releases</a>&nbsp;&nbsp;•&nbsp;&nbsp;
+    <a href="#why-zync">Why Zync</a>&nbsp;&nbsp;•&nbsp;&nbsp;
     <a href="#local-terminal">Local terminal</a>&nbsp;&nbsp;•&nbsp;&nbsp;
     <a href="#your-data">Your data</a>&nbsp;&nbsp;•&nbsp;&nbsp;
-    <a href="#installation">Installation</a>&nbsp;&nbsp;•&nbsp;&nbsp;
+    <a href="#how-zync-compares">Compare</a>&nbsp;&nbsp;•&nbsp;&nbsp;
     <a href="#highlights">Highlights</a>&nbsp;&nbsp;•&nbsp;&nbsp;
+    <a href="#installation">Installation</a>&nbsp;&nbsp;•&nbsp;&nbsp;
     <a href="#documentation">Documentation</a>&nbsp;&nbsp;•&nbsp;&nbsp;
     <a href="#for-developers">Developers</a>&nbsp;&nbsp;•&nbsp;&nbsp;
     <a href="#extensions">Extensions</a>&nbsp;&nbsp;•&nbsp;&nbsp;
-    <a href="#contributing">Contributing</a>
+    <a href="#contributing">Contributing</a>&nbsp;&nbsp;•&nbsp;&nbsp;
+    <a href="#support-zync">Support</a>
   </p>
   <br />
 </div>
@@ -31,13 +34,24 @@
 
 Manage hosts from a persistent sidebar, keep shells alive while you switch panels, and pick up exactly where you left off after a restart.
 
+## Why Zync
+
+**One native workspace for everything you do over SSH.** Connections, terminals, SFTP, tunnels, vault, and sync. Native, fast, and designed so **you own your data**.
+
+- **One app for the whole workflow:** connections, terminals, files, tunnels, vault, and snippets in a persistent sidebar
+- **A terminal you can use before you add hosts:** local shells and remote SSH share the same stack ([Local terminal](#local-terminal))
+- **Your data stays yours:** no Zync server for hosts or credentials; optional encrypted sync goes to your own cloud ([Your data](#your-data))
+- **Open source:** MIT licensed, built in public; ideas and contributions welcome ([Contributing](#contributing))
+
+Everyday infra work should feel fast, clear, and under your control.
+
 <p align="center">
   <img src="assets/readme-hero.png" alt="Zync workspace: connections sidebar, welcome screen, vault, and port forwarding" width="900" />
 </p>
 
 ## Local terminal
 
-**Start on your machine. Scale to your servers.**
+**Local shells and remote SSH in one app.**
 
 Zync is a full desktop terminal before it is an SSH client. Install it, open the app, and run commands on your own machine. No hosts, no keys, and no remote setup required.
 
@@ -49,7 +63,7 @@ When you add SSH hosts later, local and remote sessions share the same workspace
 
 ## Your data
 
-**Zero-trust for your workspace:** Zync is a **desktop app**, not a hosted SSH service. We do **not** store your hosts, credentials, terminal sessions, or workspace on Zync servers. **You own your data.**
+**You own your workspace data.** Zync is a **desktop app**, not a hosted SSH service. We do **not** store your hosts, credentials, terminal sessions, or workspace on Zync servers.
 
 | Where it lives | What that means |
 |----------------|-----------------|
@@ -59,7 +73,60 @@ When you add SSH hosts later, local and remote sessions share the same workspace
 
 No Zync account is required to use the app. Install it, work offline, unlock the vault when you need secrets, and turn on sync only if you want encrypted backup across your own devices.
 
+**Roadmap:** additional cloud providers for personal multi-device sync, plus an optional **self-hosted team backend** for orgs that want shared sync without sending credentials to Zync infrastructure. Today ships with Google Drive; team hosting is not available yet.
+
 Details: [docs/SECURITY.md](docs/SECURITY.md)
+
+## How Zync compares
+
+Why pick Zync over Termius, VS Code Remote SSH, or MobaXterm? Each tool optimizes for a different job. Zync targets a **single desktop workspace** for day-to-day SSH ops: hosts, terminals, files, tunnels, vault, and sync together.
+
+Comparisons reflect each product's typical use today, not every paid tier or plugin. Free-plan limits are noted in **bold**.
+
+| Feature | Zync | Termius | VS Code Remote SSH | MobaXterm |
+|---------|------|---------|-------------------|-----------|
+| **Platforms** | Linux, Windows, macOS | Linux, Windows, macOS, iOS, Android | Where VS Code runs | Windows-first (official) |
+| **Files** | SFTP manager + in-app editor | SFTP client | Remote explorer in the IDE | SFTP browser + editor |
+| **Vault** | On-device encrypted vault | **Local vault on free**; cloud/team vault needs paid plan | SSH keys / system agent | Local saved sessions (master password) |
+| **Sync** | Your cloud (Google Drive; encrypted) | **No cross-device sync on free**; Termius cloud on paid | None (local workspace) | None (local sessions) |
+| **Open Source** | MIT | No | VS Code is OSS; Remote SSH is a Microsoft extension | Proprietary (free Home + paid Pro) |
+| **Pricing** | Free (MIT, no subscription) | Free Starter (**no sync/snippets/cloud vault**); Pro from ~$10/mo (annual) | Free (VS Code + Remote SSH extension) | Free Home (**12 sessions, 2 tunnels**); Pro ~$69/user/year with **perpetual license** (updates optional) |
+| **Best Fit** | One native desktop app for SSH, files, vault, and tunnels without a vendor-owned workspace | Mobile + cross-device sync inside the Termius platform | Editing and debugging code as a full IDE remote session | Windows-heavy workflows with X11 and classic session tooling |
+
+See vendor websites for current pricing and plan details.
+
+**Rule of thumb:**
+
+- **VS Code Remote SSH** → IDE-first workflows
+- **MobaXterm** → Windows + X11 workflows
+- **Termius** → Mobile and cloud-sync workflows
+- **Zync** → Native SSH workspace with local-first data ownership
+
+## Highlights
+
+### Connect
+
+- SSH with key or password auth, **jump hosts**, and connection folders
+- **SSH config import** and visual **tunnel** + **port forwarding** management
+- Jump from **local shells** to remote sessions in the same app (see [Local terminal](#local-terminal))
+
+### Work
+
+- **xterm 6** terminal with WebGL/DOM rendering, multi-tab shells, optional idle suspend, and **ghost suggestions**
+- **SFTP file manager** with drag-and-drop and an in-app **CodeMirror 6** editor
+- **Dashboard**, **snippets**, and **session persistence** (tabs, terminals, working directory)
+
+### Secure
+
+- **Your data stays on your devices.** No Zync-hosted workspace; see [Your data](#your-data)
+- Encrypted **Vault** for credentials: recovery key, revision history, OS keychain remember-unlock
+- **Google Drive sync** to *your* account: encrypted hosts, tunnels, snippets, and settings (Sync & Backup workspace)
+
+### Extend
+
+- **AI sidebar** (Ctrl+I): **Ask** and **Agent** modes with terminal context
+- **Plugin marketplace:** feature plugins, themes, icon themes, and editor providers
+- Command palette (⌘K / Ctrl+K), rich shortcuts, auto-updates, cross-platform packages
 
 ## Installation
 
@@ -124,32 +191,6 @@ sudo apt update && sudo apt install zync
 1. Install Zync and launch the app.
 2. **Start working:** open a **local terminal** from the welcome screen, or **add a connection** (import `~/.ssh/config`, use the connection wizard, or create a host manually).
 3. Open **Terminal**, **Files**, or **Dashboard** from a host tab. Your workspace restores on the next launch.
-
-## Highlights
-
-### Connect
-
-- SSH with key or password auth, **jump hosts**, and connection folders
-- **SSH config import** and visual **tunnel** + **port forwarding** management
-- Jump from **local shells** to remote sessions in the same app (see [Local terminal](#local-terminal))
-
-### Work
-
-- **xterm 6** terminal with WebGL/DOM rendering, multi-tab shells, optional idle suspend, and **ghost suggestions**
-- **SFTP file manager** with drag-and-drop and an in-app **CodeMirror 6** editor
-- **Dashboard**, **snippets**, and **session persistence** (tabs, terminals, working directory)
-
-### Secure
-
-- **Your data stays on your devices.** No Zync-hosted workspace; see [Your data](#your-data)
-- Encrypted **Vault** for credentials: recovery key, revision history, OS keychain remember-unlock
-- **Google Drive sync** to *your* account: encrypted hosts, tunnels, snippets, and settings (Sync & Backup workspace)
-
-### Extend
-
-- **AI sidebar** (Ctrl+I): **Ask** and **Agent** modes with terminal context
-- **Plugin marketplace:** feature plugins, themes, icon themes, and editor providers
-- Command palette (⌘K / Ctrl+K), rich shortcuts, auto-updates, cross-platform packages
 
 ## Workspace overview
 
@@ -225,14 +266,16 @@ More targets (`test:vault-*`, `test:session-persistence`, `test:terminal-rendere
 ### Architecture
 
 ```
-React UI  →  Zustand  →  Tauri IPC (invoke + channels)  →  Rust commands
-                                                              ├── SSH / SFTP (russh)
-                                                              ├── PTY (portable-pty)
-                                                              ├── Vault + sync (crypto, redb, keyring)
-                                                              └── Ghost, AI agent, session persistence
+src/features/ (React UI)  →  Zustand  →  Tauri IPC  →  src-tauri/ (Rust)
+                              invoke (request/response)     ├── SSH / SFTP (russh)
+                              Channel (streaming I/O)       ├── PTY (portable-pty)
+                                                            ├── Vault + sync (crypto, redb, keyring)
+                                                            └── Ghost, AI agent, session persistence
 ```
 
-Deeper reference: command families include `ssh_*`, `terminal_*`, `vault_*`, `sync_*`, `ghost_*`, `ai_agent_*`, `session_*`, and `settings_*`. See the docs table above for subsystem guides.
+**Layout:** UI and feature logic live in `src/features/`; native work runs in `src-tauri/`. One-shot work uses `invoke`; streaming paths (notably terminal PTY output) use Tauri `Channel`s.
+
+**Start here:** [docs/TERMINAL.md](docs/TERMINAL.md) for IPC, lifecycle, and renderer patterns. Command families include `ssh_*`, `terminal_*`, `vault_*`, `sync_*`, `ghost_*`, `ai_agent_*`, `session_*`, and `settings_*`. See the docs table above for other subsystem guides.
 
 ## Extensions
 
@@ -241,6 +284,15 @@ Plugins, theme packs, and editor providers ship through the built-in Marketplace
 ## Contributing
 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for fork/branch workflow, conventions, and PR guidelines.
+
+## Support Zync
+
+If Zync helps you in your daily workflow, consider supporting development.
+
+- **[Sponsor](https://github.com/sponsors/gajendraxdev)** the maintainer on GitHub Sponsors
+- **[Report bugs](https://github.com/zync-sh/zync/issues/new/choose)** or request features
+- **[Contribute code](CONTRIBUTING.md)** via pull requests
+- **[Share feedback](https://github.com/zync-sh/zync/discussions)** in GitHub Discussions
 
 ## Changelog
 
