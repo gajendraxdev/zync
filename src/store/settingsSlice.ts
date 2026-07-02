@@ -385,12 +385,16 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
         }
 
         const previous = get().settings;
+        const previousTabs = get().tabs;
         const updated = { ...previous, ...actualSettings };
         const privacyPatch = actualSettings.privacy;
+        const privacyTitlesTouched = Boolean(
+            privacyPatch && 'showHostAddressesInLists' in privacyPatch,
+        );
         const nextState: Partial<AppStore> = { settings: updated };
-        if (privacyPatch && 'showHostAddressesInLists' in privacyPatch) {
+        if (privacyTitlesTouched) {
             nextState.tabs = refreshConnectionTabTitles(
-                get().tabs,
+                previousTabs,
                 get().connections,
                 updated.privacy.showHostAddressesInLists,
             );
@@ -405,7 +409,13 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
             const rollbackPatch = Object.fromEntries(
                 changedKeys.map((key) => [key, previous[key]])
             ) as Partial<AppSettings>;
-            set({ settings: { ...current, ...rollbackPatch } });
+            const rollbackState: Partial<AppStore> = {
+                settings: { ...current, ...rollbackPatch },
+            };
+            if (privacyTitlesTouched) {
+                rollbackState.tabs = previousTabs;
+            }
+            set(rollbackState);
             throw error;
         }
     },
