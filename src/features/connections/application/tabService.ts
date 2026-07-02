@@ -75,7 +75,7 @@ export const refreshConnectionTabTitles = (
         }
         const connection = connections.find((entry) => entry.id === tab.connectionId);
         if (!connection) return tab;
-        const title = getConnectionPrimaryLabel(connection, showHostAddressesInLists) || 'Untitled Connection';
+        const title = getConnectionPrimaryLabel(connection, showHostAddressesInLists);
         return title === tab.title ? tab : { ...tab, title };
     });
 
@@ -88,7 +88,7 @@ export const createConnectionTabState = (
     const newTab: Tab = {
         id: crypto.randomUUID(),
         type: 'connection',
-        title: getConnectionPrimaryLabel(connection, options.showHostAddressesInLists) || 'Untitled Connection',
+        title: getConnectionPrimaryLabel(connection, options.showHostAddressesInLists),
         connectionId: connection.id,
         view: startView,
     };

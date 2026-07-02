@@ -56,6 +56,8 @@ export function GeneralTab({
     onClearConnections,
 }: GeneralTabProps) {
     const [isUpdatingAutoCheck, setIsUpdatingAutoCheck] = useState(false);
+    const showHostAddressesInLists =
+        settings.privacy?.showHostAddressesInLists ?? DEFAULT_SHOW_HOST_ADDRESSES_IN_LISTS;
 
     const handleAutoUpdateToggle = async () => {
         if (isUpdatingAutoCheck) return;
@@ -88,19 +90,19 @@ export function GeneralTab({
                             onClick={() => onUpdateSettings({
                                 privacy: {
                                     ...(settings.privacy ?? { showHostAddressesInLists: DEFAULT_SHOW_HOST_ADDRESSES_IN_LISTS }),
-                                    showHostAddressesInLists: !(settings.privacy?.showHostAddressesInLists ?? DEFAULT_SHOW_HOST_ADDRESSES_IN_LISTS),
+                                    showHostAddressesInLists: !showHostAddressesInLists,
                                 },
                             })}
                             role="switch"
-                            aria-checked={settings.privacy?.showHostAddressesInLists ?? DEFAULT_SHOW_HOST_ADDRESSES_IN_LISTS}
+                            aria-checked={showHostAddressesInLists}
                             aria-label="Show host addresses in lists"
                             className={`w-11 h-6 rounded-full transition-colors relative focus:outline-none focus:ring-2 focus:ring-[var(--color-app-accent)]/50 ${
-                                settings.privacy?.showHostAddressesInLists ? 'bg-[var(--color-app-accent)]' : 'bg-[var(--color-app-border)]'
+                                showHostAddressesInLists ? 'bg-[var(--color-app-accent)]' : 'bg-[var(--color-app-border)]'
                             }`}
                         >
                             <span
                                 className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${
-                                    settings.privacy?.showHostAddressesInLists ? 'translate-x-5' : 'translate-x-0'
+                                    showHostAddressesInLists ? 'translate-x-5' : 'translate-x-0'
                                 }`}
                             />
                         </button>
