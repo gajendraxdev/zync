@@ -153,6 +153,16 @@ export function CopyToServerModal({
   };
 
   const availableServers = connections.filter((conn: Connection) => conn.id !== firstFile?.connectionId);
+  const sourceConnection = connections.find((conn: Connection) => conn.id === firstFile.connectionId);
+  const sourceLabels = sourceConnection
+    ? getConnectionDisplayLabels(sourceConnection, showHostAddressesInLists)
+    : null;
+  const targetConnection = selectedServerId
+    ? availableServers.find((conn) => conn.id === selectedServerId)
+    : undefined;
+  const targetLabels = targetConnection
+    ? getConnectionDisplayLabels(targetConnection, showHostAddressesInLists)
+    : null;
   const serverOptions: SelectOption[] = availableServers.map(conn => {
     const labels = getConnectionDisplayLabels(conn, showHostAddressesInLists);
     return {
@@ -240,10 +250,10 @@ export function CopyToServerModal({
                 <span className="text-[8px] font-bold uppercase tracking-widest text-app-muted">Source</span>
               </div>
               <div className="text-base font-bold tracking-tight text-app-text truncate leading-tight transition-colors">
-                {connections.find((c: Connection) => c.id === firstFile.connectionId)?.name}
+                {sourceLabels?.primary ?? 'Source'}
               </div>
               <div className="text-[10px] text-app-muted font-medium opacity-50 truncate">
-                {connections.find((c: Connection) => c.id === firstFile.connectionId)?.username}@{connections.find((c: Connection) => c.id === firstFile.connectionId)?.host}
+                {sourceLabels?.secondary ?? ''}
               </div>
             </div>
           </div>
@@ -266,10 +276,10 @@ export function CopyToServerModal({
                 <Server size={12} className={selectedServerId ? 'text-emerald-600 dark:text-emerald-400' : 'text-app-muted'} />
               </div>
               <div className="text-base font-bold tracking-tight text-app-text leading-tight truncate">
-                {selectedServerId ? availableServers.find(s => s.id === selectedServerId)?.name : 'Destination...'}
+                {targetLabels?.primary ?? 'Destination...'}
               </div>
               <div className="text-[10px] text-app-muted font-medium opacity-50 truncate">
-                {selectedServerId ? `${availableServers.find(s => s.id === selectedServerId)?.username}@${availableServers.find(s => s.id === selectedServerId)?.host}` : 'Select a hub'}
+                {targetLabels?.secondary ?? (selectedServerId ? '' : 'Select a hub')}
               </div>
             </div>
           </div>
