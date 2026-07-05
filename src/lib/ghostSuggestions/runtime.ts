@@ -1,6 +1,4 @@
 import { InputTracker } from './inputTracker.js';
-import { resolveGhostInputDispatchDecision } from './controller.js';
-import type { GhostPopupState } from './types.js';
 
 interface GhostTrackerRuntimeParams {
   tracker: InputTracker;
@@ -87,56 +85,15 @@ export function bindGhostTrackerRuntime({
   };
 }
 
-interface HandleGhostInputParams {
-  data: string;
-  popup: GhostPopupState;
-  tracker?: InputTracker;
-  allowTabPopup?: boolean;
-  onMovePopupSelection: (delta: number) => void;
-  onAcceptPopupSelection: () => void;
-  onDismissPopup: () => void;
-  onTriggerTabPopup: (tracker: InputTracker) => Promise<void> | void;
-}
-
 /**
- * Handles ghost-specific input routing (popup controls, tab trigger, inline accept).
+ * Handles inline ghost input routing (accept/dismiss keys).
  * Returns true when the event was fully handled and should NOT continue to PTY write.
  */
-export async function handleGhostInputEvent({
-  data,
-  popup,
-  tracker,
-  allowTabPopup = true,
-  onMovePopupSelection,
-  onAcceptPopupSelection,
-  onDismissPopup,
-  onTriggerTabPopup,
-}: HandleGhostInputParams): Promise<boolean> {
-  const dispatch = resolveGhostInputDispatchDecision(data, popup, Boolean(tracker), allowTabPopup);
-
-  if (typeof dispatch.moveDelta === 'number') {
-    onMovePopupSelection(dispatch.moveDelta);
-    return true;
-  }
-  if (dispatch.acceptPopupSelection) {
-    onAcceptPopupSelection();
-    return true;
-  }
-  if (dispatch.dismissPopup) {
-    onDismissPopup();
-    return true;
-  }
-  if (dispatch.closePopupBeforeContinue) {
-    onDismissPopup();
-  }
-  if (dispatch.triggerTabPopup && tracker) {
-    await onTriggerTabPopup(tracker);
-    return true;
-  }
-  if (dispatch.shouldFeedTracker && tracker) {
-    const { consumed } = tracker.feed(data);
-    if (consumed) return true;
-  }
-
-  return false;
+export function handleGhostInputEvent(
+  data: string,
+  tracker?: InputTracker,
+): boolean {
+  if (!tracker) return false;
+  const { consumed } = tracker.feed(data);
+  return consumed;
 }

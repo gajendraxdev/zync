@@ -1,9 +1,8 @@
 /**
  * pathCompletion.ts — filesystem-aware ghost suffix (fish-style path completion).
  *
- * Priority mirrors fish shell:
- *   1. History (handled upstream by ghost_suggest Rust command)
- *   2. Filesystem entries in the directory matching the typed path prefix
+ * Filesystem entries in the directory matching the typed path prefix.
+ * History is handled upstream by ghost_suggest (Rust) in client.ts.
  *
  * Triggers when:
  *   - the last argument includes a path separator (`/` or `\`), or

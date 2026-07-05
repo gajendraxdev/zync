@@ -63,7 +63,6 @@ export interface AppSettings {
     };
     ghostSuggestions: {
         inlineEnabled: boolean;
-        popupEnabled: boolean;
         contextMenuEnabled: boolean;
         providers: {
             history: boolean;
@@ -183,7 +182,6 @@ export const defaultSettings: AppSettings = {
     },
     ghostSuggestions: {
         inlineEnabled: true,
-        popupEnabled: true,
         contextMenuEnabled: false,
         providers: {
             history: true,

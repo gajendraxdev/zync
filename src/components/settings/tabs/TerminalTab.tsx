@@ -132,12 +132,6 @@ export function TerminalTab({
                         onChange={(value) => { setGhostSuggestionsField({ inlineEnabled: value }); }}
                     />
                     <Toggle
-                        label="Tab popup suggestions"
-                        description="Use Tab to open/navigate completion list before falling back to shell completion."
-                        checked={settings.ghostSuggestions?.popupEnabled ?? true}
-                        onChange={(value) => { setGhostSuggestionsField({ popupEnabled: value }); }}
-                    />
-                    <Toggle
                         label="Context-menu suggestion actions"
                         description="Show suggestion actions in terminal right-click context menu."
                         checked={settings.ghostSuggestions?.contextMenuEnabled ?? false}
