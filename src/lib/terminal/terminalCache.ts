@@ -35,6 +35,8 @@ export interface TerminalCache {
   ligaturesLoadPromise?: Promise<void> | null;
   /** Set after terminal:create fails for a dead SSH backend; cleared on reconnect/ready. */
   spawnBlocked?: boolean;
+  /** CWD used for the in-flight PTY spawn — seeded on terminal-ready. */
+  pendingSpawnCwd?: string;
   /** Last PTY output or user input timestamp — used to skip idle-host suspend while busy. */
   lastActivityAt?: number;
   /** Idle-suspend banner already written for the current suspend cycle. */

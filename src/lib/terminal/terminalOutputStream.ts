@@ -1,5 +1,7 @@
 import { Channel } from '@tauri-apps/api/core';
 import type { Terminal as XTerm } from '@xterm/xterm';
+import { feedPromptCwdSniffer } from '../ghostSuggestions/promptCwdSniffer.js';
+import { useAppStore } from '../../store/useAppStore.js';
 import { terminalCache } from './terminalCache.js';
 import { touchTerminalActivity } from './terminalActivity.js';
 import { silenceTerminalOutputChannel } from './terminalReloadTeardown.js';
@@ -82,6 +84,12 @@ export function attachTerminalOutputChannel(termId: string, term: XTerm): Channe
     }
 
     touchTerminalActivity(termId);
+    if (entry.connectionId) {
+      const connectionId = entry.connectionId;
+      feedPromptCwdSniffer(termId, data, (path) => {
+        useAppStore.getState().setTerminalCwd(connectionId, termId, path);
+      });
+    }
     term.write(data);
   });
 

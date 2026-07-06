@@ -32,6 +32,7 @@ export async function resolveInlineSuggestion({
   line,
   cwd,
   scope,
+  fsConnectionId,
   providers,
 }: InlineSuggestionParams): Promise<string> {
   if (!shouldUseGhostForLine(line)) {
@@ -44,9 +45,10 @@ export async function resolveInlineSuggestion({
   };
 
   const preferPath = shouldPreferPathSuggestion(line);
+  const listConnectionId = fsConnectionId ?? scope;
 
   if (preferPath && enabledProviders.filesystem) {
-    const fsSuffix = await getPathSuggestion(line, cwd, scope, INLINE_FS_TIMEOUT_MS).catch(() => null);
+    const fsSuffix = await getPathSuggestion(line, cwd, listConnectionId, INLINE_FS_TIMEOUT_MS).catch(() => null);
     if (fsSuffix) return fsSuffix;
   }
 
@@ -56,7 +58,7 @@ export async function resolveInlineSuggestion({
   }
 
   if (!preferPath && enabledProviders.filesystem) {
-    const fsSuffix = await getPathSuggestion(line, cwd, scope, INLINE_FS_TIMEOUT_MS).catch(() => null);
+    const fsSuffix = await getPathSuggestion(line, cwd, listConnectionId, INLINE_FS_TIMEOUT_MS).catch(() => null);
     if (fsSuffix) return fsSuffix;
   }
 

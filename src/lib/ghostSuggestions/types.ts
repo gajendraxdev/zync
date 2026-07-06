@@ -20,5 +20,7 @@ export interface InlineSuggestionParams {
   line: string;
   cwd?: string;
   scope: string;
+  /** Connection id for `fs_list` (defaults to scope). */
+  fsConnectionId?: string;
   providers?: GhostSuggestionProviders;
 }

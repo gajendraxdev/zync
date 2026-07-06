@@ -39,6 +39,7 @@ export function spawnTerminalSession(options: SpawnTerminalSessionOptions): bool
   const generation = cached.generation + 1;
   cached.generation = generation;
   cached.connectionId = connectionId;
+  cached.pendingSpawnCwd = cwd;
   cached.spawned = true;
   cached.starting = true;
   cached.suspendedByPanel = false;

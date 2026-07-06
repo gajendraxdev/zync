@@ -1,3 +1,4 @@
+import { useAppStore } from '../../store/useAppStore.js';
 import { terminalCache } from './terminalCache.js';
 import { touchTerminalActivity } from './terminalActivity.js';
 import { clearIdleHostSuspendNotice } from './terminalIdleSuspendNotice.js';
@@ -88,6 +89,10 @@ export function handleTerminalReady(termId: string, generation: number): boolean
   cached.spawned = true;
   cached.spawnBlocked = false;
   cached.suspendedByIdle = false;
+  if (cached.pendingSpawnCwd && cached.connectionId) {
+    useAppStore.getState().setTerminalCwd(cached.connectionId, termId, cached.pendingSpawnCwd);
+    cached.pendingSpawnCwd = undefined;
+  }
   clearIdleHostSuspendNotice(termId);
   flushPendingInput(termId);
   return true;

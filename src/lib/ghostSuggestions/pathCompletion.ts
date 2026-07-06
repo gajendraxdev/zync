@@ -78,12 +78,12 @@ export function getLastArg(line: string): string {
   return line.slice(start);
 }
 
-export /**
+/**
  * Strip a leading unmatched opening quote from a shell argument so that
  * `"My D` becomes `My D` for prefix matching purposes.
  * Only strips when the quote has no matching closing counterpart.
  */
-function stripLeadingUnmatchedQuote(arg: string): string {
+export function stripLeadingUnmatchedQuote(arg: string): string {
   if (arg.length > 0 && (arg[0] === '"' || arg[0] === "'")) {
     const q = arg[0];
     if (!arg.slice(1).includes(q)) return arg.slice(1);
@@ -151,7 +151,7 @@ export function getCommandName(line: string): string {
 }
 
 /** True when `arg` looks like it contains a path separator the user typed. */
-function hasPathSeparator(arg: string): boolean {
+export function hasPathSeparator(arg: string): boolean {
   return arg.includes('/') || arg.includes('\\');
 }
 
@@ -199,7 +199,7 @@ function splitPath(
  * Absolute paths and `~` paths are returned as-is (backend handles tilde
  * expansion). Relative paths (`./`, `../`, or bare `foo/`) are joined with cwd.
  */
-function resolveDir(dir: string, cwd: string, sep: string): string {
+export function resolveDir(dir: string, cwd: string, sep: string): string {
   // Already absolute or home-relative — pass through
   if (
     dir.startsWith('/') ||
@@ -212,21 +212,32 @@ function resolveDir(dir: string, cwd: string, sep: string): string {
 
   const base = cwd.endsWith(sep) ? cwd.slice(0, -1) : cwd;
 
+  let resolved: string;
   if (dir.startsWith('./') || dir.startsWith('.\\')) {
-    return `${base}${sep}${dir.slice(2)}`;
+    resolved = `${base}${sep}${dir.slice(2)}`;
+  } else {
+    // Starts with `../` — let the backend resolve the parent traversal
+    resolved = `${base}${sep}${dir}`;
   }
 
-  // Starts with `../` — let the backend resolve the parent traversal
-  return `${base}${sep}${dir}`;
+  return sep === '\\' ? resolved.replace(/\//g, '\\') : resolved.replace(/\\/g, '/');
 }
 
 /**
  * Strip the trailing separator so `fs_list` receives a bare directory path
  * (e.g. "/usr" not "/usr/"), unless the path is the root itself.
  */
-function stripTrailingSep(path: string): string {
+export function stripTrailingSep(path: string): string {
   if (path === '/' || /^[A-Za-z]:[/\\]$/.test(path)) return path;
   return path.replace(/[/\\]+$/, '');
+}
+
+/** Map list paths to what `fs_list` expects (local HOME vs remote SFTP cwd). */
+function normalizeFsListPath(path: string, connectionId: string): string {
+  if (path === '~' || path === '~/') {
+    return connectionId === 'local' ? '' : '.';
+  }
+  return path;
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -249,7 +260,7 @@ export async function getPathSuggestion(
   return matches[0] ?? null;
 }
 
-function inferSeparator(cwd: string | undefined): string {
+export function inferSeparator(cwd: string | undefined): string {
   if (cwd?.includes('\\')) return '\\';
   return '/';
 }
@@ -289,13 +300,14 @@ export async function getPathSuggestions(
     }
     dir = '';
     partial = lastArg;
+    if (isDirectoryOnlyCommand && partial.toLowerCase() === commandName.toLowerCase()) {
+      partial = '';
+    }
   }
 
   // Resolve against CWD when we have one; otherwise use the dir as typed.
-  // For directory-only commands with no CWD fall back to '~' so that
-  // `cd ` on an SSH session still lists the remote home directory.
   const resolvedDir = cwd ? resolveDir(dir, cwd, sep) : dir;
-  const apiPath = stripTrailingSep(resolvedDir) || (isDirectoryOnlyCommand ? '~' : sep);
+  const apiPath = normalizeFsListPath(stripTrailingSep(resolvedDir), connectionId);
   const cacheKey = `${connectionId}::${apiPath}`;
 
   let entries: FsEntry[];

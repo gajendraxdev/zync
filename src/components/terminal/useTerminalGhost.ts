@@ -6,6 +6,7 @@ import {
   commitGhostCommand,
   resolveInlineSuggestion,
 } from '../../lib/ghostSuggestions/client';
+import { resolveCdTargetPath } from '../../lib/ghostSuggestions/cwdTracking';
 import { bindGhostTrackerRuntime, handleGhostInputEvent } from '../../lib/ghostSuggestions/runtime';
 import type { AppSettings } from '../../store/settingsSlice';
 import {
@@ -98,6 +99,7 @@ export function useTerminalGhost({
             line,
             cwd,
             scope: ghostScope,
+            fsConnectionId: terminalKey,
             providers: ghostSettingsRef.current.providers,
           });
         },
@@ -114,6 +116,12 @@ export function useTerminalGhost({
         },
         onHistoryCommit: (cmd) => {
           commitGhostCommand(cmd, ghostScope).catch(() => {});
+          const termState = useAppStore.getState().terminals[terminalKey]?.find((t) => t.id === mountSessionId);
+          const cwd = termState?.lastKnownCwd ?? termState?.initialPath;
+          const nextCwd = resolveCdTargetPath(cmd, cwd);
+          if (nextCwd) {
+            useAppStore.getState().setTerminalCwd(terminalKey, mountSessionId, nextCwd);
+          }
         },
         onClearUI: () => {
           setGhostSuggestion('');
