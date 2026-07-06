@@ -4,6 +4,21 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Added
+- **Ghost native shell policy**: Settings → Terminal → Ghost suggestions → **Native shell policy** (`auto` / `always` / `off`) suppresses inline ghost when fish is active or zsh autosuggestions are detected (probes `~/.zshrc` and related init files on host and WSL). ([7ecf0a5])
+- **WSL path completion**: Local WSL terminals list the Linux filesystem via `fs_list_wsl` / `wsl_get_cwd` instead of Windows `%USERPROFILE%`; spawn shell is persisted on the tab; prompt sniffing supports `host:~ $` themes. ([d2cef31])
+
+### Changed
+- **Ghost escape handling (P2)**: Left/Right/Home/End and history keys desync the input tracker without wiping the line buffer; hard reset remains on Enter/Ctrl+C/Ctrl+U. ([7ecf0a5])
+- **Ghost path completion**: Bare `cd` skips history fallback (avoids `cd ..` from unrelated history); WSL listings use longer timeouts, prefetch, and shared `WSL_FS_LIST_TIMEOUT_MS`. ([d2cef31])
+- **Documentation**: `docs/TERMINAL_GHOST_SUGGESTIONS.md` — WSL path completion, architecture and scaling limits, shipped P2/P3 notes. ([3aa9a70])
+
+### Fixed
+- **Ghost WSL listing**: `fs_list_wsl` inlines paths in `wsl.exe` scripts (host spawn drops shell assignments); fixes empty `WSL list failed` errors. ([d2cef31])
+- **Ghost WSL wrong suggestions**: Path completion resolves WSL only on local tabs; Linux cwd inference no longer misroutes SSH sessions to `fs_list_wsl`. ([d2cef31])
+- **Ghost WSL cwd races**: `fetchWslCwd` uses a timeout and generation guard so stale results cannot overwrite cwd after PTY respawn. ([d2cef31])
+- **Ghost cwd tracking**: `cd ..` from bare `~` returns unknown cwd instead of guessing `/`; shared `isAbsoluteOrHomePath` helper with path completion. ([d2cef31])
+
 ### Removed
 - **Tab popup ghost suggestions**: Removed the Tab-triggered completion list overlay, popup state/routing modules (`GhostSuggestionListOverlay`, tab/popup controller stack), and the **Tab popup suggestions** setting toggle. Tab no longer opens or navigates a Zync list. Removed auto-open popup while typing when multiple candidates matched. Context-menu suggestion actions now cover inline accept only (no multi-item popup list). ([336d54d])
 
@@ -19,7 +34,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Fixed
 - **Ghost overlay alignment**: Position inline suffix relative to the overlay parent using `.xterm-screen` offset and measured cell height so ghost text sits on the cursor row under WebGL and DOM renderers. ([a91e477])
-- **Ghost path completion cwd**: Bare `cd` lists the current directory; `~` / `~/` map to local HOME or remote SFTP cwd for directory and file-aware commands; relative multi-segment paths (e.g. `cd foo/bar`) resolve against tracked cwd; `cd ..` handles `~` and `~/…` parents correctly. ([ee1b6c4])
+- **Ghost path completion cwd**: Bare `cd` lists the current directory; `~` maps to local HOME or remote SFTP cwd for directory and file-aware commands; relative multi-segment paths (e.g. `cd foo/bar`) resolve against tracked cwd; `cd ..` handles `~/…` parents correctly. ([ee1b6c4])
 - **Ghost cwd after `cd`**: `lastKnownCwd` updates on submitted `cd` / `pushd` commands (Enter) only — not when partially accepting an inline ghost suffix. ([ee1b6c4], [a68a705])
 - **Ghost Tab desync history**: After shell Tab completion, Enter no longer commits a stale input-tracker line buffer to ghost history or cwd inference. ([a68a705])
 
