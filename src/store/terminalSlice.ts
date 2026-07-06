@@ -73,6 +73,9 @@ export interface TerminalSlice {
      */
     setTerminalInitialPath: (connectionId: string, termId: string, path: string) => void;
 
+    /** Persist the shell used for a tab (e.g. after spawn when only settings had `wsl`). */
+    setTerminalShellOverride: (connectionId: string, termId: string, shellOverride: string) => void;
+
     /**
      * Restore persisted terminal tabs for a connection on app start.
      * Uses saved IDs and metadata directly without spawning new UUIDs.
@@ -303,6 +306,24 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                 }
             };
         });
+        scheduleSaveSession(() => get().saveSession());
+    },
+
+    /** @inheritdoc */
+    setTerminalShellOverride: (connectionId, termId, shellOverride) => {
+        set(state => {
+            const currentTabs = state.terminals[connectionId] || [];
+            const newTabs = currentTabs.map(t =>
+                t.id === termId ? { ...t, shellOverride } : t
+            );
+            return {
+                terminals: {
+                    ...state.terminals,
+                    [connectionId]: newTabs
+                }
+            };
+        });
+        scheduleSaveSession(() => get().saveSession());
     },
 
     /** @inheritdoc */

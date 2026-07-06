@@ -8,6 +8,16 @@ import {
 } from '../../lib/ghostSuggestions/client';
 import { resolveCdTargetPath } from '../../lib/ghostSuggestions/cwdTracking';
 import { bindGhostTrackerRuntime, handleGhostInputEvent } from '../../lib/ghostSuggestions/runtime';
+import { shouldSuppressGhostForNativeShell } from '../../lib/ghostSuggestions/shellSuppression';
+import {
+  getZshAutosuggestEnabled,
+  scheduleZshAutosuggestProbe,
+} from '../../lib/ghostSuggestions/zshAutosuggestDetect';
+import {
+  cwdForWslPathCompletion,
+  resolveWslShellIdForPathCompletion,
+  shellIdIndicatesWsl,
+} from '../../lib/ghostSuggestions/wslShell';
 import type { AppSettings } from '../../store/settingsSlice';
 import {
   clearTerminalPendingInput,
@@ -18,6 +28,14 @@ import {
   terminalCache,
 } from '../../lib/terminal';
 import type { TerminalMountContext } from './useTerminalLifecycle';
+
+function getEffectiveShellId(
+  terminalKey: string,
+  shellOverride?: string,
+  windowsShell?: string,
+): string | undefined {
+  return shellOverride ?? (terminalKey === 'local' ? windowsShell : undefined);
+}
 
 export interface UseTerminalGhostOptions {
   sessionId: string;
@@ -86,6 +104,15 @@ export function useTerminalGhost({
       ghostTrackerRef.current?.clearSuggestion();
     }
 
+    const storeOnBind = useAppStore.getState();
+    const termStateOnBind = storeOnBind.terminals[terminalKey]?.find((t) => t.id === mountSessionId);
+    const shellIdOnBind = getEffectiveShellId(
+      terminalKey,
+      termStateOnBind?.shellOverride,
+      storeOnBind.settings.localTerm?.windowsShell,
+    );
+    scheduleZshAutosuggestProbe(mountSessionId, terminalKey, shellIdOnBind);
+
     const unbindGhostTracker = cachedGhostTracker
       ? bindGhostTrackerRuntime({
         tracker: cachedGhostTracker,
@@ -93,13 +120,31 @@ export function useTerminalGhost({
         resolveInlineSuggestion: async (line) => {
           if (!ghostSettingsRef.current.inlineEnabled) return '';
           if (!isVisibleRef.current) return '';
-          const termState = useAppStore.getState().terminals[terminalKey]?.find((t) => t.id === mountSessionId);
-          const cwd = termState?.lastKnownCwd ?? termState?.initialPath;
+          const store = useAppStore.getState();
+          const termState = store.terminals[terminalKey]?.find((t) => t.id === mountSessionId);
+          const shellId = getEffectiveShellId(
+            terminalKey,
+            termState?.shellOverride,
+            store.settings.localTerm?.windowsShell,
+          );
+          if (shouldSuppressGhostForNativeShell(
+            ghostSettingsRef.current.nativeShellPolicy,
+            shellId,
+            getZshAutosuggestEnabled(mountSessionId),
+          )) {
+            return '';
+          }
+          const rawCwd = termState?.lastKnownCwd ?? termState?.initialPath;
+          const wslShellId = terminalKey === 'local'
+            ? resolveWslShellIdForPathCompletion(shellId, rawCwd)
+            : undefined;
+          const cwd = wslShellId ? cwdForWslPathCompletion(rawCwd) : rawCwd;
           return resolveInlineSuggestion({
             line,
             cwd,
             scope: ghostScope,
             fsConnectionId: terminalKey,
+            wslShellId,
             providers: ghostSettingsRef.current.providers,
           });
         },
@@ -169,6 +214,16 @@ export function useTerminalGhost({
               remoteReady: true,
             });
             cached.ghostTracker?.reset();
+            cached.zshAutosuggestEnabled = undefined;
+            cached.zshAutosuggestProbe = undefined;
+            const storeAfterSpawn = useAppStore.getState();
+            const termAfterSpawn = storeAfterSpawn.terminals[terminalKey]?.find((t) => t.id === mountSessionId);
+            const shellAfterSpawn = getEffectiveShellId(
+              terminalKey,
+              termAfterSpawn?.shellOverride,
+              storeAfterSpawn.settings.localTerm?.windowsShell,
+            );
+            scheduleZshAutosuggestProbe(mountSessionId, terminalKey, shellAfterSpawn);
             setGhostSuggestion('');
             return;
           }

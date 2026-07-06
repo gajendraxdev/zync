@@ -1,4 +1,11 @@
 import { useAppStore } from '../../store/useAppStore.js';
+import { scheduleZshAutosuggestProbe } from '../ghostSuggestions/zshAutosuggestDetect.js';
+import { prefetchWslHomeListing } from '../ghostSuggestions/pathCompletion.js';
+import {
+  fetchWslCwd,
+  resolveWslShellIdForPathCompletion,
+  shellIdIndicatesWsl,
+} from '../ghostSuggestions/wslShell.js';
 import { terminalCache } from './terminalCache.js';
 import { touchTerminalActivity } from './terminalActivity.js';
 import { clearIdleHostSuspendNotice } from './terminalIdleSuspendNotice.js';
@@ -92,6 +99,41 @@ export function handleTerminalReady(termId: string, generation: number): boolean
   if (cached.pendingSpawnCwd && cached.connectionId) {
     useAppStore.getState().setTerminalCwd(cached.connectionId, termId, cached.pendingSpawnCwd);
     cached.pendingSpawnCwd = undefined;
+  }
+  if (cached.connectionId) {
+    const store = useAppStore.getState();
+    const readyGeneration = generation;
+    const pendingSpawnShell = cached.pendingSpawnShell;
+    cached.pendingSpawnShell = undefined;
+    const termTab = store.terminals[cached.connectionId]?.find((t) => t.id === termId);
+    if (pendingSpawnShell && !termTab?.shellOverride) {
+      store.setTerminalShellOverride(cached.connectionId, termId, pendingSpawnShell);
+    }
+    const shellId = termTab?.shellOverride
+      ?? pendingSpawnShell
+      ?? (cached.connectionId === 'local' ? store.settings.localTerm?.windowsShell : undefined);
+    scheduleZshAutosuggestProbe(termId, cached.connectionId, shellId);
+
+    if (cached.connectionId === 'local') {
+      let cwdHint = termTab?.lastKnownCwd ?? termTab?.initialPath;
+      const wslShellId = resolveWslShellIdForPathCompletion(shellId, cwdHint);
+      if (wslShellId && !cwdHint) {
+        store.setTerminalCwd(cached.connectionId, termId, '~');
+        cwdHint = '~';
+      }
+      if (wslShellId && shellIdIndicatesWsl(wslShellId)) {
+        void fetchWslCwd(wslShellId)
+          .then((linuxCwd) => {
+            if (!linuxCwd) return;
+            const current = terminalCache.get(termId);
+            if (!current?.connectionId || current.generation !== readyGeneration) return;
+            useAppStore.getState().setTerminalCwd(current.connectionId, termId, linuxCwd);
+            prefetchWslHomeListing(wslShellId, linuxCwd);
+          })
+          .catch(() => {});
+        prefetchWslHomeListing(wslShellId, cwdHint);
+      }
+    }
   }
   clearIdleHostSuspendNotice(termId);
   flushPendingInput(termId);

@@ -40,6 +40,7 @@ export function spawnTerminalSession(options: SpawnTerminalSessionOptions): bool
   cached.generation = generation;
   cached.connectionId = connectionId;
   cached.pendingSpawnCwd = cwd;
+  cached.pendingSpawnShell = shell;
   cached.spawned = true;
   cached.starting = true;
   cached.suspendedByPanel = false;

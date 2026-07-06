@@ -2341,6 +2341,226 @@ pub async fn fs_cwd(connection_id: String, state: State<'_, AppState>) -> Result
     }
 }
 
+/// Read zsh init file contents from a WSL distro home (Windows local terminals only).
+/// Returns empty string when WSL is unavailable, login shell is not zsh, or files are missing.
+#[tauri::command]
+pub async fn read_wsl_zsh_init_files(wsl_distro: Option<String>) -> Result<String, String> {
+    read_wsl_zsh_init_files_impl(wsl_distro).await
+}
+
+#[cfg(target_os = "windows")]
+async fn read_wsl_zsh_init_files_impl(wsl_distro: Option<String>) -> Result<String, String> {
+    use tokio::process::Command;
+
+    let mut cmd = Command::new("wsl.exe");
+    if let Some(distro) = wsl_distro {
+        let trimmed = distro.trim();
+        if !trimmed.is_empty() {
+            cmd.arg("-d").arg(trimmed);
+        }
+    }
+
+    let shell_script = concat!(
+        "case \"$SHELL\" in *zsh*) ;; *) exit 2;; esac; ",
+        "for f in ~/.zshrc ~/.zprofile ~/.zshenv; do ",
+        "[ -f \"$f\" ] && cat \"$f\"; done"
+    );
+    cmd.args(["--", "sh", "-lc", shell_script]);
+
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| format!("Failed to run WSL probe: {}", e))?;
+
+    if output.status.code() == Some(2) {
+        return Ok(String::new());
+    }
+    if !output.status.success() {
+        return Ok(String::new());
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+async fn read_wsl_zsh_init_files_impl(_wsl_distro: Option<String>) -> Result<String, String> {
+    Ok(String::new())
+}
+
+/// Current working directory inside a WSL distro (Linux path).
+#[tauri::command]
+pub async fn wsl_get_cwd(wsl_distro: Option<String>) -> Result<String, String> {
+    wsl_get_cwd_impl(wsl_distro).await
+}
+
+/// List a directory inside a WSL distro for ghost path completion.
+#[tauri::command]
+pub async fn fs_list_wsl(wsl_distro: Option<String>, path: String) -> Result<Vec<FileEntry>, String> {
+    fs_list_wsl_impl(wsl_distro, path).await
+}
+
+#[cfg(target_os = "windows")]
+fn push_wsl_distro(cmd: &mut tokio::process::Command, wsl_distro: &Option<String>) {
+    if let Some(distro) = wsl_distro {
+        let trimmed = distro.trim();
+        if !trimmed.is_empty() {
+            cmd.arg("-d").arg(trimmed);
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+async fn wsl_get_cwd_impl(wsl_distro: Option<String>) -> Result<String, String> {
+    use tokio::process::Command;
+
+    let mut cmd = Command::new("wsl.exe");
+    push_wsl_distro(&mut cmd, &wsl_distro);
+    cmd.args(["--", "sh", "-lc", "pwd -P"]);
+
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| format!("Failed to read WSL cwd: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "WSL cwd failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+async fn wsl_get_cwd_impl(_wsl_distro: Option<String>) -> Result<String, String> {
+    Err("WSL is only available on Windows".to_string())
+}
+
+#[cfg(target_os = "windows")]
+fn shell_single_quote(path: &str) -> String {
+    format!("'{}'", path.replace('\'', "'\"'\"'"))
+}
+
+#[cfg(target_os = "windows")]
+fn wsl_list_path_shell(path: &str) -> String {
+    let trimmed = path.trim();
+    if trimmed.is_empty() || trimmed == "." || trimmed == "~" {
+        return "\"$HOME\"".to_string();
+    }
+    if let Some(rest) = trimmed.strip_prefix("~/") {
+        if rest.is_empty() {
+            return "\"$HOME\"".to_string();
+        }
+        let escaped = rest
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('$', "\\$");
+        return format!("\"$HOME/{escaped}\"");
+    }
+    shell_single_quote(trimmed)
+}
+
+#[cfg(target_os = "windows")]
+async fn fs_list_wsl_impl(wsl_distro: Option<String>, path: String) -> Result<Vec<FileEntry>, String> {
+    use tokio::process::Command;
+
+    // Inline the path in the script — `wsl.exe -- sh -lc` drops assignments like
+    // `target=...` when spawned from the Windows side, so `$target` is always empty.
+    let path_shell = wsl_list_path_shell(&path);
+    let list_script = format!(
+        "if [ ! -d {path_shell} ]; then exit 1; fi; \
+         ls -1AF -- {path_shell} 2>/dev/null"
+    );
+
+    let mut cmd = Command::new("wsl.exe");
+    push_wsl_distro(&mut cmd, &wsl_distro);
+    cmd.args(["--", "sh", "-lc", &list_script]);
+
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| format!("Failed to list WSL directory: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let detail = if stderr.is_empty() { stdout } else { stderr };
+        return Err(format!("WSL list failed for {path:?}: {detail}"));
+    }
+
+    Ok(parse_wsl_ls_listing(&String::from_utf8_lossy(&output.stdout)))
+}
+
+#[cfg(not(target_os = "windows"))]
+async fn fs_list_wsl_impl(_wsl_distro: Option<String>, _path: String) -> Result<Vec<FileEntry>, String> {
+    Err("WSL is only available on Windows".to_string())
+}
+
+fn parse_wsl_ls_listing(stdout: &str) -> Vec<FileEntry> {
+    let mut entries = Vec::new();
+
+    for line in stdout.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let (name, file_type) = if let Some(stripped) = line.strip_suffix('/') {
+            (stripped, "d")
+        } else if let Some(stripped) = line.strip_suffix('@') {
+            (stripped, "l")
+        } else if let Some((link, _)) = line.split_once(" -> ") {
+            (link.trim(), "l")
+        } else {
+            (line, "-")
+        };
+        if name == "." || name == ".." {
+            continue;
+        }
+
+        entries.push(FileEntry {
+            name: name.to_string(),
+            path: String::new(),
+            r#type: file_type.to_string(),
+            size: 0,
+            last_modified: 0,
+            permissions: String::new(),
+        });
+    }
+
+    entries.sort_by(|a, b| {
+        let a_dir = a.r#type == "d" || a.r#type == "l";
+        let b_dir = b.r#type == "d" || b.r#type == "l";
+        if a_dir && !b_dir {
+            std::cmp::Ordering::Less
+        } else if !a_dir && b_dir {
+            std::cmp::Ordering::Greater
+        } else {
+            a.name.cmp(&b.name)
+        }
+    });
+
+    entries
+}
+
+#[cfg(test)]
+mod wsl_list_tests {
+    use super::parse_wsl_ls_listing;
+
+    #[test]
+    fn parse_ls_marks_directories_and_symlinks() {
+        let stdout = "data/\nfile.txt\nlink@\nother -> target\n";
+        let entries = parse_wsl_ls_listing(stdout);
+        assert_eq!(entries.len(), 4);
+        let by_name: std::collections::HashMap<_, _> =
+            entries.iter().map(|e| (e.name.as_str(), e.r#type.as_str())).collect();
+        assert_eq!(by_name.get("data"), Some(&"d"));
+        assert_eq!(by_name.get("file.txt"), Some(&"-"));
+        assert_eq!(by_name.get("link"), Some(&"l"));
+        assert_eq!(by_name.get("other"), Some(&"l"));
+    }
+}
+
 #[tauri::command]
 pub async fn fs_touch(
     connection_id: String,

@@ -188,6 +188,9 @@ const ipcRenderer = {
       'config:select-folder': 'config_select_folder',
       'shell:open': 'shell_open',
       'shell:getWslDistros': 'shell_get_wsl_distros',
+      'read_wsl_zsh_init_files': 'read_wsl_zsh_init_files',
+      'wsl_get_cwd': 'wsl_get_cwd',
+      'fs_list_wsl': 'fs_list_wsl',
       'shell:getWindowsShells': 'shell_get_windows_shells',
       'shell:getAvailableShells': 'shell_get_available_shells',
       'shell:getConnectionShells': 'shell_get_connection_shells',
@@ -356,6 +359,14 @@ const ipcRenderer = {
           payload = { connectionId: args[0].connectionId, command: args[0].command };
         } else {
           payload = { connectionId: args[0], command: args[1] };
+        }
+      } else if (
+        tauriCommand === 'fs_list_wsl'
+        || tauriCommand === 'wsl_get_cwd'
+        || tauriCommand === 'read_wsl_zsh_init_files'
+      ) {
+        if (args.length === 1 && typeof args[0] === 'object') {
+          payload = args[0];
         }
       } else if (tauriCommand === 'fs_list' || tauriCommand === 'fs_read_file' || tauriCommand === 'fs_mkdir' || tauriCommand === 'fs_delete' || tauriCommand === 'fs_exists') {
         if (args.length === 1 && typeof args[0] === 'object' && 'connectionId' in args[0]) {

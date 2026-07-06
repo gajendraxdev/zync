@@ -37,6 +37,11 @@ export interface TerminalCache {
   spawnBlocked?: boolean;
   /** CWD used for the in-flight PTY spawn — seeded on terminal-ready. */
   pendingSpawnCwd?: string;
+  /** Shell id/path used for the in-flight PTY spawn — persisted on terminal-ready. */
+  pendingSpawnShell?: string;
+  /** Probed from zsh init files when shell is zsh (undefined = not yet known). */
+  zshAutosuggestEnabled?: boolean;
+  zshAutosuggestProbe?: Promise<boolean>;
   /** Last PTY output or user input timestamp — used to skip idle-host suspend while busy. */
   lastActivityAt?: number;
   /** Idle-suspend banner already written for the current suspend cycle. */

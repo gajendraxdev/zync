@@ -2,19 +2,11 @@ import {
   getCommandName,
   getLastArg,
   inferSeparator,
+  isAbsoluteOrHomePath,
   resolveDir,
   stripLeadingUnmatchedQuote,
   stripTrailingSep,
 } from './pathCompletion.js';
-
-function isAbsolutePath(arg: string): boolean {
-  return (
-    arg.startsWith('/') ||
-    arg.startsWith('~') ||
-    /^[A-Za-z]:[/\\]/.test(arg) ||
-    arg.startsWith('\\\\')
-  );
-}
 
 /**
  * Best-effort cwd update after `cd` / `pushd` commits when OSC 7 is unavailable.
@@ -35,7 +27,7 @@ export function resolveCdTargetPath(line: string, cwd?: string): string | null {
     return parentDirectory(cwd);
   }
 
-  if (isAbsolutePath(arg)) {
+  if (isAbsoluteOrHomePath(arg)) {
     return stripTrailingSep(arg);
   }
 

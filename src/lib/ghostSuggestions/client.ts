@@ -1,4 +1,13 @@
-import { getPathSuggestion, getLastArg, getCommandName as getCommandNameFull, FILE_AWARE_COMMANDS } from './pathCompletion';
+import {
+  getPathSuggestion,
+  getLastArg,
+  getCommandName as getCommandNameFull,
+  FILE_AWARE_COMMANDS,
+  hasUnmatchedQuoteOnActiveToken,
+  isBareDirectoryListingLine,
+} from './pathCompletion';
+import { WSL_FS_LIST_TIMEOUT_MS } from './wslShell';
+import { cwdForWslPathCompletion, shellIdIndicatesWsl } from './wslShell';
 import type {
   GhostCommitRequest,
   GhostSuggestionProviders,
@@ -33,6 +42,7 @@ export async function resolveInlineSuggestion({
   cwd,
   scope,
   fsConnectionId,
+  wslShellId,
   providers,
 }: InlineSuggestionParams): Promise<string> {
   if (!shouldUseGhostForLine(line)) {
@@ -46,19 +56,39 @@ export async function resolveInlineSuggestion({
 
   const preferPath = shouldPreferPathSuggestion(line);
   const listConnectionId = fsConnectionId ?? scope;
+  const listCwd = wslShellId ? cwdForWslPathCompletion(cwd) : cwd;
+  const fsTimeoutMs = wslShellId && shellIdIndicatesWsl(wslShellId)
+    ? WSL_FS_LIST_TIMEOUT_MS
+    : INLINE_FS_TIMEOUT_MS;
 
   if (preferPath && enabledProviders.filesystem) {
-    const fsSuffix = await getPathSuggestion(line, cwd, listConnectionId, INLINE_FS_TIMEOUT_MS).catch(() => null);
+    const fsSuffix = await getPathSuggestion(
+      line,
+      listCwd,
+      listConnectionId,
+      fsTimeoutMs,
+      wslShellId,
+    ).catch(() => null);
     if (fsSuffix) return fsSuffix;
   }
 
-  if (enabledProviders.history) {
+  const skipHistoryForBareCd = preferPath
+    && enabledProviders.filesystem
+    && isBareDirectoryListingLine(line);
+
+  if (enabledProviders.history && !skipHistoryForBareCd) {
     const historySuffix = await fetchHistorySuggestion(line, scope);
     if (historySuffix) return historySuffix;
   }
 
   if (!preferPath && enabledProviders.filesystem) {
-    const fsSuffix = await getPathSuggestion(line, cwd, listConnectionId, INLINE_FS_TIMEOUT_MS).catch(() => null);
+    const fsSuffix = await getPathSuggestion(
+      line,
+      listCwd,
+      listConnectionId,
+      fsTimeoutMs,
+      wslShellId,
+    ).catch(() => null);
     if (fsSuffix) return fsSuffix;
   }
 
@@ -83,5 +113,7 @@ function isFilesystemCommand(line: string): boolean {
 }
 
 function shouldUseGhostForLine(line: string): boolean {
-  return Boolean(getCommandNameFull(line));
+  if (!getCommandNameFull(line)) return false;
+  if (hasUnmatchedQuoteOnActiveToken(line)) return false;
+  return true;
 }

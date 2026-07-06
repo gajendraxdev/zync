@@ -38,15 +38,22 @@ export function extractPowerShellCwd(text: string): string | null {
 }
 
 /**
- * Extract cwd from common Unix prompts (`user@host:~/path$`, `/path#`, etc.).
+ * Extract cwd from common Unix prompts (`user@host:~/path$`, `host:~ $`, `/path#`, etc.).
  */
 export function extractUnixPromptCwd(text: string): string | null {
   const clean = stripAnsi(text);
-  const re = /(?:^|\n)(?:[^\r\n@]*@[^\r\n:]*:)?([/~][^\r\n$#%›>]+)[$#%›>]\s*(?:\r?\n|$)/g;
+  const patterns = [
+    // user@host:~/path$ or bare /path#
+    /(?:^|\n)(?:[^\r\n@]*@[^\r\n:]*:)?([/~][^\r\n$#%›>]+)[$#%›>]\s*(?:\r?\n|$)/g,
+    // host:~/path$ / host:~ $ (no @ — common in WSL zsh themes)
+    /(?:^|\n)(?:[^\r\n$#%›>\s]+):([/~][^\r\n$#%›>]*)\s*[$#%›>]/g,
+  ];
   let last: string | null = null;
-  for (const match of clean.matchAll(re)) {
-    const candidate = normalizePromptPath(match[1] ?? '');
-    if (candidate) last = candidate;
+  for (const re of patterns) {
+    for (const match of clean.matchAll(re)) {
+      const candidate = normalizePromptPath(match[1] ?? '');
+      if (candidate) last = candidate;
+    }
   }
   return last;
 }

@@ -1,3 +1,7 @@
+import { parseWslDistro, shellIdIndicatesWsl, WSL_FS_LIST_TIMEOUT_MS } from './wslShell.js';
+
+export { WSL_FS_LIST_TIMEOUT_MS };
+
 /**
  * pathCompletion.ts — filesystem-aware ghost suffix (fish-style path completion).
  *
@@ -89,6 +93,36 @@ export function stripLeadingUnmatchedQuote(arg: string): string {
     if (!arg.slice(1).includes(q)) return arg.slice(1);
   }
   return arg;
+}
+
+/** True when the active shell token has an unmatched opening quote. */
+export function hasUnmatchedQuoteOnActiveToken(line: string): boolean {
+  const arg = getLastArg(line);
+  let inSingle = false;
+  let inDouble = false;
+  let escaped = false;
+
+  for (let i = 0; i < arg.length; i++) {
+    const ch = arg[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (ch === "'" && !inDouble) {
+      inSingle = !inSingle;
+      continue;
+    }
+    if (ch === '"' && !inSingle) {
+      inDouble = !inDouble;
+      continue;
+    }
+  }
+
+  return inSingle || inDouble;
 }
 
 /**
@@ -199,14 +233,18 @@ function splitPath(
  * Absolute paths and `~` paths are returned as-is (backend handles tilde
  * expansion). Relative paths (`./`, `../`, or bare `foo/`) are joined with cwd.
  */
+export function isAbsoluteOrHomePath(path: string): boolean {
+  return (
+    path.startsWith('/') ||
+    path.startsWith('~') ||
+    /^[A-Za-z]:[/\\]/.test(path) ||
+    path.startsWith('\\\\')
+  );
+}
+
 export function resolveDir(dir: string, cwd: string, sep: string): string {
   // Already absolute or home-relative — pass through
-  if (
-    dir.startsWith('/') ||
-    dir.startsWith('~') ||
-    /^[A-Za-z]:[/\\]/.test(dir) ||
-    dir.startsWith('\\\\')
-  ) {
+  if (isAbsoluteOrHomePath(dir)) {
     return dir;
   }
 
@@ -234,10 +272,19 @@ export function stripTrailingSep(path: string): string {
 
 /** Map list paths to what `fs_list` expects (local HOME vs remote SFTP cwd). */
 function normalizeFsListPath(path: string, connectionId: string): string {
-  if (path === '~' || path === '~/') {
+  if (path === '~') {
     return connectionId === 'local' ? '' : '.';
   }
   return path;
+}
+
+/** True for bare `cd` / `pushd` / `popd` (list cwd entries, not history like `cd ..`). */
+export function isBareDirectoryListingLine(line: string): boolean {
+  const trimmed = line.trimEnd();
+  const command = getCommandName(trimmed);
+  if (!DIRECTORY_ONLY_COMMANDS.has(command)) return false;
+  const lastArg = getLastArg(trimmed);
+  return !lastArg || lastArg.toLowerCase() === command;
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -255,8 +302,9 @@ export async function getPathSuggestion(
   cwd: string | undefined,
   connectionId: string,
   timeoutMs = FS_LIST_TIMEOUT_MS,
+  wslShellId?: string,
 ): Promise<string | null> {
-  const matches = await getPathSuggestions(line, cwd, connectionId, 1, timeoutMs);
+  const matches = await getPathSuggestions(line, cwd, connectionId, 1, timeoutMs, wslShellId);
   return matches[0] ?? null;
 }
 
@@ -265,13 +313,28 @@ export function inferSeparator(cwd: string | undefined): string {
   return '/';
 }
 
+function fsListTimeoutMs(timeoutMs: number, wslShellId?: string): number {
+  if (wslShellId && shellIdIndicatesWsl(wslShellId)) {
+    return Math.max(timeoutMs, WSL_FS_LIST_TIMEOUT_MS);
+  }
+  return timeoutMs;
+}
+
+/** Warm WSL home listing cache after terminal-ready (wsl.exe cold start). */
+export function prefetchWslHomeListing(shellId: string, cwd?: string): void {
+  if (!shellIdIndicatesWsl(shellId)) return;
+  void getPathSuggestions('cd', cwd, 'local', 8, WSL_FS_LIST_TIMEOUT_MS, shellId).catch(() => {});
+}
+
 export async function getPathSuggestions(
   line: string,
   cwd: string | undefined,
   connectionId: string,
   limit = 32,
   timeoutMs = FS_LIST_TIMEOUT_MS,
+  wslShellId?: string,
 ): Promise<string[]> {
+  const listTimeoutMs = fsListTimeoutMs(timeoutMs, wslShellId);
   const lastArg = stripLeadingUnmatchedQuote(getLastArg(line));
   if (looksLikeRemoteTarget(lastArg)) return [];
   const commandName = getCommandName(line);
@@ -307,8 +370,11 @@ export async function getPathSuggestions(
 
   // Resolve against CWD when we have one; otherwise use the dir as typed.
   const resolvedDir = cwd ? resolveDir(dir, cwd, sep) : dir;
+  const useWsl = Boolean(wslShellId && shellIdIndicatesWsl(wslShellId));
   const apiPath = normalizeFsListPath(stripTrailingSep(resolvedDir), connectionId);
-  const cacheKey = `${connectionId}::${apiPath}`;
+  const cacheKey = useWsl
+    ? `wsl:${parseWslDistro(wslShellId!) ?? 'default'}::${apiPath}`
+    : `${connectionId}::${apiPath}`;
 
   let entries: FsEntry[];
   try {
@@ -317,7 +383,7 @@ export async function getPathSuggestions(
     if (cached && now - cached.at <= FS_LIST_CACHE_TTL_MS) {
       entries = cached.entries;
     } else {
-      entries = await invokeFsList(connectionId, apiPath, timeoutMs);
+      entries = await invokeFsList(connectionId, apiPath, listTimeoutMs, wslShellId);
       fsListCache.set(cacheKey, { at: now, entries });
       if (fsListCache.size > 128) {
         // First pass: evict entries that have already expired past their TTL.
@@ -399,8 +465,19 @@ function normalizeEntryType(t: string): string {
   return 'file';
 }
 
-async function invokeFsList(connectionId: string, path: string, timeoutMs: number): Promise<FsEntry[]> {
-  const request = window.ipcRenderer.invoke('fs_list', { connectionId, path }) as Promise<Array<{ name: string; type: string }>>;
+async function invokeFsList(
+  connectionId: string,
+  path: string,
+  timeoutMs: number,
+  wslShellId?: string,
+): Promise<FsEntry[]> {
+  const useWsl = Boolean(wslShellId && shellIdIndicatesWsl(wslShellId));
+  const request = (useWsl
+    ? window.ipcRenderer.invoke('fs_list_wsl', {
+      wslDistro: parseWslDistro(wslShellId!),
+      path,
+    })
+    : window.ipcRenderer.invoke('fs_list', { connectionId, path })) as Promise<Array<{ name: string; type: string }>>;
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
   const timeout = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => {
