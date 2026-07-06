@@ -412,15 +412,15 @@ Terminal ANSI palette follows theme plugin manifest `mode` (with luminance fallb
 
 ## 15. Ghost suggestions
 
-Zync provides fish-style inline ghost text, Tab popup lists, per-scope command history (Rust frecency), and filesystem path completion. Ghost input runs through `inputQueue` so it cannot reorder shell keystrokes.
+Zync provides fish-style **inline** ghost text, per-scope command history (Rust frecency), and filesystem path completion (local, WSL, SSH). Tab always goes to the shell; → accepts the ghost suffix. Ghost input runs through `inputQueue` so it cannot reorder shell keystrokes.
 
-**Full documentation:** [TERMINAL_GHOST_SUGGESTIONS.md](./TERMINAL_GHOST_SUGGESTIONS.md) — file map, event flow, key bindings, settings, and change notes.
+**Full documentation:** [TERMINAL_GHOST.md](./TERMINAL_GHOST.md) — architecture, suggestion engine, key bindings, settings, WSL/SSH behavior, and future plans.
 
 **At a glance:**
 
-- UI: `useTerminalGhost.ts`, `GhostSuggestionOverlay.tsx`, `GhostSuggestionListOverlay.tsx`
+- UI: `useTerminalGhost.ts`, `GhostSuggestionOverlay.tsx`
 - Logic: `src/lib/ghostSuggestions/*`
-- Backend: `src-tauri/src/ghost/*`
+- Backend: `src-tauri/src/ghost/*` (`ghost_suggest_v2` decision engine)
 - Settings: **Settings → Terminal → Ghost suggestions**
 - IPC skipped when shell tab is hidden
 
@@ -489,7 +489,7 @@ Terminal tab intro links jump to Appearance for look-and-feel.
 
 Minor items that do not change core shell behavior today:
 
-- Ghost suggestion fish-like parity edge cases — see [TERMINAL_GHOST_SUGGESTIONS.md](./TERMINAL_GHOST_SUGGESTIONS.md)
+- Ghost suggestion behavior and edge cases — see [TERMINAL_GHOST.md](./TERMINAL_GHOST.md)
 - Rare Windows ConPTY edge cases (`windowsPty` / `reflowCursorLine` defaults in `xtermOptions.ts`)
 
 ---
@@ -502,7 +502,7 @@ Minor items that do not change core shell behavior today:
 src/components/terminal/
   Terminal.tsx, TerminalHost.tsx, TerminalManager.tsx
   TerminalDisconnectedView.tsx, TerminalSearchBar.tsx, TerminalContextMenu.tsx
-  GhostSuggestionOverlay.tsx, GhostSuggestionListOverlay.tsx
+  GhostSuggestionOverlay.tsx
   useTerminalLifecycle.ts, useTerminalTheme.ts, useTerminalSearch.ts
   useTerminalGhost.ts, useTerminalKeybindings.ts, useTerminalGlobalShortcuts.ts
   terminalTheme.ts
@@ -536,7 +536,7 @@ tests/runTerminalRendererTests.mjs
 
 ## Related documents
 
-- [TERMINAL_GHOST_SUGGESTIONS.md](./TERMINAL_GHOST_SUGGESTIONS.md) — ghost completion system (inline, popup, history, paths)
+- [TERMINAL_GHOST.md](./TERMINAL_GHOST.md) — ghost completion system (inline, history, paths, AI integration plans)
 - [SESSION_PERSISTENCE.md](./SESSION_PERSISTENCE.md) — workspace tab/session restore (includes terminal snapshots)
 - [SETTINGS_SYSTEM.md](./SETTINGS_SYSTEM.md) — global settings persistence and `settings.terminal` schema
 
