@@ -5,7 +5,9 @@ import {
   FILE_AWARE_COMMANDS,
   hasUnmatchedQuoteOnActiveToken,
   isBareDirectoryListingLine,
+  REMOTE_FS_LIST_TIMEOUT_MS,
 } from './pathCompletion';
+import { ghostDebug } from './ghostDebug';
 import { WSL_FS_LIST_TIMEOUT_MS } from './wslShell';
 import { cwdForWslPathCompletion, shellIdIndicatesWsl } from './wslShell';
 import type {
@@ -16,6 +18,12 @@ import type {
 } from './types';
 
 const INLINE_FS_TIMEOUT_MS = 160;
+
+function inlineFsTimeoutMs(connectionId: string, wslShellId?: string): number {
+  if (wslShellId && shellIdIndicatesWsl(wslShellId)) return WSL_FS_LIST_TIMEOUT_MS;
+  if (connectionId !== 'local') return REMOTE_FS_LIST_TIMEOUT_MS;
+  return INLINE_FS_TIMEOUT_MS;
+}
 
 export async function fetchHistorySuggestion(
   line: string,
@@ -46,6 +54,7 @@ export async function resolveInlineSuggestion({
   providers,
 }: InlineSuggestionParams): Promise<string> {
   if (!shouldUseGhostForLine(line)) {
+    ghostDebug('resolve', { phase: 'skip', reason: 'line-not-eligible', line });
     return '';
   }
 
@@ -57,9 +66,18 @@ export async function resolveInlineSuggestion({
   const preferPath = shouldPreferPathSuggestion(line);
   const listConnectionId = fsConnectionId ?? scope;
   const listCwd = wslShellId ? cwdForWslPathCompletion(cwd) : cwd;
-  const fsTimeoutMs = wslShellId && shellIdIndicatesWsl(wslShellId)
-    ? WSL_FS_LIST_TIMEOUT_MS
-    : INLINE_FS_TIMEOUT_MS;
+  const fsTimeoutMs = inlineFsTimeoutMs(listConnectionId, wslShellId);
+
+  ghostDebug('resolve', {
+    line,
+    scope,
+    listConnectionId,
+    cwd: listCwd ?? null,
+    wslShellId: wslShellId ?? null,
+    preferPath,
+    fsTimeoutMs,
+    providers: enabledProviders,
+  });
 
   if (preferPath && enabledProviders.filesystem) {
     const fsSuffix = await getPathSuggestion(
@@ -69,7 +87,10 @@ export async function resolveInlineSuggestion({
       fsTimeoutMs,
       wslShellId,
     ).catch(() => null);
-    if (fsSuffix) return fsSuffix;
+    if (fsSuffix) {
+      ghostDebug('resolve', { phase: 'path-hit', suffix: fsSuffix });
+      return fsSuffix;
+    }
   }
 
   const skipHistoryForBareCd = preferPath
@@ -78,7 +99,10 @@ export async function resolveInlineSuggestion({
 
   if (enabledProviders.history && !skipHistoryForBareCd) {
     const historySuffix = await fetchHistorySuggestion(line, scope);
-    if (historySuffix) return historySuffix;
+    if (historySuffix) {
+      ghostDebug('resolve', { phase: 'history-hit', suffix: historySuffix });
+      return historySuffix;
+    }
   }
 
   if (!preferPath && enabledProviders.filesystem) {
@@ -89,9 +113,13 @@ export async function resolveInlineSuggestion({
       fsTimeoutMs,
       wslShellId,
     ).catch(() => null);
-    if (fsSuffix) return fsSuffix;
+    if (fsSuffix) {
+      ghostDebug('resolve', { phase: 'path-hit-secondary', suffix: fsSuffix });
+      return fsSuffix;
+    }
   }
 
+  ghostDebug('resolve', { phase: 'empty', skipHistoryForBareCd });
   return '';
 }
 

@@ -98,6 +98,40 @@ fn shell_single_quote(value: &str) -> String {
     value.replace('\'', "'\\''")
 }
 
+/// Format a path for POSIX `cd`. Tilde prefixes must stay unquoted so the shell
+/// expands them; only the suffix after `~/` is single-quoted when present.
+pub(crate) fn posix_shell_cd_path(path: &str) -> String {
+    let trimmed = path.trim();
+    if trimmed.is_empty() || trimmed == "~" {
+        return "~".to_string();
+    }
+    if let Some(rest) = trimmed.strip_prefix("~/") {
+        if rest.is_empty() {
+            return "~".to_string();
+        }
+        return format!("~/'{}'", shell_single_quote(rest));
+    }
+    if let Some(tail) = trimmed.strip_prefix('~') {
+        if !tail.is_empty() && !tail.starts_with('/') {
+            let (user, rest) = tail
+                .split_once('/')
+                .map(|(u, r)| (u, Some(r)))
+                .unwrap_or((tail, None));
+            if !user.is_empty()
+                && user
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+            {
+                return match rest {
+                    Some("") | None => format!("~{user}"),
+                    Some(rest) => format!("~{user}/'{}'", shell_single_quote(rest)),
+                };
+            }
+        }
+    }
+    format!("'{}'", shell_single_quote(trimmed))
+}
+
 fn powershell_single_quote(value: &str) -> String {
     value.replace('\'', "''")
 }
@@ -648,7 +682,12 @@ impl PtyManager {
                     }
                 }
             } else {
-                format!("cd '{}' && clear\r", shell_single_quote(&path))
+                let trimmed = path.trim();
+                if trimmed == "~" {
+                    "clear\r".to_string()
+                } else {
+                    format!("cd {} && clear\r", posix_shell_cd_path(trimmed))
+                }
             };
             channel
                 .data(cd_cmd.as_bytes())
@@ -894,5 +933,29 @@ impl PtyManager {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::posix_shell_cd_path;
+
+    #[test]
+    fn posix_shell_cd_path_leaves_tilde_unquoted() {
+        assert_eq!(posix_shell_cd_path("~"), "~");
+        assert_eq!(posix_shell_cd_path(" ~/ "), "~");
+    }
+
+    #[test]
+    fn posix_shell_cd_path_quotes_suffix_after_tilde_slash() {
+        assert_eq!(posix_shell_cd_path("~/data"), "~/'data'");
+        assert_eq!(posix_shell_cd_path("~/my dir"), "~/'my dir'");
+        assert_eq!(posix_shell_cd_path("~/it's"), "~/'it'\\''s'");
+    }
+
+    #[test]
+    fn posix_shell_cd_path_quotes_absolute_paths() {
+        assert_eq!(posix_shell_cd_path("/home/user"), "'/home/user'");
+        assert_eq!(posix_shell_cd_path("/home/a b"), "'/home/a b'");
     }
 }

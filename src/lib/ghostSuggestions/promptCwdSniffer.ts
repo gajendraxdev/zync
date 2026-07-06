@@ -1,3 +1,5 @@
+import { ghostDebug } from './ghostDebug.js';
+
 /**
  * Passive cwd extraction from shell prompt text in PTY output.
  * PowerShell does not emit OSC 7 by default; this keeps ghost path completion aligned.
@@ -86,6 +88,7 @@ export function feedPromptCwdSniffer(
 
   const cwd = extractCwdFromPromptOutput(merged);
   if (cwd) {
+    ghostDebug('cwd-sniff', { termId, cwd });
     onCwd(cwd);
   }
 }

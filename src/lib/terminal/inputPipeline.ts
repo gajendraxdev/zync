@@ -1,6 +1,7 @@
 import { useAppStore } from '../../store/useAppStore.js';
 import { scheduleZshAutosuggestProbe } from '../ghostSuggestions/zshAutosuggestDetect.js';
-import { prefetchWslHomeListing } from '../ghostSuggestions/pathCompletion.js';
+import { prefetchWslHomeListing, seedRemoteHomeCache } from '../ghostSuggestions/pathCompletion.js';
+import { ghostDebug } from '../ghostSuggestions/ghostDebug.js';
 import {
   fetchWslCwd,
   resolveWslShellIdForPathCompletion,
@@ -132,6 +133,31 @@ export function handleTerminalReady(termId: string, generation: number): boolean
           })
           .catch(() => {});
         prefetchWslHomeListing(wslShellId, cwdHint);
+      }
+    } else {
+      let cwdHint = termTab?.lastKnownCwd ?? termTab?.initialPath;
+      if (!cwdHint) {
+        void window.ipcRenderer.invoke('fs_cwd', { connectionId: cached.connectionId })
+          .then((path: unknown) => {
+            if (typeof path !== 'string' || !path.trim()) return;
+            const current = terminalCache.get(termId);
+            if (!current?.connectionId || current.generation !== readyGeneration) return;
+            ghostDebug('cwd', {
+              source: 'fs_cwd-seed',
+              connectionId: cached.connectionId,
+              path: path.trim(),
+            });
+            const trimmed = path.trim();
+            seedRemoteHomeCache(cached.connectionId!, trimmed);
+            store.setTerminalCwd(cached.connectionId!, termId, trimmed);
+          })
+          .catch((err: unknown) => {
+            ghostDebug('cwd', {
+              source: 'fs_cwd-seed',
+              connectionId: cached.connectionId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
       }
     }
   }

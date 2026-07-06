@@ -3,6 +3,7 @@ import {
   handleGhostInputEvent,
 } from '../.tmp-agent-tests/src/lib/ghostSuggestions/runtime.js';
 import {
+  expandTildePathForRemote,
   getPathSuggestions,
   isBareDirectoryListingLine,
 } from '../.tmp-agent-tests/src/lib/ghostSuggestions/pathCompletion.js';
@@ -460,6 +461,12 @@ await runTest('hasUnmatchedQuoteOnActiveToken blocks open quotes on active token
 await runTest('extractCwdFromPromptOutput reads host:tilde prompts without @', () => {
   const cwd = extractCwdFromPromptOutput('data\r\nkgajendra:~ $ ');
   assert.equal(cwd, '~');
+});
+
+await runTest('expandTildePathForRemote maps tilde paths for SFTP', () => {
+  assert.equal(expandTildePathForRemote('~', '/home/gajen'), '/home/gajen');
+  assert.equal(expandTildePathForRemote('~/data', '/home/gajen'), '/home/gajen/data');
+  assert.equal(expandTildePathForRemote('/var/log', '/home/gajen'), '/var/log');
 });
 
 await runTest('resolveWslShellIdForPathCompletion infers WSL from Linux cwd', () => {

@@ -1,3 +1,4 @@
+import { ghostDebug } from './ghostDebug.js';
 import { InputTracker } from './inputTracker.js';
 
 interface GhostTrackerRuntimeParams {
@@ -47,6 +48,7 @@ export function bindGhostTrackerRuntime({
       onSuggestion('', line);
       onClearUI();
       if (tracker.isDesynced()) {
+        ghostDebug('runtime', { phase: 'skip-fetch', reason: 'desynced', line });
         requestSeq += 1;
         clearTimer();
         return;

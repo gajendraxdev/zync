@@ -13,6 +13,7 @@ import {
   getZshAutosuggestEnabled,
   scheduleZshAutosuggestProbe,
 } from '../../lib/ghostSuggestions/zshAutosuggestDetect';
+import { ghostDebug } from '../../lib/ghostSuggestions/ghostDebug';
 import {
   cwdForWslPathCompletion,
   resolveWslShellIdForPathCompletion,
@@ -127,18 +128,31 @@ export function useTerminalGhost({
             termState?.shellOverride,
             store.settings.localTerm?.windowsShell,
           );
-          if (shouldSuppressGhostForNativeShell(
+          const suppressed = shouldSuppressGhostForNativeShell(
             ghostSettingsRef.current.nativeShellPolicy,
             shellId,
             getZshAutosuggestEnabled(mountSessionId),
-          )) {
-            return '';
-          }
+          );
           const rawCwd = termState?.lastKnownCwd ?? termState?.initialPath;
           const wslShellId = terminalKey === 'local'
             ? resolveWslShellIdForPathCompletion(shellId, rawCwd)
             : undefined;
           const cwd = wslShellId ? cwdForWslPathCompletion(rawCwd) : rawCwd;
+          ghostDebug('terminal', {
+            terminalKey,
+            termId: mountSessionId,
+            line,
+            shellId: shellId ?? null,
+            rawCwd: rawCwd ?? null,
+            cwd: cwd ?? null,
+            wslShellId: wslShellId ?? null,
+            suppressed,
+            desynced: cachedGhostTracker?.isDesynced() ?? false,
+          });
+          if (suppressed) {
+            ghostDebug('terminal', { phase: 'suppressed', shellId: shellId ?? null });
+            return '';
+          }
           return resolveInlineSuggestion({
             line,
             cwd,

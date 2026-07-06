@@ -14,6 +14,8 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Documentation**: `docs/TERMINAL_GHOST_SUGGESTIONS.md` — WSL path completion, architecture and scaling limits, shipped P2/P3 notes. ([a55b4db])
 
 ### Fixed
+- **SSH terminal reconnect cwd**: Restoring `lastKnownCwd` `~` no longer sends `cd '~'` (bash treats quoted tilde as a literal path); home reconnect clears the banner only; `~/…` paths use shell-safe tilde quoting. `terminal:navigate` uses the same POSIX cd path helper. ([8099dd3])
+- **Ghost SSH path completion**: Remote `fs_list` uses a 900ms timeout; `~` / `~/…` paths expand via cached remote home from `fs_cwd`; home dir is seeded on SSH `terminal-ready`. Opt-in debug logging via `localStorage.setItem('zync:ghost-debug', '1')`. ([8099dd3])
 - **Ghost WSL listing**: `fs_list_wsl` inlines paths in `wsl.exe` scripts (host spawn drops shell assignments); fixes empty `WSL list failed` errors. ([d2cef31])
 - **Ghost WSL wrong suggestions**: Path completion resolves WSL only on local tabs; Linux cwd inference no longer misroutes SSH sessions to `fs_list_wsl`. ([d2cef31])
 - **Ghost WSL cwd races**: `fetchWslCwd` uses a timeout and generation guard so stale results cannot overwrite cwd after PTY respawn. ([d2cef31])

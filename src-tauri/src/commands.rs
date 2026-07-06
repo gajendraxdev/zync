@@ -1,5 +1,5 @@
 use crate::fs::{FileEntry, FileSystem};
-use crate::pty::PtyManager;
+use crate::pty::{posix_shell_cd_path, PtyManager};
 use crate::ssh::{Client, SshManager};
 use crate::types::*;
 use anyhow::Result;
@@ -1272,7 +1272,7 @@ pub async fn terminal_navigate(
     path: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let cd_cmd = format!("cd {}\r", universal_double_quote_path(&path));
+    let cd_cmd = format!("cd {}\r", posix_shell_cd_path(&path));
     state
         .pty_manager
         .write(&term_id, &cd_cmd)
@@ -6083,11 +6083,6 @@ pub async fn ssh_parse_command(command: String) -> Result<crate::ssh_parser::Par
 /// Shell-quote a path so it can be safely embedded in a remote command string.
 fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
-}
-
-fn universal_double_quote_path(path: &str) -> String {
-    let escaped = path.replace('\\', "\\\\").replace('"', "\\\"");
-    format!("\"{}\"", escaped)
 }
 
 /// Download selected remote files/directories as a .tar.gz archive.

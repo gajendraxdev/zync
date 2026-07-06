@@ -1,3 +1,4 @@
+import { ghostDebug } from './ghostDebug.js';
 import { parseWslDistro, shellIdIndicatesWsl, WSL_FS_LIST_TIMEOUT_MS } from './wslShell.js';
 
 export { WSL_FS_LIST_TIMEOUT_MS };
@@ -47,8 +48,57 @@ export const FILE_AWARE_COMMANDS = new Set([
   'chown',
 ]);
 const FS_LIST_CACHE_TTL_MS = 1200;
-const FS_LIST_TIMEOUT_MS = 450;
+export const FS_LIST_TIMEOUT_MS = 450;
+/** SSH/SFTP round-trips need more time than local inline ghost fetches. */
+export const REMOTE_FS_LIST_TIMEOUT_MS = 900;
 const fsListCache = new Map<string, { at: number; entries: FsEntry[] }>();
+const remoteHomeCache = new Map<string, { at: number; path: string }>();
+const REMOTE_HOME_CACHE_TTL_MS = 60_000;
+
+/** Expand `~` / `~/…` to an absolute SFTP path (SFTP does not do shell tilde expansion). */
+export function expandTildePathForRemote(path: string, home: string): string {
+  const trimmed = path.trim();
+  if (trimmed === '~') return home;
+  if (trimmed.startsWith('~/') || trimmed.startsWith('~\\')) {
+    const rest = trimmed.slice(2).replace(/\\/g, '/').replace(/^\/+/, '');
+    return rest ? `${home}/${rest}` : home;
+  }
+  return path;
+}
+
+export function seedRemoteHomeCache(connectionId: string, home: string): void {
+  const trimmed = home.trim();
+  if (!trimmed.startsWith('/')) return;
+  remoteHomeCache.set(connectionId, { at: Date.now(), path: trimmed });
+}
+
+async function getRemoteHomeDir(connectionId: string): Promise<string | null> {
+  const now = Date.now();
+  const cached = remoteHomeCache.get(connectionId);
+  if (cached && now - cached.at <= REMOTE_HOME_CACHE_TTL_MS) {
+    return cached.path;
+  }
+  try {
+    const home = await window.ipcRenderer.invoke('fs_cwd', { connectionId }) as unknown;
+    if (typeof home !== 'string') return null;
+    const trimmed = home.trim();
+    if (!trimmed.startsWith('/')) return null;
+    remoteHomeCache.set(connectionId, { at: now, path: trimmed });
+    return trimmed;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveRemoteListingPath(
+  connectionId: string,
+  path: string,
+): Promise<string | null> {
+  if (!path.includes('~')) return path;
+  const home = await getRemoteHomeDir(connectionId);
+  if (!home) return null;
+  return expandTildePathForRemote(path, home);
+}
 
 // ─── Path parsing ─────────────────────────────────────────────────────────────
 
@@ -275,6 +325,9 @@ function normalizeFsListPath(path: string, connectionId: string): string {
   if (path === '~') {
     return connectionId === 'local' ? '' : '.';
   }
+  if (!path && connectionId !== 'local') {
+    return '.';
+  }
   return path;
 }
 
@@ -336,7 +389,19 @@ export async function getPathSuggestions(
 ): Promise<string[]> {
   const listTimeoutMs = fsListTimeoutMs(timeoutMs, wslShellId);
   const lastArg = stripLeadingUnmatchedQuote(getLastArg(line));
-  if (looksLikeRemoteTarget(lastArg)) return [];
+  ghostDebug('path', {
+    phase: 'start',
+    line,
+    connectionId,
+    cwd: cwd ?? null,
+    timeoutMs: listTimeoutMs,
+    wslShellId: wslShellId ?? null,
+    lastArg,
+  });
+  if (looksLikeRemoteTarget(lastArg)) {
+    ghostDebug('path', { phase: 'abort', reason: 'remote-target', lastArg });
+    return [];
+  }
   const commandName = getCommandName(line);
   const isDirectoryOnlyCommand = DIRECTORY_ONLY_COMMANDS.has(commandName);
   const isFileAwareCommand = FILE_AWARE_COMMANDS.has(commandName);
@@ -347,19 +412,44 @@ export async function getPathSuggestions(
 
   if (hasPathSeparator(lastArg)) {
     const split = splitPath(lastArg);
-    if (!split) return [];
+    if (!split) {
+      ghostDebug('path', { phase: 'abort', reason: 'split-failed', lastArg });
+      return [];
+    }
     dir = split.dir;
     partial = split.partial;
     sep = split.sep;
   } else {
     // Bare-word CWD completion.
-    if (!commandName) return [];
-    if (!isDirectoryOnlyCommand && !isFileAwareCommand) return [];
-    if (lastArg.startsWith('-')) return [];
+    if (!commandName) {
+      ghostDebug('path', { phase: 'abort', reason: 'no-command' });
+      return [];
+    }
+    if (!isDirectoryOnlyCommand && !isFileAwareCommand) {
+      ghostDebug('path', { phase: 'abort', reason: 'not-fs-command', commandName });
+      return [];
+    }
+    if (lastArg.startsWith('-')) {
+      ghostDebug('path', { phase: 'abort', reason: 'flag-arg', lastArg });
+      return [];
+    }
     // For non-directory-only commands skip when there is no partial or we
     // don't have cwd context to list from.
     if (!isDirectoryOnlyCommand) {
-      if (!cwd || !lastArg || lastArg.toLowerCase() === commandName) return [];
+      if (!cwd || !lastArg || lastArg.toLowerCase() === commandName) {
+        ghostDebug('path', { phase: 'abort', reason: 'needs-cwd-partial', cwd: cwd ?? null, lastArg });
+        return [];
+      }
+    }
+    if (isDirectoryOnlyCommand && !cwd) {
+      ghostDebug('path', {
+        phase: 'warn',
+        reason: 'bare-cd-without-tracked-cwd',
+        connectionId,
+        note: connectionId === 'local'
+          ? 'local may list HOME'
+          : 'remote lists SFTP "." — may differ from shell pwd until prompt sniffing sets cwd',
+      });
     }
     dir = '';
     partial = lastArg;
@@ -369,19 +459,47 @@ export async function getPathSuggestions(
   }
 
   // Resolve against CWD when we have one; otherwise use the dir as typed.
-  const resolvedDir = cwd ? resolveDir(dir, cwd, sep) : dir;
+  let effectiveCwd = cwd;
+  if (connectionId !== 'local' && cwd?.includes('~')) {
+    const home = await getRemoteHomeDir(connectionId);
+    if (!home) {
+      ghostDebug('path', { phase: 'abort', reason: 'remote-home-unavailable', cwd });
+      return [];
+    }
+    effectiveCwd = expandTildePathForRemote(cwd, home);
+  }
+  const resolvedDir = effectiveCwd ? resolveDir(dir, effectiveCwd, sep) : dir;
   const useWsl = Boolean(wslShellId && shellIdIndicatesWsl(wslShellId));
-  const apiPath = normalizeFsListPath(stripTrailingSep(resolvedDir), connectionId);
+  let apiPath = normalizeFsListPath(stripTrailingSep(resolvedDir), connectionId);
+  if (connectionId !== 'local') {
+    const expanded = await resolveRemoteListingPath(connectionId, apiPath);
+    if (expanded === null) {
+      ghostDebug('path', { phase: 'abort', reason: 'remote-path-expand-failed', apiPath });
+      return [];
+    }
+    apiPath = expanded;
+  }
   const cacheKey = useWsl
     ? `wsl:${parseWslDistro(wslShellId!) ?? 'default'}::${apiPath}`
     : `${connectionId}::${apiPath}`;
 
+  ghostDebug('path', {
+    phase: 'list',
+    commandName,
+    resolvedDir,
+    apiPath,
+    cacheKey,
+    partial,
+  });
+
   let entries: FsEntry[];
+  let cacheHit = false;
   try {
     const now = Date.now();
     const cached = fsListCache.get(cacheKey);
     if (cached && now - cached.at <= FS_LIST_CACHE_TTL_MS) {
       entries = cached.entries;
+      cacheHit = true;
     } else {
       entries = await invokeFsList(connectionId, apiPath, listTimeoutMs, wslShellId);
       fsListCache.set(cacheKey, { at: now, entries });
@@ -402,16 +520,34 @@ export async function getPathSuggestions(
         }
       }
     }
-  } catch {
+  } catch (err) {
+    ghostDebug('path', {
+      phase: 'fs-list-error',
+      connectionId,
+      apiPath,
+      cacheKey,
+      error: err instanceof Error ? err.message : String(err),
+    });
     const fallback = fsListCache.get(cacheKey);
     if (fallback?.entries?.length) {
       entries = fallback.entries;
+      ghostDebug('path', { phase: 'stale-cache-fallback', cacheKey, count: entries.length });
     } else {
       return [];
     }
   }
 
-  if (!entries?.length) return [];
+  ghostDebug('path', {
+    phase: 'listed',
+    cacheHit,
+    entryCount: entries?.length ?? 0,
+    cacheKey,
+  });
+
+  if (!entries?.length) {
+    ghostDebug('path', { phase: 'abort', reason: 'empty-listing', apiPath });
+    return [];
+  }
 
   // Filter: name must start with the partial the user already typed.
   // Case-insensitive fallback mirrors fish tier-2 behaviour.
@@ -425,13 +561,19 @@ export async function getPathSuggestions(
       (partial === '' || e.name.toLowerCase().startsWith(partialLower)),
   );
 
-  if (!matches.length) return [];
+  if (!matches.length) {
+    ghostDebug('path', { phase: 'abort', reason: 'no-prefix-match', partial, entryCount: entries.length });
+    return [];
+  }
 
   if (isDirectoryOnlyCommand) {
     // Note: symlink target type is not available from fs_list, so symlinks are
     // treated as potentially navigable entries for directory-only commands.
     matches = matches.filter((e) => e.type === 'directory' || e.type === 'symlink');
-    if (!matches.length) return [];
+    if (!matches.length) {
+      ghostDebug('path', { phase: 'abort', reason: 'no-directory-match', partial });
+      return [];
+    }
   }
 
   // Sort: directories first (most useful for `cd`), then alphabetically.
@@ -455,6 +597,11 @@ export async function getPathSuggestions(
     const trailingSep = (m.type === 'directory' || m.type === 'symlink') ? sep : '';
     suggestions.push(nameSuffix + trailingSep);
   }
+  ghostDebug('path', {
+    phase: 'suggestions',
+    count: suggestions.length,
+    first: suggestions[0] ?? null,
+  });
   return suggestions;
 }
 
@@ -484,9 +631,20 @@ async function invokeFsList(
       reject(new Error('fs_list timeout'));
     }, Math.max(50, timeoutMs));
   });
+  const backend = useWsl ? 'fs_list_wsl' : 'fs_list';
   try {
     const raw = await Promise.race([request, timeout]);
+    ghostDebug('fs-list', { backend, connectionId, path, timeoutMs, count: raw.length });
     return raw.map((e) => ({ name: e.name, type: normalizeEntryType(e.type) }));
+  } catch (err) {
+    ghostDebug('fs-list', {
+      backend,
+      connectionId,
+      path,
+      timeoutMs,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
   } finally {
     if (timeoutId !== null) {
       clearTimeout(timeoutId);
