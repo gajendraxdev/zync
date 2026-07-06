@@ -1887,7 +1887,7 @@ pub async fn terminal_create(
 async fn reconnect_stored_connection(
     connection_id: &str,
     original_config: ConnectionConfig,
-    state: &State<'_, AppState>,
+    state: &AppState,
 ) -> Result<(), String> {
     // Acquire per-connection reconnect lock *without* holding connections lock across await (avoids deadlock with concurrent ops needing connections).
     let reconnect_lock = {
@@ -2049,7 +2049,7 @@ pub async fn terminal_has_active_processes(
 // Helper to get SFTP session - reconnects automatically if session is dead.
 // Zero overhead for healthy connections; only re-establishes when needed.
 async fn get_sftp_or_reconnect(
-    state: &State<'_, AppState>,
+    state: &AppState,
     id: &str,
 ) -> Result<Arc<russh_sftp::client::SftpSession>, String> {
     // 1. Try to get existing SFTP session
@@ -2161,6 +2161,81 @@ pub async fn fs_list(
     }
 }
 
+/// True when an SFTP read error indicates the shared session is dead (not a slow read).
+pub(crate) fn sftp_error_is_dead_session(err: &anyhow::Error) -> bool {
+    let mut current: &dyn std::error::Error = err.as_ref();
+    loop {
+        if let Some(io_err) = current.downcast_ref::<std::io::Error>() {
+            return matches!(
+                io_err.kind(),
+                ErrorKind::BrokenPipe
+                    | ErrorKind::ConnectionReset
+                    | ErrorKind::UnexpectedEof
+                    | ErrorKind::NotConnected
+            );
+        }
+        let lower = current.to_string().to_ascii_lowercase();
+        if lower.contains("session closed")
+            || lower.contains("connection is closed")
+            || lower.contains("channel is eof")
+        {
+            return true;
+        }
+        current = match current.source() {
+            Some(source) => source,
+            None => break,
+        };
+    }
+    false
+}
+
+pub(crate) async fn read_remote_connection_file(
+    state: &AppState,
+    connection_id: &str,
+    path: &str,
+    timeout_secs: u64,
+) -> Result<String, String> {
+    let sftp = get_sftp_or_reconnect(state, connection_id).await?;
+    let timeout_duration = std::time::Duration::from_secs(timeout_secs);
+
+    match tokio::time::timeout(
+        timeout_duration,
+        state.file_system.read_remote(&sftp, path),
+    )
+    .await
+    {
+        Ok(Ok(res)) => Ok(res),
+        Ok(Err(e)) if sftp_error_is_dead_session(&e) => {
+            println!("[FS] SFTP session closed during read, retrying...");
+            {
+                let mut connections = state.connections.lock().await;
+                if let Some(c) = connections.get_mut(connection_id) {
+                    c.sftp_session = None;
+                }
+            }
+            let sftp = get_sftp_or_reconnect(state, connection_id).await?;
+            match tokio::time::timeout(
+                timeout_duration,
+                state.file_system.read_remote(&sftp, path),
+            )
+            .await
+            {
+                Ok(Ok(res)) => Ok(res),
+                Ok(Err(e)) => Err(e.to_string()),
+                Err(_) => Err(format!(
+                    "DISCONNECTED: SFTP read timed out after {}s",
+                    timeout_duration.as_secs()
+                )),
+            }
+        }
+        Ok(Err(e)) => Err(e.to_string()),
+        Err(_) => Err(format!(
+            "DISCONNECTED: SFTP read timed out after {}s",
+            timeout_duration.as_secs()
+        )),
+    }
+}
+
 #[tauri::command]
 pub async fn fs_read_file(
     connection_id: String,
@@ -2174,53 +2249,7 @@ pub async fn fs_read_file(
             .await
             .map_err(|e| e.to_string())
     } else {
-        let sftp = get_sftp_or_reconnect(&state, &connection_id).await?;
-        let timeout_duration = std::time::Duration::from_secs(10);
-
-        match tokio::time::timeout(
-            timeout_duration,
-            state.file_system.read_remote(&sftp, &path),
-        )
-        .await
-        {
-            Ok(Ok(res)) => Ok(res),
-            Ok(Err(e)) if e.to_string().to_lowercase().contains("session closed") => {
-                println!("[FS] SFTP session closed during read, retrying...");
-                {
-                    let mut connections = state.connections.lock().await;
-                    if let Some(c) = connections.get_mut(&connection_id) {
-                        c.sftp_session = None;
-                    }
-                }
-                let sftp = get_sftp_or_reconnect(&state, &connection_id).await?;
-                match tokio::time::timeout(
-                    timeout_duration,
-                    state.file_system.read_remote(&sftp, &path),
-                )
-                .await
-                {
-                    Ok(Ok(res)) => Ok(res),
-                    Ok(Err(e)) => Err(e.to_string()),
-                    Err(_) => Err(format!(
-                        "DISCONNECTED: SFTP read timed out after {}s",
-                        timeout_duration.as_secs()
-                    )),
-                }
-            }
-            Ok(Err(e)) => Err(e.to_string()),
-            Err(_) => {
-                {
-                    let mut connections = state.connections.lock().await;
-                    if let Some(c) = connections.get_mut(&connection_id) {
-                        c.sftp_session = None;
-                    }
-                }
-                Err(format!(
-                    "DISCONNECTED: SFTP read timed out after {}s",
-                    timeout_duration.as_secs()
-                ))
-            }
-        }
+        read_remote_connection_file(&state, &connection_id, &path, 10).await
     }
 }
 
@@ -2365,6 +2394,9 @@ async fn read_wsl_zsh_init_files_impl(wsl_distro: Option<String>) -> Result<Stri
         "[ -f \"$f\" ] && cat \"$f\"; done"
     );
     cmd.args(["--", "sh", "-lc", shell_script]);
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
 
     let timeout_duration = std::time::Duration::from_secs(8);
     let child = cmd
@@ -2510,6 +2542,97 @@ async fn fs_list_wsl_impl(wsl_distro: Option<String>, path: String) -> Result<Ve
 #[cfg(not(target_os = "windows"))]
 async fn fs_list_wsl_impl(_wsl_distro: Option<String>, _path: String) -> Result<Vec<FileEntry>, String> {
     Err("WSL is only available on Windows".to_string())
+}
+
+/// Filesystem helpers for ghost suggest v2 (P5).
+pub(crate) async fn ghost_fs_list(
+    state: &AppState,
+    connection_id: &str,
+    path: &str,
+) -> Result<Vec<FileEntry>, String> {
+    if connection_id == "local" {
+        state
+            .file_system
+            .list_local(path)
+            .map_err(|e| e.to_string())
+    } else {
+        let sftp = get_sftp_or_reconnect(state, connection_id).await?;
+        let timeout_duration = std::time::Duration::from_secs(10);
+        match tokio::time::timeout(
+            timeout_duration,
+            state.file_system.list_remote(&sftp, path),
+        )
+        .await
+        {
+            Ok(Ok(res)) => Ok(res),
+            Ok(Err(e)) if e.to_string().to_lowercase().contains("session closed") => {
+                {
+                    let mut connections = state.connections.lock().await;
+                    if let Some(c) = connections.get_mut(connection_id) {
+                        c.sftp_session = None;
+                    }
+                }
+                let sftp = get_sftp_or_reconnect(state, connection_id).await?;
+                match tokio::time::timeout(
+                    timeout_duration,
+                    state.file_system.list_remote(&sftp, path),
+                )
+                .await
+                {
+                    Ok(Ok(res)) => Ok(res),
+                    Ok(Err(e)) => Err(e.to_string()),
+                    Err(_) => Err(format!(
+                        "DISCONNECTED: SFTP listing timed out after {}s",
+                        timeout_duration.as_secs()
+                    )),
+                }
+            }
+            Ok(Err(e)) => Err(e.to_string()),
+            Err(_) => {
+                {
+                    let mut connections = state.connections.lock().await;
+                    if let Some(c) = connections.get_mut(connection_id) {
+                        c.sftp_session = None;
+                    }
+                }
+                Err(format!(
+                    "DISCONNECTED: SFTP listing timed out after {}s",
+                    timeout_duration.as_secs()
+                ))
+            }
+        }
+    }
+}
+
+pub(crate) async fn ghost_fs_cwd(state: &AppState, connection_id: &str) -> Result<String, String> {
+    if connection_id == "local" {
+        state
+            .file_system
+            .get_home_dir(connection_id)
+            .map_err(|e| e.to_string())
+    } else {
+        let sftp = get_sftp_or_reconnect(state, connection_id).await?;
+        let timeout_duration = std::time::Duration::from_secs(10);
+        match tokio::time::timeout(timeout_duration, sftp.canonicalize(".")).await {
+            Ok(Ok(path)) => Ok(path),
+            Ok(Err(e)) => Err(e.to_string()),
+            Err(_) => Err(format!(
+                "DISCONNECTED: SFTP cwd timed out after {}s",
+                timeout_duration.as_secs()
+            )),
+        }
+    }
+}
+
+pub(crate) async fn ghost_fs_list_wsl(
+    wsl_distro: Option<String>,
+    path: String,
+) -> Result<Vec<FileEntry>, String> {
+    fs_list_wsl_impl(wsl_distro, path).await
+}
+
+pub(crate) async fn ghost_wsl_get_cwd(wsl_distro: Option<String>) -> Result<String, String> {
+    wsl_get_cwd_impl(wsl_distro).await
 }
 
 fn parse_wsl_ls_listing(stdout: &str) -> Vec<FileEntry> {

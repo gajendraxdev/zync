@@ -1,3 +1,4 @@
+use crate::ghost::context::{cwd_context_bonus, recent_session_bonus, RankingContext};
 use crate::ghost::parser::history_suffix_for_command;
 use crate::ghost::types::ScopeHistory;
 
@@ -63,6 +64,7 @@ pub fn best_suffix_for_prefix(
     scope: &ScopeHistory,
     prefix: &str,
     case_insensitive: bool,
+    context: RankingContext<'_>,
 ) -> Option<String> {
     let mut best_suffix: Option<String> = None;
     let mut best_score = f64::NEG_INFINITY;
@@ -77,7 +79,9 @@ pub fn best_suffix_for_prefix(
 
         let score = scope.scores.get(cmd).map(|e| e.live_score()).unwrap_or(0.0);
         let suffix_len = suffix.chars().count();
-        let bonus = suffix_bonus_for_command(prefix, &suffix);
+        let bonus = suffix_bonus_for_command(prefix, &suffix)
+            + cwd_context_bonus(prefix, cmd, context.cwd)
+            + recent_session_bonus(cmd, context.recent_commands);
 
         if score > best_score
             || (score == best_score && bonus > best_bonus)
@@ -103,6 +107,7 @@ pub fn ranked_candidates_for_prefix(
     prefix: &str,
     case_insensitive: bool,
     limit: usize,
+    context: RankingContext<'_>,
 ) -> Vec<String> {
     if limit == 0 {
         return Vec::new();
@@ -116,7 +121,9 @@ pub fn ranked_candidates_for_prefix(
 
         let score = scope.scores.get(cmd).map(|e| e.live_score()).unwrap_or(0.0);
         let suffix_len = suffix.chars().count();
-        let bonus = suffix_bonus_for_command(prefix, &suffix);
+        let bonus = suffix_bonus_for_command(prefix, &suffix)
+            + cwd_context_bonus(prefix, cmd, context.cwd)
+            + recent_session_bonus(cmd, context.recent_commands);
         candidates.push((suffix, score, bonus, suffix_len, idx));
     }
 
@@ -147,6 +154,7 @@ pub fn ranked_candidates_for_prefix(
 #[cfg(test)]
 mod tests {
     use super::{best_suffix_for_prefix, ranked_candidates_for_prefix};
+    use crate::ghost::context::RankingContext;
     use crate::ghost::types::ScopeHistory;
 
     #[test]
@@ -159,7 +167,7 @@ mod tests {
             scores: Default::default(),
         };
 
-        let best = best_suffix_for_prefix(&scope, "git checkout ", false)
+        let best = best_suffix_for_prefix(&scope, "git checkout ", false, RankingContext::empty())
             .expect("expected best suffix");
         assert_eq!(best, "main");
     }
@@ -175,19 +183,34 @@ mod tests {
             scores: Default::default(),
         };
 
-        let out = ranked_candidates_for_prefix(&scope, "git st", false, 10);
+        let out = ranked_candidates_for_prefix(&scope, "git st", false, 10, RankingContext::empty());
         assert_eq!(out, vec!["ash".to_string(), "atus".to_string()]);
     }
 
     #[test]
-    fn command_bonus_prefers_pathy_cd_suffixes() {
+    fn command_bonus_prefers_pathy_cd_suffixes_without_cwd() {
         let scope = ScopeHistory {
             history: vec!["cd notes".to_string(), "cd /var/log".to_string()],
             scores: Default::default(),
         };
 
-        let best = best_suffix_for_prefix(&scope, "cd ", false).expect("expected suffix");
+        let best = best_suffix_for_prefix(&scope, "cd ", false, RankingContext::empty())
+            .expect("expected suffix");
         assert_eq!(best, "/var/log");
+    }
+
+    #[test]
+    fn cwd_context_prefers_relative_cd_under_current_directory() {
+        let scope = ScopeHistory {
+            history: vec!["cd /var/log".to_string(), "cd Documents".to_string()],
+            scores: Default::default(),
+        };
+        let ctx = RankingContext {
+            cwd: Some("/home/me/projects"),
+            recent_commands: &[],
+        };
+        let best = best_suffix_for_prefix(&scope, "cd ", false, ctx).expect("expected suffix");
+        assert_eq!(best, "Documents");
     }
 
     #[test]
@@ -197,7 +220,8 @@ mod tests {
             scores: Default::default(),
         };
 
-        let best = best_suffix_for_prefix(&scope, "ssh ", false).expect("expected suffix");
+        let best = best_suffix_for_prefix(&scope, "ssh ", false, RankingContext::empty())
+            .expect("expected suffix");
         assert_eq!(best, "root@prod");
     }
 
@@ -211,7 +235,8 @@ mod tests {
             scores: Default::default(),
         };
 
-        let best = best_suffix_for_prefix(&scope, "cd Doc", false).expect("expected suffix");
+        let best = best_suffix_for_prefix(&scope, "cd Doc", false, RankingContext::empty())
+            .expect("expected suffix");
         assert_eq!(best, "uments");
     }
 
@@ -223,13 +248,28 @@ mod tests {
         };
 
         assert_eq!(
-            best_suffix_for_prefix(&scope, "git", false),
+            best_suffix_for_prefix(&scope, "git", false, RankingContext::empty()),
             Some(" checkout staging".to_string())
         );
         assert_eq!(
-            best_suffix_for_prefix(&scope, "git ", false),
+            best_suffix_for_prefix(&scope, "git ", false, RankingContext::empty()),
             Some("checkout staging".to_string())
         );
+    }
+
+    #[test]
+    fn recent_session_boosts_matching_history() {
+        let scope = ScopeHistory {
+            history: vec!["git stash".to_string(), "git status".to_string()],
+            scores: Default::default(),
+        };
+        let recent = vec!["git status".to_string()];
+        let ctx = RankingContext {
+            cwd: None,
+            recent_commands: &recent,
+        };
+        let best = best_suffix_for_prefix(&scope, "git st", false, ctx).expect("expected suffix");
+        assert_eq!(best, "atus");
     }
 
     #[test]
@@ -239,7 +279,7 @@ mod tests {
             scores: Default::default(),
         };
 
-        let out = ranked_candidates_for_prefix(&scope, "git st", true, 10);
+        let out = ranked_candidates_for_prefix(&scope, "git st", true, 10, RankingContext::empty());
         assert_eq!(out.len(), 1);
     }
 }

@@ -2,6 +2,8 @@
 
 /** WSL spawns are slow — shared by path listing and cwd probes. */
 export const WSL_FS_LIST_TIMEOUT_MS = 1200;
+/** Remote SFTP fs_cwd / listing timeout (matches Rust path_suggest). */
+export const REMOTE_FS_LIST_TIMEOUT_MS = 900;
 
 export function shellIdIndicatesWsl(shellId: string): boolean {
   return shellId === 'wsl' || shellId.startsWith('wsl:');

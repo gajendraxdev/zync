@@ -2,12 +2,14 @@ import { lineForSuggestionParsing } from './activeSegment.js';
 import {
   getCommandName,
   getLastArg,
+  stripLeadingUnmatchedQuote,
+} from './commandTokens.js';
+import {
   inferSeparator,
   isAbsoluteOrHomePath,
   resolveDir,
-  stripLeadingUnmatchedQuote,
   stripTrailingSep,
-} from './pathCompletion.js';
+} from './pathUtils.js';
 
 /**
  * Best-effort cwd update after `cd` / `pushd` commits when OSC 7 is unavailable.

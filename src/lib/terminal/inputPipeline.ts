@@ -1,10 +1,7 @@
 import { useAppStore } from '../../store/useAppStore.js';
 import { scheduleZshAutosuggestProbe } from '../ghostSuggestions/zshAutosuggestDetect.js';
-import {
-  prefetchWslHomeListing,
-  REMOTE_FS_LIST_TIMEOUT_MS,
-  seedRemoteHomeCache,
-} from '../ghostSuggestions/pathCompletion.js';
+import { prefetchWslHomeListing } from '../ghostSuggestions/client.js';
+import { REMOTE_FS_LIST_TIMEOUT_MS } from '../ghostSuggestions/wslShell.js';
 import { ghostDebug } from '../ghostSuggestions/ghostDebug.js';
 import {
   fetchWslCwd,
@@ -160,9 +157,7 @@ export function handleTerminalReady(termId: string, generation: number): boolean
               connectionId: cached.connectionId,
               path: path.trim(),
             });
-            const trimmed = path.trim();
-            seedRemoteHomeCache(cached.connectionId!, trimmed);
-            store.setTerminalCwd(cached.connectionId!, termId, trimmed);
+            store.setTerminalCwd(cached.connectionId!, termId, path.trim());
           })
           .catch((err: unknown) => {
             ghostDebug('cwd', {

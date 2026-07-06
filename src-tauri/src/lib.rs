@@ -219,6 +219,8 @@ pub fn run() {
             commands::ai_clear_brain_sessions,
             ghost::commands::ghost_commit,
             ghost::commands::ghost_suggest,
+            ghost::commands::ghost_suggest_v2,
+            ghost::commands::ghost_seed_remote_history,
             ghost::commands::ghost_accept,
             ghost::commands::ghost_candidates,
             session::session_load,

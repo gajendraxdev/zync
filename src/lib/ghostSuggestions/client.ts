@@ -1,40 +1,21 @@
-import { lineForSuggestionParsing } from './activeSegment.js';
-import { normalizeSuggestionSuffix } from './suggestionSuffix.js';
-import {
-  getPathSuggestion,
-  getLastArg,
-  getCommandName as getCommandNameFull,
-  FILE_AWARE_COMMANDS,
-  hasUnmatchedQuoteOnActiveToken,
-  isBareDirectoryListingLine,
-  REMOTE_FS_LIST_TIMEOUT_MS,
-} from './pathCompletion.js';
-import { ghostDebug } from './ghostDebug.js';
-import { WSL_FS_LIST_TIMEOUT_MS } from './wslShell.js';
-import { cwdForWslPathCompletion, shellIdIndicatesWsl } from './wslShell.js';
+import { ghostDebug, isGhostDebugEnabled } from './ghostDebug.js';
+import { shellIdIndicatesWsl } from './wslShell.js';
 import type {
   GhostCommitRequest,
-  GhostSuggestionProviders,
-  GhostSuggestRequest,
+  GhostSeedRemoteHistoryRequest,
+  GhostSeedRemoteHistoryResponse,
+  GhostSuggestV2Request,
+  GhostSuggestV2Response,
   InlineSuggestionParams,
 } from './types.js';
 
-const INLINE_FS_TIMEOUT_MS = 160;
-
-function inlineFsTimeoutMs(connectionId: string, wslShellId?: string): number {
-  if (wslShellId && shellIdIndicatesWsl(wslShellId)) return WSL_FS_LIST_TIMEOUT_MS;
-  if (connectionId !== 'local') return REMOTE_FS_LIST_TIMEOUT_MS;
-  return INLINE_FS_TIMEOUT_MS;
-}
-
-export async function fetchHistorySuggestion(
-  line: string,
-  scope: string,
-): Promise<string | null> {
-  const request: GhostSuggestRequest = { prefix: line, scope };
+export async function fetchGhostSuggestionV2(
+  request: GhostSuggestV2Request,
+): Promise<GhostSuggestV2Response> {
+  const empty: GhostSuggestV2Response = { suffix: '', confidence: 0 };
   return window.ipcRenderer
-    .invoke('ghost_suggest', { request })
-    .catch(() => null) as Promise<string | null>;
+    .invoke('ghost_suggest_v2', { request })
+    .catch(() => empty) as Promise<GhostSuggestV2Response>;
 }
 
 export async function commitGhostCommand(command: string, scope: string): Promise<void> {
@@ -47,106 +28,70 @@ export async function acceptGhostCommand(command: string, scope: string): Promis
   await window.ipcRenderer.invoke('ghost_accept', { request });
 }
 
+export async function seedRemoteGhostHistory(
+  request: GhostSeedRemoteHistoryRequest,
+): Promise<GhostSeedRemoteHistoryResponse> {
+  const empty: GhostSeedRemoteHistoryResponse = { imported: 0 };
+  return window.ipcRenderer
+    .invoke('ghost_seed_remote_history', { request })
+    .catch(() => empty) as Promise<GhostSeedRemoteHistoryResponse>;
+}
+
 export async function resolveInlineSuggestion({
   line,
   cwd,
   scope,
   fsConnectionId,
   wslShellId,
+  recentCommands,
   providers,
 }: InlineSuggestionParams): Promise<string> {
-  if (!shouldUseGhostForLine(line)) {
-    ghostDebug('resolve', { phase: 'skip', reason: 'line-not-eligible', line });
-    return '';
-  }
-
-  const enabledProviders: GhostSuggestionProviders = {
-    history: providers?.history ?? true,
-    filesystem: providers?.filesystem ?? true,
+  const request: GhostSuggestV2Request = {
+    prefix: line,
+    scope,
+    cwd,
+    shellId: wslShellId,
+    fsConnectionId: fsConnectionId ?? scope,
+    recentCommands,
+    providers,
+    debug: isGhostDebugEnabled(),
   };
 
-  const preferPath = shouldPreferPathSuggestion(line);
-  const listConnectionId = fsConnectionId ?? scope;
-  const listCwd = wslShellId ? cwdForWslPathCompletion(cwd) : cwd;
-  const fsTimeoutMs = inlineFsTimeoutMs(listConnectionId, wslShellId);
-
   ghostDebug('resolve', {
+    phase: 'v2-request',
     line,
     scope,
-    listConnectionId,
-    cwd: listCwd ?? null,
+    cwd: cwd ?? null,
     wslShellId: wslShellId ?? null,
-    preferPath,
-    fsTimeoutMs,
-    providers: enabledProviders,
+    providers: providers ?? null,
   });
 
-  if (preferPath && enabledProviders.filesystem) {
-    const fsSuffix = await getPathSuggestion(
-      line,
-      listCwd,
-      listConnectionId,
-      fsTimeoutMs,
-      wslShellId,
-    ).catch(() => null);
-    if (fsSuffix) {
-      const normalized = normalizeSuggestionSuffix(line, fsSuffix);
-      ghostDebug('resolve', { phase: 'path-hit', suffix: normalized });
-      return normalized;
-    }
-  }
+  const response = await fetchGhostSuggestionV2(request);
 
-  const skipHistoryForBareCd = preferPath
-    && enabledProviders.filesystem
-    && isBareDirectoryListingLine(line);
-  const skipHistoryForOpenQuote = hasUnmatchedQuoteOnActiveToken(line);
+  ghostDebug('resolve', {
+    phase: response.suffix ? 'v2-hit' : 'v2-empty',
+    line,
+    suffix: response.suffix || null,
+    rawSuffix: response.rawSuffix ?? null,
+    spacingReason: response.spacingReason ?? null,
+    confidence: response.confidence,
+    suppressReason: response.suppressReason ?? null,
+  });
 
-  if (enabledProviders.history && !skipHistoryForBareCd && !skipHistoryForOpenQuote) {
-    const historySuffix = await fetchHistorySuggestion(line, scope);
-    if (historySuffix) {
-      const normalized = normalizeSuggestionSuffix(line, historySuffix);
-      ghostDebug('resolve', { phase: 'history-hit', suffix: normalized });
-      return normalized;
-    }
-  }
-
-  if (!preferPath && enabledProviders.filesystem) {
-    const fsSuffix = await getPathSuggestion(
-      line,
-      listCwd,
-      listConnectionId,
-      fsTimeoutMs,
-      wslShellId,
-    ).catch(() => null);
-    if (fsSuffix) {
-      const normalized = normalizeSuggestionSuffix(line, fsSuffix);
-      ghostDebug('resolve', { phase: 'path-hit-secondary', suffix: normalized });
-      return normalized;
-    }
-  }
-
-  ghostDebug('resolve', { phase: 'empty', skipHistoryForBareCd });
-  return '';
+  return response.suffix;
 }
 
-export function shouldPreferPathSuggestion(line: string): boolean {
-  const parseLine = lineForSuggestionParsing(line);
-  if (isFilesystemCommand(parseLine)) {
-    return true;
-  }
-  const lastArg = getLastArg(parseLine);
-  return lastArg.includes('/') || lastArg.includes('\\');
+/** Warm Rust path cache after WSL terminal-ready (wsl.exe cold start). */
+export function prefetchWslHomeListing(shellId: string, cwd?: string): void {
+  if (!shellIdIndicatesWsl(shellId)) return;
+  void fetchGhostSuggestionV2({
+    prefix: 'cd',
+    scope: 'local',
+    cwd,
+    shellId,
+    fsConnectionId: 'local',
+    providers: { history: false, filesystem: true },
+  }).catch(() => {});
 }
 
-function isDirectoryCommand(line: string): boolean {
-  const command = getCommandNameFull(line);
-  return command === 'cd' || command === 'pushd' || command === 'popd';
-}
-
-function isFilesystemCommand(line: string): boolean {
-  return isDirectoryCommand(line) || FILE_AWARE_COMMANDS.has(getCommandNameFull(line));
-}
-
-function shouldUseGhostForLine(line: string): boolean {
-  return Boolean(getCommandNameFull(lineForSuggestionParsing(line)));
-}
+export { shouldPreferPathSuggestion } from './commandTokens.js';

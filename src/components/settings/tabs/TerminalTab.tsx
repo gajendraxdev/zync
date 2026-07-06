@@ -169,6 +169,12 @@ export function TerminalTab({
                             onChange={(value) => { setGhostProviderField({ history: value }); }}
                         />
                         <Toggle
+                            label="Import remote shell history on connect"
+                            description="One-time read of ~/.zsh_history and ~/.bash_history over SFTP when an SSH host connects. Never logged; scoped per host."
+                            checked={settings.ghostSuggestions?.importRemoteHistoryOnConnect ?? false}
+                            onChange={(value) => { setGhostSuggestionsField({ importRemoteHistoryOnConnect: value }); }}
+                        />
+                        <Toggle
                             label="Filesystem paths"
                             description="Suggest local/remote path candidates for commands like cd."
                             checked={settings.ghostSuggestions?.providers?.filesystem ?? true}

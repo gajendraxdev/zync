@@ -20,9 +20,11 @@ import {
   shellIdIndicatesWsl,
 } from '../../lib/ghostSuggestions/wslShell';
 import type { AppSettings } from '../../store/settingsSlice';
+import { extractRecentCommands } from '../../lib/ghostSuggestions/recentCommands';
 import {
   clearTerminalPendingInput,
   enqueueTerminalInputTask,
+  getTerminalRecentLines,
   queueTerminalInput,
   isTerminalIdleSuspended,
   spawnTerminalFromStoreContext,
@@ -153,12 +155,16 @@ export function useTerminalGhost({
             ghostDebug('terminal', { phase: 'suppressed', shellId: shellId ?? null });
             return '';
           }
+          const recentCommands = extractRecentCommands(
+            getTerminalRecentLines(mountSessionId, 24),
+          );
           return resolveInlineSuggestion({
             line,
             cwd,
             scope: ghostScope,
             fsConnectionId: terminalKey,
             wslShellId,
+            recentCommands,
             providers: ghostSettingsRef.current.providers,
           });
         },

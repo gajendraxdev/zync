@@ -46,6 +46,8 @@ import { useVaultStore } from '../vault/useVaultStore';
 import { isVaultInUseError, VAULT_IN_USE_USER_MESSAGE } from '../vault/vaultLoading';
 import { isVaultLockedError } from '../vault/vaultUnlockPrompt';
 import { connectIpc, disconnectIpc, getRemoteCwdIpc } from '../features/connections/infrastructure/connectionIpc';
+import { seedRemoteGhostHistory } from '../lib/ghostSuggestions/client';
+import { ghostDebug } from '../lib/ghostSuggestions/ghostDebug';
 import { runSerializedConnectionOp } from '../features/connections/infrastructure/connectionOpQueue';
 import {
     markConnectionBackendLive,
@@ -446,8 +448,10 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
 
             // Fetch home path after connection
             let homePath = '/';
+            let homePathResolved = false;
             try {
                 homePath = await getRemoteCwdIpc(id);
+                homePathResolved = true;
             } catch (e) {
                 console.error('[CONNECT] Failed to fetch home path:', e);
             }
@@ -466,6 +470,26 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                 resetTerminalPtyForReconnect(termId);
             }
             dispatchTerminalConnectionWakeup(termIds);
+
+            const ghostSettings = get().settings.ghostSuggestions;
+            if (
+                homePathResolved
+                && ghostSettings.importRemoteHistoryOnConnect
+                && ghostSettings.providers.history
+                && ghostSettings.inlineEnabled
+            ) {
+                void seedRemoteGhostHistory({
+                    connectionId: id,
+                    scope: id,
+                    homePath,
+                }).then((result) => {
+                    ghostDebug('seed', {
+                        connectionId: id,
+                        imported: result.imported,
+                        skippedReason: result.skippedReason ?? null,
+                    });
+                }).catch(() => {});
+            }
 
             // Auto-start tunnels
             try {

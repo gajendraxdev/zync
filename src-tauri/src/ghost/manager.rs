@@ -1,10 +1,11 @@
+use crate::ghost::context::RankingContext;
 use crate::ghost::parser::extract_search_prefix;
 use crate::ghost::ranking::{best_suffix_for_prefix, ranked_candidates_for_prefix};
 use crate::ghost::types::{
     FrecencyEntry, GhostData, LegacyGhostData, ScopeHistory, MAX_HISTORY, MIN_PREFIX_LEN,
     SAVE_INTERVAL,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use tokio::sync::Mutex;
 
@@ -34,7 +35,10 @@ impl GhostManager {
                                 scores: legacy.scores,
                             },
                         );
-                        GhostData { scopes }
+                        GhostData {
+                            scopes,
+                            imported_scopes: Default::default(),
+                        }
                     })
                 })
             })
@@ -156,6 +160,16 @@ impl GhostManager {
     ///   Tier 1 — case-sensitive prefix
     ///   Tier 2 — case-insensitive prefix
     pub async fn suggest(&self, prefix: String, scope: Option<&str>) -> Option<String> {
+        self.suggest_with_context(prefix, scope, RankingContext::empty())
+            .await
+    }
+
+    pub async fn suggest_with_context(
+        &self,
+        prefix: String,
+        scope: Option<&str>,
+        context: RankingContext<'_>,
+    ) -> Option<String> {
         let Some(trimmed_prefix) = extract_search_prefix(&prefix) else {
             return None;
         };
@@ -167,12 +181,12 @@ impl GhostManager {
         };
 
         // ── Tier 1: case-sensitive prefix ────────────────────────────────────────
-        if let Some(suffix) = best_suffix_for_prefix(scope_data, &trimmed_prefix, false) {
+        if let Some(suffix) = best_suffix_for_prefix(scope_data, &trimmed_prefix, false, context) {
             return Some(suffix);
         }
 
         // ── Tier 2: case-insensitive prefix ──────────────────────────────────────
-        best_suffix_for_prefix(scope_data, &trimmed_prefix, true)
+        best_suffix_for_prefix(scope_data, &trimmed_prefix, true, context)
     }
 
     /// Called when the user explicitly accepts a suggestion (Tab / →).
@@ -209,6 +223,56 @@ impl GhostManager {
         self.save_inner(&snapshot).await;
     }
 
+    /// Returns true when this scope already received a remote shell-history import.
+    pub async fn is_scope_imported(&self, scope: Option<&str>) -> bool {
+        let data = self.data.lock().await;
+        let scope_key = Self::normalize_scope(scope);
+        data.imported_scopes.contains(&scope_key)
+    }
+
+    /// One-time seed from parsed remote shell history (P7). Never logs command text.
+    pub async fn seed_shell_history(&self, scope: Option<&str>, commands: &[String]) -> u32 {
+        let scope_key = Self::normalize_scope(scope);
+        let mut data = self.data.lock().await;
+        if data.imported_scopes.contains(&scope_key) {
+            return 0;
+        }
+
+        let scope_data = data.scopes.entry(scope_key.clone()).or_default();
+        let mut known: HashSet<String> = scope_data.history.iter().cloned().collect();
+        let mut to_prepend: Vec<String> = Vec::new();
+
+        // Oldest first so newer file entries end up closer to index 0.
+        for cmd in commands.iter().rev() {
+            let trimmed = cmd.trim().to_string();
+            if trimmed.len() < MIN_PREFIX_LEN || !known.insert(trimmed.clone()) {
+                continue;
+            }
+            to_prepend.push(trimmed);
+        }
+
+        for trimmed in &to_prepend {
+            scope_data.history.insert(0, trimmed.clone());
+            scope_data
+                .scores
+                .entry(trimmed.clone())
+                .or_insert_with(FrecencyEntry::new_with_bump);
+        }
+        let imported = to_prepend.len() as u32;
+
+        if scope_data.history.len() > MAX_HISTORY {
+            scope_data.history.truncate(MAX_HISTORY);
+            Self::prune_evicted_scores(scope_data);
+        }
+
+        data.imported_scopes.insert(scope_key);
+        let snapshot = data.clone();
+        drop(data);
+
+        self.save_inner(&snapshot).await;
+        imported
+    }
+
     pub async fn candidates(
         &self,
         prefix: String,
@@ -226,13 +290,15 @@ impl GhostManager {
         };
 
         let lim = limit.clamp(1, 64);
-        let mut out = ranked_candidates_for_prefix(scope_data, &trimmed_prefix, false, lim);
+        let ctx = RankingContext::empty();
+        let mut out = ranked_candidates_for_prefix(scope_data, &trimmed_prefix, false, lim, ctx);
         if out.len() < lim {
             let more = ranked_candidates_for_prefix(
                 scope_data,
                 &trimmed_prefix,
                 true,
                 lim.saturating_sub(out.len()),
+                ctx,
             );
             for suffix in more {
                 if !out.contains(&suffix) {
@@ -284,5 +350,32 @@ mod tests {
         assert_eq!(local, "local");
         let explicit = GhostManager::normalize_scope(Some("server-x"));
         assert_eq!(explicit, "server-x");
+    }
+
+    #[tokio::test]
+    async fn seed_shell_history_imports_once_per_scope() {
+        let dir = test_dir("seed-history");
+        let mgr = GhostManager::new(&dir);
+
+        let imported = mgr
+            .seed_shell_history(
+                Some("server-a"),
+                &["clear".to_string(), "git status".to_string()],
+            )
+            .await;
+        assert_eq!(imported, 2);
+
+        let suggestion = mgr
+            .suggest("c".to_string(), Some("server-a"))
+            .await
+            .expect("expected clear suffix");
+        assert_eq!(suggestion, "lear");
+
+        let second = mgr
+            .seed_shell_history(Some("server-a"), &["npm test".to_string()])
+            .await;
+        assert_eq!(second, 0);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
