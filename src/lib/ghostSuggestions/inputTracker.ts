@@ -6,6 +6,8 @@
  * so it survives component remounts alongside the XTerm instance.
  */
 
+import { classifyInputEscape } from './escapeInput.js';
+
 export interface InputTrackerOptions {
   onLineChange: (line: string) => void;
   onAccept: (suffix: string, lineAfterAccept: string) => void;
@@ -69,6 +71,12 @@ export class InputTracker {
     this.opts = opts;
   }
 
+  private dismissAndDesync(): void {
+    this.activeSuffix = '';
+    this.desynced = true;
+    this.opts.onDismiss();
+  }
+
   /**
    * Feed raw bytes from term.onData() into the tracker.
    * Returns { consumed: true } when the caller should NOT forward data to the PTY
@@ -77,9 +85,7 @@ export class InputTracker {
   feed(data: string): { consumed: boolean } {
     // Tab always goes to the shell (fish/zsh completion). Dismiss ghost and desync.
     if (data === TAB) {
-      this.activeSuffix = '';
-      this.desynced = true;
-      this.opts.onDismiss();
+      this.dismissAndDesync();
       return { consumed: false };
     }
 
@@ -147,14 +153,12 @@ export class InputTracker {
       return { consumed: false };
     }
 
-    // ── Escape sequences (arrows, function keys, etc.) ────────────────────────
-    // Any escape sequence means shell line-editing likely changed our view.
-    // Keep it conservative for accuracy: reset local buffer and dismiss.
-    if (data.startsWith('\x1b')) {
-      this.lineBuffer = '';
-      this.activeSuffix = '';
-      this.desynced = true;
-      this.opts.onDismiss();
+    // ── Escape sequences and history edits (P2) ───────────────────────────────
+    // Cursor/history keys desync without wiping the buffer; unknown escapes
+    // also desync conservatively until Enter/Ctrl+C/Ctrl+U resets the line.
+    const escapeClass = classifyInputEscape(data);
+    if (escapeClass !== null) {
+      this.dismissAndDesync();
       return { consumed: false };
     }
 

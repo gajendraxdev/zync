@@ -64,6 +64,8 @@ export interface AppSettings {
     ghostSuggestions: {
         inlineEnabled: boolean;
         contextMenuEnabled: boolean;
+        /** Auto: suppress on fish; zsh only when autosuggestions plugin detected. Off: suppress all native shells. */
+        nativeShellPolicy: 'auto' | 'always' | 'off';
         providers: {
             history: boolean;
             filesystem: boolean;
@@ -183,6 +185,7 @@ export const defaultSettings: AppSettings = {
     ghostSuggestions: {
         inlineEnabled: true,
         contextMenuEnabled: false,
+        nativeShellPolicy: 'auto',
         providers: {
             history: true,
             filesystem: true,

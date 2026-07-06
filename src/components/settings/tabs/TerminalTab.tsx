@@ -137,6 +137,26 @@ export function TerminalTab({
                         checked={settings.ghostSuggestions?.contextMenuEnabled ?? false}
                         onChange={(value) => { setGhostSuggestionsField({ contextMenuEnabled: value }); }}
                     />
+                    <div className="px-3 py-2 space-y-1">
+                        <Select
+                            label="Native shell sessions"
+                            value={settings.ghostSuggestions?.nativeShellPolicy ?? 'auto'}
+                            onChange={(value) => {
+                                if (value === 'auto' || value === 'always' || value === 'off') {
+                                    setGhostSuggestionsField({ nativeShellPolicy: value });
+                                }
+                            }}
+                            options={[
+                                { value: 'auto', label: 'Auto (recommended)' },
+                                { value: 'always', label: 'Always on' },
+                                { value: 'off', label: 'Off for native shells' },
+                            ]}
+                            className="bg-app-bg/50"
+                        />
+                        <p className="text-[10px] text-[var(--color-app-muted)] pl-1">
+                            Auto hides inline ghost on fish and on zsh only when zsh-autosuggestions is detected in init files.
+                        </p>
+                    </div>
 
                     <div className="rounded-lg border border-[var(--color-app-border)]/50 bg-[var(--color-app-bg)]/25 px-1 pt-3 pb-1 mt-2">
                         <div className="text-xs font-semibold uppercase tracking-wide text-[var(--color-app-muted)] px-3 pb-1">

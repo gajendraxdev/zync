@@ -22,5 +22,7 @@ export interface InlineSuggestionParams {
   scope: string;
   /** Connection id for `fs_list` (defaults to scope). */
   fsConnectionId?: string;
+  /** When set to `wsl` / `wsl:Distro`, path listing uses the WSL Linux filesystem. */
+  wslShellId?: string;
   providers?: GhostSuggestionProviders;
 }
