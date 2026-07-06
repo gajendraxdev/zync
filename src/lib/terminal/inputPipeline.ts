@@ -1,6 +1,10 @@
 import { useAppStore } from '../../store/useAppStore.js';
 import { scheduleZshAutosuggestProbe } from '../ghostSuggestions/zshAutosuggestDetect.js';
-import { prefetchWslHomeListing, seedRemoteHomeCache } from '../ghostSuggestions/pathCompletion.js';
+import {
+  prefetchWslHomeListing,
+  REMOTE_FS_LIST_TIMEOUT_MS,
+  seedRemoteHomeCache,
+} from '../ghostSuggestions/pathCompletion.js';
 import { ghostDebug } from '../ghostSuggestions/ghostDebug.js';
 import {
   fetchWslCwd,
@@ -137,7 +141,16 @@ export function handleTerminalReady(termId: string, generation: number): boolean
     } else {
       let cwdHint = termTab?.lastKnownCwd ?? termTab?.initialPath;
       if (!cwdHint) {
-        void window.ipcRenderer.invoke('fs_cwd', { connectionId: cached.connectionId })
+        const fsCwdRequest = window.ipcRenderer.invoke('fs_cwd', {
+          connectionId: cached.connectionId,
+        }) as Promise<string>;
+        let fsCwdTimeoutId: ReturnType<typeof setTimeout> | null = null;
+        const fsCwdTimeout = new Promise<never>((_, reject) => {
+          fsCwdTimeoutId = setTimeout(() => {
+            reject(new Error('fs_cwd timeout'));
+          }, REMOTE_FS_LIST_TIMEOUT_MS);
+        });
+        void Promise.race([fsCwdRequest, fsCwdTimeout])
           .then((path: unknown) => {
             if (typeof path !== 'string' || !path.trim()) return;
             const current = terminalCache.get(termId);
@@ -157,6 +170,12 @@ export function handleTerminalReady(termId: string, generation: number): boolean
               connectionId: cached.connectionId,
               error: err instanceof Error ? err.message : String(err),
             });
+          })
+          .finally(() => {
+            if (fsCwdTimeoutId !== null) {
+              clearTimeout(fsCwdTimeoutId);
+              fsCwdTimeoutId = null;
+            }
           });
       }
     }

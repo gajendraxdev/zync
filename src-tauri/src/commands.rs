@@ -1,5 +1,5 @@
 use crate::fs::{FileEntry, FileSystem};
-use crate::pty::{posix_shell_cd_path, PtyManager};
+use crate::pty::PtyManager;
 use crate::ssh::{Client, SshManager};
 use crate::types::*;
 use anyhow::Result;
@@ -1272,10 +1272,9 @@ pub async fn terminal_navigate(
     path: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let cd_cmd = format!("cd {}\r", posix_shell_cd_path(&path));
     state
         .pty_manager
-        .write(&term_id, &cd_cmd)
+        .navigate_to_path(&term_id, &path)
         .await
         .map_err(|e| e.to_string())
 }
@@ -2367,10 +2366,30 @@ async fn read_wsl_zsh_init_files_impl(wsl_distro: Option<String>) -> Result<Stri
     );
     cmd.args(["--", "sh", "-lc", shell_script]);
 
-    let output = cmd
-        .output()
-        .await
+    let timeout_duration = std::time::Duration::from_secs(8);
+    let child = cmd
+        .spawn()
         .map_err(|e| format!("Failed to run WSL probe: {}", e))?;
+    let child_pid = child.id();
+    let output = match tokio::time::timeout(timeout_duration, child.wait_with_output()).await {
+        Ok(Ok(output)) => output,
+        Ok(Err(e)) => return Err(format!("Failed to run WSL probe: {}", e)),
+        Err(_) => {
+            if let Some(pid) = child_pid {
+                let _ = Command::new("taskkill")
+                    .args(["/PID", &pid.to_string(), "/F", "/T"])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status()
+                    .await;
+            }
+            eprintln!(
+                "[WSL] zsh init probe timed out after {}s",
+                timeout_duration.as_secs()
+            );
+            return Ok(String::new());
+        }
+    };
 
     if output.status.code() == Some(2) {
         return Ok(String::new());
@@ -2452,11 +2471,7 @@ fn wsl_list_path_shell(path: &str) -> String {
         if rest.is_empty() {
             return "\"$HOME\"".to_string();
         }
-        let escaped = rest
-            .replace('\\', "\\\\")
-            .replace('"', "\\\"")
-            .replace('$', "\\$");
-        return format!("\"$HOME/{escaped}\"");
+        return format!("\"$HOME\"/{}", shell_single_quote(rest));
     }
     shell_single_quote(trimmed)
 }

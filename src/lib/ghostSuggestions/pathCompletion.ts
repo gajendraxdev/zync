@@ -323,7 +323,7 @@ export function stripTrailingSep(path: string): string {
 /** Map list paths to what `fs_list` expects (local HOME vs remote SFTP cwd). */
 function normalizeFsListPath(path: string, connectionId: string): string {
   if (path === '~') {
-    return connectionId === 'local' ? '' : '.';
+    return connectionId === 'local' ? '' : '~';
   }
   if (!path && connectionId !== 'local') {
     return '.';

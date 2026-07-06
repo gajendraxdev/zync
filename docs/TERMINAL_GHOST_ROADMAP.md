@@ -55,7 +55,7 @@ After popup removal, ghost suggestions are **inline only**:
 
 ## Strategy: three layers
 
-```
+```text
 Layer 1 — Robustness     → fix wrong/missing ghost (buffer sync, suppression, keys)
 Layer 2 — Smarter        → better ranking, context, history seeding
 Layer 3 — Popup v2       → lists later, non-Tab trigger, shell-safe

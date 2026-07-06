@@ -8,6 +8,17 @@ import { silenceTerminalOutputChannel } from './terminalReloadTeardown.js';
 
 const GENERATION_HEADER_BYTES = 4;
 
+/** Cheap pre-filter before UTF-8 decode + prompt regex work on PTY output. */
+function outputMayContainPrompt(data: Uint8Array): boolean {
+  for (let i = 0; i < data.length; i++) {
+    const byte = data[i];
+    if (byte === 0x0d || byte === 0x0a || byte === 0x24 || byte === 0x3a || byte === 0x3e) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function isTauriRuntime(): boolean {
   return typeof window !== 'undefined'
     && Boolean((window as Window & { __TAURI_INTERNALS__?: { transformCallback?: unknown } }).__TAURI_INTERNALS__?.transformCallback);
@@ -84,7 +95,7 @@ export function attachTerminalOutputChannel(termId: string, term: XTerm): Channe
     }
 
     touchTerminalActivity(termId);
-    if (entry.connectionId) {
+    if (entry.connectionId && outputMayContainPrompt(data)) {
       const connectionId = entry.connectionId;
       feedPromptCwdSniffer(termId, data, (path) => {
         useAppStore.getState().setTerminalCwd(connectionId, termId, path);

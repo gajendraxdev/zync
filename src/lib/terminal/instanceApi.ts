@@ -1,3 +1,4 @@
+import { clearPromptCwdSniffer } from '../ghostSuggestions/promptCwdSniffer.js';
 import { clearTerminalRendererSession } from './rendererSession.js';
 import { disposeTerminalLigatures } from './ligatures.js';
 import { clearTerminalPendingInput, terminalCache } from './terminalCache.js';
@@ -31,6 +32,7 @@ export function destroyTerminalInstance(termId: string): void {
 
   clearTerminalPendingInput(termId);
   clearTerminalInputQueue(termId);
+  clearPromptCwdSniffer(termId);
   cached.ghostTracker?.destroy();
   disposeTerminalLigatures(cached);
   cached.ligaturesEnabled = false;

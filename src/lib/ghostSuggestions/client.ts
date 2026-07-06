@@ -96,8 +96,9 @@ export async function resolveInlineSuggestion({
   const skipHistoryForBareCd = preferPath
     && enabledProviders.filesystem
     && isBareDirectoryListingLine(line);
+  const skipHistoryForOpenQuote = hasUnmatchedQuoteOnActiveToken(line);
 
-  if (enabledProviders.history && !skipHistoryForBareCd) {
+  if (enabledProviders.history && !skipHistoryForBareCd && !skipHistoryForOpenQuote) {
     const historySuffix = await fetchHistorySuggestion(line, scope);
     if (historySuffix) {
       ghostDebug('resolve', { phase: 'history-hit', suffix: historySuffix });
@@ -141,7 +142,5 @@ function isFilesystemCommand(line: string): boolean {
 }
 
 function shouldUseGhostForLine(line: string): boolean {
-  if (!getCommandNameFull(line)) return false;
-  if (hasUnmatchedQuoteOnActiveToken(line)) return false;
-  return true;
+  return Boolean(getCommandNameFull(line));
 }

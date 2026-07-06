@@ -28,9 +28,15 @@ function normalizePromptPath(raw: string): string {
 /**
  * Extract cwd from the latest PowerShell prompt (`PS E:\work>` / `PS E:\work›`).
  */
+const POWERSHELL_PROMPT_PATH =
+  /(?:[A-Za-z]:[\\/]|\\\\|~[/\\]?|\/)[^\r\n\x1b›>\u203a]*/;
+
 export function extractPowerShellCwd(text: string): string | null {
   const clean = stripAnsi(text);
-  const re = /PS\s+((?:[A-Za-z]:)?[^\r\n\x1b›>\u203a]+?)\s*[›>\u203a]/g;
+  const re = new RegExp(
+    `PS\\s+(${POWERSHELL_PROMPT_PATH.source})\\s*[›>\\u203a]`,
+    'g',
+  );
   let last: string | null = null;
   for (const match of clean.matchAll(re)) {
     const candidate = normalizePromptPath(match[1] ?? '');

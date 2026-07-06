@@ -27,14 +27,23 @@ export function GhostSuggestionOverlay({ term, suggestion }: Props) {
     let frameId = 0;
     let prevLeft = 0;
     let prevTop = 0;
+    let prevCellWidth = 0;
+    let prevCellHeight = 0;
     let stableFrames = 0;
     const STOP_AFTER = 5;
 
     const tick = () => {
       const next = getCursorPixelPosition(term);
-      if (next.left !== prevLeft || next.top !== prevTop) {
+      if (
+        next.left !== prevLeft
+        || next.top !== prevTop
+        || next.cellWidth !== prevCellWidth
+        || next.cellHeight !== prevCellHeight
+      ) {
         prevLeft = next.left;
         prevTop = next.top;
+        prevCellWidth = next.cellWidth;
+        prevCellHeight = next.cellHeight;
         stableFrames = 0;
         setPos(next);
       } else {

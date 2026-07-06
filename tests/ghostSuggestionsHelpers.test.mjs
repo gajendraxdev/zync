@@ -5,6 +5,7 @@ import {
 import {
   expandTildePathForRemote,
   getPathSuggestions,
+  hasUnmatchedQuoteOnActiveToken,
   isBareDirectoryListingLine,
 } from '../.tmp-agent-tests/src/lib/ghostSuggestions/pathCompletion.js';
 import {
@@ -33,10 +34,6 @@ import {
   resolveWslShellIdForPathCompletion,
   shellIdIndicatesWsl,
 } from '../.tmp-agent-tests/src/lib/ghostSuggestions/wslShell.js';
-import {
-  hasUnmatchedQuoteOnActiveToken,
-} from '../.tmp-agent-tests/src/lib/ghostSuggestions/pathCompletion.js';
-
 async function runTest(name, fn) {
   try {
     await fn();
@@ -184,6 +181,12 @@ await runTest('resolveCdTargetPath parentDirectory handles tilde cwd', () => {
   assert.equal(resolveCdTargetPath('cd ..', '~/foo/bar'), '~/foo');
   assert.equal(resolveCdTargetPath('cd ..', '~/only'), '~');
   assert.equal(resolveCdTargetPath('cd ..', '~'), null);
+});
+
+await runTest('resolveCdTargetPath parentDirectory preserves Windows drive root', () => {
+  assert.equal(resolveCdTargetPath('cd ..', 'C:\\'), 'C:\\');
+  assert.equal(resolveCdTargetPath('cd ..', 'C:'), 'C:\\');
+  assert.equal(resolveCdTargetPath('cd ..', 'E:\\work'), 'E:\\');
 });
 
 await runTest('isBareDirectoryListingLine matches bare cd token', () => {

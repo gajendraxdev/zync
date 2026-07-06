@@ -49,6 +49,9 @@ function parentDirectory(cwd?: string): string | null {
 
   const sep = inferSeparator(cwd);
   const trimmed = stripTrailingSep(cwd);
+  if (/^[A-Za-z]:\\?$/.test(trimmed)) {
+    return trimmed.endsWith('\\') ? trimmed : `${trimmed}\\`;
+  }
   const driveMatch = /^([A-Za-z]:)(?:\\|\/)(.*)$/.exec(trimmed);
   if (driveMatch) {
     const rest = driveMatch[2];
