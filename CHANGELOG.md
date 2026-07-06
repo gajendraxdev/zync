@@ -11,7 +11,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 ### Changed
 - **Ghost escape handling (P2)**: Left/Right/Home/End and history keys desync the input tracker without wiping the line buffer; hard reset remains on Enter/Ctrl+C/Ctrl+U. ([7ecf0a5])
 - **Ghost path completion**: Bare `cd` skips history fallback (avoids `cd ..` from unrelated history); WSL listings use longer timeouts, prefetch, and shared `WSL_FS_LIST_TIMEOUT_MS`. ([d2cef31])
-- **Documentation**: `docs/TERMINAL_GHOST_SUGGESTIONS.md` — WSL path completion, architecture and scaling limits, shipped P2/P3 notes. ([3aa9a70])
+- **Documentation**: `docs/TERMINAL_GHOST_SUGGESTIONS.md` — WSL path completion, architecture and scaling limits, shipped P2/P3 notes. ([a55b4db])
 
 ### Fixed
 - **Ghost WSL listing**: `fs_list_wsl` inlines paths in `wsl.exe` scripts (host spawn drops shell assignments); fixes empty `WSL list failed` errors. ([d2cef31])
