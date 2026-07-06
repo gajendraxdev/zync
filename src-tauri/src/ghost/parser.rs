@@ -62,7 +62,7 @@ fn strip_leading_assignments(mut s: &str) -> &str {
 }
 
 /// Extract the active command segment for inline suggestions.
-/// - Keeps only text after the last unquoted command separator (`;`, `|`, `&&`, `||`, newline)
+/// - Keeps only text after the last unquoted command separator (`;`, `|`, `&`, `&&`, `||`, newline)
 /// - Strips leading shell wrappers (`sudo`, `env`, etc.)
 /// - Returns None when the segment is empty or not suitable for inline suggestion.
 pub fn extract_search_prefix(input: &str) -> Option<String> {
@@ -108,9 +108,13 @@ pub fn extract_search_prefix(input: &str) -> Option<String> {
                     segment_start = i + 2;
                     i += 1;
                 }
-            } else if ch == '&' && i + 1 < chars.len() && chars[i + 1] == '&' {
-                segment_start = i + 2;
-                i += 1;
+            } else if ch == '&' {
+                if i + 1 < chars.len() && chars[i + 1] == '&' {
+                    segment_start = i + 2;
+                    i += 1;
+                } else {
+                    segment_start = i + 1;
+                }
             }
         }
 
@@ -146,6 +150,48 @@ fn prefix_matches(candidate: &str, prefix: &str, case_insensitive: bool) -> bool
     }
 }
 
+fn contains_lone_ampersand(cmd: &str) -> bool {
+    let bytes = cmd.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'&' {
+            let prev_is_amp = i > 0 && bytes[i - 1] == b'&';
+            let next_is_amp = i + 1 < bytes.len() && bytes[i + 1] == b'&';
+            if !prev_is_amp && !next_is_amp {
+                return true;
+            }
+            if next_is_amp {
+                i += 2;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
+fn history_entry_may_need_segment_fallback(cmd: &str) -> bool {
+    if ["|", ";", "&&", "||", "\n", "\r"]
+        .iter()
+        .any(|sep| cmd.contains(sep))
+    {
+        return true;
+    }
+    if contains_lone_ampersand(cmd) {
+        return true;
+    }
+    let trimmed = cmd.trim_start();
+    const KEYWORDS: &[&str] = &[
+        "and ", "or ", "not ", "if ", "while ", "begin ", "command ", "builtin ", "exec ",
+        "sudo ", "doas ", "time ", "env ", "noglob ",
+    ];
+    if KEYWORDS.iter().any(|kw| trimmed.starts_with(kw)) {
+        return true;
+    }
+    let next_ws = trimmed.find(char::is_whitespace).unwrap_or(trimmed.len());
+    looks_like_env_assignment(&trimmed[..next_ws])
+}
+
 fn suffix_after_prefix(candidate: &str, prefix: &str) -> Option<String> {
     let prefix_chars = prefix.chars().count();
     let byte_idx = candidate
@@ -166,9 +212,11 @@ pub fn history_suffix_for_command(
     if prefix_matches(cmd, prefix, case_insensitive) {
         return suffix_after_prefix(cmd, prefix);
     }
-    if let Some(segment) = extract_search_prefix(cmd) {
-        if prefix_matches(&segment, prefix, case_insensitive) {
-            return suffix_after_prefix(&segment, prefix);
+    if history_entry_may_need_segment_fallback(cmd) {
+        if let Some(segment) = extract_search_prefix(cmd) {
+            if prefix_matches(&segment, prefix, case_insensitive) {
+                return suffix_after_prefix(&segment, prefix);
+            }
         }
     }
     None
@@ -203,6 +251,10 @@ mod tests {
         assert_eq!(
             extract_search_prefix("ls -la | grep x\ncd /va"),
             Some("cd /va".to_string())
+        );
+        assert_eq!(
+            extract_search_prefix("sleep 1 & git che"),
+            Some("git che".to_string())
         );
     }
 

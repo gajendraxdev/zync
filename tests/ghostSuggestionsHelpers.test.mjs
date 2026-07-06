@@ -389,3 +389,14 @@ await runTest('extractRecentCommands preserves embedded shell variables', () => 
   const commands = extractRecentCommands(scrollback, 4);
   assert.deepEqual(commands, ['echo $HOME/docs']);
 });
+
+await runTest('extractRecentCommands ignores redirection markers inside commands', () => {
+  const scrollback = 'user@host:~/proj$ git log >> out.txt\n';
+  const commands = extractRecentCommands(scrollback, 4);
+  assert.deepEqual(commands, ['git log >> out.txt']);
+});
+
+await runTest('lineForSuggestionParsing uses tail after background ampersand', () => {
+  assert.equal(lineForSuggestionParsing('sleep 1 & git che'), 'git che');
+  assert.equal(extractActiveSegment('sleep 1 & git che'), 'git che');
+});

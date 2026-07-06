@@ -9,16 +9,40 @@ function stripAnsi(value: string): string {
   return value.replace(/\x1b\[[0-9;]*m/g, '');
 }
 
+function isValidPromptMarker(line: string, marker: string, idx: number): boolean {
+  if (marker === '> ') {
+    const prev = idx > 0 ? line[idx - 1] : '';
+    if (prev === '>' || /\d/.test(prev)) return false;
+  }
+  return true;
+}
+
+function rightmostPromptMarkerIndex(line: string, marker: string): number {
+  let searchEnd = line.length;
+  while (searchEnd > 0) {
+    const idx = line.lastIndexOf(marker, searchEnd - 1);
+    if (idx < 0) return -1;
+    if (isValidPromptMarker(line, marker, idx)) return idx;
+    searchEnd = idx;
+  }
+  return -1;
+}
+
 function extractCommandFromLine(line: string): string {
   let trimmed = stripAnsi(line).trim();
   if (!trimmed) return '';
 
+  let bestIdx = -1;
+  let bestMarkerLen = 0;
   for (const marker of PROMPT_MARKERS) {
-    const idx = trimmed.lastIndexOf(marker);
-    if (idx >= 0) {
-      trimmed = trimmed.slice(idx + marker.length).trim();
-      break;
+    const idx = rightmostPromptMarkerIndex(trimmed, marker);
+    if (idx > bestIdx) {
+      bestIdx = idx;
+      bestMarkerLen = marker.length;
     }
+  }
+  if (bestIdx >= 0) {
+    trimmed = trimmed.slice(bestIdx + bestMarkerLen).trim();
   }
 
   return trimmed.replace(/(?:\x1b\[[0-9;]*m)*[\]$#%>]\s*$/, '').trim();
@@ -26,7 +50,6 @@ function extractCommandFromLine(line: string): string {
 
 function looksLikeShellCommand(line: string): boolean {
   if (!line || line.length > MAX_COMMAND_LEN) return false;
-  if (/^\s/.test(line)) return false;
   if (OUTPUT_LINE.test(line)) return false;
   const first = line[0];
   if (!/[A-Za-z0-9_~./$"'-]/.test(first)) return false;

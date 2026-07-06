@@ -53,11 +53,8 @@ fn parse_history_line(line: &str) -> Option<String> {
         return None;
     }
 
-    // Zsh extended history: `: <unix_ts>:<duration>;<command>`
-    if let Some(cmd) = trimmed.strip_prefix(':') {
-        return cmd
-            .split_once(';')
-            .map(|(_, command)| normalize_history_command(command));
+    if let Some(cmd) = parse_zsh_extended_history_line(trimmed) {
+        return Some(cmd);
     }
 
     // Bash timestamp or comment lines (`#1700000000`, `# comment`).
@@ -70,6 +67,23 @@ fn parse_history_line(line: &str) -> Option<String> {
 
 fn normalize_history_command(command: &str) -> String {
     command.trim().to_string()
+}
+
+/// Zsh extended history: `: <unix_ts>:<duration>;<command>`
+fn parse_zsh_extended_history_line(trimmed: &str) -> Option<String> {
+    if !trimmed.starts_with(':') {
+        return None;
+    }
+    let rest = trimmed[1..].trim_start();
+    let semi = rest.find(';')?;
+    let header = rest.get(..semi)?.trim();
+    let mut parts = header.split(':');
+    let timestamp = parts.next()?.trim();
+    let _duration = parts.next()?;
+    if timestamp.is_empty() || !timestamp.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    Some(normalize_history_command(rest.get(semi + 1..)?))
 }
 
 #[cfg(test)]
@@ -109,6 +123,15 @@ mod tests {
         assert_eq!(
             parse_shell_history(content),
             vec!["echo hello world".to_string()]
+        );
+    }
+
+    #[test]
+    fn preserves_bash_commands_starting_with_colon() {
+        let content = ": echo hello\n";
+        assert_eq!(
+            parse_shell_history(content),
+            vec![": echo hello".to_string()]
         );
     }
 }

@@ -2565,7 +2565,8 @@ pub(crate) async fn ghost_fs_list(
         .await
         {
             Ok(Ok(res)) => Ok(res),
-            Ok(Err(e)) if e.to_string().to_lowercase().contains("session closed") => {
+            Ok(Err(e)) if sftp_error_is_dead_session(&e) => {
+                println!("[FS] SFTP session closed during list, retrying...");
                 {
                     let mut connections = state.connections.lock().await;
                     if let Some(c) = connections.get_mut(connection_id) {
@@ -2588,18 +2589,10 @@ pub(crate) async fn ghost_fs_list(
                 }
             }
             Ok(Err(e)) => Err(e.to_string()),
-            Err(_) => {
-                {
-                    let mut connections = state.connections.lock().await;
-                    if let Some(c) = connections.get_mut(connection_id) {
-                        c.sftp_session = None;
-                    }
-                }
-                Err(format!(
-                    "DISCONNECTED: SFTP listing timed out after {}s",
-                    timeout_duration.as_secs()
-                ))
-            }
+            Err(_) => Err(format!(
+                "DISCONNECTED: SFTP listing timed out after {}s",
+                timeout_duration.as_secs()
+            )),
         }
     }
 }

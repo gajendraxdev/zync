@@ -97,9 +97,14 @@ export function findActiveSegmentStart(line: string): number {
       }
       continue;
     }
-    if (ch === '&' && line[i + 1] === '&') {
-      segmentStart = i + 2;
-      i += 1;
+    if (ch === '&') {
+      if (line[i + 1] === '&') {
+        segmentStart = i + 2;
+        i += 1;
+      } else {
+        segmentStart = i + 1;
+      }
+      continue;
     }
   }
 

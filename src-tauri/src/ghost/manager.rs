@@ -251,6 +251,10 @@ impl GhostManager {
             to_prepend.push(trimmed);
         }
 
+        if to_prepend.is_empty() {
+            return 0;
+        }
+
         for trimmed in &to_prepend {
             scope_data.history.insert(0, trimmed.clone());
             scope_data
@@ -375,6 +379,23 @@ mod tests {
             .seed_shell_history(Some("server-a"), &["npm test".to_string()])
             .await;
         assert_eq!(second, 0);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn empty_seed_does_not_mark_scope_imported() {
+        let dir = test_dir("seed-empty");
+        let mgr = GhostManager::new(&dir);
+
+        let imported = mgr.seed_shell_history(Some("server-b"), &[]).await;
+        assert_eq!(imported, 0);
+        assert!(!mgr.is_scope_imported(Some("server-b")).await);
+
+        let retry = mgr
+            .seed_shell_history(Some("server-b"), &["git status".to_string()])
+            .await;
+        assert_eq!(retry, 1);
 
         let _ = std::fs::remove_dir_all(&dir);
     }
