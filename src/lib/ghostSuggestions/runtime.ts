@@ -46,6 +46,12 @@ export function bindGhostTrackerRuntime({
       tracker.clearSuggestion();
       onSuggestion('', line);
       onClearUI();
+      if (tracker.isDesynced()) {
+        requestSeq += 1;
+        clearTimer();
+        return;
+      }
+
       requestSeq += 1;
       const seq = requestSeq;
       clearTimer();
@@ -53,9 +59,11 @@ export function bindGhostTrackerRuntime({
       timer = setTimeout(async () => {
         timer = null;
         if (!active || seq !== requestSeq || tracker.getLineBuffer() !== line) return;
+        if (tracker.isDesynced()) return;
 
         const suffix = await resolveInlineSuggestion(line);
         if (!active || seq !== requestSeq || tracker.getLineBuffer() !== line) return;
+        if (tracker.isDesynced()) return;
 
         tracker.setSuggestion(suffix);
         onSuggestion(suffix, line);

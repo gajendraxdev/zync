@@ -20,7 +20,6 @@ const CTRL_C      = '\x03';
 const CTRL_D      = '\x04';
 const ENTER       = '\r';
 const TAB         = '\t';
-const CTRL_F      = '\x06';
 const ARROW_RIGHT = '\x1b[C';
 const ALT_F       = '\x1bf';       // ESC + f
 const ALT_RIGHT_1 = '\x1b[1;3C';   // common Alt+Right
@@ -76,9 +75,17 @@ export class InputTracker {
    * (i.e. an accept key consumed part/all of the active suggestion).
    */
   feed(data: string): { consumed: boolean } {
-    // ── Accept suggestion ──────────────────────────────────────────────────────
+    // Tab always goes to the shell (fish/zsh completion). Dismiss ghost and desync.
+    if (data === TAB) {
+      this.activeSuffix = '';
+      this.desynced = true;
+      this.opts.onDismiss();
+      return { consumed: false };
+    }
+
+    // ── Accept suggestion (Right arrow only for full accept; Tab is shell-owned) ─
     if (this.activeSuffix) {
-      const acceptFull = data === TAB || data === ARROW_RIGHT || data === CTRL_F;
+      const acceptFull = data === ARROW_RIGHT;
       const acceptWord = data === ALT_F || data === ALT_RIGHT_1 || data === ALT_RIGHT_2;
       const acceptPath = data === CTRL_RIGHT;
 
@@ -100,8 +107,10 @@ export class InputTracker {
 
     // ── Enter: commit command to history, reset buffer ─────────────────────────
     if (data === ENTER) {
-      const cmd = this.lineBuffer.trim();
-      if (cmd) this.opts.onHistoryCommit(cmd);
+      if (!this.desynced) {
+        const cmd = this.lineBuffer.trim();
+        if (cmd) this.opts.onHistoryCommit(cmd);
+      }
       this.lineBuffer  = '';
       this.activeSuffix = '';
       this.desynced = false;
@@ -189,6 +198,10 @@ export class InputTracker {
 
   getLineBuffer(): string {
     return this.lineBuffer;
+  }
+
+  isDesynced(): boolean {
+    return this.desynced;
   }
 
   /**
