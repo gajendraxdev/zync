@@ -5,15 +5,23 @@ All notable changes to Zync are documented in this file. The format is based on 
 ## [Unreleased]
 
 ### Removed
-- **Tab popup ghost suggestions**: Removed the Tab-triggered completion list overlay, popup state/routing modules (`GhostSuggestionListOverlay`, tab/popup controller stack), and the **Tab popup suggestions** setting toggle. Tab no longer opens or navigates a Zync list — it goes to the shell unless an inline ghost suffix is active and accepted. Removed auto-open popup while typing when multiple candidates matched. Context-menu suggestion actions now cover inline accept only (no multi-item popup list). ([336d54d])
+- **Tab popup ghost suggestions**: Removed the Tab-triggered completion list overlay, popup state/routing modules (`GhostSuggestionListOverlay`, tab/popup controller stack), and the **Tab popup suggestions** setting toggle. Tab no longer opens or navigates a Zync list. Removed auto-open popup while typing when multiple candidates matched. Context-menu suggestion actions now cover inline accept only (no multi-item popup list). ([336d54d])
+
+### Added
+- **Ghost cwd tracking**: Passive cwd extraction from PowerShell (`PS E:\path›`) and common Unix prompts in PTY output; spawn cwd is seeded on `terminal-ready` when OSC 7 is unavailable. ([ee1b6c4])
+- **Ghost parked roadmap**: `docs/TERMINAL_GHOST_ROADMAP.md` — robustness, smarter ranking, and shell-safe popup v2 constraints. ([d5f8cee])
 
 ### Changed
 - **Ghost suggestions (inline only)**: Inline faded suffix, history frecency, and filesystem path completion remain. Path commands such as `cd` and file-aware commands again show inline ghost suffixes (previously deferred to the popup list). Rust `ghost_candidates` IPC is retained for a future popup v2 rebuild. ([336d54d])
-- **Ghost shell-safe keys (P0/P1)**: Tab always forwards to the shell for native completion; Right arrow accepts inline ghost. Tab dismisses ghost and pauses new suggestions until the line resets (Enter/Ctrl+C/Ctrl+U), avoiding stale suffix after shell Tab completion.
-- **Ghost overlay alignment**: Position ghost suffix using `.xterm-screen` offset and measured cell height so inline text sits on the cursor row.
-- **Ghost path completion**: Fix bare `cd` token listing, `fs_list` HOME/`.` fallback without tilde, track cwd after `cd` commits/accepts when OSC 7 is missing.
-- **Ghost cwd from shell prompts**: Sniff PowerShell (`PS E:\path›`) and Unix prompt paths from PTY output so path suggestions use the live directory, not a stale drive root.
-- **Documentation**: Updated `docs/TERMINAL_GHOST_SUGGESTIONS.md` for inline-only architecture; added parked roadmap `docs/TERMINAL_GHOST_ROADMAP.md` (robustness, smarter ranking, shell-safe popup v2).
+- **Ghost shell-safe keys**: Tab always forwards to the shell for native completion (fish/zsh/bash Tab completion). Right arrow accepts inline ghost; Tab dismisses ghost and pauses new suggestions until the line resets (Enter/Ctrl+C/Ctrl+U). ([a68a705])
+- **Ghost path listing connection id**: Filesystem ghost suffixes call `fs_list` with the workspace connection id instead of the history scope key. ([ee1b6c4])
+- **Documentation**: Updated `docs/TERMINAL_GHOST_SUGGESTIONS.md` for inline-only architecture and Tab desync behavior. ([d5f8cee])
+
+### Fixed
+- **Ghost overlay alignment**: Position inline suffix relative to the overlay parent using `.xterm-screen` offset and measured cell height so ghost text sits on the cursor row under WebGL and DOM renderers. ([a91e477])
+- **Ghost path completion cwd**: Bare `cd` lists the current directory; `~` / `~/` map to local HOME or remote SFTP cwd for directory and file-aware commands; relative multi-segment paths (e.g. `cd foo/bar`) resolve against tracked cwd; `cd ..` handles `~` and `~/…` parents correctly. ([ee1b6c4])
+- **Ghost cwd after `cd`**: `lastKnownCwd` updates on submitted `cd` / `pushd` commands (Enter) only — not when partially accepting an inline ghost suffix. ([ee1b6c4], [a68a705])
+- **Ghost Tab desync history**: After shell Tab completion, Enter no longer commits a stale input-tracker line buffer to ghost history or cwd inference. ([a68a705])
 
 ## [2.19.2] - 2026-07-02
 
