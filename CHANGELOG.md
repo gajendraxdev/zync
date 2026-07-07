@@ -4,8 +4,6 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
-## [2.21.0] - 2026-07-07
-
 ### Added
 - **Tunnel reconnect restore**: On reconnect, Zync restarts tunnels that were active before disconnect plus any with per-tunnel **auto-start** enabled (`tunnelReconnectService.ts`).
 - **Tunnel documentation**: Canonical `docs/TUNNELS.md` — architecture, lifecycle, manual QA playbook, improvement plan.

@@ -532,7 +532,7 @@ Note failures with: host OS, tunnel type (local/remote), which UI surface, and w
 
 Active work track after v2.20.1. Implement in order where possible.
 
-### Phase 1 — Trust (P0) — **shipped (v2.21.0)**
+### Phase 1 — Trust (P0) — **implemented (next tunnel release)**
 
 | ID | Task | Status |
 |----|------|--------|
@@ -541,7 +541,7 @@ Active work track after v2.20.1. Implement in order where possible.
 | T3 | Disconnect hygiene | Implemented — `ssh_disconnect` stops tunnels; events emitted |
 | T4 | Copy + docs | Modal done; this playbook added; landing page pending after QA |
 
-### Phase 2 — Reliability (P1) — **shipped (v2.21.0)**
+### Phase 2 — Reliability (P1) — **implemented (next tunnel release)**
 
 | ID | Task | Status |
 |----|------|--------|
@@ -596,7 +596,7 @@ See §17.
 
 ## 18. Backend modularization
 
-**Tunnel IPC extraction — shipped (v2.21.0).** Broader `commands.rs` split (SSH, terminal, FS) remains deferred.
+**Tunnel IPC extraction — done (next tunnel release).** Broader `commands.rs` split (SSH, terminal, FS) remains deferred.
 
 ### Problem
 
