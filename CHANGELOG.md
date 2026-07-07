@@ -4,6 +4,62 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.20.1] - 2026-07-07
+
+### Added
+- **Ghost native shell policy**: Settings → Terminal → Ghost suggestions → **Native shell policy** (`auto` / `always` / `off`) suppresses inline ghost when fish is active or zsh autosuggestions are detected (probes `~/.zshrc` and related init files on host and WSL). ([7ecf0a5])
+- **WSL path completion**: Local WSL terminals list the Linux filesystem via `fs_list_wsl` / `wsl_get_cwd` instead of Windows `%USERPROFILE%`; spawn shell is persisted on the tab; prompt sniffing supports `host:~ $` themes. ([d2cef31])
+- **Ghost cwd tracking**: Passive cwd extraction from PowerShell (`PS E:\path›`) and common Unix prompts in PTY output; spawn cwd is seeded on `terminal-ready` when OSC 7 is unavailable. ([ee1b6c4])
+- **Ghost documentation**: `docs/TERMINAL_GHOST.md` — consolidated architecture, suggestion engine, settings, and future plans. ([0df3d49])
+- **Ghost suggest v2 (P5)**: Backend-first `ghost_suggest_v2` IPC — Rust decides history vs path in one engine; renderer calls a thin TS client. Path listing moved to `path_suggest.rs` (local, SSH SFTP, WSL). ([2245969])
+- **Ghost context ranking (P6)**: Cwd boost/penalty and recent in-session commands from terminal scrollback improve history and path picks per scope. ([2245969])
+- **Ghost SSH history seed (P7)**: Opt-in **Import remote shell history on connect** reads `~/.zsh_history` / `~/.bash_history` once per host over SFTP (never logged). ([2245969])
+- **Ghost spacing debug**: With `localStorage.setItem('zync:ghost-debug', '1')`, v2 responses include `rawSuffix` and `spacingReason` for suffix normalization. ([2245969])
+
+### Changed
+- **Ghost escape handling (P2)**: Left/Right/Home/End and history keys desync the input tracker without wiping the line buffer; hard reset remains on Enter/Ctrl+C/Ctrl+U. ([7ecf0a5])
+- **Ghost path completion**: Bare `cd` skips history fallback (avoids `cd ..` from unrelated history); WSL listings use longer timeouts, prefetch, and shared `WSL_FS_LIST_TIMEOUT_MS`. ([d2cef31])
+- **Documentation**: `docs/TERMINAL_GHOST.md` — WSL path completion, architecture, scaling limits, and shipped robustness notes. ([a55b4db], [0df3d49])
+- **Ghost suggestions (inline only)**: Inline faded suffix, history frecency, and filesystem path completion remain. Path commands such as `cd` and file-aware commands again show inline ghost suffixes (previously deferred to the popup list). Rust `ghost_candidates` IPC is retained for a future popup v2 rebuild. ([336d54d])
+- **Ghost shell-safe keys**: Tab always forwards to the shell for native completion (fish/zsh/bash Tab completion). Right arrow accepts inline ghost; Tab dismisses ghost and pauses new suggestions until the line resets (Enter/Ctrl+C/Ctrl+U). ([a68a705])
+- **Ghost path listing connection id**: Filesystem ghost suffixes call `fs_list` with the workspace connection id instead of the history scope key. ([ee1b6c4])
+- **Documentation**: Updated ghost docs for inline-only architecture and Tab desync behavior. ([d5f8cee], [0df3d49])
+- **Ghost TS path layer**: Removed duplicate `pathCompletion.ts`; cwd tracking keeps `commandTokens.ts` / `pathUtils.ts` helpers only. ([2245969])
+
+### Fixed
+- **Ghost pipeline suggestions (P4)**: Path completion and cwd tracking parse the active command segment after `|`, `&&`, and `;`; history matches pipeline tails with correct leading-space suffixes. ([c6442e9])
+- **Ghost suggestion spacing**: Inline suffixes add a leading space when the typed line lacks trailing whitespace; duplicate space is stripped when the user already typed one. ([c6442e9])
+- **Ghost WSL tilde listing**: Local WSL tabs expand `~` / `~/…` via `wsl_get_cwd` before `fs_list_wsl` instead of sending empty or `.` paths. ([c6442e9])
+- **Synced terminal navigation**: `terminal:navigate` issues shell-specific `cd` commands (cmd `/d`, PowerShell `Set-Location`, POSIX tilde-safe paths) based on the live PTY session. ([ba187a5])
+- **Ghost open-quote paths**: Filesystem suggestions still run inside open quotes (e.g. `cd "My D`); history is suppressed until the quote closes. ([ba187a5])
+- **Ghost remote home listing**: Remote `~` paths no longer normalize to SFTP `.` before home expansion. ([ba187a5])
+- **Ghost Windows drive root**: `cd ..` from `C:\` or `C:` stays at the drive root instead of collapsing. ([ba187a5])
+- **Ghost overlay metrics**: Inline suffix position refreshes when cell width/height change, not only cursor left/top. ([ba187a5])
+- **Ghost prompt sniffing**: PowerShell cwd regex requires a real path prefix; sniffer state clears on terminal teardown; PTY output pre-filter skips non-prompt chunks. ([ba187a5])
+- **Ghost SSH cwd seed**: Remote `fs_cwd` seed on `terminal-ready` uses the same timeout discipline as remote `fs_list`. ([ba187a5])
+- **WSL zsh probe**: `read_wsl_zsh_init_files` times out and terminates stuck `wsl.exe` children; `~/…` list scripts use `"$HOME"/'suffix'` quoting. ([ba187a5])
+- **SSH terminal reconnect cwd**: Restoring `lastKnownCwd` `~` no longer sends `cd '~'` (bash treats quoted tilde as a literal path); home reconnect clears the banner only; `~/…` paths use shell-safe tilde quoting. `terminal:navigate` uses the same POSIX cd path helper. ([8099dd3])
+- **Ghost SSH path completion**: Remote `fs_list` uses a 900ms timeout; `~` / `~/…` paths expand via cached remote home from `fs_cwd`; home dir is seeded on SSH `terminal-ready`. Opt-in debug logging via `localStorage.setItem('zync:ghost-debug', '1')`. ([8099dd3])
+- **Ghost WSL listing**: `fs_list_wsl` inlines paths in `wsl.exe` scripts (host spawn drops shell assignments); fixes empty `WSL list failed` errors. ([d2cef31])
+- **Ghost WSL wrong suggestions**: Path completion resolves WSL only on local tabs; Linux cwd inference no longer misroutes SSH sessions to `fs_list_wsl`. ([d2cef31])
+- **Ghost WSL cwd races**: `fetchWslCwd` uses a timeout and generation guard so stale results cannot overwrite cwd after PTY respawn. ([d2cef31])
+- **Ghost cwd tracking**: `cd ..` from bare `~` returns unknown cwd instead of guessing `/`; shared `isAbsoluteOrHomePath` helper with path completion. ([d2cef31])
+- **Ghost overlay alignment**: Position inline suffix relative to the overlay parent using `.xterm-screen` offset and measured cell height so ghost text sits on the cursor row under WebGL and DOM renderers. ([a91e477])
+- **Ghost path completion cwd**: Bare `cd` lists the current directory; `~` maps to local HOME or remote SFTP cwd for directory and file-aware commands; relative multi-segment paths (e.g. `cd foo/bar`) resolve against tracked cwd; `cd ..` handles `~/…` parents correctly. ([ee1b6c4])
+- **Ghost cwd after `cd`**: `lastKnownCwd` updates on submitted `cd` / `pushd` commands (Enter) only — not when partially accepting an inline ghost suffix. ([ee1b6c4], [a68a705])
+- **Ghost Tab desync history**: After shell Tab completion, Enter no longer commits a stale input-tracker line buffer to ghost history or cwd inference. ([a68a705])
+- **Ghost suffix spacing (P5+)**: Partial command names glue without a space (`c` → `lear`); bare `cd` gets a space before dot/absolute paths (`.acme.sh/`, `/usr`); multi-token new words keep history leading space (`git status` + ` modified`). ([2245969])
+- **Ghost history import**: Zsh backslash-continued EXTENDED_HISTORY lines reassemble correctly; bash `#` metadata lines skipped. ([2245969])
+- **Ghost history seed**: Skips when remote home path fetch fails (no silent `/` seed); SFTP read timeouts no longer clear a healthy session; batch import uses HashSet dedup. ([2245969])
+- **WSL zsh probe stdin**: `read_wsl_zsh_init_files` sets stdin to null so background probes cannot hang on inherited input. ([2245969])
+- **Release build**: Removed unused import in `useTerminalGhost.ts` that failed TypeScript on CI (`tsc` exit 2). ([bee917a])
+
+### Security
+- **Ghost password leak**: Detect hidden-input prompts (`sudo`, `su`, SSH `Password:`, passphrases) and suppress inline ghost plus history commits while active; block credential-like tokens from ghost history storage and suggestions (including alphanumeric passwords such as `su` credentials). SSH history import and the secret prompt sniffer use the same credential filter; prompt detection clears its PTY tail buffer so secret-input mode is not re-entered on every output chunk. ([5ebdaaf])
+
+### Removed
+- **Tab popup ghost suggestions**: Removed the Tab-triggered completion list overlay, popup state/routing modules (`GhostSuggestionListOverlay`, tab/popup controller stack), and the **Tab popup suggestions** setting toggle. Tab no longer opens or navigates a Zync list. Removed auto-open popup while typing when multiple candidates matched. Context-menu suggestion actions now cover inline accept only (no multi-item popup list). ([336d54d])
+
 ## [2.19.2] - 2026-07-02
 
 ### Added
@@ -792,7 +848,8 @@ All notable changes to Zync are documented in this file. The format is based on 
 - Auto-updates
 - Multiple themes (Dark, Light, Dracula)
 
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.19.2...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.20.1...HEAD
+[2.20.1]: https://github.com/zync-sh/zync/compare/v2.19.2...v2.20.1
 [2.19.2]: https://github.com/zync-sh/zync/compare/v2.19.1...v2.19.2
 [2.19.1]: https://github.com/zync-sh/zync/compare/v2.18.0...v2.19.1
 [2.18.0]: https://github.com/zync-sh/zync/compare/v2.17.0...v2.18.0

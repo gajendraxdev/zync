@@ -209,7 +209,7 @@ sudo apt update && sudo apt install zync
 | [docs/SECURITY.md](docs/SECURITY.md) | Vault, sync, OAuth, and operator security guidance |
 | [docs/VAULT.md](docs/VAULT.md) | Vault, credentials, Google sync |
 | [docs/TERMINAL.md](docs/TERMINAL.md) | Terminal system (IPC, renderer, lifecycle, settings) |
-| [docs/TERMINAL_GHOST_SUGGESTIONS.md](docs/TERMINAL_GHOST_SUGGESTIONS.md) | Ghost completions (inline, popup, history, paths) |
+| [docs/TERMINAL_GHOST.md](docs/TERMINAL_GHOST.md) | Ghost completions (inline, history, paths, suggestion engine) |
 | [docs/SESSION_PERSISTENCE.md](docs/SESSION_PERSISTENCE.md) | Tab and terminal restore across restarts |
 | [docs/SETTINGS_SYSTEM.md](docs/SETTINGS_SYSTEM.md) | Global settings and `settings.json` |
 

@@ -1,3 +1,13 @@
+import { useAppStore } from '../../store/useAppStore.js';
+import { scheduleZshAutosuggestProbe } from '../ghostSuggestions/zshAutosuggestDetect.js';
+import { prefetchWslHomeListing } from '../ghostSuggestions/client.js';
+import { REMOTE_FS_LIST_TIMEOUT_MS } from '../ghostSuggestions/wslShell.js';
+import { ghostDebug } from '../ghostSuggestions/ghostDebug.js';
+import {
+  fetchWslCwd,
+  resolveWslShellIdForPathCompletion,
+  shellIdIndicatesWsl,
+} from '../ghostSuggestions/wslShell.js';
 import { terminalCache } from './terminalCache.js';
 import { touchTerminalActivity } from './terminalActivity.js';
 import { clearIdleHostSuspendNotice } from './terminalIdleSuspendNotice.js';
@@ -88,6 +98,83 @@ export function handleTerminalReady(termId: string, generation: number): boolean
   cached.spawned = true;
   cached.spawnBlocked = false;
   cached.suspendedByIdle = false;
+  if (cached.pendingSpawnCwd && cached.connectionId) {
+    useAppStore.getState().setTerminalCwd(cached.connectionId, termId, cached.pendingSpawnCwd);
+    cached.pendingSpawnCwd = undefined;
+  }
+  if (cached.connectionId) {
+    const store = useAppStore.getState();
+    const readyGeneration = generation;
+    const pendingSpawnShell = cached.pendingSpawnShell;
+    cached.pendingSpawnShell = undefined;
+    const termTab = store.terminals[cached.connectionId]?.find((t) => t.id === termId);
+    if (pendingSpawnShell && !termTab?.shellOverride) {
+      store.setTerminalShellOverride(cached.connectionId, termId, pendingSpawnShell);
+    }
+    const shellId = termTab?.shellOverride
+      ?? pendingSpawnShell
+      ?? (cached.connectionId === 'local' ? store.settings.localTerm?.windowsShell : undefined);
+    scheduleZshAutosuggestProbe(termId, cached.connectionId, shellId);
+
+    if (cached.connectionId === 'local') {
+      let cwdHint = termTab?.lastKnownCwd ?? termTab?.initialPath;
+      const wslShellId = resolveWslShellIdForPathCompletion(shellId, cwdHint);
+      if (wslShellId && !cwdHint) {
+        store.setTerminalCwd(cached.connectionId, termId, '~');
+        cwdHint = '~';
+      }
+      if (wslShellId && shellIdIndicatesWsl(wslShellId)) {
+        void fetchWslCwd(wslShellId)
+          .then((linuxCwd) => {
+            if (!linuxCwd) return;
+            const current = terminalCache.get(termId);
+            if (!current?.connectionId || current.generation !== readyGeneration) return;
+            useAppStore.getState().setTerminalCwd(current.connectionId, termId, linuxCwd);
+            prefetchWslHomeListing(wslShellId, linuxCwd);
+          })
+          .catch(() => {});
+        prefetchWslHomeListing(wslShellId, cwdHint);
+      }
+    } else {
+      let cwdHint = termTab?.lastKnownCwd ?? termTab?.initialPath;
+      if (!cwdHint) {
+        const fsCwdRequest = window.ipcRenderer.invoke('fs_cwd', {
+          connectionId: cached.connectionId,
+        }) as Promise<string>;
+        let fsCwdTimeoutId: ReturnType<typeof setTimeout> | null = null;
+        const fsCwdTimeout = new Promise<never>((_, reject) => {
+          fsCwdTimeoutId = setTimeout(() => {
+            reject(new Error('fs_cwd timeout'));
+          }, REMOTE_FS_LIST_TIMEOUT_MS);
+        });
+        void Promise.race([fsCwdRequest, fsCwdTimeout])
+          .then((path: unknown) => {
+            if (typeof path !== 'string' || !path.trim()) return;
+            const current = terminalCache.get(termId);
+            if (!current?.connectionId || current.generation !== readyGeneration) return;
+            ghostDebug('cwd', {
+              source: 'fs_cwd-seed',
+              connectionId: cached.connectionId,
+              path: path.trim(),
+            });
+            store.setTerminalCwd(cached.connectionId!, termId, path.trim());
+          })
+          .catch((err: unknown) => {
+            ghostDebug('cwd', {
+              source: 'fs_cwd-seed',
+              connectionId: cached.connectionId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          })
+          .finally(() => {
+            if (fsCwdTimeoutId !== null) {
+              clearTimeout(fsCwdTimeoutId);
+              fsCwdTimeoutId = null;
+            }
+          });
+      }
+    }
+  }
   clearIdleHostSuspendNotice(termId);
   flushPendingInput(termId);
   return true;

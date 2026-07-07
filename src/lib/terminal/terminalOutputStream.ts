@@ -1,10 +1,24 @@
 import { Channel } from '@tauri-apps/api/core';
 import type { Terminal as XTerm } from '@xterm/xterm';
+import { feedPromptCwdSniffer } from '../ghostSuggestions/promptCwdSniffer.js';
+import { feedSecretInputSniffer } from '../ghostSuggestions/secretInputDetect.js';
+import { useAppStore } from '../../store/useAppStore.js';
 import { terminalCache } from './terminalCache.js';
 import { touchTerminalActivity } from './terminalActivity.js';
 import { silenceTerminalOutputChannel } from './terminalReloadTeardown.js';
 
 const GENERATION_HEADER_BYTES = 4;
+
+/** Cheap pre-filter before UTF-8 decode + prompt regex work on PTY output. */
+function outputMayContainPrompt(data: Uint8Array): boolean {
+  for (let i = 0; i < data.length; i++) {
+    const byte = data[i];
+    if (byte === 0x0d || byte === 0x0a || byte === 0x24 || byte === 0x3a || byte === 0x3e) {
+      return true;
+    }
+  }
+  return false;
+}
 
 function isTauriRuntime(): boolean {
   return typeof window !== 'undefined'
@@ -82,6 +96,20 @@ export function attachTerminalOutputChannel(termId: string, term: XTerm): Channe
     }
 
     touchTerminalActivity(termId);
+    if (entry.connectionId) {
+      const connectionId = entry.connectionId;
+      // Always run the bounded secret sniffer; chunk-boundary prefilters can miss prompts.
+      feedSecretInputSniffer(termId, data, () => {
+        const live = terminalCache.get(termId);
+        live?.ghostTracker?.enterSecretInputMode();
+      });
+      if (outputMayContainPrompt(data)) {
+        feedPromptCwdSniffer(termId, data, (path) => {
+          entry.ghostTracker?.exitSecretInputMode();
+          useAppStore.getState().setTerminalCwd(connectionId, termId, path);
+        });
+      }
+    }
     term.write(data);
   });
 

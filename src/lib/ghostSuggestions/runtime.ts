@@ -1,6 +1,5 @@
+import { ghostDebug } from './ghostDebug.js';
 import { InputTracker } from './inputTracker.js';
-import { resolveGhostInputDispatchDecision } from './controller.js';
-import type { GhostPopupState } from './types.js';
 
 interface GhostTrackerRuntimeParams {
   tracker: InputTracker;
@@ -48,6 +47,19 @@ export function bindGhostTrackerRuntime({
       tracker.clearSuggestion();
       onSuggestion('', line);
       onClearUI();
+      if (tracker.isSecretInputMode()) {
+        ghostDebug('runtime', { phase: 'skip-fetch', reason: 'secret-input', line });
+        requestSeq += 1;
+        clearTimer();
+        return;
+      }
+      if (tracker.isDesynced()) {
+        ghostDebug('runtime', { phase: 'skip-fetch', reason: 'desynced', line });
+        requestSeq += 1;
+        clearTimer();
+        return;
+      }
+
       requestSeq += 1;
       const seq = requestSeq;
       clearTimer();
@@ -55,9 +67,11 @@ export function bindGhostTrackerRuntime({
       timer = setTimeout(async () => {
         timer = null;
         if (!active || seq !== requestSeq || tracker.getLineBuffer() !== line) return;
+        if (tracker.isDesynced()) return;
 
         const suffix = await resolveInlineSuggestion(line);
         if (!active || seq !== requestSeq || tracker.getLineBuffer() !== line) return;
+        if (tracker.isDesynced()) return;
 
         tracker.setSuggestion(suffix);
         onSuggestion(suffix, line);
@@ -87,56 +101,15 @@ export function bindGhostTrackerRuntime({
   };
 }
 
-interface HandleGhostInputParams {
-  data: string;
-  popup: GhostPopupState;
-  tracker?: InputTracker;
-  allowTabPopup?: boolean;
-  onMovePopupSelection: (delta: number) => void;
-  onAcceptPopupSelection: () => void;
-  onDismissPopup: () => void;
-  onTriggerTabPopup: (tracker: InputTracker) => Promise<void> | void;
-}
-
 /**
- * Handles ghost-specific input routing (popup controls, tab trigger, inline accept).
+ * Handles inline ghost input routing (accept/dismiss keys).
  * Returns true when the event was fully handled and should NOT continue to PTY write.
  */
-export async function handleGhostInputEvent({
-  data,
-  popup,
-  tracker,
-  allowTabPopup = true,
-  onMovePopupSelection,
-  onAcceptPopupSelection,
-  onDismissPopup,
-  onTriggerTabPopup,
-}: HandleGhostInputParams): Promise<boolean> {
-  const dispatch = resolveGhostInputDispatchDecision(data, popup, Boolean(tracker), allowTabPopup);
-
-  if (typeof dispatch.moveDelta === 'number') {
-    onMovePopupSelection(dispatch.moveDelta);
-    return true;
-  }
-  if (dispatch.acceptPopupSelection) {
-    onAcceptPopupSelection();
-    return true;
-  }
-  if (dispatch.dismissPopup) {
-    onDismissPopup();
-    return true;
-  }
-  if (dispatch.closePopupBeforeContinue) {
-    onDismissPopup();
-  }
-  if (dispatch.triggerTabPopup && tracker) {
-    await onTriggerTabPopup(tracker);
-    return true;
-  }
-  if (dispatch.shouldFeedTracker && tracker) {
-    const { consumed } = tracker.feed(data);
-    if (consumed) return true;
-  }
-
-  return false;
+export function handleGhostInputEvent(
+  data: string,
+  tracker?: InputTracker,
+): boolean {
+  if (!tracker) return false;
+  const { consumed } = tracker.feed(data);
+  return consumed;
 }

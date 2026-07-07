@@ -1272,10 +1272,9 @@ pub async fn terminal_navigate(
     path: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let cd_cmd = format!("cd {}\r", universal_double_quote_path(&path));
     state
         .pty_manager
-        .write(&term_id, &cd_cmd)
+        .navigate_to_path(&term_id, &path)
         .await
         .map_err(|e| e.to_string())
 }
@@ -1888,7 +1887,7 @@ pub async fn terminal_create(
 async fn reconnect_stored_connection(
     connection_id: &str,
     original_config: ConnectionConfig,
-    state: &State<'_, AppState>,
+    state: &AppState,
 ) -> Result<(), String> {
     // Acquire per-connection reconnect lock *without* holding connections lock across await (avoids deadlock with concurrent ops needing connections).
     let reconnect_lock = {
@@ -2050,7 +2049,7 @@ pub async fn terminal_has_active_processes(
 // Helper to get SFTP session - reconnects automatically if session is dead.
 // Zero overhead for healthy connections; only re-establishes when needed.
 async fn get_sftp_or_reconnect(
-    state: &State<'_, AppState>,
+    state: &AppState,
     id: &str,
 ) -> Result<Arc<russh_sftp::client::SftpSession>, String> {
     // 1. Try to get existing SFTP session
@@ -2162,6 +2161,81 @@ pub async fn fs_list(
     }
 }
 
+/// True when an SFTP read error indicates the shared session is dead (not a slow read).
+pub(crate) fn sftp_error_is_dead_session(err: &anyhow::Error) -> bool {
+    let mut current: &dyn std::error::Error = err.as_ref();
+    loop {
+        if let Some(io_err) = current.downcast_ref::<std::io::Error>() {
+            return matches!(
+                io_err.kind(),
+                ErrorKind::BrokenPipe
+                    | ErrorKind::ConnectionReset
+                    | ErrorKind::UnexpectedEof
+                    | ErrorKind::NotConnected
+            );
+        }
+        let lower = current.to_string().to_ascii_lowercase();
+        if lower.contains("session closed")
+            || lower.contains("connection is closed")
+            || lower.contains("channel is eof")
+        {
+            return true;
+        }
+        current = match current.source() {
+            Some(source) => source,
+            None => break,
+        };
+    }
+    false
+}
+
+pub(crate) async fn read_remote_connection_file(
+    state: &AppState,
+    connection_id: &str,
+    path: &str,
+    timeout_secs: u64,
+) -> Result<String, String> {
+    let sftp = get_sftp_or_reconnect(state, connection_id).await?;
+    let timeout_duration = std::time::Duration::from_secs(timeout_secs);
+
+    match tokio::time::timeout(
+        timeout_duration,
+        state.file_system.read_remote(&sftp, path),
+    )
+    .await
+    {
+        Ok(Ok(res)) => Ok(res),
+        Ok(Err(e)) if sftp_error_is_dead_session(&e) => {
+            println!("[FS] SFTP session closed during read, retrying...");
+            {
+                let mut connections = state.connections.lock().await;
+                if let Some(c) = connections.get_mut(connection_id) {
+                    c.sftp_session = None;
+                }
+            }
+            let sftp = get_sftp_or_reconnect(state, connection_id).await?;
+            match tokio::time::timeout(
+                timeout_duration,
+                state.file_system.read_remote(&sftp, path),
+            )
+            .await
+            {
+                Ok(Ok(res)) => Ok(res),
+                Ok(Err(e)) => Err(e.to_string()),
+                Err(_) => Err(format!(
+                    "DISCONNECTED: SFTP read timed out after {}s",
+                    timeout_duration.as_secs()
+                )),
+            }
+        }
+        Ok(Err(e)) => Err(e.to_string()),
+        Err(_) => Err(format!(
+            "DISCONNECTED: SFTP read timed out after {}s",
+            timeout_duration.as_secs()
+        )),
+    }
+}
+
 #[tauri::command]
 pub async fn fs_read_file(
     connection_id: String,
@@ -2175,53 +2249,7 @@ pub async fn fs_read_file(
             .await
             .map_err(|e| e.to_string())
     } else {
-        let sftp = get_sftp_or_reconnect(&state, &connection_id).await?;
-        let timeout_duration = std::time::Duration::from_secs(10);
-
-        match tokio::time::timeout(
-            timeout_duration,
-            state.file_system.read_remote(&sftp, &path),
-        )
-        .await
-        {
-            Ok(Ok(res)) => Ok(res),
-            Ok(Err(e)) if e.to_string().to_lowercase().contains("session closed") => {
-                println!("[FS] SFTP session closed during read, retrying...");
-                {
-                    let mut connections = state.connections.lock().await;
-                    if let Some(c) = connections.get_mut(&connection_id) {
-                        c.sftp_session = None;
-                    }
-                }
-                let sftp = get_sftp_or_reconnect(&state, &connection_id).await?;
-                match tokio::time::timeout(
-                    timeout_duration,
-                    state.file_system.read_remote(&sftp, &path),
-                )
-                .await
-                {
-                    Ok(Ok(res)) => Ok(res),
-                    Ok(Err(e)) => Err(e.to_string()),
-                    Err(_) => Err(format!(
-                        "DISCONNECTED: SFTP read timed out after {}s",
-                        timeout_duration.as_secs()
-                    )),
-                }
-            }
-            Ok(Err(e)) => Err(e.to_string()),
-            Err(_) => {
-                {
-                    let mut connections = state.connections.lock().await;
-                    if let Some(c) = connections.get_mut(&connection_id) {
-                        c.sftp_session = None;
-                    }
-                }
-                Err(format!(
-                    "DISCONNECTED: SFTP read timed out after {}s",
-                    timeout_duration.as_secs()
-                ))
-            }
-        }
+        read_remote_connection_file(&state, &connection_id, &path, 10).await
     }
 }
 
@@ -2338,6 +2366,329 @@ pub async fn fs_cwd(connection_id: String, state: State<'_, AppState>) -> Result
                 ))
             }
         }
+    }
+}
+
+/// Read zsh init file contents from a WSL distro home (Windows local terminals only).
+/// Returns empty string when WSL is unavailable, login shell is not zsh, or files are missing.
+#[tauri::command]
+pub async fn read_wsl_zsh_init_files(wsl_distro: Option<String>) -> Result<String, String> {
+    read_wsl_zsh_init_files_impl(wsl_distro).await
+}
+
+#[cfg(target_os = "windows")]
+async fn read_wsl_zsh_init_files_impl(wsl_distro: Option<String>) -> Result<String, String> {
+    use tokio::process::Command;
+
+    let mut cmd = Command::new("wsl.exe");
+    if let Some(distro) = wsl_distro {
+        let trimmed = distro.trim();
+        if !trimmed.is_empty() {
+            cmd.arg("-d").arg(trimmed);
+        }
+    }
+
+    let shell_script = concat!(
+        "case \"$SHELL\" in *zsh*) ;; *) exit 2;; esac; ",
+        "for f in ~/.zshrc ~/.zprofile ~/.zshenv; do ",
+        "[ -f \"$f\" ] && cat \"$f\"; done"
+    );
+    cmd.args(["--", "sh", "-lc", shell_script]);
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    let timeout_duration = std::time::Duration::from_secs(8);
+    let child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to run WSL probe: {}", e))?;
+    let child_pid = child.id();
+    let output = match tokio::time::timeout(timeout_duration, child.wait_with_output()).await {
+        Ok(Ok(output)) => output,
+        Ok(Err(e)) => return Err(format!("Failed to run WSL probe: {}", e)),
+        Err(_) => {
+            if let Some(pid) = child_pid {
+                let _ = Command::new("taskkill")
+                    .args(["/PID", &pid.to_string(), "/F", "/T"])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status()
+                    .await;
+            }
+            eprintln!(
+                "[WSL] zsh init probe timed out after {}s",
+                timeout_duration.as_secs()
+            );
+            return Ok(String::new());
+        }
+    };
+
+    if output.status.code() == Some(2) {
+        return Ok(String::new());
+    }
+    if !output.status.success() {
+        return Ok(String::new());
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+async fn read_wsl_zsh_init_files_impl(_wsl_distro: Option<String>) -> Result<String, String> {
+    Ok(String::new())
+}
+
+/// Current working directory inside a WSL distro (Linux path).
+#[tauri::command]
+pub async fn wsl_get_cwd(wsl_distro: Option<String>) -> Result<String, String> {
+    wsl_get_cwd_impl(wsl_distro).await
+}
+
+/// List a directory inside a WSL distro for ghost path completion.
+#[tauri::command]
+pub async fn fs_list_wsl(wsl_distro: Option<String>, path: String) -> Result<Vec<FileEntry>, String> {
+    fs_list_wsl_impl(wsl_distro, path).await
+}
+
+#[cfg(target_os = "windows")]
+fn push_wsl_distro(cmd: &mut tokio::process::Command, wsl_distro: &Option<String>) {
+    if let Some(distro) = wsl_distro {
+        let trimmed = distro.trim();
+        if !trimmed.is_empty() {
+            cmd.arg("-d").arg(trimmed);
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+async fn wsl_get_cwd_impl(wsl_distro: Option<String>) -> Result<String, String> {
+    use tokio::process::Command;
+
+    let mut cmd = Command::new("wsl.exe");
+    push_wsl_distro(&mut cmd, &wsl_distro);
+    cmd.args(["--", "sh", "-lc", "pwd -P"]);
+
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| format!("Failed to read WSL cwd: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "WSL cwd failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+async fn wsl_get_cwd_impl(_wsl_distro: Option<String>) -> Result<String, String> {
+    Err("WSL is only available on Windows".to_string())
+}
+
+#[cfg(target_os = "windows")]
+fn shell_single_quote(path: &str) -> String {
+    format!("'{}'", path.replace('\'', "'\"'\"'"))
+}
+
+#[cfg(target_os = "windows")]
+fn wsl_list_path_shell(path: &str) -> String {
+    let trimmed = path.trim();
+    if trimmed.is_empty() || trimmed == "." || trimmed == "~" {
+        return "\"$HOME\"".to_string();
+    }
+    if let Some(rest) = trimmed.strip_prefix("~/") {
+        if rest.is_empty() {
+            return "\"$HOME\"".to_string();
+        }
+        return format!("\"$HOME\"/{}", shell_single_quote(rest));
+    }
+    shell_single_quote(trimmed)
+}
+
+#[cfg(target_os = "windows")]
+async fn fs_list_wsl_impl(wsl_distro: Option<String>, path: String) -> Result<Vec<FileEntry>, String> {
+    use tokio::process::Command;
+
+    // Inline the path in the script — `wsl.exe -- sh -lc` drops assignments like
+    // `target=...` when spawned from the Windows side, so `$target` is always empty.
+    let path_shell = wsl_list_path_shell(&path);
+    let list_script = format!(
+        "if [ ! -d {path_shell} ]; then exit 1; fi; \
+         ls -1AF -- {path_shell} 2>/dev/null"
+    );
+
+    let mut cmd = Command::new("wsl.exe");
+    push_wsl_distro(&mut cmd, &wsl_distro);
+    cmd.args(["--", "sh", "-lc", &list_script]);
+
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| format!("Failed to list WSL directory: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let detail = if stderr.is_empty() { stdout } else { stderr };
+        return Err(format!("WSL list failed for {path:?}: {detail}"));
+    }
+
+    Ok(parse_wsl_ls_listing(&String::from_utf8_lossy(&output.stdout)))
+}
+
+#[cfg(not(target_os = "windows"))]
+async fn fs_list_wsl_impl(_wsl_distro: Option<String>, _path: String) -> Result<Vec<FileEntry>, String> {
+    Err("WSL is only available on Windows".to_string())
+}
+
+/// Filesystem helpers for ghost suggest v2 (P5).
+pub(crate) async fn ghost_fs_list(
+    state: &AppState,
+    connection_id: &str,
+    path: &str,
+) -> Result<Vec<FileEntry>, String> {
+    if connection_id == "local" {
+        state
+            .file_system
+            .list_local(path)
+            .map_err(|e| e.to_string())
+    } else {
+        let sftp = get_sftp_or_reconnect(state, connection_id).await?;
+        let timeout_duration = std::time::Duration::from_secs(10);
+        match tokio::time::timeout(
+            timeout_duration,
+            state.file_system.list_remote(&sftp, path),
+        )
+        .await
+        {
+            Ok(Ok(res)) => Ok(res),
+            Ok(Err(e)) if sftp_error_is_dead_session(&e) => {
+                println!("[FS] SFTP session closed during list, retrying...");
+                {
+                    let mut connections = state.connections.lock().await;
+                    if let Some(c) = connections.get_mut(connection_id) {
+                        c.sftp_session = None;
+                    }
+                }
+                let sftp = get_sftp_or_reconnect(state, connection_id).await?;
+                match tokio::time::timeout(
+                    timeout_duration,
+                    state.file_system.list_remote(&sftp, path),
+                )
+                .await
+                {
+                    Ok(Ok(res)) => Ok(res),
+                    Ok(Err(e)) => Err(e.to_string()),
+                    Err(_) => Err(format!(
+                        "DISCONNECTED: SFTP listing timed out after {}s",
+                        timeout_duration.as_secs()
+                    )),
+                }
+            }
+            Ok(Err(e)) => Err(e.to_string()),
+            Err(_) => Err(format!(
+                "DISCONNECTED: SFTP listing timed out after {}s",
+                timeout_duration.as_secs()
+            )),
+        }
+    }
+}
+
+pub(crate) async fn ghost_fs_cwd(state: &AppState, connection_id: &str) -> Result<String, String> {
+    if connection_id == "local" {
+        state
+            .file_system
+            .get_home_dir(connection_id)
+            .map_err(|e| e.to_string())
+    } else {
+        let sftp = get_sftp_or_reconnect(state, connection_id).await?;
+        let timeout_duration = std::time::Duration::from_secs(10);
+        match tokio::time::timeout(timeout_duration, sftp.canonicalize(".")).await {
+            Ok(Ok(path)) => Ok(path),
+            Ok(Err(e)) => Err(e.to_string()),
+            Err(_) => Err(format!(
+                "DISCONNECTED: SFTP cwd timed out after {}s",
+                timeout_duration.as_secs()
+            )),
+        }
+    }
+}
+
+pub(crate) async fn ghost_fs_list_wsl(
+    wsl_distro: Option<String>,
+    path: String,
+) -> Result<Vec<FileEntry>, String> {
+    fs_list_wsl_impl(wsl_distro, path).await
+}
+
+pub(crate) async fn ghost_wsl_get_cwd(wsl_distro: Option<String>) -> Result<String, String> {
+    wsl_get_cwd_impl(wsl_distro).await
+}
+
+fn parse_wsl_ls_listing(stdout: &str) -> Vec<FileEntry> {
+    let mut entries = Vec::new();
+
+    for line in stdout.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let (name, file_type) = if let Some(stripped) = line.strip_suffix('/') {
+            (stripped, "d")
+        } else if let Some(stripped) = line.strip_suffix('@') {
+            (stripped, "l")
+        } else if let Some((link, _)) = line.split_once(" -> ") {
+            (link.trim(), "l")
+        } else {
+            (line, "-")
+        };
+        if name == "." || name == ".." {
+            continue;
+        }
+
+        entries.push(FileEntry {
+            name: name.to_string(),
+            path: String::new(),
+            r#type: file_type.to_string(),
+            size: 0,
+            last_modified: 0,
+            permissions: String::new(),
+        });
+    }
+
+    entries.sort_by(|a, b| {
+        let a_dir = a.r#type == "d" || a.r#type == "l";
+        let b_dir = b.r#type == "d" || b.r#type == "l";
+        if a_dir && !b_dir {
+            std::cmp::Ordering::Less
+        } else if !a_dir && b_dir {
+            std::cmp::Ordering::Greater
+        } else {
+            a.name.cmp(&b.name)
+        }
+    });
+
+    entries
+}
+
+#[cfg(test)]
+mod wsl_list_tests {
+    use super::parse_wsl_ls_listing;
+
+    #[test]
+    fn parse_ls_marks_directories_and_symlinks() {
+        let stdout = "data/\nfile.txt\nlink@\nother -> target\n";
+        let entries = parse_wsl_ls_listing(stdout);
+        assert_eq!(entries.len(), 4);
+        let by_name: std::collections::HashMap<_, _> =
+            entries.iter().map(|e| (e.name.as_str(), e.r#type.as_str())).collect();
+        assert_eq!(by_name.get("data"), Some(&"d"));
+        assert_eq!(by_name.get("file.txt"), Some(&"-"));
+        assert_eq!(by_name.get("link"), Some(&"l"));
+        assert_eq!(by_name.get("other"), Some(&"l"));
     }
 }
 
@@ -5863,11 +6214,6 @@ pub async fn ssh_parse_command(command: String) -> Result<crate::ssh_parser::Par
 /// Shell-quote a path so it can be safely embedded in a remote command string.
 fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
-}
-
-fn universal_double_quote_path(path: &str) -> String {
-    let escaped = path.replace('\\', "\\\\").replace('"', "\\\"");
-    format!("\"{}\"", escaped)
 }
 
 /// Download selected remote files/directories as a .tar.gz archive.

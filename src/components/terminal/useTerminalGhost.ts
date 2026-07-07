@@ -5,24 +5,39 @@ import {
   acceptGhostCommand,
   commitGhostCommand,
   resolveInlineSuggestion,
-  resolvePopupCandidates,
-  resolveTabCompletionOutcome,
-  shouldPreferPathSuggestion,
 } from '../../lib/ghostSuggestions/client';
-import type { GhostTabState } from '../../lib/ghostSuggestions/types';
-import { createInitialGhostTabState, resetGhostTabState } from '../../lib/ghostSuggestions/tabState';
+import { resolveCdTargetPath } from '../../lib/ghostSuggestions/cwdTracking';
 import { bindGhostTrackerRuntime, handleGhostInputEvent } from '../../lib/ghostSuggestions/runtime';
-import { useGhostPopupState } from '../../lib/ghostSuggestions/uiState';
+import { shouldSuppressGhostForNativeShell } from '../../lib/ghostSuggestions/shellSuppression';
+import {
+  getZshAutosuggestEnabled,
+  scheduleZshAutosuggestProbe,
+} from '../../lib/ghostSuggestions/zshAutosuggestDetect';
+import { ghostDebug } from '../../lib/ghostSuggestions/ghostDebug';
+import {
+  cwdForWslPathCompletion,
+  resolveWslShellIdForPathCompletion,
+} from '../../lib/ghostSuggestions/wslShell';
 import type { AppSettings } from '../../store/settingsSlice';
+import { extractRecentCommands } from '../../lib/ghostSuggestions/recentCommands';
 import {
   clearTerminalPendingInput,
   enqueueTerminalInputTask,
+  getTerminalRecentLines,
   queueTerminalInput,
   isTerminalIdleSuspended,
   spawnTerminalFromStoreContext,
   terminalCache,
 } from '../../lib/terminal';
 import type { TerminalMountContext } from './useTerminalLifecycle';
+
+function getEffectiveShellId(
+  terminalKey: string,
+  shellOverride?: string,
+  windowsShell?: string,
+): string | undefined {
+  return shellOverride ?? (terminalKey === 'local' ? windowsShell : undefined);
+}
 
 export interface UseTerminalGhostOptions {
   sessionId: string;
@@ -44,14 +59,6 @@ export function useTerminalGhost({
   isConnectedRef,
 }: UseTerminalGhostOptions) {
   const [ghostSuggestion, setGhostSuggestion] = useState('');
-  const {
-    ghostPopup,
-    ghostPopupRef,
-    closeGhostPopup,
-    openGhostPopup,
-    moveGhostPopupSelection,
-  } = useGhostPopupState();
-  const ghostTabStateRef = useRef<GhostTabState>(createInitialGhostTabState());
   const ghostTrackerRef = useRef<InputTracker | null>(null);
   const ghostSettingsRef = useRef(ghostSettings);
 
@@ -61,11 +68,7 @@ export function useTerminalGhost({
       setGhostSuggestion('');
       ghostTrackerRef.current?.clearSuggestion();
     }
-    if (!ghostSettings.popupEnabled) {
-      closeGhostPopup();
-      ghostTabStateRef.current = resetGhostTabState();
-    }
-  }, [ghostSettings, closeGhostPopup]);
+  }, [ghostSettings]);
 
   const acceptGhostSuffix = useCallback((suffix: string) => {
     if (!suffix) return;
@@ -74,10 +77,8 @@ export function useTerminalGhost({
     cached?.ghostTracker?.clearSuggestion();
     queueTerminalInput(sessionId, suffix);
     acceptGhostCommand(cached?.ghostTracker?.getLineBuffer() ?? '', ghostScope).catch(() => {});
-    closeGhostPopup();
     setGhostSuggestion('');
-    ghostTabStateRef.current = resetGhostTabState();
-  }, [sessionId, ghostScope, closeGhostPopup]);
+  }, [sessionId, ghostScope]);
 
   const truncateLabel = useCallback((label: string, max = 60) => {
     if (label.length <= max) return label;
@@ -86,9 +87,7 @@ export function useTerminalGhost({
 
   const resetGhostUi = useCallback(() => {
     setGhostSuggestion('');
-    closeGhostPopup();
-    ghostTabStateRef.current = resetGhostTabState();
-  }, [closeGhostPopup]);
+  }, []);
 
   const initGhostTracker = useCallback((termSessionId: string) => {
     const ghostTracker = new InputTracker({
@@ -107,6 +106,15 @@ export function useTerminalGhost({
       ghostTrackerRef.current?.clearSuggestion();
     }
 
+    const storeOnBind = useAppStore.getState();
+    const termStateOnBind = storeOnBind.terminals[terminalKey]?.find((t) => t.id === mountSessionId);
+    const shellIdOnBind = getEffectiveShellId(
+      terminalKey,
+      termStateOnBind?.shellOverride,
+      storeOnBind.settings.localTerm?.windowsShell,
+    );
+    scheduleZshAutosuggestProbe(mountSessionId, terminalKey, shellIdOnBind);
+
     const unbindGhostTracker = cachedGhostTracker
       ? bindGhostTrackerRuntime({
         tracker: cachedGhostTracker,
@@ -114,47 +122,58 @@ export function useTerminalGhost({
         resolveInlineSuggestion: async (line) => {
           if (!ghostSettingsRef.current.inlineEnabled) return '';
           if (!isVisibleRef.current) return '';
-          const termState = useAppStore.getState().terminals[terminalKey]?.find((t) => t.id === mountSessionId);
-          const cwd = termState?.lastKnownCwd ?? termState?.initialPath;
+          if (cachedGhostTracker?.isSecretInputMode()) return '';
+          const store = useAppStore.getState();
+          const termState = store.terminals[terminalKey]?.find((t) => t.id === mountSessionId);
+          const shellId = getEffectiveShellId(
+            terminalKey,
+            termState?.shellOverride,
+            store.settings.localTerm?.windowsShell,
+          );
+          const suppressed = shouldSuppressGhostForNativeShell(
+            ghostSettingsRef.current.nativeShellPolicy,
+            shellId,
+            getZshAutosuggestEnabled(mountSessionId),
+          );
+          const rawCwd = termState?.lastKnownCwd ?? termState?.initialPath;
+          const wslShellId = terminalKey === 'local'
+            ? resolveWslShellIdForPathCompletion(shellId, rawCwd)
+            : undefined;
+          const cwd = wslShellId ? cwdForWslPathCompletion(rawCwd) : rawCwd;
+          ghostDebug('terminal', {
+            terminalKey,
+            termId: mountSessionId,
+            line,
+            shellId: shellId ?? null,
+            rawCwd: rawCwd ?? null,
+            cwd: cwd ?? null,
+            wslShellId: wslShellId ?? null,
+            suppressed,
+            desynced: cachedGhostTracker?.isDesynced() ?? false,
+          });
+          if (suppressed) {
+            ghostDebug('terminal', { phase: 'suppressed', shellId: shellId ?? null });
+            return '';
+          }
+          const recentCommands = extractRecentCommands(
+            getTerminalRecentLines(mountSessionId, 24),
+          );
           return resolveInlineSuggestion({
             line,
             cwd,
             scope: ghostScope,
+            fsConnectionId: terminalKey,
+            wslShellId,
+            recentCommands,
             providers: ghostSettingsRef.current.providers,
           });
         },
-        onSuggestion: (suffix, line) => {
+        onSuggestion: (suffix) => {
           if (ghostSettingsRef.current.inlineEnabled) {
             setGhostSuggestion(suffix);
           } else {
             setGhostSuggestion('');
           }
-
-          closeGhostPopup();
-
-          if (!ghostSettingsRef.current.popupEnabled || line.trim().length < 2) {
-            return;
-          }
-
-          const termState = useAppStore.getState().terminals[terminalKey]?.find((t) => t.id === mountSessionId);
-          const cwd = termState?.lastKnownCwd ?? termState?.initialPath;
-          const preferPath = shouldPreferPathSuggestion(line);
-          if (!isVisibleRef.current) return;
-          void resolvePopupCandidates({
-            line,
-            cwd,
-            scope: ghostScope,
-            preferPath,
-            limit: 10,
-            providers: ghostSettingsRef.current.providers,
-          }).then((items) => {
-            if (!cachedGhostTracker || cachedGhostTracker.getLineBuffer() !== line) return;
-            if (!ghostSettingsRef.current.popupEnabled) return;
-            if (items.length > 1) openGhostPopup(items, line);
-            else closeGhostPopup();
-          }).catch(() => {
-            closeGhostPopup();
-          });
         },
         onAccept: (suffix, lineAfterAccept) => {
           queueTerminalInput(mountSessionId, suffix);
@@ -162,68 +181,18 @@ export function useTerminalGhost({
         },
         onHistoryCommit: (cmd) => {
           commitGhostCommand(cmd, ghostScope).catch(() => {});
+          const termState = useAppStore.getState().terminals[terminalKey]?.find((t) => t.id === mountSessionId);
+          const cwd = termState?.lastKnownCwd ?? termState?.initialPath;
+          const nextCwd = resolveCdTargetPath(cmd, cwd);
+          if (nextCwd) {
+            useAppStore.getState().setTerminalCwd(terminalKey, mountSessionId, nextCwd);
+          }
         },
         onClearUI: () => {
           setGhostSuggestion('');
-          closeGhostPopup();
-          ghostTabStateRef.current = resetGhostTabState();
         },
       })
       : () => {};
-
-    const triggerGhostPopup = async (tracker: InputTracker) => {
-      try {
-        const line = tracker.getLineBuffer();
-        if (!ghostSettingsRef.current.popupEnabled) {
-          queueTerminalInput(mountSessionId, '\t');
-          return;
-        }
-        const termState = useAppStore.getState().terminals[terminalKey]?.find((t) => t.id === mountSessionId);
-        const cwd = termState?.lastKnownCwd ?? termState?.initialPath;
-        if (!isVisibleRef.current) return;
-        const outcome = await resolveTabCompletionOutcome({
-          line,
-          cwd,
-          scope: ghostScope,
-          previousTabState: ghostTabStateRef.current,
-          now: Date.now(),
-          limit: 24,
-          providers: ghostSettingsRef.current.providers,
-        });
-
-        if (tracker.getLineBuffer() !== line) {
-          ghostTabStateRef.current = resetGhostTabState();
-          closeGhostPopup();
-          return;
-        }
-
-        if (outcome.kind === 'accept') {
-          ghostTabStateRef.current = outcome.nextState;
-          acceptGhostSuffix(outcome.suffix);
-          return;
-        }
-        if (outcome.kind === 'show_list') {
-          if (!ghostSettingsRef.current.popupEnabled) {
-            ghostTabStateRef.current = resetGhostTabState();
-            closeGhostPopup();
-            queueTerminalInput(mountSessionId, '\t');
-            return;
-          }
-          ghostTabStateRef.current = outcome.nextState;
-          openGhostPopup(outcome.items, line);
-          return;
-        }
-
-        closeGhostPopup();
-        ghostTabStateRef.current = resetGhostTabState();
-        queueTerminalInput(mountSessionId, '\t');
-      } catch (error) {
-        console.warn('[Ghost] Tab popup resolution failed:', error);
-        ghostTabStateRef.current = resetGhostTabState();
-        closeGhostPopup();
-        queueTerminalInput(mountSessionId, '\t');
-      }
-    };
 
     const cachedForInput = terminalCache.get(mountSessionId);
     if (cachedForInput?.onDataDisposable) {
@@ -265,27 +234,22 @@ export function useTerminalGhost({
               remoteReady: true,
             });
             cached.ghostTracker?.reset();
+            cached.zshAutosuggestEnabled = undefined;
+            cached.zshAutosuggestProbe = undefined;
+            const storeAfterSpawn = useAppStore.getState();
+            const termAfterSpawn = storeAfterSpawn.terminals[terminalKey]?.find((t) => t.id === mountSessionId);
+            const shellAfterSpawn = getEffectiveShellId(
+              terminalKey,
+              termAfterSpawn?.shellOverride,
+              storeAfterSpawn.settings.localTerm?.windowsShell,
+            );
+            scheduleZshAutosuggestProbe(mountSessionId, terminalKey, shellAfterSpawn);
             setGhostSuggestion('');
-            closeGhostPopup();
-            ghostTabStateRef.current = resetGhostTabState();
             return;
           }
 
           if (isVisibleRef.current) {
-            const handledByGhost = await handleGhostInputEvent({
-              data,
-              popup: ghostPopupRef.current,
-              tracker: cached?.ghostTracker,
-              allowTabPopup: ghostSettingsRef.current.popupEnabled,
-              onMovePopupSelection: moveGhostPopupSelection,
-              onAcceptPopupSelection: () => {
-                const popup = ghostPopupRef.current;
-                const suffix = popup.items[popup.selectedIndex] ?? '';
-                acceptGhostSuffix(suffix);
-              },
-              onDismissPopup: closeGhostPopup,
-              onTriggerTabPopup: triggerGhostPopup,
-            });
+            const handledByGhost = handleGhostInputEvent(data, cached?.ghostTracker);
             if (handledByGhost) return;
           }
 
@@ -299,19 +263,12 @@ export function useTerminalGhost({
     terminalKey,
     ghostScope,
     spawnConnectionId,
-    acceptGhostSuffix,
-    closeGhostPopup,
-    openGhostPopup,
-    moveGhostPopupSelection,
     isVisibleRef,
     isConnectedRef,
-    ghostPopupRef,
   ]);
 
   return {
     ghostSuggestion,
-    ghostPopup,
-    ghostPopupRef,
     acceptGhostSuffix,
     truncateLabel,
     resetGhostUi,

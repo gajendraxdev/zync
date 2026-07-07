@@ -132,17 +132,31 @@ export function TerminalTab({
                         onChange={(value) => { setGhostSuggestionsField({ inlineEnabled: value }); }}
                     />
                     <Toggle
-                        label="Tab popup suggestions"
-                        description="Use Tab to open/navigate completion list before falling back to shell completion."
-                        checked={settings.ghostSuggestions?.popupEnabled ?? true}
-                        onChange={(value) => { setGhostSuggestionsField({ popupEnabled: value }); }}
-                    />
-                    <Toggle
                         label="Context-menu suggestion actions"
                         description="Show suggestion actions in terminal right-click context menu."
                         checked={settings.ghostSuggestions?.contextMenuEnabled ?? false}
                         onChange={(value) => { setGhostSuggestionsField({ contextMenuEnabled: value }); }}
                     />
+                    <div className="px-3 py-2 space-y-1">
+                        <Select
+                            label="Native shell sessions"
+                            value={settings.ghostSuggestions?.nativeShellPolicy ?? 'auto'}
+                            onChange={(value) => {
+                                if (value === 'auto' || value === 'always' || value === 'off') {
+                                    setGhostSuggestionsField({ nativeShellPolicy: value });
+                                }
+                            }}
+                            options={[
+                                { value: 'auto', label: 'Auto (recommended)' },
+                                { value: 'always', label: 'Always on' },
+                                { value: 'off', label: 'Off for native shells' },
+                            ]}
+                            className="bg-app-bg/50"
+                        />
+                        <p className="text-[10px] text-[var(--color-app-muted)] pl-1">
+                            Auto hides inline ghost on fish and on zsh only when zsh-autosuggestions is detected in init files.
+                        </p>
+                    </div>
 
                     <div className="rounded-lg border border-[var(--color-app-border)]/50 bg-[var(--color-app-bg)]/25 px-1 pt-3 pb-1 mt-2">
                         <div className="text-xs font-semibold uppercase tracking-wide text-[var(--color-app-muted)] px-3 pb-1">
@@ -153,6 +167,12 @@ export function TerminalTab({
                             description="Suggest commands based on your past usage for this server/session scope."
                             checked={settings.ghostSuggestions?.providers?.history ?? true}
                             onChange={(value) => { setGhostProviderField({ history: value }); }}
+                        />
+                        <Toggle
+                            label="Import remote shell history on connect"
+                            description="One-time read of ~/.zsh_history and ~/.bash_history over SFTP when an SSH host connects. Never logged; scoped per host."
+                            checked={settings.ghostSuggestions?.importRemoteHistoryOnConnect ?? false}
+                            onChange={(value) => { setGhostSuggestionsField({ importRemoteHistoryOnConnect: value }); }}
                         />
                         <Toggle
                             label="Filesystem paths"

@@ -11,52 +11,51 @@ export interface GhostSuggestRequest extends GhostScopeRequest {
   prefix: string;
 }
 
-export interface GhostCandidatesRequest extends GhostScopeRequest {
-  prefix: string;
-  limit?: number;
-}
-
 export interface GhostSuggestionProviders {
   history: boolean;
   filesystem: boolean;
 }
 
-export interface GhostPopupState {
-  visible: boolean;
-  items: string[];
-  /** Selected item index, always clamped to 0..items.length-1 when visible. */
-  selectedIndex: number;
-  anchorLine: string;
+/** P5 backend-first suggest request. */
+export interface GhostSuggestV2Request extends GhostScopeRequest {
+  prefix: string;
+  cwd?: string;
+  shellId?: string;
+  fsConnectionId?: string;
+  recentCommands?: string[];
+  providers?: GhostSuggestionProviders;
+  /** When true, response includes raw suffix + spacing decision. */
+  debug?: boolean;
 }
 
-export type GhostPopupKeyAction =
-  | { kind: 'next' }
-  | { kind: 'prev' }
-  | { kind: 'accept' }
-  | { kind: 'dismiss' }
-  | { kind: 'close_and_pass' };
-
-export interface GhostTabState {
-  lastLine: string;
-  /** Unix timestamp in milliseconds (Date.now()). */
-  lastAt: number;
+export interface GhostSuggestV2Response {
+  suffix: string;
+  confidence: number;
+  suppressReason?: string;
+  rawSuffix?: string;
+  spacingReason?: string;
 }
 
-export type GhostTabOutcome =
-  | { kind: 'fallback' }
-  | { kind: 'accept'; suffix: string; nextState: GhostTabState }
-  | { kind: 'show_list'; items: string[]; nextState: GhostTabState };
+export interface GhostSeedRemoteHistoryRequest {
+  connectionId: string;
+  scope?: string;
+  homePath: string;
+}
 
-interface SuggestionBaseParams {
+export interface GhostSeedRemoteHistoryResponse {
+  imported: number;
+  skippedReason?: string;
+}
+
+export interface InlineSuggestionParams {
   line: string;
   cwd?: string;
   scope: string;
+  /** Connection id for `fs_list` (defaults to scope). */
+  fsConnectionId?: string;
+  /** When set to `wsl` / `wsl:Distro`, path listing uses the WSL Linux filesystem. */
+  wslShellId?: string;
+  /** Recent in-session commands from scrollback (P6 ranking). */
+  recentCommands?: string[];
   providers?: GhostSuggestionProviders;
-}
-
-export interface InlineSuggestionParams extends SuggestionBaseParams {}
-
-export interface PopupCandidatesParams extends SuggestionBaseParams {
-  preferPath: boolean;
-  limit?: number;
 }

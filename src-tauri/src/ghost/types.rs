@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Score decays by 50% every 72 hours.
@@ -68,6 +68,9 @@ pub struct ScopeHistory {
 pub struct GhostData {
     /// Per-scope history buckets (scope = connection_id or "local").
     pub scopes: HashMap<String, ScopeHistory>,
+    /// Scopes that already received a one-time remote shell-history import (P7).
+    #[serde(default)]
+    pub imported_scopes: HashSet<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]

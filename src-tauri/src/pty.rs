@@ -53,6 +53,24 @@ enum ShellKind {
     Other,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NavigateShellStyle {
+    Posix,
+    WindowsCmd,
+    WindowsPowerShell,
+    WindowsOther,
+}
+
+impl From<ShellKind> for NavigateShellStyle {
+    fn from(kind: ShellKind) -> Self {
+        match kind {
+            ShellKind::Cmd => NavigateShellStyle::WindowsCmd,
+            ShellKind::PowerShell | ShellKind::Pwsh => NavigateShellStyle::WindowsPowerShell,
+            ShellKind::Other => NavigateShellStyle::WindowsOther,
+        }
+    }
+}
+
 fn classify_windows_shell(shell_label: &str) -> ShellKind {
     let trimmed = shell_label.trim();
     if trimmed.is_empty() {
@@ -96,6 +114,94 @@ fn remote_windows_shell_command(shell_override: &str) -> Option<&'static str> {
 
 fn shell_single_quote(value: &str) -> String {
     value.replace('\'', "'\\''")
+}
+
+/// Format a path for POSIX `cd`. Tilde prefixes must stay unquoted so the shell
+/// expands them; only the suffix after `~/` is single-quoted when present.
+pub(crate) fn posix_shell_cd_path(path: &str) -> String {
+    let trimmed = path.trim();
+    if trimmed.is_empty() || trimmed == "~" {
+        return "~".to_string();
+    }
+    if let Some(rest) = trimmed.strip_prefix("~/") {
+        if rest.is_empty() {
+            return "~".to_string();
+        }
+        return format!("~/'{}'", shell_single_quote(rest));
+    }
+    if let Some(tail) = trimmed.strip_prefix('~') {
+        if !tail.is_empty() && !tail.starts_with('/') {
+            let (user, rest) = tail
+                .split_once('/')
+                .map(|(u, r)| (u, Some(r)))
+                .unwrap_or((tail, None));
+            if !user.is_empty()
+                && user
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+            {
+                return match rest {
+                    Some("") | None => format!("~{user}"),
+                    Some(rest) => format!("~{user}/'{}'", shell_single_quote(rest)),
+                };
+            }
+        }
+    }
+    format!("'{}'", shell_single_quote(trimmed))
+}
+
+pub(crate) fn build_navigate_cd_command(path: &str, style: NavigateShellStyle) -> String {
+    match style {
+        NavigateShellStyle::Posix => format!("cd {}\r", posix_shell_cd_path(path)),
+        NavigateShellStyle::WindowsCmd => {
+            format!("cd /d \"{}\"\r", windows_double_quote(path, false))
+        }
+        NavigateShellStyle::WindowsPowerShell => format!(
+            "Set-Location -LiteralPath '{}'\r",
+            powershell_single_quote(path)
+        ),
+        NavigateShellStyle::WindowsOther => {
+            format!("cd \"{}\"\r", windows_double_quote(path, false))
+        }
+    }
+}
+
+fn local_navigate_shell_style(
+    shell_override: Option<&str>,
+    is_wsl_shell: bool,
+    shell: &str,
+) -> NavigateShellStyle {
+    if !cfg!(target_os = "windows") {
+        return NavigateShellStyle::Posix;
+    }
+    if is_wsl_shell || is_posix_interactive_shell(shell) {
+        return NavigateShellStyle::Posix;
+    }
+    match shell_override.map(str::trim) {
+        Some("cmd") => NavigateShellStyle::WindowsCmd,
+        Some("pwsh") => NavigateShellStyle::WindowsPowerShell,
+        Some(s) if s.eq_ignore_ascii_case("powershell") || s.eq_ignore_ascii_case("default") => {
+            NavigateShellStyle::WindowsPowerShell
+        }
+        None => NavigateShellStyle::WindowsPowerShell,
+        Some(other) => classify_windows_shell(other).into(),
+    }
+}
+
+fn remote_navigate_shell_style(
+    remote_is_windows: bool,
+    shell_override: Option<&str>,
+) -> NavigateShellStyle {
+    if !remote_is_windows {
+        return NavigateShellStyle::Posix;
+    }
+    let selected = shell_override
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("default"));
+    match selected {
+        Some(shell) => classify_windows_shell(shell).into(),
+        None => NavigateShellStyle::WindowsOther,
+    }
 }
 
 fn powershell_single_quote(value: &str) -> String {
@@ -201,6 +307,7 @@ pub struct PtySession {
     #[allow(dead_code)]
     pub output_channel: IpcChannel,
     pub handle: TerminalHandle,
+    navigate_shell: NavigateShellStyle,
 }
 
 pub struct PtyManager {
@@ -419,6 +526,11 @@ impl PtyManager {
         let child_killer = child.clone_killer();
         let child_pid = child.process_id();
 
+        let navigate_shell = local_navigate_shell_style(
+            shell_override.as_deref(),
+            is_wsl_shell,
+            &shell,
+        );
         let session = PtySession {
             connection_id,
             output_channel: output_channel.clone(),
@@ -430,6 +542,7 @@ impl PtyManager {
                 child_killer,
                 child_pid,
             },
+            navigate_shell,
         };
 
         let mut sessions = self.sessions.lock().await;
@@ -648,7 +761,12 @@ impl PtyManager {
                     }
                 }
             } else {
-                format!("cd '{}' && clear\r", shell_single_quote(&path))
+                let trimmed = path.trim();
+                if trimmed == "~" {
+                    "clear\r".to_string()
+                } else {
+                    format!("cd {} && clear\r", posix_shell_cd_path(trimmed))
+                }
             };
             channel
                 .data(cd_cmd.as_bytes())
@@ -660,6 +778,10 @@ impl PtyManager {
         let (tx, mut rx) = mpsc::channel::<Vec<u8>>(32);
         let (resize_tx, mut resize_rx) = mpsc::channel::<(u16, u16)>(4);
 
+        let navigate_shell = remote_navigate_shell_style(
+            remote_is_windows,
+            selected_shell,
+        );
         let session = PtySession {
             connection_id,
             output_channel: output_channel.clone(),
@@ -668,6 +790,7 @@ impl PtyManager {
                 resize_tx,
                 task_handle: None,
             },
+            navigate_shell,
         };
 
         let mut sessions = self.sessions.lock().await;
@@ -778,6 +901,17 @@ impl PtyManager {
             }
         }
         Ok(())
+    }
+
+    pub async fn navigate_to_path(&self, term_id: &str, path: &str) -> Result<()> {
+        let cd_cmd = {
+            let sessions = self.sessions.lock().await;
+            let session = sessions
+                .get(term_id)
+                .ok_or_else(|| anyhow!("Session not found: {}", term_id))?;
+            build_navigate_cd_command(path, session.navigate_shell)
+        };
+        self.write(term_id, &cd_cmd).await
     }
 
     pub async fn write(&self, term_id: &str, data: &str) -> Result<()> {
@@ -894,5 +1028,42 @@ impl PtyManager {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_navigate_cd_command, posix_shell_cd_path, NavigateShellStyle};
+
+    #[test]
+    fn build_navigate_cd_command_uses_cmd_syntax_for_windows_cmd() {
+        let cmd = build_navigate_cd_command(r"E:\work\data", NavigateShellStyle::WindowsCmd);
+        assert!(cmd.contains("cd /d"));
+        assert!(cmd.contains(r"E:\work\data"));
+    }
+
+    #[test]
+    fn build_navigate_cd_command_uses_posix_tilde_quoting() {
+        let cmd = build_navigate_cd_command("~/data", NavigateShellStyle::Posix);
+        assert_eq!(cmd, "cd ~/'data'\r");
+    }
+
+    #[test]
+    fn posix_shell_cd_path_leaves_tilde_unquoted() {
+        assert_eq!(posix_shell_cd_path("~"), "~");
+        assert_eq!(posix_shell_cd_path(" ~/ "), "~");
+    }
+
+    #[test]
+    fn posix_shell_cd_path_quotes_suffix_after_tilde_slash() {
+        assert_eq!(posix_shell_cd_path("~/data"), "~/'data'");
+        assert_eq!(posix_shell_cd_path("~/my dir"), "~/'my dir'");
+        assert_eq!(posix_shell_cd_path("~/it's"), "~/'it'\\''s'");
+    }
+
+    #[test]
+    fn posix_shell_cd_path_quotes_absolute_paths() {
+        assert_eq!(posix_shell_cd_path("/home/user"), "'/home/user'");
+        assert_eq!(posix_shell_cd_path("/home/a b"), "'/home/a b'");
     }
 }

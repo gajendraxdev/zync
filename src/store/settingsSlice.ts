@@ -63,8 +63,11 @@ export interface AppSettings {
     };
     ghostSuggestions: {
         inlineEnabled: boolean;
-        popupEnabled: boolean;
         contextMenuEnabled: boolean;
+        /** Auto: suppress on fish; zsh only when autosuggestions plugin detected. Off: suppress all native shells. */
+        nativeShellPolicy: 'auto' | 'always' | 'off';
+        /** P7: one-time import of remote ~/.zsh_history / ~/.bash_history on SSH connect. */
+        importRemoteHistoryOnConnect: boolean;
         providers: {
             history: boolean;
             filesystem: boolean;
@@ -183,8 +186,9 @@ export const defaultSettings: AppSettings = {
     },
     ghostSuggestions: {
         inlineEnabled: true,
-        popupEnabled: true,
         contextMenuEnabled: false,
+        nativeShellPolicy: 'auto',
+        importRemoteHistoryOnConnect: false,
         providers: {
             history: true,
             filesystem: true,
