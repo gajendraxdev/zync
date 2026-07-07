@@ -160,6 +160,7 @@ const ipcRenderer = {
       'tunnel:start_local': 'tunnel_start_local', // Add snake_case mapping
       'tunnel:startRemote': 'tunnel_start_remote',
       'tunnel:start_remote': 'tunnel_start_remote', // Add snake_case mapping
+      'tunnel:start': 'tunnel_start',
       'tunnel:stop': 'tunnel_stop',
       'ssh:exec': 'ssh_exec',
       'ssh:test': 'ssh_test_connection',
@@ -444,7 +445,7 @@ const ipcRenderer = {
           };
         }
 
-      } else if (tauriCommand === 'tunnel_stop') {
+      } else if (tauriCommand === 'tunnel_start' || tauriCommand === 'tunnel_stop') {
         payload = { id: args[0] };
       } else if (tauriCommand === 'fs_cwd') {
         if (args.length === 1 && typeof args[0] === 'object' && 'connectionId' in args[0]) {

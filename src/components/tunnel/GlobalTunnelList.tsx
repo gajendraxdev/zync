@@ -9,6 +9,15 @@ import { TUNNEL_PRESETS, TunnelPreset } from '../../lib/tunnelPresets';
 import { AddTunnelModal } from '../modals/AddTunnelModal';
 import { ImportSSHCommandModal } from '../modals/ImportSSHCommandModal';
 import { TunnelCard, TunnelConfig } from './TunnelCard';
+import {
+    parsePortConflictError,
+    tunnelWithSwappedPort,
+} from '../../features/tunnels/application/tunnelPortConflict';
+import {
+    revertTunnelOriginalPort,
+    stopTunnelConfig,
+    startTunnelConfig,
+} from '../../features/tunnels/application/tunnelActions';
 
 export function GlobalTunnelList() {
     const connections = useAppStore(state => state.connections);
@@ -19,6 +28,8 @@ export function GlobalTunnelList() {
     const updateTunnelStatus = useAppStore(state => state.updateTunnelStatus);
     const deleteTunnel = useAppStore(state => state.deleteTunnel);
     const saveTunnel = useAppStore(state => state.saveTunnel);
+    const startTunnel = useAppStore(state => state.startTunnel);
+    const stopTunnel = useAppStore(state => state.stopTunnel);
 
     const showToast = useAppStore((state) => state.showToast);
     // const [tunnels, setTunnels] = useState<TunnelConfig[]>([]); // Removed local state
@@ -73,10 +84,7 @@ export function GlobalTunnelList() {
         };
 
         window.ipcRenderer.on('tunnel:status-change', handleStatusChange);
-
-        const interval = setInterval(loadTunnels, 30000);
         return () => {
-            clearInterval(interval);
             window.ipcRenderer.off('tunnel:status-change', handleStatusChange);
         };
     }, []);
@@ -164,22 +172,17 @@ export function GlobalTunnelList() {
 
         try {
             if (tunnel.status === 'active') {
-                await window.ipcRenderer.invoke('tunnel:stop', tunnel.id);
+                await stopTunnelConfig(tunnel, stopTunnel);
                 showToast('info', 'Forwarding stopped');
 
-                // Auto-revert if it was using a suggested port
-                if (tunnel.originalPort) {
-                    try {
-                        const revertedTunnel = {
-                            ...tunnel,
-                            [tunnel.type === 'local' ? 'localPort' : 'remotePort']: tunnel.originalPort,
-                            originalPort: undefined,
-                        };
-                        await saveTunnel(revertedTunnel);
+                try {
+                    const reverted = await revertTunnelOriginalPort(tunnel, saveTunnel);
+                    if (reverted && tunnel.originalPort) {
                         showToast('success', `Port reverted to ${tunnel.originalPort}`);
-                    } catch (revertError: any) {
-                        showToast('error', `Failed to revert port: ${revertError.message || revertError}`);
                     }
+                } catch (revertError: unknown) {
+                    const message = revertError instanceof Error ? revertError.message : String(revertError);
+                    showToast('error', `Failed to revert port: ${message}`);
                 }
 
                 // Connection Cleanup Logic
@@ -203,37 +206,16 @@ export function GlobalTunnelList() {
                         return;
                     }
                 }
-                // Start tunnel with proper parameters based on type
-                if (tunnel.type === 'remote') {
-                    await window.ipcRenderer.invoke('tunnel:start_remote',
-                        tunnel.connectionId,
-                        tunnel.remotePort,
-                        tunnel.remoteHost || '127.0.0.1',
-                        tunnel.localPort
-                    );
-                } else {
-                    await window.ipcRenderer.invoke('tunnel:start_local',
-                        tunnel.connectionId,
-                        tunnel.localPort,
-                        tunnel.remoteHost,
-                        tunnel.remotePort
-                    );
-                }
+                await startTunnelConfig(tunnel, startTunnel);
                 showToast('success', `Forwarding started`);
-                await loadTunnels();
             }
-        } catch (error: any) {
-            const errorMsg = error.message || error || 'Unknown error';
-
-            // Check if error mentions port conflict with suggested port
-            const portConflictMatch = errorMsg.match(/Port (\d+) is already in use\. Port (\d+) is available/);
-            if (portConflictMatch) {
-                const currentPort = parseInt(portConflictMatch[1]);
-                const suggestedPort = parseInt(portConflictMatch[2]);
-                setPortSuggestion({ tunnel, currentPort, suggestedPort });
+        } catch (error: unknown) {
+            const conflict = parsePortConflictError(error, tunnel);
+            if (conflict) {
+                setPortSuggestion(conflict);
                 return;
             }
-
+            const errorMsg = error instanceof Error ? error.message : String(error);
             showToast('error', `Action failed: ${errorMsg}`);
         }
     };
@@ -246,36 +228,13 @@ export function GlobalTunnelList() {
         setCustomPort(''); // Reset custom port input
 
         try {
-            const currentPort = tunnel.type === 'local' ? tunnel.localPort : tunnel.remotePort;
-            const updatedTunnel = {
-                ...tunnel,
-                [tunnel.type === 'local' ? 'localPort' : 'remotePort']: port,
-                originalPort: tunnel.originalPort || currentPort, // Store original if not already stored
-            };
-
-            // Save the updated config
+            const updatedTunnel = tunnelWithSwappedPort(tunnel, port);
             await saveTunnel(updatedTunnel);
-
-            // Then start tunnel with port
-            if (tunnel.type === 'remote') {
-                await window.ipcRenderer.invoke('tunnel:start_remote',
-                    tunnel.connectionId,
-                    port,
-                    tunnel.remoteHost || '127.0.0.1',
-                    tunnel.localPort
-                );
-            } else {
-                await window.ipcRenderer.invoke('tunnel:start_local',
-                    tunnel.connectionId,
-                    port,
-                    tunnel.remoteHost,
-                    tunnel.remotePort
-                );
-            }
+            await startTunnel(updatedTunnel.id, updatedTunnel.connectionId);
             showToast('success', `Switched to port ${port}`);
-            await loadTunnels();
-        } catch (error: any) {
-            showToast('error', `Failed to start on port ${port}: ${error.message || error}`);
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            showToast('error', `Failed to start on port ${port}: ${message}`);
         }
     };
 
@@ -324,21 +283,7 @@ export function GlobalTunnelList() {
 
             for (const tunnel of tunnels) {
                 try {
-                    if (tunnel.type === 'remote') {
-                        await window.ipcRenderer.invoke('tunnel:start_remote',
-                            tunnel.connectionId,
-                            tunnel.remotePort,
-                            tunnel.remoteHost || '127.0.0.1',
-                            tunnel.localPort
-                        );
-                    } else {
-                        await window.ipcRenderer.invoke('tunnel:start_local',
-                            tunnel.connectionId,
-                            tunnel.localPort,
-                            tunnel.remoteHost,
-                            tunnel.remotePort
-                        );
-                    }
+                    await startTunnel(tunnel.id, tunnel.connectionId);
                     successCount++;
                 } catch (err) {
                     console.error(`Failed to start tunnel ${tunnel.name}:`, err);
@@ -364,7 +309,7 @@ export function GlobalTunnelList() {
         for (const tunnel of groupTunnels) {
             if (tunnel.status === 'active') {
                 try {
-                    await window.ipcRenderer.invoke('tunnel:stop', tunnel.id);
+                    await stopTunnel(tunnel.id, tunnel.connectionId);
                     count++;
                 } catch (err) {
                     console.error(`Failed to stop tunnel ${tunnel.name}:`, err);

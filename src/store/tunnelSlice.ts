@@ -159,10 +159,10 @@ export const createTunnelSlice: StateCreator<AppStore, [], [], TunnelSlice> = (s
         }
     },
 
-    stopTunnel: async (id, _connectionId) => {
+    stopTunnel: async (id, connectionId) => {
         try {
             await ipc.invoke('tunnel:stop', id);
-            // Status update will come from backend event
+            get().updateTunnelStatus(id, connectionId, 'stopped');
         } catch (error: any) {
             console.error('Failed to stop tunnel:', error);
             get().showToast('error', 'Failed to stop tunnel');

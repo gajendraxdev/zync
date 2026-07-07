@@ -672,7 +672,7 @@ export function AddTunnelModal({ isOpen, onClose, initialConnectionId, editingTu
                                     <div className="w-8 h-4.5 bg-app-surface/50 rounded-full peer peer-checked:bg-app-accent/40 transition-all border border-app-border peer-checked:border-app-accent/50"></div>
                                     <div className="absolute left-0.75 top-0.75 w-3 h-3 bg-app-muted/20 rounded-full transition-all peer-checked:translate-x-3.5 peer-checked:bg-white shadow-sm"></div>
                                 </div>
-                                <span className="text-[11px] font-medium text-app-muted group-hover:text-app-text transition-colors">Auto-start connection on save</span>
+                                <span className="text-[11px] font-medium text-app-muted group-hover:text-app-text transition-colors">Auto-start tunnel when connection opens</span>
                             </label>
                         </div>
                     </AnimatePresence>

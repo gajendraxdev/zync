@@ -13,6 +13,7 @@ mod ssh_config;
 mod ssh_parser;
 mod sync;
 pub mod tunnel;
+mod tunnels;
 mod types;
 mod utils;
 mod vault;
@@ -147,14 +148,14 @@ pub fn run() {
             commands::fs_copy_batch,
             commands::fs_rename_batch,
             commands::fs_exists,
-            commands::tunnel_get_all,
-            commands::tunnel_start_local,
-            commands::tunnel_start_remote,
-            commands::tunnel_stop,
-            commands::tunnel_list,
-            commands::tunnel_save,
-            commands::tunnel_delete,
-            commands::tunnel_start,
+            tunnels::commands::tunnel_get_all,
+            tunnels::commands::tunnel_start_local,
+            tunnels::commands::tunnel_start_remote,
+            tunnels::commands::tunnel_stop,
+            tunnels::commands::tunnel_list,
+            tunnels::commands::tunnel_save,
+            tunnels::commands::tunnel_delete,
+            tunnels::commands::tunnel_start,
             commands::window_is_maximized,
             commands::window_maximize,
             commands::window_minimize,

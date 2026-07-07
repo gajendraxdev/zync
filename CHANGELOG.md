@@ -4,6 +4,26 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.21.0] - 2026-07-07
+
+### Added
+- **Tunnel reconnect restore**: On reconnect, Zync restarts tunnels that were active before disconnect plus any with per-tunnel **auto-start** enabled (`tunnelReconnectService.ts`).
+- **Tunnel documentation**: Canonical `docs/TUNNELS.md` — architecture, lifecycle, manual QA playbook, improvement plan.
+- **Tunnel tests**: `tests/tunnelReconnectService.test.mjs` for reconnect + auto-start merge behavior.
+
+### Changed
+- **Tunnel start path**: All UI surfaces use `tunnelSlice` → `tunnel:start` (honors saved `bindAddress`); removed 30s status polling from tunnel UIs.
+- **Tunnel backend layout**: Tunnel IPC handlers moved from `commands.rs` to `src-tauri/src/tunnels/commands.rs` (runtime remains in `tunnel.rs`).
+- **Add Tunnel modal**: Label clarified to “Auto-start tunnel when connection opens”.
+
+### Fixed
+- **Tunnel IPC**: `tunnel:start` mapping in `tauri-ipc.ts` — was missing `{ id }` payload after unify.
+- **SSH disconnect**: `ssh_disconnect` now stops runtime tunnels for the connection (no leaked listeners / stale active status).
+- **Tunnel runtime IDs**: Scoped by `connectionId` + endpoints — fixes cross-connection port collision.
+- **Port conflict revert**: Stopping after alternate-port swap no longer leaves the On/Off toggle stuck active.
+- **TunnelManager crash**: Stable empty-array Zustand selector (fixes infinite re-render on mount).
+- **Reconnect failures**: Toast when a tunnel fails to restart after reconnect.
+
 ## [2.20.1] - 2026-07-07
 
 ### Added

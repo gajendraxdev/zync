@@ -29,10 +29,11 @@ import {
     markConnectionStatus,
     reduceTabCloseState,
 } from '../features/connections/application/connectionLifecycleService';
+import { pinFeatureOnConnectionIfNeeded } from '../features/connections/application/tunnelAutoStartService';
 import {
-    pinFeatureOnConnectionIfNeeded,
-    startAutoStartTunnels,
-} from '../features/connections/application/tunnelAutoStartService';
+    restartTunnelsAfterConnect,
+    snapshotActiveTunnelsForReconnect,
+} from '../features/tunnels/application/tunnelReconnectService';
 import {
     buildConnectConfigResult,
     connectConfigUsesVaultAuth,
@@ -491,20 +492,24 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                 }).catch(() => {});
             }
 
-            // Auto-start tunnels
             try {
                 await get().loadTunnels(id);
                 const tunnels = get().tunnels[id] || [];
                 const startTunnel = get().startTunnel;
 
-                const autoStartCount = await startAutoStartTunnels(
+                const restartedCount = await restartTunnelsAfterConnect({
+                    connectionId: id,
                     tunnels,
-                    id,
                     startTunnel,
-                    (tunnel, error) => console.error(`Failed to auto-start tunnel ${tunnel.name}:`, error),
-                );
+                    onTunnelError: (tunnel, error) => {
+                        const label = tunnel.name || tunnel.id;
+                        const message = error instanceof Error ? error.message : String(error);
+                        console.error(`Failed to restart tunnel ${label}:`, error);
+                        get().showToast('error', `Tunnel "${label}" failed to start: ${message}`, 6000);
+                    },
+                });
 
-                if (autoStartCount > 0) {
+                if (restartedCount > 0) {
                     // 1. Pin 'port-forwarding' feature if not already pinned
                     const conn = get().connections.find(c => c.id === id);
                     if (conn) {
@@ -544,6 +549,13 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
     disconnect: async (id) => {
         return runSerializedConnectionOp(id, async () => {
         markConnectionBackendOffline(id);
+
+        try {
+            await get().loadTunnels(id);
+            snapshotActiveTunnelsForReconnect(id, get().tunnels[id] || []);
+        } catch (err) {
+            console.error('[TUNNEL] Failed to snapshot tunnels before disconnect:', err);
+        }
 
         try {
             await disconnectIpc(id);
