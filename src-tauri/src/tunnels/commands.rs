@@ -1,5 +1,5 @@
 use crate::commands::{get_data_dir, AppState};
-use crate::tunnel::{remote_forward_map_key, tunnel_runtime_id};
+use super::{remote_forward_map_key, tunnel_runtime_id};
 use crate::types::{SavedTunnel, SavedTunnelsData};
 use serde::Serialize;
 use std::collections::HashSet;

@@ -1,8 +1,10 @@
-//! Tunnel IPC layer — Tauri commands for port forwarding.
+//! Tunnel subsystem — runtime engine, IPC commands, and shared helpers.
 //!
-//! Runtime engine: `crate::tunnel::TunnelManager`
 //! Persistence/sync: `crate::sync::domain_tunnels`
 
 pub mod commands;
+pub mod manager;
+
+pub use manager::{remote_forward_map_key, tunnel_runtime_id, TunnelManager};
 
 pub(crate) use commands::stop_tunnels_for_connections;

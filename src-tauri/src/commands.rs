@@ -15,7 +15,7 @@ use tauri::{AppHandle, Manager, State};
 use tauri_plugin_store::StoreExt;
 use tokio::sync::Mutex;
 
-use crate::tunnel::TunnelManager;
+use crate::tunnels::TunnelManager;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -516,7 +516,7 @@ pub struct ConnectionHandle {
 async fn reconnect_connection(
     config: &ConnectionConfig,
     ssh_manager: &crate::ssh::SshManager,
-    tunnel_manager: &crate::tunnel::TunnelManager,
+    tunnel_manager: &crate::tunnels::TunnelManager,
 ) -> Result<ConnectionHandle, String> {
     let session = ssh_manager
         .connect(config.clone(), Arc::new(tunnel_manager.clone()))

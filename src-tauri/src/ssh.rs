@@ -4,7 +4,7 @@ use russh::*;
 use russh_keys::*; // Re-adding this for key loading
 use std::sync::Arc;
 
-use crate::tunnel::TunnelManager;
+use crate::tunnels::TunnelManager;
 use crate::types::{AuthMethod, ConnectionConfig};
 use russh::client::Msg;
 use tokio::net::TcpStream;
@@ -111,7 +111,7 @@ impl client::Handler for Client {
             connected_address, connected_port
         );
 
-        let map_key = crate::tunnel::remote_forward_map_key(
+        let map_key = crate::tunnels::remote_forward_map_key(
             &self.connection_id,
             connected_port as u16,
         );
@@ -298,7 +298,7 @@ impl SshManager {
     pub async fn connect(
         &self,
         config: ConnectionConfig,
-        tunnel_manager: Arc<crate::tunnel::TunnelManager>,
+        tunnel_manager: Arc<crate::tunnels::TunnelManager>,
     ) -> Result<client::Handle<Client>> {
         // Keep-alive: send a heartbeat every 60s to prevent NAT/firewall timeouts on idle sessions
         let client_config = client::Config {

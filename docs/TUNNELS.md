@@ -92,7 +92,7 @@ UI (TunnelManager | GlobalTunnelList | AddTunnelModal)
   → tunnelSlice (Zustand)
     → tunnel:start | tunnel:stop
       → commands.rs (load tunnels.json, resolve SSH session)
-        → TunnelManager (tunnel.rs)
+        → TunnelManager (`tunnels/manager.rs`)
           → russh: channel_open_direct_tcpip (local)
           → russh: tcpip_forward + forwarded-tcpip handler (remote)
   ← tunnel:status-change (active | stopped | error)
@@ -247,7 +247,8 @@ Orphan tunnels (host not in restore set) are skipped with counts. See [VAULT.md]
 
 | Area | Path |
 |------|------|
-| Rust engine | `src-tauri/src/tunnel.rs` |
+| Tunnel module | `src-tauri/src/tunnels/` |
+| Runtime engine | `src-tauri/src/tunnels/manager.rs` |
 | Tunnel IPC | `src-tauri/src/tunnels/commands.rs` |
 | Types | `src-tauri/src/types.rs` (`SavedTunnel`) |
 | Sync domain | `src-tauri/src/sync/domain_tunnels.rs` |
@@ -327,7 +328,7 @@ Detailed steps and pass criteria: [§14](#14-phase-1-manual-qa-playbook).
 | Failures | Silent auto-start failures | Toast when a tunnel fails to restart on reconnect |
 | Modal copy | Ambiguous auto-start label | “Auto-start tunnel when connection opens” |
 
-**Files touched (for dev reference):** `src-tauri/src/tunnel.rs`, `commands.rs`, `ssh.rs`; `src/features/tunnels/application/*`; `src/store/connectionSlice.ts`, `tunnelSlice.ts`; `TunnelManager.tsx`, `GlobalTunnelList.tsx`.
+**Files touched (for dev reference):** `src-tauri/src/tunnels/`, `commands.rs`, `ssh.rs`; `src/features/tunnels/application/*`; `src/store/connectionSlice.ts`, `tunnelSlice.ts`; `TunnelManager.tsx`, `GlobalTunnelList.tsx`.
 
 ---
 
@@ -596,29 +597,27 @@ See §17.
 
 ## 18. Backend modularization
 
-**Tunnel IPC extraction — done (next tunnel release).** Broader `commands.rs` split (SSH, terminal, FS) remains deferred.
+**Tunnel module consolidation — done (next tunnel release):** `tunnels/commands.rs` (IPC) + `tunnels/manager.rs` (runtime). Broader `commands.rs` split (SSH, terminal, FS) remains deferred.
 
 ### Problem
 
-`commands.rs` is ~6,000 lines. Tunnel **runtime** already lives in `tunnel.rs` and sync in `sync/domain_tunnels.rs`, but tunnel **IPC handlers** (~500 lines) and `stop_tunnels_for_connections` still sit in `commands.rs` (same pattern as early core features). Newer areas (`ghost/`, `vault/`, `sync/`) use `feature/commands.rs`.
+`commands.rs` is still ~5,500 lines for SSH, terminal, FS, and settings. The **tunnel subsystem** is consolidated under `src-tauri/src/tunnels/` (`manager.rs` + `commands.rs`). Sync persistence remains in `sync/domain_tunnels.rs`.
 
-### Proposed layout (behavior-neutral refactor)
+### Completed layout
 
 ```text
 src-tauri/src/tunnels/
   mod.rs
+  manager.rs      # TunnelManager, runtime IDs, port conflict helpers
   commands.rs     # tunnel_* IPC + stop_tunnels_for_connections
 ```
 
-**Stay in `commands.rs` initially:** `AppState`, `get_data_dir()` (shared with ghost/vault today).
+**Still in `commands.rs`:** `AppState`, `get_data_dir()` (shared with ghost/vault today).
 
-**`lib.rs` registration:** `commands::tunnel_start` → `tunnels::commands::tunnel_start`.
+### Before SOCKS (Phase 3)
 
-### When to do it
-
-- After Phase 1 sign-off (§14 checklist)
-- Before Phase 3 SOCKS work (new IPC will be easier in a dedicated module)
-- As a **pure move** PR — no behavior changes, `cargo test tunnel` + manual smoke green
+- Add dynamic forward logic to `manager.rs`
+- Extend `commands.rs` / `tunnel:start` for `type: "dynamic"`
 
 ### Out of scope for tunnel-only extraction
 

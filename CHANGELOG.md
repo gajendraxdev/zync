@@ -11,7 +11,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Changed
 - **Tunnel start path**: All UI surfaces use `tunnelSlice` → `tunnel:start` (honors saved `bindAddress`); removed 30s status polling from tunnel UIs.
-- **Tunnel backend layout**: Tunnel IPC handlers moved from `commands.rs` to `src-tauri/src/tunnels/commands.rs` (runtime remains in `tunnel.rs`).
+- **Tunnel backend layout**: Tunnel subsystem consolidated under `src-tauri/src/tunnels/` (`commands.rs` IPC, `manager.rs` runtime).
 - **Add Tunnel modal**: Label clarified to “Auto-start tunnel when connection opens”.
 
 ### Fixed
