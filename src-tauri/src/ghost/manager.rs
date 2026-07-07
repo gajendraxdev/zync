@@ -251,7 +251,10 @@ impl GhostManager {
         // Oldest first so newer file entries end up closer to index 0.
         for cmd in commands.iter().rev() {
             let trimmed = cmd.trim().to_string();
-            if trimmed.len() < MIN_PREFIX_LEN || !known.insert(trimmed.clone()) {
+            if trimmed.len() < MIN_PREFIX_LEN
+                || !crate::ghost::token::history_entry_safe_to_store(&trimmed)
+                || !known.insert(trimmed.clone())
+            {
                 continue;
             }
             to_prepend.push(trimmed);
@@ -402,6 +405,28 @@ mod tests {
             .seed_shell_history(Some("server-b"), &["git status".to_string()])
             .await;
         assert_eq!(retry, 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn seed_shell_history_skips_unsafe_imported_commands() {
+        let dir = test_dir("seed-unsafe");
+        let mgr = GhostManager::new(&dir);
+
+        let imported = mgr
+            .seed_shell_history(
+                Some("server-c"),
+                &["mertech_admin".to_string(), "git status".to_string()],
+            )
+            .await;
+        assert_eq!(imported, 1);
+
+        assert_eq!(
+            mgr.suggest("git st".to_string(), Some("server-c")).await,
+            Some("atus".to_string())
+        );
+        assert_eq!(mgr.suggest("mer".to_string(), Some("server-c")).await, None);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

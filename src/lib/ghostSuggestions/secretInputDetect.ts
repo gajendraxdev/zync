@@ -61,6 +61,8 @@ export function feedSecretInputSniffer(
 
   ghostDebug('secret-input', { termId, phase: 'prompt-detected' });
   onSecretPrompt();
+  // Drop matched prompt text so later PTY chunks cannot re-enter secret-input mode.
+  sniffBuffers.set(termId, '');
 }
 
 export function clearSecretInputSniffer(termId: string): void {

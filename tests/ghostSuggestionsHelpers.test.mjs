@@ -47,7 +47,9 @@ import {
   extractRecentCommands,
 } from '../.tmp-agent-tests/src/lib/ghostSuggestions/recentCommands.js';
 import {
+  clearSecretInputSniffer,
   detectSecretPromptInOutput,
+  feedSecretInputSniffer,
 } from '../.tmp-agent-tests/src/lib/ghostSuggestions/secretInputDetect.js';
 async function runTest(name, fn) {
   try {
@@ -402,6 +404,20 @@ await runTest('extractRecentCommands ignores redirection markers inside commands
 await runTest('lineForSuggestionParsing uses tail after background ampersand', () => {
   assert.equal(lineForSuggestionParsing('sleep 1 & git che'), 'git che');
   assert.equal(extractActiveSegment('sleep 1 & git che'), 'git che');
+});
+
+await runTest('feedSecretInputSniffer fires once per prompt until new output', () => {
+  let calls = 0;
+  const termId = 'secret-sniffer-once';
+  const encode = (value) => new TextEncoder().encode(value);
+  try {
+    feedSecretInputSniffer(termId, encode('Password: '), () => { calls += 1; });
+    assert.equal(calls, 1);
+    feedSecretInputSniffer(termId, encode('\x1b[?25h'), () => { calls += 1; });
+    assert.equal(calls, 1);
+  } finally {
+    clearSecretInputSniffer(termId);
+  }
 });
 
 await runTest('detectSecretPromptInOutput recognizes sudo and SSH password prompts', () => {
