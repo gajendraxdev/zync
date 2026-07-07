@@ -4,6 +4,8 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.20.0] - 2026-07-07
+
 ### Added
 - **Ghost native shell policy**: Settings → Terminal → Ghost suggestions → **Native shell policy** (`auto` / `always` / `off`) suppresses inline ghost when fish is active or zsh autosuggestions are detected (probes `~/.zshrc` and related init files on host and WSL). ([7ecf0a5])
 - **WSL path completion**: Local WSL terminals list the Linux filesystem via `fs_list_wsl` / `wsl_get_cwd` instead of Windows `%USERPROFILE%`; spawn shell is persisted on the tab; prompt sniffing supports `host:~ $` themes. ([d2cef31])
@@ -845,7 +847,8 @@ All notable changes to Zync are documented in this file. The format is based on 
 - Auto-updates
 - Multiple themes (Dark, Light, Dracula)
 
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.19.2...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.20.0...HEAD
+[2.20.0]: https://github.com/zync-sh/zync/compare/v2.19.2...v2.20.0
 [2.19.2]: https://github.com/zync-sh/zync/compare/v2.19.1...v2.19.2
 [2.19.1]: https://github.com/zync-sh/zync/compare/v2.18.0...v2.19.1
 [2.18.0]: https://github.com/zync-sh/zync/compare/v2.17.0...v2.18.0
