@@ -24,7 +24,7 @@ export async function revertTunnelOriginalPort(
 ): Promise<TunnelConfig | null> {
     if (!tunnel.originalPort) return null;
 
-    const portKey = tunnel.type === 'local' ? 'localPort' : 'remotePort';
+    const portKey = tunnel.type === 'remote' ? 'remotePort' : 'localPort';
     const revertedTunnel = {
         ...tunnel,
         [portKey]: tunnel.originalPort,

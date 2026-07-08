@@ -2,16 +2,18 @@ import { ExternalLink, Trash2, ArrowRight, Copy, Square, Play } from 'lucide-rea
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/Button';
 import { OSIcon } from '../icons/OSIcon';
+import { isDynamicTunnel, socks5Url } from '../../features/tunnels/domain/tunnelTypes';
 
 export interface TunnelConfig {
     id: string;
     connectionId: string;
     name: string;
-    type: 'local' | 'remote';
+    type: 'local' | 'remote' | 'dynamic';
     localPort: number;
     remoteHost: string;
     remotePort: number;
     bindToAny?: boolean;
+    bindAddress?: string;
     status: 'active' | 'error' | 'stopped';
     autoStart?: boolean;
     group?: string;
@@ -43,6 +45,8 @@ export function TunnelCard({
     onCopy
 }: TunnelCardProps) {
     const isActive = tunnel.status === 'active';
+    const isDynamic = isDynamicTunnel(tunnel.type);
+    const socksUrl = socks5Url(tunnel.bindAddress, tunnel.localPort);
 
     if (viewMode === 'list') {
         return (
@@ -71,14 +75,24 @@ export function TunnelCard({
 
                 {/* Port Flow */}
                 <div className="flex items-center gap-2 text-[11px] font-mono text-app-muted/80">
-                    <span className={cn("font-semibold", tunnel.type === 'local' ? "text-app-accent" : "text-app-text")}>
-                        {tunnel.type === 'local' ? tunnel.localPort : tunnel.remotePort}
-                    </span>
-                    <ArrowRight size={12} className="text-app-muted/30" />
-                    <span className={cn("truncate max-w-[180px]", tunnel.type === 'remote' ? "text-app-accent" : "text-app-text")}>
-                        {tunnel.type === 'local' ? (tunnel.remoteHost === '127.0.0.1' ? 'localhost' : tunnel.remoteHost) : 'localhost'}
-                        <span className="opacity-50">:{tunnel.type === 'local' ? tunnel.remotePort : tunnel.localPort}</span>
-                    </span>
+                    {isDynamic ? (
+                        <>
+                            <span className="font-semibold text-violet-400">{tunnel.localPort}</span>
+                            <ArrowRight size={12} className="text-app-muted/30" />
+                            <span className="truncate max-w-[180px] text-violet-300/90">SOCKS → any host</span>
+                        </>
+                    ) : (
+                        <>
+                            <span className={cn("font-semibold", tunnel.type === 'local' ? "text-app-accent" : "text-app-text")}>
+                                {tunnel.type === 'local' ? tunnel.localPort : tunnel.remotePort}
+                            </span>
+                            <ArrowRight size={12} className="text-app-muted/30" />
+                            <span className={cn("truncate max-w-[180px]", tunnel.type === 'remote' ? "text-app-accent" : "text-app-text")}>
+                                {tunnel.type === 'local' ? (tunnel.remoteHost === '127.0.0.1' ? 'localhost' : tunnel.remoteHost) : 'localhost'}
+                                <span className="opacity-50">:{tunnel.type === 'local' ? tunnel.remotePort : tunnel.localPort}</span>
+                            </span>
+                        </>
+                    )}
                 </div>
 
                 {/* Badges */}
@@ -86,6 +100,11 @@ export function TunnelCard({
                     {tunnel.bindToAny && (
                         <span className="text-[9px] font-bold text-orange-400 bg-orange-400/10 px-1.5 py-0.5 rounded border border-orange-400/20 whitespace-nowrap">
                             PUBLIC
+                        </span>
+                    )}
+                    {isDynamic && (
+                        <span className="text-[9px] font-bold text-violet-400 bg-violet-400/10 px-1.5 py-0.5 rounded border border-violet-400/20 whitespace-nowrap">
+                            SOCKS
                         </span>
                     )}
                     {tunnel.autoStart && (
@@ -97,22 +116,24 @@ export function TunnelCard({
 
                 {/* Actions */}
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity justify-end">
-                    {tunnel.type === 'local' && (
+                    {(tunnel.type === 'local' || isDynamic) && (
                         <>
                             <button
-                                onClick={() => onCopy(`localhost:${tunnel.localPort}`)}
+                                onClick={() => onCopy(isDynamic ? socksUrl : `localhost:${tunnel.localPort}`)}
                                 className="p-1.5 rounded hover:bg-app-surface text-app-muted hover:text-blue-400 transition-colors"
-                                title="Copy Local Address"
+                                title={isDynamic ? 'Copy SOCKS URL' : 'Copy Local Address'}
                             >
                                 <Copy size={13} />
                             </button>
-                            <button
-                                onClick={() => onOpenBrowser(tunnel.localPort)}
-                                className="p-1.5 rounded hover:bg-app-surface text-app-muted hover:text-blue-400 transition-colors"
-                                title="Open Browser"
-                            >
-                                <ExternalLink size={13} />
-                            </button>
+                            {tunnel.type === 'local' && (
+                                <button
+                                    onClick={() => onOpenBrowser(tunnel.localPort)}
+                                    className="p-1.5 rounded hover:bg-app-surface text-app-muted hover:text-blue-400 transition-colors"
+                                    title="Open Browser"
+                                >
+                                    <ExternalLink size={13} />
+                                </button>
+                            )}
                         </>
                     )}
                     <button
@@ -187,6 +208,15 @@ export function TunnelCard({
                             <ExternalLink size={13} />
                         </button>
                     )}
+                    {isDynamic && (
+                        <button
+                            onClick={() => onCopy(socksUrl)}
+                            className="p-1.5 rounded-lg hover:bg-app-surface text-violet-400 hover:text-white transition-colors"
+                            title="Copy SOCKS URL"
+                        >
+                            <Copy size={13} />
+                        </button>
+                    )}
                     <button
                         onClick={() => onEdit(tunnel)}
                         className="p-1.5 rounded-lg hover:bg-app-surface text-app-muted hover:text-app-text transition-colors"
@@ -211,30 +241,48 @@ export function TunnelCard({
             {/* Body: Port Flow */}
             <div className="relative flex flex-col gap-1 mb-2">
                 <div className="flex items-center justify-between bg-app-surface/30 rounded-lg p-1 border border-app-border/10">
-                    <span className={cn(
-                        "font-mono text-[11px] font-bold",
-                        tunnel.type === 'local' ? "text-app-accent" : "text-app-text/70"
-                    )}>
-                        {tunnel.type === 'local' ? tunnel.localPort : tunnel.remotePort}
-                    </span>
+                    {isDynamic ? (
+                        <>
+                            <span className="font-mono text-[11px] font-bold text-violet-400">
+                                {tunnel.localPort}
+                            </span>
+                            <div className="flex items-center text-app-border/40 px-1">
+                                <div className="h-[1px] w-2 bg-current" />
+                                <ArrowRight size={10} className="text-current -ml-1" />
+                                <div className="h-[1px] w-2 bg-current -ml-1" />
+                            </div>
+                            <span className="font-mono text-[10px] font-bold text-violet-300/90 truncate max-w-[100px]">
+                                SOCKS → any
+                            </span>
+                        </>
+                    ) : (
+                        <>
+                            <span className={cn(
+                                "font-mono text-[11px] font-bold",
+                                tunnel.type === 'local' ? "text-app-accent" : "text-app-text/70"
+                            )}>
+                                {tunnel.type === 'local' ? tunnel.localPort : tunnel.remotePort}
+                            </span>
 
-                    <div className="flex items-center text-app-border/40 px-1">
-                        <div className="h-[1px] w-2 bg-current" />
-                        <ArrowRight size={10} className="text-current -ml-1" />
-                        <div className="h-[1px] w-2 bg-current -ml-1" />
-                    </div>
+                            <div className="flex items-center text-app-border/40 px-1">
+                                <div className="h-[1px] w-2 bg-current" />
+                                <ArrowRight size={10} className="text-current -ml-1" />
+                                <div className="h-[1px] w-2 bg-current -ml-1" />
+                            </div>
 
-                    <div className="flex flex-col items-end min-w-0 text-right">
-                        <span className={cn(
-                            "font-mono text-[11px] font-bold truncate max-w-[100px]",
-                            tunnel.type === 'remote' ? "text-app-accent" : "text-app-text/70"
-                        )}>
-                            {tunnel.type === 'local' ? (tunnel.remoteHost === '127.0.0.1' ? 'localhost' : tunnel.remoteHost) : 'localhost'}
-                        </span>
-                        <span className="font-mono text-[9px] text-app-muted/50 leading-none">
-                            :{tunnel.type === 'local' ? tunnel.remotePort : tunnel.localPort}
-                        </span>
-                    </div>
+                            <div className="flex flex-col items-end min-w-0 text-right">
+                                <span className={cn(
+                                    "font-mono text-[11px] font-bold truncate max-w-[100px]",
+                                    tunnel.type === 'remote' ? "text-app-accent" : "text-app-text/70"
+                                )}>
+                                    {tunnel.type === 'local' ? (tunnel.remoteHost === '127.0.0.1' ? 'localhost' : tunnel.remoteHost) : 'localhost'}
+                                </span>
+                                <span className="font-mono text-[9px] text-app-muted/50 leading-none">
+                                    :{tunnel.type === 'local' ? tunnel.remotePort : tunnel.localPort}
+                                </span>
+                            </div>
+                        </>
+                    )}
                 </div>
             </div>
 
@@ -258,6 +306,11 @@ export function TunnelCard({
                                     PUBLIC
                                 </span>
                             )}
+                            {isDynamic && (
+                                <span className="text-[9px] font-bold text-violet-400 bg-violet-400/10 px-2 py-1 rounded-md border border-violet-400/20">
+                                    SOCKS
+                                </span>
+                            )}
                             {tunnel.autoStart && (
                                 <span className="text-[9px] font-bold text-blue-400 bg-blue-400/10 px-2 py-1 rounded-md border border-blue-400/20">
                                     AUTO
@@ -268,11 +321,11 @@ export function TunnelCard({
                 </div>
 
                 <div className="flex items-center gap-1.5">
-                    {tunnel.type === 'local' && (
+                    {(tunnel.type === 'local' || isDynamic) && (
                         <button
-                            onClick={() => onCopy(`localhost:${tunnel.localPort}`)}
+                            onClick={() => onCopy(isDynamic ? socksUrl : `localhost:${tunnel.localPort}`)}
                             className="p-1 rounded-md hover:bg-app-surface text-app-muted hover:text-white transition-colors"
-                            title="Copy Address"
+                            title={isDynamic ? 'Copy SOCKS URL' : 'Copy Address'}
                         >
                             <Copy size={11} />
                         </button>

@@ -1,5 +1,11 @@
 import { useState, useEffect } from 'react';
-import { ArrowRight, Laptop, Server as ServerIcon, Plus, Trash2, Layers } from 'lucide-react';
+import { ArrowRight, Laptop, Server as ServerIcon, Plus, Trash2, Layers, Globe } from 'lucide-react';
+import {
+    DYNAMIC_REMOTE_HOST,
+    DYNAMIC_REMOTE_PORT,
+    defaultTunnelName,
+    type TunnelType,
+} from '../../features/tunnels/domain/tunnelTypes';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore, type Connection, type TunnelConfig } from '../../store/useAppStore';
 import { Button } from '../ui/Button';
@@ -53,7 +59,7 @@ export function AddTunnelModal({ isOpen, onClose, initialConnectionId, editingTu
     const [selectedConnectionId, setSelectedConnectionId] = useState('');
     const [name, setName] = useState('');
     const [group, setGroup] = useState('');
-    const [type, setType] = useState<'local' | 'remote'>('local');
+    const [type, setType] = useState<TunnelType>('local');
     const [localPort, setLocalPort] = useState('8080');
     const [remoteHost, setRemoteHost] = useState('127.0.0.1');
     const [remotePort, setRemotePort] = useState('80');
@@ -112,21 +118,34 @@ export function AddTunnelModal({ isOpen, onClose, initialConnectionId, editingTu
 
         if (mode === 'single') {
             const lPort = parseInt(localPort);
-            const rPort = parseInt(remotePort);
+            const isDynamic = type === 'dynamic';
 
-            if (isNaN(lPort) || isNaN(rPort) || lPort < 1 || rPort < 1) {
-                showToast('error', 'Ports must be valid numbers');
+            if (isNaN(lPort) || lPort < 1) {
+                showToast('error', 'Local port must be a valid number');
                 return;
+            }
+
+            let rPort = 0;
+            let host = remoteHost;
+            if (!isDynamic) {
+                rPort = parseInt(remotePort);
+                if (isNaN(rPort) || rPort < 1) {
+                    showToast('error', 'Ports must be valid numbers');
+                    return;
+                }
+            } else {
+                host = DYNAMIC_REMOTE_HOST;
+                rPort = DYNAMIC_REMOTE_PORT;
             }
 
             try {
                 const config: TunnelConfig = {
                     id: editingTunnel?.id || crypto.randomUUID(),
                     connectionId: selectedConnectionId,
-                    name: name || (type === 'local' ? `Local ${lPort} -> ${remoteHost}:${rPort}` : `Remote ${rPort} -> Local ${lPort}`),
+                    name: name || defaultTunnelName(type, lPort, host, rPort),
                     type,
                     localPort: lPort,
-                    remoteHost,
+                    remoteHost: host,
                     remotePort: rPort,
                     bindAddress,
                     autoStart,
@@ -221,12 +240,12 @@ export function AddTunnelModal({ isOpen, onClose, initialConnectionId, editingTu
                         <div className="absolute inset-0 bg-[linear-gradient(to_bottom,transparent_50%,rgba(0,0,0,0.1)_50%)] bg-[size:100%_4px] opacity-10 pointer-events-none" />
                         <div className="absolute inset-0 opacity-[0.03] pointer-events-none mix-blend-overlay" style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3F%3E%3Cfilter id='noiseFilter'%3F%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")` }} />
 
-                        <div className="relative z-10 flex items-center justify-between gap-8 h-20">
+                        <div className="relative z-10 flex items-center justify-between gap-4 h-20">
                             {/* Local Side */}
                             <button
                                 onClick={() => { setType('local'); setMode('single'); }}
                                 className={cn(
-                                    "flex flex-col items-center gap-2 transition-all duration-300 transform w-28 group/btn",
+                                    "flex flex-col items-center gap-2 transition-all duration-300 transform w-24 group/btn",
                                     type === 'local' ? "scale-105 opacity-100" : "opacity-40 hover:opacity-70"
                                 )}
                             >
@@ -257,9 +276,9 @@ export function AddTunnelModal({ isOpen, onClose, initialConnectionId, editingTu
                                     <defs>
                                         <linearGradient id="flow-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
                                             <stop offset="0%" stopColor="transparent" />
-                                            <stop offset="20%" stopColor={type === 'local' ? '#818cf8' : '#fb923c'} stopOpacity="0.2" />
-                                            <stop offset="50%" stopColor={type === 'local' ? '#818cf8' : '#fb923c'} />
-                                            <stop offset="80%" stopColor={type === 'local' ? '#818cf8' : '#fb923c'} stopOpacity="0.2" />
+                                            <stop offset="20%" stopColor={type === 'local' ? '#818cf8' : type === 'remote' ? '#fb923c' : '#a78bfa'} stopOpacity="0.2" />
+                                            <stop offset="50%" stopColor={type === 'local' ? '#818cf8' : type === 'remote' ? '#fb923c' : '#a78bfa'} />
+                                            <stop offset="80%" stopColor={type === 'local' ? '#818cf8' : type === 'remote' ? '#fb923c' : '#a78bfa'} stopOpacity="0.2" />
                                             <stop offset="100%" stopColor="transparent" />
                                         </linearGradient>
                                     </defs>
@@ -281,7 +300,7 @@ export function AddTunnelModal({ isOpen, onClose, initialConnectionId, editingTu
                                         strokeDasharray="4 4"
                                         initial={{ strokeDashoffset: 0 }}
                                         animate={{
-                                            strokeDashoffset: type === 'local' ? -200 : 200,
+                                            strokeDashoffset: type === 'remote' ? 200 : -200,
                                             opacity: [0.5, 1, 0.5]
                                         }}
                                         transition={{
@@ -294,10 +313,10 @@ export function AddTunnelModal({ isOpen, onClose, initialConnectionId, editingTu
                                     <motion.circle
                                         r="3.5"
                                         cy="10"
-                                        fill={type === 'local' ? '#818cf8' : '#fb923c'}
-                                        initial={{ cx: type === 'local' ? "0%" : "100%", opacity: 0 }}
+                                        fill={type === 'local' ? '#818cf8' : type === 'remote' ? '#fb923c' : '#a78bfa'}
+                                        initial={{ cx: type === 'remote' ? "100%" : "0%", opacity: 0 }}
                                         animate={{
-                                            cx: type === 'local' ? "100%" : "0%",
+                                            cx: type === 'remote' ? "0%" : "100%",
                                             opacity: [0, 1, 1, 0],
                                             r: [3.5, 4.5, 3.5]
                                         }}
@@ -313,10 +332,10 @@ export function AddTunnelModal({ isOpen, onClose, initialConnectionId, editingTu
                                     <motion.circle
                                         r="2.5"
                                         cy="10"
-                                        fill={type === 'local' ? '#818cf8' : '#fb923c'}
-                                        initial={{ cx: type === 'local' ? "0%" : "100%", opacity: 0 }}
+                                        fill={type === 'local' ? '#818cf8' : type === 'remote' ? '#fb923c' : '#a78bfa'}
+                                        initial={{ cx: type === 'remote' ? "100%" : "0%", opacity: 0 }}
                                         animate={{
-                                            cx: type === 'local' ? "100%" : "0%",
+                                            cx: type === 'remote' ? "0%" : "100%",
                                             opacity: [0, 1, 1, 0],
                                             r: [2.5, 3.5, 2.5]
                                         }}
@@ -343,10 +362,12 @@ export function AddTunnelModal({ isOpen, onClose, initialConnectionId, editingTu
                                         "absolute -top-3 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border bg-app-panel/90 backdrop-blur-sm z-20",
                                         type === 'local'
                                             ? "text-indigo-400 border-indigo-500/30"
-                                            : "text-orange-400 border-orange-500/30"
+                                            : type === 'remote'
+                                                ? "text-orange-400 border-orange-500/30"
+                                                : "text-violet-400 border-violet-500/30"
                                     )}
                                 >
-                                    {type === 'local' ? 'Outbound' : 'Inbound'}
+                                    {type === 'local' ? 'Outbound' : type === 'remote' ? 'Inbound' : 'Dynamic'}
                                 </motion.div>
                             </div>
 
@@ -354,7 +375,7 @@ export function AddTunnelModal({ isOpen, onClose, initialConnectionId, editingTu
                             <button
                                 onClick={() => { setType('remote'); setMode('single'); }}
                                 className={cn(
-                                    "flex flex-col items-center gap-2 transition-all duration-300 transform w-28 group/btn",
+                                    "flex flex-col items-center gap-2 transition-all duration-300 transform w-24 group/btn",
                                     type === 'remote' ? "scale-105 opacity-100" : "opacity-40 hover:opacity-70"
                                 )}
                             >
@@ -378,6 +399,35 @@ export function AddTunnelModal({ isOpen, onClose, initialConnectionId, editingTu
                                     type === 'remote' ? "text-orange-400" : "text-app-muted"
                                 )}>Remote Forward</span>
                             </button>
+
+                            {/* Dynamic / SOCKS */}
+                            <button
+                                onClick={() => { setType('dynamic'); setMode('single'); }}
+                                className={cn(
+                                    "flex flex-col items-center gap-2 transition-all duration-300 transform w-24 group/btn",
+                                    type === 'dynamic' ? "scale-105 opacity-100" : "opacity-40 hover:opacity-70"
+                                )}
+                            >
+                                <div className={cn(
+                                    "w-12 h-12 rounded-xl flex items-center justify-center border transition-all shadow-lg relative overflow-hidden",
+                                    type === 'dynamic'
+                                        ? "bg-violet-500/20 border-violet-500/50 shadow-violet-500/20"
+                                        : "bg-app-muted/5 border-app-muted/10 hover:bg-app-muted/10"
+                                )}>
+                                    <Globe size={20} className={cn(type === 'dynamic' ? "text-violet-400" : "text-app-muted")} />
+                                    {type === 'dynamic' && (
+                                        <motion.div
+                                            initial={{ opacity: 0 }}
+                                            animate={{ opacity: 1 }}
+                                            className="absolute inset-0 bg-violet-500/10"
+                                        />
+                                    )}
+                                </div>
+                                <span className={cn(
+                                    "text-[10px] font-bold uppercase tracking-wider transition-colors",
+                                    type === 'dynamic' ? "text-violet-400" : "text-app-muted"
+                                )}>SOCKS Proxy</span>
+                            </button>
                         </div>
 
                         {/* Explainer Text */}
@@ -385,11 +435,15 @@ export function AddTunnelModal({ isOpen, onClose, initialConnectionId, editingTu
                             "mt-3 text-center text-[11px] font-medium py-2 px-4 rounded-lg border transition-colors",
                             type === 'local'
                                 ? "bg-indigo-500/5 border-indigo-500/10 text-indigo-600 dark:text-indigo-300"
-                                : "bg-orange-500/5 border-orange-500/10 text-orange-600 dark:text-orange-300"
+                                : type === 'remote'
+                                    ? "bg-orange-500/5 border-orange-500/10 text-orange-600 dark:text-orange-300"
+                                    : "bg-violet-500/5 border-violet-500/10 text-violet-600 dark:text-violet-300"
                         )}>
                             {type === 'local'
                                 ? "Access a service running on the remote server (e.g. database) from your local machine."
-                                : "Expose a local service (e.g. localhost dev server) to the remote server."}
+                                : type === 'remote'
+                                    ? "Expose a local service (e.g. localhost dev server) to the remote server."
+                                    : "Run a local SOCKS5 proxy (ssh -D) — route any TCP destination through the SSH session."}
                         </div>
                     </div>
                 )
@@ -432,17 +486,36 @@ export function AddTunnelModal({ isOpen, onClose, initialConnectionId, editingTu
                                         <div className="w-1 h-1 rounded-full bg-app-accent" />
                                         Configuration
                                     </h3>
-                                    <button
-                                        onClick={() => setMode('bulk')}
-                                        className="text-[10px] font-bold text-app-muted hover:text-app-accent transition-all flex items-center gap-2 uppercase tracking-wider group"
-                                    >
-                                        <Layers size={12} className="group-hover:rotate-12 transition-transform" />
-                                        Switch to Bulk
-                                    </button>
+                                    {type !== 'dynamic' && (
+                                        <button
+                                            onClick={() => setMode('bulk')}
+                                            className="text-[10px] font-bold text-app-muted hover:text-app-accent transition-all flex items-center gap-2 uppercase tracking-wider group"
+                                        >
+                                            <Layers size={12} className="group-hover:rotate-12 transition-transform" />
+                                            Switch to Bulk
+                                        </button>
+                                    )}
                                 </div>
 
                                 <div className="grid grid-cols-12 gap-4 items-end">
-                                    {type === 'local' ? (
+                                    {type === 'dynamic' ? (
+                                        <div className="col-span-12 grid grid-cols-2 gap-4">
+                                            <Input
+                                                label="SOCKS Port"
+                                                placeholder="1080"
+                                                value={localPort}
+                                                onChange={(e) => setLocalPort(e.target.value)}
+                                                className="font-mono text-center bg-app-surface border-app-border focus:border-violet-500/40 focus:bg-violet-500/5"
+                                            />
+                                            <Input
+                                                label="Bind Address"
+                                                placeholder="127.0.0.1"
+                                                value={bindAddress}
+                                                onChange={(e) => setBindAddress(e.target.value)}
+                                                className="font-mono bg-app-surface border-app-border focus:border-violet-500/40"
+                                            />
+                                        </div>
+                                    ) : type === 'local' ? (
                                         <>
                                             <div className="col-span-3">
                                                 <Input
@@ -515,22 +588,33 @@ export function AddTunnelModal({ isOpen, onClose, initialConnectionId, editingTu
                                     )}
                                 </div>
 
-                                <div className="grid grid-cols-2 gap-4 pt-2">
+                                {type !== 'dynamic' && (
+                                    <div className="grid grid-cols-2 gap-4 pt-2">
+                                        <Input
+                                            label="Name (Optional)"
+                                            placeholder={type === 'local' ? "e.g. Postgres DB" : "e.g. Webhook Handler"}
+                                            value={name}
+                                            onChange={(e) => setName(e.target.value)}
+                                            className="bg-app-surface border-app-border focus:border-app-border/80"
+                                        />
+                                        <Input
+                                            label="Bind Address"
+                                            placeholder={type === 'local' ? "127.0.0.1" : "0.0.0.0"}
+                                            value={bindAddress}
+                                            onChange={(e) => setBindAddress(e.target.value)}
+                                            className="font-mono bg-app-surface border-app-border focus:border-app-border/80"
+                                        />
+                                    </div>
+                                )}
+                                {type === 'dynamic' && (
                                     <Input
                                         label="Name (Optional)"
-                                        placeholder={type === 'local' ? "e.g. Postgres DB" : "e.g. Webhook Handler"}
+                                        placeholder="e.g. Dev SOCKS Proxy"
                                         value={name}
                                         onChange={(e) => setName(e.target.value)}
                                         className="bg-app-surface border-app-border focus:border-app-border/80"
                                     />
-                                    <Input
-                                        label="Bind Address"
-                                        placeholder={type === 'local' ? "127.0.0.1" : "0.0.0.0"}
-                                        value={bindAddress}
-                                        onChange={(e) => setBindAddress(e.target.value)}
-                                        className="font-mono bg-app-surface border-app-border focus:border-app-border/80"
-                                    />
-                                </div>
+                                )}
                             </motion.div>
                         ) : (
                             <motion.div

@@ -5,7 +5,7 @@ export interface TunnelConfig {
     id: string;
     connectionId: string;
     name: string;
-    type: 'local' | 'remote';
+    type: 'local' | 'remote' | 'dynamic';
     localPort: number;
     remoteHost: string;
     remotePort: number;

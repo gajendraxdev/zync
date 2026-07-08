@@ -1,6 +1,6 @@
 # Port Forwarding & Tunnels — Current Documentation
 
-**Last updated:** 2026-07-07  
+**Last updated:** 2026-07-08
 **SSH stack:** russh sessions in `commands.rs` / `ssh.rs`  
 **User-facing guide:** [zync.thesudoer.in/docs/port-forwarding](https://zync.thesudoer.in/docs/port-forwarding)
 
@@ -33,7 +33,7 @@ Canonical reference for Zync’s SSH tunnel system: product behavior, architectu
 
 ## 1. What it is
 
-Zync manages **static SSH port forwards** visually — the same jobs as `ssh -L` and `ssh -R`, without hand-editing commands for every session.
+Zync manages **SSH port forwards** visually — the same jobs as `ssh -L`, `ssh -R`, and `ssh -D`, without hand-editing commands for every session.
 
 | Capability | Status |
 |------------|--------|
@@ -42,12 +42,12 @@ Zync manages **static SSH port forwards** visually — the same jobs as `ssh -L`
 | Per-connection **Port Forwarding** tab | Shipped |
 | Global tunnel dashboard (sidebar) | Shipped |
 | CRUD, groups, presets, bulk create | Shipped |
-| SSH command import (`ssh -L` / `-R` paste) | Shipped |
+| SSH command import (`ssh -L` / `-R` / `-D` paste) | Shipped |
 | Port conflict detection + suggested alternate port | Shipped (local bind) |
 | Opt-in **auto-start on connect** | Shipped |
 | Open in browser / copy address | Shipped |
 | Sync domain + bundled restore (with host) | Shipped |
-| Dynamic / SOCKS forward (`-D`) | **Not implemented** |
+| Dynamic / SOCKS forward (`-D`) | Shipped |
 | `~/.ssh/config` `LocalForward` / `RemoteForward` import | **Not implemented** |
 | Auto-restart tunnels after reconnect | Shipped (active + `autoStart` on reconnect) |
 
@@ -68,7 +68,7 @@ Tunnels require an **active SSH session** on the host connection. They stop when
 
 ### Non-goals (current scope)
 
-- SOCKS / dynamic forwarding (`-D`) — planned (see §17)
+
 - Jump-host topology editor (tunnels use the existing connected session)
 - Per-tunnel bandwidth metrics dashboard — planned
 - Arbitrary `ssh -J` multi-hop tunnel chains beyond the active session
@@ -95,6 +95,7 @@ UI (TunnelManager | GlobalTunnelList | AddTunnelModal)
         → TunnelManager (`tunnels/manager.rs`)
           → russh: channel_open_direct_tcpip (local)
           → russh: tcpip_forward + forwarded-tcpip handler (remote)
+          → SOCKS5 handshake + per-client direct-tcpip (dynamic)
   ← tunnel:status-change (active | stopped | error)
 ```
 
@@ -102,7 +103,7 @@ UI (TunnelManager | GlobalTunnelList | AddTunnelModal)
 
 | Map | Key | Value |
 |-----|-----|-------|
-| `local_listeners` | `tunnel_runtime_id` — `local:{connectionId}:{localPort}:{remoteHost}:{remotePort}` | TcpListener abort handle + cancel broadcast |
+| `local_listeners` | `tunnel_runtime_id` — `local:…`, `dynamic:{connectionId}:{localPort}:{bind}` | TcpListener abort handle + cancel broadcast |
 | `remote_forwards` | `remote_forward_map_key` — `{connectionId}:{remotePort}` | `(local_host, local_port, bind_address)` |
 
 ### SSH integration
@@ -129,6 +130,21 @@ Equivalent to `ssh -R [bind:]remotePort:localHost:localPort`.
 - Incoming forwarded connections are proxied to `remote_host:local_port` on the machine where Zync runs (field name `remote_host` in schema — stores the **local target host** for `-R`).
 
 **Server requirement:** Remote binds on non-loopback addresses need `GatewayPorts` / `AllowTcpForwarding` on `sshd` (documented on the marketing site).
+
+### Dynamic forward / SOCKS (`type: "dynamic"`)
+
+Equivalent to `ssh -D [bind:]localPort`.
+
+- Binds `TcpListener` on `bind_address:local_port` (default `127.0.0.1`).
+- Each accepted connection runs a **SOCKS5** handshake (RFC 1928 subset: no-auth, CONNECT only).
+- Per-client target is opened via `channel_open_direct_tcpip` through the SSH session.
+- Persisted sentinel fields: `remote_host: "*"`, `remote_port: 0` (no fixed remote target).
+
+**Scope (v1):** IPv4, domain, and IPv6 targets; UDP ASSOCIATE and BIND are not supported.
+
+**Security:** Binding to `0.0.0.0` exposes the SOCKS port on the LAN — use loopback unless intentional.
+
+**Modules:** `tunnels/socks5.rs` (protocol), `tunnels/dynamic.rs` (per-client handler), `tunnels/manager.rs::start_dynamic_forwarding`.
 
 ---
 
@@ -204,7 +220,7 @@ Orphan tunnels (host not in restore set) are skipped with counts. See [VAULT.md]
 | `tunnel:start_local` | Legacy direct local forward — optional `bind_address`; UI does not use |
 | `tunnel:start_remote` | Legacy direct remote forward — optional `bind_address`; UI does not use |
 | `tunnel:stop` | Stop by saved tunnel id |
-| `ssh_parse_command` | Parse pasted `ssh` command for `-L`/`-R` |
+| `ssh_parse_command` | Parse pasted `ssh` command for `-L`/`-R`/`-D` |
 
 ### Events
 
@@ -255,6 +271,9 @@ Orphan tunnels (host not in restore set) are skipped with counts. See [VAULT.md]
 | Zustand slice | `src/store/tunnelSlice.ts` |
 | Auto-start | `src/features/connections/application/tunnelAutoStartService.ts` |
 | Reconnect restore | `src/features/tunnels/application/tunnelReconnectService.ts` |
+| Tunnel types (shared) | `src/features/tunnels/domain/tunnelTypes.ts` |
+| SOCKS5 protocol | `src-tauri/src/tunnels/socks5.rs` |
+| Dynamic handler | `src-tauri/src/tunnels/dynamic.rs` |
 | Shared actions | `src/features/tunnels/application/tunnelActions.ts` |
 | Port conflict UX | `src/features/tunnels/application/tunnelPortConflict.ts` |
 | Per-connection UI | `src/components/tunnel/TunnelManager.tsx` |
@@ -484,6 +503,28 @@ Detailed steps and pass criteria: [§14](#14-phase-1-manual-qa-playbook).
 
 ---
 
+### T11 — Dynamic / SOCKS forward (`-D`)
+
+**Goal:** Local SOCKS5 proxy routes arbitrary TCP destinations through the SSH session.
+
+**Setup:** Create a **dynamic** tunnel (preset “SOCKS Proxy” or Add Tunnel → SOCKS Proxy). Default port `1080`, bind `127.0.0.1`. Connect to host, start tunnel.
+
+**Pass checks:**
+
+1. Tunnel card shows **SOCKS** badge and `1080 → SOCKS → any host` flow.
+2. Copy action produces `socks5://127.0.0.1:1080`.
+3. With tunnel active:
+   ```bash
+   curl --proxy socks5://127.0.0.1:1080 https://example.com -I
+   ```
+   Returns HTTP headers (proves CONNECT + relay).
+4. Stop tunnel — port no longer accepts connections; status → stopped.
+5. Reconnect host with tunnel active before disconnect — SOCKS restarts (T2 behavior).
+
+**Security note:** Binding to `0.0.0.0` exposes SOCKS on all interfaces — verify only when intentional.
+
+---
+
 ### T10 — Sync restore (T8 exit criteria)
 
 **Goal:** Bundled host restore still brings tunnels.
@@ -511,6 +552,7 @@ Before we call Phase 1 done and update the landing page / CHANGELOG:
 - [ ] T7 cross-connection ports (if you have two hosts)
 - [ ] T8 port conflict revert
 - [ ] T9 UI parity
+- [ ] T11 SOCKS / dynamic forward
 - [ ] Automated tests green (`cargo test tunnel`, reconnect/autostart npm tests, `npm run build`)
 
 Note failures with: host OS, tunnel type (local/remote), which UI surface, and whether reconnect was manual or auto-reconnect.
@@ -559,14 +601,11 @@ See §17.
 
 ## 17. Future features
 
-### Dynamic / SOCKS forwarding (`-D`)
+### SOCKS enhancements (post-v1)
 
-- **User value:** Single local SOCKS port for many destinations through the SSH session (browser proxy, dynamic tooling).
-- **Design sketch:**
-  - New `type: "dynamic"` in `SavedTunnel` with `local_port` + `bind_address`
-  - russh: accept local connections, for each connection perform SOCKS5 handshake (or minimal SOCKS4), open `direct-tcpip` to requested target
-  - UI: preset “SOCKS proxy”, copy `socks5://127.0.0.1:port`
-- **Constraints:** One dynamic listener per connection; document security (open bind = LAN exposure).
+- SOCKS username/password auth (RFC 1929)
+- UDP ASSOCIATE for DNS-over-SOCKS clients
+- Per-connection connection limits / rate limiting
 
 ### SSH config forward import
 
@@ -613,11 +652,6 @@ src-tauri/src/tunnels/
 ```
 
 **Still in `commands.rs`:** `AppState`, `get_data_dir()` (shared with ghost/vault today).
-
-### Before SOCKS (Phase 3)
-
-- Add dynamic forward logic to `manager.rs`
-- Extend `commands.rs` / `tunnel:start` for `type: "dynamic"`
 
 ### Out of scope for tunnel-only extraction
 

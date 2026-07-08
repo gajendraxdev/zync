@@ -5,9 +5,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 ## [Unreleased]
 
 ### Added
+- **Dynamic / SOCKS forwarding (`ssh -D`)**: New `type: "dynamic"` tunnel — local SOCKS5 proxy through the SSH session (`tunnels/socks5.rs`, `tunnels/dynamic.rs`). UI preset, Add Tunnel modal, copy `socks5://` URL, `-D` import support.
 - **Tunnel reconnect restore**: On reconnect, Zync restarts tunnels that were active before disconnect plus any with per-tunnel **auto-start** enabled (`tunnelReconnectService.ts`).
 - **Tunnel documentation**: Canonical `docs/TUNNELS.md` — architecture, lifecycle, manual QA playbook, improvement plan.
-- **Tunnel tests**: `tests/tunnelReconnectService.test.mjs` for reconnect + auto-start merge behavior.
+- **Tunnel tests**: `tests/tunnelReconnectService.test.mjs` for reconnect + auto-start merge behavior; Rust unit tests for SOCKS5 parsing and `ssh -D` command import.
 
 ### Changed
 - **Tunnel start path**: All UI surfaces use `tunnelSlice` → `tunnel:start` (honors saved `bindAddress`); removed 30s status polling from tunnel UIs.

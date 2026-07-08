@@ -25,7 +25,7 @@ export function parsePortConflictError(
 }
 
 export function tunnelWithSwappedPort(tunnel: TunnelConfig, port: number): TunnelConfig {
-    const portKey = tunnel.type === 'local' ? 'localPort' : 'remotePort';
+    const portKey = tunnel.type === 'remote' ? 'remotePort' : 'localPort';
     const currentPort = tunnel[portKey as 'localPort' | 'remotePort'];
     return {
         ...tunnel,

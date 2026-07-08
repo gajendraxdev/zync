@@ -231,15 +231,7 @@ pub async fn tunnel_list(
     let remote_forwards = state.tunnel_manager.remote_forwards.lock().await;
 
     for t in &mut tunnels {
-        let is_active = if t.tunnel_type == "local" {
-            let id = tunnel_runtime_id(t);
-            local_listeners.contains_key(&id)
-        } else {
-            let key = remote_forward_map_key(&t.connection_id, t.remote_port);
-            remote_forwards.contains_key(&key)
-        };
-
-        if is_active {
+        if tunnel_is_active(t, &local_listeners, &remote_forwards) {
             t.status = Some("active".to_string());
         } else {
             t.status = Some("stopped".to_string());
@@ -247,6 +239,25 @@ pub async fn tunnel_list(
     }
 
     Ok(tunnels)
+}
+
+fn tunnel_is_active(
+    tunnel: &SavedTunnel,
+    local_listeners: &std::collections::HashMap<
+        String,
+        (
+            tokio::task::AbortHandle,
+            tokio::sync::broadcast::Sender<()>,
+        ),
+    >,
+    remote_forwards: &std::collections::HashMap<String, (String, u16, String)>,
+) -> bool {
+    if tunnel.tunnel_type == "local" || tunnel.tunnel_type == "dynamic" {
+        local_listeners.contains_key(&tunnel_runtime_id(tunnel))
+    } else {
+        let key = remote_forward_map_key(&tunnel.connection_id, tunnel.remote_port);
+        remote_forwards.contains_key(&key)
+    }
 }
 
 #[tauri::command]
@@ -345,7 +356,16 @@ pub async fn tunnel_start(
     };
 
     let runtime_id = tunnel_runtime_id(&tunnel);
-    let res = if tunnel.tunnel_type == "local" {
+    let res = if tunnel.tunnel_type == "dynamic" {
+        let bind_addr = tunnel
+            .bind_address
+            .clone()
+            .unwrap_or_else(|| "127.0.0.1".to_string());
+        state
+            .tunnel_manager
+            .start_dynamic_forwarding(session, runtime_id, bind_addr, tunnel.local_port)
+            .await
+    } else if tunnel.tunnel_type == "local" {
         let bind_addr = tunnel
             .bind_address
             .clone()
@@ -424,14 +444,7 @@ pub async fn tunnel_get_all(
     let remote_forwards = state.tunnel_manager.remote_forwards.lock().await;
 
     for t in &mut tunnels {
-        let is_active = if t.tunnel_type == "local" {
-            local_listeners.contains_key(&tunnel_runtime_id(t))
-        } else {
-            let key = remote_forward_map_key(&t.connection_id, t.remote_port);
-            remote_forwards.contains_key(&key)
-        };
-
-        if is_active {
+        if tunnel_is_active(t, &local_listeners, &remote_forwards) {
             t.status = Some("active".to_string());
         } else {
             t.status = Some("stopped".to_string());

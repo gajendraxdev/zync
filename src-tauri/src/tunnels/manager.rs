@@ -1,4 +1,5 @@
 use crate::ssh::Client;
+use crate::tunnels::dynamic;
 use crate::types::SavedTunnel;
 use anyhow::{anyhow, Result};
 use log::warn;
@@ -10,6 +11,18 @@ use tokio::sync::Mutex;
 
 /// Stable runtime key for a saved tunnel config (unique per connection + endpoints).
 pub fn tunnel_runtime_id(tunnel: &SavedTunnel) -> String {
+    if tunnel.tunnel_type == "dynamic" {
+        let bind = tunnel
+            .bind_address
+            .as_deref()
+            .unwrap_or("127.0.0.1")
+            .replace(':', "_");
+        return format!(
+            "dynamic:{}:{}:{}",
+            tunnel.connection_id, tunnel.local_port, bind
+        );
+    }
+
     let remote_host = tunnel.remote_host.replace(':', "_");
     if tunnel.tunnel_type == "local" {
         format!(
@@ -22,6 +35,10 @@ pub fn tunnel_runtime_id(tunnel: &SavedTunnel) -> String {
             tunnel.connection_id, tunnel.remote_port, remote_host, tunnel.local_port
         )
     }
+}
+
+fn uses_local_listener(tunnel_type: &str) -> bool {
+    tunnel_type == "local" || tunnel_type == "dynamic"
 }
 
 /// Scoped key for remote forward lookup (per SSH connection).
@@ -156,6 +173,89 @@ impl TunnelManager {
         Ok(runtime_id)
     }
 
+    /// SOCKS5 dynamic forward (`ssh -D`) — one local port, per-connection remote targets.
+    pub async fn start_dynamic_forwarding(
+        &self,
+        session: Arc<Mutex<Handle<Client>>>,
+        runtime_id: String,
+        bind_address: String,
+        local_port: u16,
+    ) -> Result<String> {
+        {
+            let listeners = self.local_listeners.lock().await;
+            if listeners.contains_key(&runtime_id) {
+                println!(
+                    "[TUNNEL] Dynamic tunnel {} already active, skipping start",
+                    runtime_id
+                );
+                return Ok(runtime_id);
+            }
+        }
+
+        let listener = match TcpListener::bind(format!("{}:{}", bind_address, local_port)).await {
+            Ok(listener) => listener,
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+                let process_info = find_process_using_port(local_port).await;
+                let suggested_port = find_next_available_port(local_port, 10).await;
+
+                let error_msg = if let Some(port) = suggested_port {
+                    format!(
+                        "Port {} is already in use{}. Port {} is available.",
+                        local_port,
+                        process_info.map(|p| format!(" {}", p)).unwrap_or_default(),
+                        port
+                    )
+                } else {
+                    format!(
+                        "Port {} is already in use{}. Please choose a different port.",
+                        local_port,
+                        process_info.map(|p| format!(" {}", p)).unwrap_or_default()
+                    )
+                };
+
+                return Err(anyhow!(error_msg));
+            }
+            Err(e) => return Err(e.into()),
+        };
+
+        println!(
+            "[TUNNEL] Starting dynamic SOCKS {} on {}:{}",
+            runtime_id, bind_address, local_port
+        );
+
+        let (tx, _rx) = tokio::sync::broadcast::channel(1);
+        let tx_for_store = tx.clone();
+        let session = session.clone();
+
+        let handle = tokio::spawn(async move {
+            loop {
+                let accept_fut = listener.accept();
+                let mut rx = tx.subscribe();
+
+                tokio::select! {
+                    Ok((client_stream, _)) = accept_fut => {
+                        let session = session.clone();
+                        let client_rx = tx.subscribe();
+                        tokio::spawn(async move {
+                            dynamic::handle_socks5_client(client_stream, session, client_rx).await;
+                        });
+                    }
+                    _ = rx.recv() => {
+                        println!("[TUNNEL] Dynamic listener stopped via signal");
+                        break;
+                    }
+                }
+            }
+        });
+
+        self.local_listeners
+            .lock()
+            .await
+            .insert(runtime_id.clone(), (handle.abort_handle(), tx_for_store));
+
+        Ok(runtime_id)
+    }
+
     pub async fn start_remote_forwarding(
         &self,
         session: Arc<Mutex<Handle<Client>>>,
@@ -211,7 +311,7 @@ impl TunnelManager {
         let runtime_id = tunnel_runtime_id(tunnel);
         println!("[TUNNEL MANAGER] Stopping {}", runtime_id);
 
-        if tunnel.tunnel_type == "local" {
+        if uses_local_listener(&tunnel.tunnel_type) {
             let mut listeners = self.local_listeners.lock().await;
             if let Some((handle, tx)) = listeners.remove(&runtime_id) {
                 let _ = tx.send(());
@@ -219,7 +319,7 @@ impl TunnelManager {
                 println!("[TUNNEL] Stop signal sent for {}", runtime_id);
             } else {
                 println!(
-                    "[TUNNEL] Local tunnel {} not found in listeners",
+                    "[TUNNEL] Local-side tunnel {} not found in listeners",
                     runtime_id
                 );
             }
@@ -418,6 +518,17 @@ mod tests {
         assert_ne!(
             remote_forward_map_key("host-1", 9000),
             remote_forward_map_key("host-2", 9000)
+        );
+    }
+
+    #[test]
+    fn tunnel_runtime_id_for_dynamic() {
+        let mut t = sample_tunnel("dynamic", "conn-d");
+        t.remote_host = "*".to_string();
+        t.remote_port = 0;
+        assert_eq!(
+            tunnel_runtime_id(&t),
+            "dynamic:conn-d:8080:127.0.0.1"
         );
     }
 }
