@@ -1,4 +1,3 @@
-import { isLikelyIpAddress } from '../../connections/domain/connectionDisplay';
 import type { TunnelType } from '../domain/tunnelTypes';
 
 export const TUNNEL_TYPE_META: Record<TunnelType, { label: string; flag: string }> = {
@@ -20,9 +19,6 @@ export function formatTunnelServiceEndpoint(
     const h = remoteHost.trim();
     if (h === '127.0.0.1' || h === 'localhost') {
         return { host: 'localhost', port, tagged: false };
-    }
-    if (isLikelyIpAddress(h)) {
-        return { host: h, port, tagged: false };
     }
     return { host: h, port, tagged: false };
 }

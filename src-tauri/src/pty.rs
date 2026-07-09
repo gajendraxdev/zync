@@ -858,14 +858,14 @@ impl PtyManager {
                             }
                             Some(ChannelMsg::Eof) => {
                                 flush_pending_output(&output_channel_clone, generation, &mut pending_output);
-                                emit_terminal_exit(&app_handle, &term_id_clone, generation, None);
                                 emit_connection_transport_lost(&app_handle, &connection_id_for_transport);
+                                emit_terminal_exit(&app_handle, &term_id_clone, generation, None);
                                 break;
                             }
                             None => {
                                 flush_pending_output(&output_channel_clone, generation, &mut pending_output);
-                                emit_terminal_exit(&app_handle, &term_id_clone, generation, None);
                                 emit_connection_transport_lost(&app_handle, &connection_id_for_transport);
+                                emit_terminal_exit(&app_handle, &term_id_clone, generation, None);
                                 break;
                             }
                             _ => {}

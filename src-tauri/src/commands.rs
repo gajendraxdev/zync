@@ -1127,9 +1127,14 @@ pub async fn ssh_migrate_all_keys(app_handle: tauri::AppHandle) -> Result<usize,
 /// Unlike `ssh_disconnect`, does not tear down terminal tabs — PTYs are already EOF or frontend-suspended.
 #[tauri::command]
 pub async fn ssh_transport_lost(
+    app: AppHandle,
     id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    if let Err(error) = crate::tunnels::stop_tunnels_for_connections(&app, &state, &[id.clone()]).await {
+        eprintln!("[TUNNEL] stop on transport lost for {id}: {error}");
+    }
+
     let mut connections = state.connections.lock().await;
     connections.remove(&id);
     Ok(())

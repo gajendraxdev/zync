@@ -1,4 +1,5 @@
 use crate::commands::{get_data_dir, AppState};
+use super::manager::probe_ssh_session;
 use super::{remote_forward_map_key, tunnel_runtime_id};
 use crate::types::{SavedTunnel, SavedTunnelsData};
 use serde::Serialize;
@@ -50,23 +51,47 @@ pub(crate) async fn reconcile_stale_tunnel_runtime(
 
     let id_set: HashSet<&str> = connection_ids.iter().map(String::as_str).collect();
 
-    let stale_tunnels: Vec<SavedTunnel> = {
+    let session_alive_by_connection: HashMap<String, bool> = {
         let connections = state.connections.lock().await;
-        let local_listeners = state.tunnel_manager.local_listeners.lock().await;
-        let remote_forwards = state.tunnel_manager.remote_forwards.lock().await;
-
-        saved_data
-            .tunnels
-            .into_iter()
-            .filter(|tunnel| {
-                if !id_set.contains(tunnel.connection_id.as_str()) {
-                    return false;
-                }
-                let has_session = connection_has_live_session(&connections, &tunnel.connection_id);
-                has_session == false && tunnel_is_active(tunnel, &local_listeners, &remote_forwards)
+        connection_ids
+            .iter()
+            .map(|connection_id| {
+                (
+                    connection_id.clone(),
+                    connection_has_live_session(&connections, connection_id),
+                )
             })
             .collect()
     };
+
+    let (local_runtime_keys, remote_runtime_keys) = {
+        let local_listeners = state.tunnel_manager.local_listeners.lock().await;
+        let remote_forwards = state.tunnel_manager.remote_forwards.lock().await;
+        (
+            local_listeners.keys().cloned().collect::<HashSet<_>>(),
+            remote_forwards.keys().cloned().collect::<HashSet<_>>(),
+        )
+    };
+
+    let stale_tunnels: Vec<SavedTunnel> = saved_data
+        .tunnels
+        .into_iter()
+        .filter(|tunnel| {
+            if !id_set.contains(tunnel.connection_id.as_str()) {
+                return false;
+            }
+            let has_session = session_alive_by_connection
+                .get(&tunnel.connection_id)
+                .copied()
+                .unwrap_or(false);
+            !has_session
+                && tunnel_is_active_runtime(
+                    tunnel,
+                    &local_runtime_keys,
+                    &remote_runtime_keys,
+                )
+        })
+        .collect();
 
     for tunnel in stale_tunnels {
         let _ = state.tunnel_manager.stop_tunnel(None, &tunnel).await;
@@ -78,23 +103,6 @@ pub(crate) async fn reconcile_stale_tunnel_runtime(
                 error: None,
             },
         );
-    }
-}
-
-async fn ssh_session_is_usable(
-    session: &Arc<Mutex<russh::client::Handle<crate::ssh::Client>>>,
-) -> bool {
-    let channel_result = {
-        let guard = session.lock().await;
-        guard.channel_open_session().await
-    };
-
-    match channel_result {
-        Ok(channel) => {
-            let _ = channel.close().await;
-            true
-        }
-        Err(_) => false,
     }
 }
 
@@ -130,20 +138,27 @@ async fn apply_runtime_tunnel_status(
                 .collect()
         };
 
-    let active_connection_ids: HashSet<String> = {
+    let (local_runtime_keys, remote_runtime_keys) = {
         let local_listeners = state.tunnel_manager.local_listeners.lock().await;
         let remote_forwards = state.tunnel_manager.remote_forwards.lock().await;
-        tunnels
-            .iter()
-            .filter(|tunnel| tunnel_is_active(tunnel, &local_listeners, &remote_forwards))
-            .map(|tunnel| tunnel.connection_id.clone())
-            .collect()
+        (
+            local_listeners.keys().cloned().collect::<HashSet<_>>(),
+            remote_forwards.keys().cloned().collect::<HashSet<_>>(),
+        )
     };
+
+    let active_connection_ids: HashSet<String> = tunnels
+        .iter()
+        .filter(|tunnel| {
+            tunnel_is_active_runtime(tunnel, &local_runtime_keys, &remote_runtime_keys)
+        })
+        .map(|tunnel| tunnel.connection_id.clone())
+        .collect();
 
     let mut dead_connections = Vec::new();
     for connection_id in active_connection_ids {
         let usable = match sessions_by_connection.get(&connection_id) {
-            Some(session) => ssh_session_is_usable(session).await,
+            Some(session) => probe_ssh_session(session).await,
             None => false,
         };
         if !usable {
@@ -155,14 +170,37 @@ async fn apply_runtime_tunnel_status(
         let _ = stop_tunnels_for_connections(app, state, &[connection_id]).await;
     }
 
-    let connections = state.connections.lock().await;
-    let local_listeners = state.tunnel_manager.local_listeners.lock().await;
-    let remote_forwards = state.tunnel_manager.remote_forwards.lock().await;
+    let session_alive_by_connection: HashMap<String, bool> = {
+        let connections = state.connections.lock().await;
+        connection_ids
+            .iter()
+            .map(|connection_id| {
+                (
+                    connection_id.clone(),
+                    connection_has_live_session(&connections, connection_id),
+                )
+            })
+            .collect()
+    };
+
+    let (local_runtime_keys, remote_runtime_keys) = {
+        let local_listeners = state.tunnel_manager.local_listeners.lock().await;
+        let remote_forwards = state.tunnel_manager.remote_forwards.lock().await;
+        (
+            local_listeners.keys().cloned().collect::<HashSet<_>>(),
+            remote_forwards.keys().cloned().collect::<HashSet<_>>(),
+        )
+    };
 
     for tunnel in tunnels.iter_mut() {
-        let has_session = connection_has_live_session(&connections, &tunnel.connection_id);
+        let has_session = session_alive_by_connection
+            .get(&tunnel.connection_id)
+            .copied()
+            .unwrap_or(false);
         tunnel.status = Some(
-            if has_session && tunnel_is_active(tunnel, &local_listeners, &remote_forwards) {
+            if has_session
+                && tunnel_is_active_runtime(tunnel, &local_runtime_keys, &remote_runtime_keys)
+            {
                 "active".to_string()
             } else {
                 "stopped".to_string()
@@ -195,14 +233,21 @@ pub(crate) async fn stop_tunnels_for_connections(
         .filter(|t| connection_id_set.contains(t.connection_id.as_str()))
         .collect();
 
-    let tunnels = {
+    let (local_runtime_keys, remote_runtime_keys) = {
         let local_listeners = state.tunnel_manager.local_listeners.lock().await;
         let remote_forwards = state.tunnel_manager.remote_forwards.lock().await;
-        tunnels_for_connection
-            .into_iter()
-            .filter(|tunnel| tunnel_is_active(tunnel, &local_listeners, &remote_forwards))
-            .collect::<Vec<_>>()
+        (
+            local_listeners.keys().cloned().collect::<HashSet<_>>(),
+            remote_forwards.keys().cloned().collect::<HashSet<_>>(),
+        )
     };
+
+    let tunnels = tunnels_for_connection
+        .into_iter()
+        .filter(|tunnel| {
+            tunnel_is_active_runtime(tunnel, &local_runtime_keys, &remote_runtime_keys)
+        })
+        .collect::<Vec<_>>();
 
     for tunnel in tunnels {
         let session = {
@@ -410,22 +455,16 @@ pub async fn tunnel_reconcile_connection(
     stop_tunnels_for_connections(&app, &state, &[connection_id]).await
 }
 
-fn tunnel_is_active(
+fn tunnel_is_active_runtime(
     tunnel: &SavedTunnel,
-    local_listeners: &std::collections::HashMap<
-        String,
-        (
-            tokio::task::AbortHandle,
-            tokio::sync::broadcast::Sender<()>,
-        ),
-    >,
-    remote_forwards: &std::collections::HashMap<String, (String, u16, String)>,
+    local_runtime_keys: &HashSet<String>,
+    remote_runtime_keys: &HashSet<String>,
 ) -> bool {
     if tunnel.tunnel_type == "local" || tunnel.tunnel_type == "dynamic" {
-        local_listeners.contains_key(&tunnel_runtime_id(tunnel))
+        local_runtime_keys.contains(&tunnel_runtime_id(tunnel))
     } else {
         let key = remote_forward_map_key(&tunnel.connection_id, tunnel.remote_port);
-        remote_forwards.contains_key(&key)
+        remote_runtime_keys.contains(&key)
     }
 }
 

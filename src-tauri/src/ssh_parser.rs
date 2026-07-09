@@ -32,22 +32,25 @@ pub fn parse_ssh_command(command: &str) -> ParseResult {
         .collect::<Vec<_>>()
         .join(" ");
 
+    // Optional bind prefix: IPv4, bracketed IPv6, or hostname (e.g. localhost:1080).
+    const BIND_PREFIX: &str = r"(?:(?:\d+\.\d+\.\d+\.\d+|\[[:a-fA-F0-9:]+\]|[^:\s]+):)?";
+
     // Regex for -L (Local Forwarding)
     // Matches: -L [bind_address:]local_port:remote_host:remote_port
     let local_re =
-        Regex::new(r"-L\s+(?:(?:\d+\.\d+\.\d+\.\d+|\[[:a-fA-F0-9]+\]):)?(\d+):([^:\s]+):(\d+)")
+        Regex::new(&format!(r"-L\s+{BIND_PREFIX}(\d+):([^:\s]+):(\d+)"))
             .unwrap();
 
     // Regex for -R (Remote Forwarding)
     // Matches: -R [bind_address:]remote_port:local_host:local_port
     let remote_re =
-        Regex::new(r"-R\s+(?:(?:\d+\.\d+\.\d+\.\d+|\[[:a-fA-F0-9]+\]):)?(\d+):([^:\s]+):(\d+)")
+        Regex::new(&format!(r"-R\s+{BIND_PREFIX}(\d+):([^:\s]+):(\d+)"))
             .unwrap();
 
     // Regex for -D (Dynamic / SOCKS forwarding)
     // Matches: -D [bind_address:]local_port
     let dynamic_re =
-        Regex::new(r"-D\s+(?:(?:\d+\.\d+\.\d+\.\d+|\[[:a-fA-F0-9]+\]):)?(\d+)")
+        Regex::new(&format!(r"-D\s+{BIND_PREFIX}(\d+)"))
             .unwrap();
 
     // Extract Local Tunnels
@@ -187,5 +190,28 @@ mod tests {
             parse_ssh_command("ssh -L 8080:localhost:80 -D 1080 -R 9000:localhost:3000 user@host");
         assert!(result.success);
         assert_eq!(result.tunnels.len(), 3);
+    }
+
+    #[test]
+    fn parses_dynamic_forward_with_hostname_bind() {
+        let result = parse_ssh_command("ssh -D localhost:1080 user@host");
+        assert!(result.success);
+        assert_eq!(result.tunnels.len(), 1);
+        assert_eq!(result.tunnels[0].tunnel_type, "dynamic");
+        assert_eq!(result.tunnels[0].local_port, 1080);
+    }
+
+    #[test]
+    fn parses_dynamic_forward_with_ipv4_bind() {
+        let result = parse_ssh_command("ssh -D 0.0.0.0:1080 user@host");
+        assert!(result.success);
+        assert_eq!(result.tunnels[0].local_port, 1080);
+    }
+
+    #[test]
+    fn parses_dynamic_forward_with_ipv6_bind() {
+        let result = parse_ssh_command("ssh -D [::1]:1080 user@host");
+        assert!(result.success);
+        assert_eq!(result.tunnels[0].local_port, 1080);
     }
 }

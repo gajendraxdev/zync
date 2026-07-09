@@ -9,9 +9,12 @@ use crate::tunnels::socks5::{
 use anyhow::Result;
 use russh::client::Handle;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::{broadcast, Mutex};
+
+const SOCKS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub async fn handle_socks5_client(
     mut client: TcpStream,
@@ -35,6 +38,21 @@ pub async fn handle_socks5_client(
     }
 }
 
+/// Returns `Ok(true)` when bytes were read, `Ok(false)` when cancelled.
+async fn read_exact_or_cancel(
+    client: &mut TcpStream,
+    buf: &mut [u8],
+    cancel: &mut broadcast::Receiver<()>,
+) -> Result<bool> {
+    tokio::select! {
+        result = client.read_exact(buf) => {
+            result?;
+            Ok(true)
+        }
+        _ = cancel.recv() => Ok(false),
+    }
+}
+
 async fn run_socks5_client(
     client: &mut TcpStream,
     session: Arc<Mutex<Handle<Client>>>,
@@ -43,82 +61,108 @@ async fn run_socks5_client(
     stop_tx: &broadcast::Sender<()>,
     cancel: &mut broadcast::Receiver<()>,
 ) -> Result<()> {
-    let mut greeting = [0u8; 2];
-    tokio::select! {
-        result = client.read_exact(&mut greeting) => result?,
-        _ = cancel.recv() => return Ok(()),
-    };
-
-    let nmethods = greeting[1] as usize;
-    let mut methods = vec![0u8; nmethods];
-    client.read_exact(&mut methods).await?;
-
-    let mut full_greeting = greeting.to_vec();
-    full_greeting.extend_from_slice(&methods);
-    socks5::validate_client_greeting(&full_greeting)?;
-
-    client.write_all(&method_selection_reply()).await?;
-
-    let target = match read_connect_target(client).await {
-        Ok(target) => target,
-        Err(error) => {
-            let _ = client
-                .write_all(&error_reply(socks5_error_to_reply(&error)))
-                .await;
-            return Err(anyhow::Error::new(error));
+    let handshake = async {
+        let mut greeting = [0u8; 2];
+        if !read_exact_or_cancel(client, &mut greeting, cancel).await? {
+            return Ok(());
         }
-    };
 
-    let channel = {
-        let session_guard = session.lock().await;
-        session_guard
-            .channel_open_direct_tcpip(target.host.clone(), target.port as u32, "127.0.0.1", 0)
-            .await
-    };
+        let nmethods = greeting[1] as usize;
+        let mut methods = vec![0u8; nmethods];
+        if !read_exact_or_cancel(client, &mut methods, cancel).await? {
+            return Ok(());
+        }
 
-    let channel = match channel {
-        Ok(channel) => channel,
-        Err(error) => {
-            let _ = client
-                .write_all(&error_reply(socks5::REP_GENERAL_FAILURE))
-                .await;
-            if is_ssh_session_fatal_error(&error) {
-                println!(
-                    "[TUNNEL][SOCKS] SSH session lost for {}; stopping tunnels",
-                    connection_id
-                );
-                let _ = stop_tx.send(());
-                let _ = failure_tx.send(connection_id.to_string());
+        let mut full_greeting = greeting.to_vec();
+        full_greeting.extend_from_slice(&methods);
+        socks5::validate_client_greeting(&full_greeting)?;
+
+        client.write_all(&method_selection_reply()).await?;
+
+        let target = match read_connect_target(client, cancel).await {
+            Ok(target) => target,
+            Err(error) => {
+                let _ = client
+                    .write_all(&error_reply(socks5_error_to_reply(&error)))
+                    .await;
+                return Err(anyhow::Error::new(error));
             }
-            return Err(error.into());
+        };
+
+        let channel = {
+            let session = session.clone();
+            let target_host = target.host.clone();
+            let target_port = target.port;
+            tokio::select! {
+                result = async move {
+                    let session_guard = session.lock().await;
+                    session_guard
+                        .channel_open_direct_tcpip(
+                            target_host,
+                            target_port as u32,
+                            "127.0.0.1",
+                            0,
+                        )
+                        .await
+                } => result,
+                _ = cancel.recv() => return Ok(()),
+            }
+        };
+
+        let channel = match channel {
+            Ok(channel) => channel,
+            Err(error) => {
+                let _ = client
+                    .write_all(&error_reply(socks5::REP_GENERAL_FAILURE))
+                    .await;
+                if is_ssh_session_fatal_error(&error) {
+                    println!(
+                        "[TUNNEL][SOCKS] SSH session lost for {}; stopping tunnels",
+                        connection_id
+                    );
+                    let _ = stop_tx.send(());
+                    let _ = failure_tx.send(connection_id.to_string());
+                }
+                return Err(error.into());
+            }
+        };
+
+        client.write_all(&connect_success_reply()).await?;
+
+        let mut stream = channel.into_stream();
+        tokio::select! {
+            result = tokio::io::copy_bidirectional(client, &mut stream) => {
+                if let Err(error) = result {
+                    eprintln!(
+                        "[TUNNEL][SOCKS] relay error to {}:{} — {error}",
+                        target.host,
+                        target.port
+                    );
+                }
+            }
+            _ = cancel.recv() => {}
         }
+
+        Ok(())
     };
 
-    client.write_all(&connect_success_reply()).await?;
-
-    let mut stream = channel.into_stream();
-    tokio::select! {
-        result = tokio::io::copy_bidirectional(client, &mut stream) => {
-            if let Err(error) = result {
-                eprintln!(
-                    "[TUNNEL][SOCKS] relay error to {}:{} — {error}",
-                    target.host,
-                    target.port
-                );
-            }
-        }
-        _ = cancel.recv() => {}
+    match tokio::time::timeout(SOCKS_HANDSHAKE_TIMEOUT, handshake).await {
+        Ok(result) => result,
+        Err(_) => Ok(()),
     }
-
-    Ok(())
 }
 
-async fn read_connect_target(client: &mut TcpStream) -> Result<socks5::ConnectTarget, Socks5Error> {
+async fn read_connect_target(
+    client: &mut TcpStream,
+    cancel: &mut broadcast::Receiver<()>,
+) -> Result<socks5::ConnectTarget, Socks5Error> {
     let mut header = [0u8; 4];
-    client
-        .read_exact(&mut header)
+    if !read_exact_or_cancel(client, &mut header, cancel)
         .await
-        .map_err(|_| Socks5Error::InvalidMessage("connect header"))?;
+        .map_err(|_| Socks5Error::InvalidMessage("connect header"))?
+    {
+        return Err(Socks5Error::InvalidMessage("connect header cancelled"));
+    }
 
     if header[0] != VERSION {
         return Err(Socks5Error::UnsupportedVersion(header[0]));
@@ -130,34 +174,42 @@ async fn read_connect_target(client: &mut TcpStream) -> Result<socks5::ConnectTa
     let body = match header[3] {
         ATYP_IPV4 => {
             let mut bytes = [0u8; 6];
-            client
-                .read_exact(&mut bytes)
+            if !read_exact_or_cancel(client, &mut bytes, cancel)
                 .await
-                .map_err(|_| Socks5Error::InvalidMessage("ipv4 target"))?;
+                .map_err(|_| Socks5Error::InvalidMessage("ipv4 target"))?
+            {
+                return Err(Socks5Error::InvalidMessage("ipv4 target cancelled"));
+            }
             bytes.to_vec()
         }
         ATYP_DOMAIN => {
             let mut len_buf = [0u8; 1];
-            client
-                .read_exact(&mut len_buf)
+            if !read_exact_or_cancel(client, &mut len_buf, cancel)
                 .await
-                .map_err(|_| Socks5Error::InvalidMessage("domain length"))?;
+                .map_err(|_| Socks5Error::InvalidMessage("domain length"))?
+            {
+                return Err(Socks5Error::InvalidMessage("domain length cancelled"));
+            }
             let len = len_buf[0] as usize;
             let mut tail = vec![0u8; len + 2];
-            client
-                .read_exact(&mut tail)
+            if !read_exact_or_cancel(client, &mut tail, cancel)
                 .await
-                .map_err(|_| Socks5Error::InvalidMessage("domain target"))?;
+                .map_err(|_| Socks5Error::InvalidMessage("domain target"))?
+            {
+                return Err(Socks5Error::InvalidMessage("domain target cancelled"));
+            }
             let mut out = len_buf.to_vec();
             out.extend_from_slice(&tail);
             out
         }
         ATYP_IPV6 => {
             let mut bytes = [0u8; 18];
-            client
-                .read_exact(&mut bytes)
+            if !read_exact_or_cancel(client, &mut bytes, cancel)
                 .await
-                .map_err(|_| Socks5Error::InvalidMessage("ipv6 target"))?;
+                .map_err(|_| Socks5Error::InvalidMessage("ipv6 target"))?
+            {
+                return Err(Socks5Error::InvalidMessage("ipv6 target cancelled"));
+            }
             bytes.to_vec()
         }
         other => return Err(Socks5Error::UnsupportedAddressType(other)),

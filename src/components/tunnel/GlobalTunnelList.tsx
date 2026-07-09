@@ -477,7 +477,6 @@ export function GlobalTunnelList() {
                         </div>
                     ) : (
                         <div className="w-full space-y-6">
-                            <div className="w-full space-y-6">
                                 {sortedGroupNames.map(groupName => {
                                     const ports = groupedTunnels[groupName];
                                     const activeCount = ports.filter(t => t.status === 'active').length;
@@ -612,7 +611,6 @@ export function GlobalTunnelList() {
                                         </div>
                                     );
                                 })}
-                            </div>
                         </div>
                     )}
             </div>

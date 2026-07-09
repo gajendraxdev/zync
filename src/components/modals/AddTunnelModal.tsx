@@ -26,6 +26,10 @@ const TYPE_LABELS: Record<TunnelType, string> = {
     dynamic: 'Dynamic',
 };
 
+function isValidPort(port: number): boolean {
+    return Number.isFinite(port) && port >= 1 && port <= 65535;
+}
+
 interface AddTunnelModalProps {
     isOpen: boolean;
     onClose: () => void;
@@ -110,8 +114,8 @@ export function AddTunnelModal({ isOpen, onClose, initialConnectionId, editingTu
             const lPort = parseInt(localPort);
             const isDynamic = type === 'dynamic';
 
-            if (isNaN(lPort) || lPort < 1) {
-                showToast('error', 'Local port must be a valid number');
+            if (!isValidPort(lPort)) {
+                showToast('error', 'Local port must be between 1 and 65535');
                 return;
             }
 
@@ -119,8 +123,8 @@ export function AddTunnelModal({ isOpen, onClose, initialConnectionId, editingTu
             let host = remoteHost;
             if (!isDynamic) {
                 rPort = parseInt(remotePort);
-                if (isNaN(rPort) || rPort < 1) {
-                    showToast('error', 'Ports must be valid numbers');
+                if (!isValidPort(rPort)) {
+                    showToast('error', 'Ports must be between 1 and 65535');
                     return;
                 }
             } else {
@@ -154,8 +158,8 @@ export function AddTunnelModal({ isOpen, onClose, initialConnectionId, editingTu
             for (const row of bulkRows) {
                 const lPort = parseInt(row.localPort);
                 const rPort = parseInt(row.remotePort);
-                if (isNaN(lPort) || isNaN(rPort)) {
-                    showToast('error', 'All ports must be valid numbers');
+                if (!isValidPort(lPort) || !isValidPort(rPort)) {
+                    showToast('error', 'All ports must be between 1 and 65535');
                     return;
                 }
             }
@@ -167,7 +171,7 @@ export function AddTunnelModal({ isOpen, onClose, initialConnectionId, editingTu
                     const config: TunnelConfig = {
                         id: crypto.randomUUID(),
                         connectionId: selectedConnectionId,
-                        name: (row.type === 'local' ? `Local ${lPort} -> ${row.remoteHost}:${rPort}` : `Remote ${rPort} -> Local ${lPort}`),
+                        name: defaultTunnelName(row.type, lPort, row.remoteHost, rPort),
                         type: row.type,
                         localPort: lPort,
                         remoteHost: row.remoteHost,
@@ -559,6 +563,8 @@ export function AddTunnelModal({ isOpen, onClose, initialConnectionId, editingTu
                                                             </div>
                                                             <div className="col-span-1 flex justify-end">
                                                                 <button
+                                                                    type="button"
+                                                                    aria-label="Remove bulk forward row"
                                                                     onClick={() => {
                                                                         const newRows = bulkRows.filter((_, i) => i !== index);
                                                                         setBulkRows(newRows);
@@ -585,15 +591,17 @@ export function AddTunnelModal({ isOpen, onClose, initialConnectionId, editingTu
                                         </div>
                                     </motion.div>
                                 )}
-                                <label className="flex items-center gap-2.5 cursor-pointer text-xs text-app-muted hover:text-app-text transition-colors">
-                                    <input
-                                        type="checkbox"
-                                        checked={autoStart}
-                                        onChange={(e) => setAutoStart(e.target.checked)}
-                                        className="h-3.5 w-3.5 rounded border-app-border bg-app-surface accent-[var(--color-app-accent)]"
-                                    />
-                                    Auto-start when connection opens
-                                </label>
+                                {mode === 'single' && (
+                                    <label className="flex items-center gap-2.5 cursor-pointer text-xs text-app-muted hover:text-app-text transition-colors">
+                                        <input
+                                            type="checkbox"
+                                            checked={autoStart}
+                                            onChange={(e) => setAutoStart(e.target.checked)}
+                                            className="h-3.5 w-3.5 rounded border-app-border bg-app-surface accent-[var(--color-app-accent)]"
+                                        />
+                                        Auto-start when connection opens
+                                    </label>
+                                )}
                             </AnimatePresence>
                         </div>
                         </motion.div>

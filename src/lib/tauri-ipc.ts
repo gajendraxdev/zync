@@ -401,6 +401,13 @@ const ipcRenderer = {
         } else if (args.length === 1 && typeof args[0] === 'object' && 'connectionId' in args[0]) {
           payload = { connectionId: args[0].connectionId };
         }
+      } else if (tauriCommand === 'tunnel_reconcile_connection') {
+        if (args.length === 1 && typeof args[0] === 'string') {
+          payload = { connection_id: args[0] };
+        } else if (args.length === 1 && typeof args[0] === 'object') {
+          const arg = args[0] as { connectionId?: string; connection_id?: string };
+          payload = { connection_id: arg.connection_id ?? arg.connectionId };
+        }
       } else if (tauriCommand === 'tunnel_save') {
         payload = { tunnelVal: args[0] };
       } else if (tauriCommand === 'tunnel_delete') {

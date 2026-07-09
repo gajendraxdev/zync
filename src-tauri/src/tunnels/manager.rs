@@ -12,6 +12,27 @@ use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
 const SESSION_PROBE_INTERVAL_SECS: u64 = 15;
+pub(crate) const SSH_SESSION_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
+
+/// Bounded liveness probe — opens and closes a session channel without wedging on stalled transports.
+pub(crate) async fn probe_ssh_session(session: &Arc<Mutex<Handle<Client>>>) -> bool {
+    let probe = async {
+        let channel_result = {
+            let guard = session.lock().await;
+            guard.channel_open_session().await
+        };
+        match channel_result {
+            Ok(channel) => {
+                let _ = channel.close().await;
+                true
+            }
+            Err(_) => false,
+        }
+    };
+    tokio::time::timeout(SSH_SESSION_PROBE_TIMEOUT, probe)
+        .await
+        .unwrap_or(false)
+}
 
 /// Stable runtime key for a saved tunnel config (unique per connection + endpoints).
 pub fn tunnel_runtime_id(tunnel: &SavedTunnel) -> String {
@@ -185,7 +206,7 @@ impl TunnelManager {
                         break;
                     }
                     _ = session_probe.tick() => {
-                        if !ssh_session_is_alive(&session).await {
+                        if !probe_ssh_session(&session).await {
                             println!(
                                 "[TUNNEL] SSH session probe failed for {}; stopping tunnels",
                                 connection_id
@@ -296,7 +317,7 @@ impl TunnelManager {
                         break;
                     }
                     _ = session_probe.tick() => {
-                        if !ssh_session_is_alive(&session).await {
+                        if !probe_ssh_session(&session).await {
                             println!(
                                 "[TUNNEL] SSH session probe failed for {}; stopping tunnels",
                                 connection_id
@@ -437,20 +458,6 @@ impl TunnelManager {
             }
         }
         Ok(())
-    }
-}
-
-async fn ssh_session_is_alive(session: &Arc<Mutex<Handle<Client>>>) -> bool {
-    let channel_result = {
-        let guard = session.lock().await;
-        guard.channel_open_session().await
-    };
-    match channel_result {
-        Ok(channel) => {
-            let _ = channel.close().await;
-            true
-        }
-        Err(_) => false,
     }
 }
 

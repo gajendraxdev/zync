@@ -6,6 +6,7 @@ import { GroupSelector } from '../ui/GroupSelector';
 // import { parseSSHCommand } from '../../lib/sshCommandParser'; // Removed
 import { AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
+import { defaultTunnelName } from '../../features/tunnels/domain/tunnelTypes';
 
 interface ImportSSHCommandModalProps {
     isOpen: boolean;
@@ -90,9 +91,12 @@ export function ImportSSHCommandModal({
                 const newTunnel = {
                     id: crypto.randomUUID(),
                     connectionId: selectedConnectionId,
-                    name: tunnel.name || (tunnel.type === 'dynamic'
-                        ? `SOCKS ${tunnel.localPort}`
-                        : `${tunnel.type === 'local' ? 'Local' : 'Remote'} ${tunnel.localPort}:${tunnel.remotePort}`),
+                    name: tunnel.name || defaultTunnelName(
+                        tunnel.type,
+                        tunnel.localPort,
+                        tunnel.remoteHost,
+                        tunnel.remotePort,
+                    ),
                     type: tunnel.type,
                     localPort: tunnel.localPort,
                     remoteHost: tunnel.remoteHost,

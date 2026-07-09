@@ -27,7 +27,7 @@ Canonical reference for Zync’s SSH tunnel system: product behavior, architectu
 15. [Known limits & bugs](#15-known-limits--bugs)
 16. [Improvement plan](#16-improvement-plan)
 17. [Future features](#17-future-features)
-18. [Backend modularization (deferred)](#18-backend-modularization-deferred)
+18. [Backend modularization](#18-backend-modularization)
 
 ---
 
@@ -566,7 +566,6 @@ Note failures with: host OS, tunnel type (local/remote), which UI surface, and w
 |-------|----------|--------|
 | **Remote port uniqueness** | P1 | One remote forward per `remote_port` per SSH session (by design) |
 | **Marketing doc drift** | P1 | Landing page `/docs/port-forwarding` still stale (auto-start, ssh_config import claims) |
-| **No SOCKS** | P2 | `-D` not supported |
 
 **Fixed in Phase 1 (v2.21+):** unified `tunnel:start` path, reconnect restore for active + auto-start tunnels, disconnect stops runtime tunnels, stable runtime IDs scoped by `connectionId`, event-driven UI (no 30s poll), auto-start/reconnect failure toasts.
 
