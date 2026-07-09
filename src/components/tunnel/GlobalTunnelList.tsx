@@ -476,8 +476,8 @@ export function GlobalTunnelList() {
                             )}
                         </div>
                     ) : (
-                        <div className="space-y-6 max-w-6xl">
-                            <div className="space-y-6 max-w-6xl">
+                        <div className="w-full space-y-6">
+                            <div className="w-full space-y-6">
                                 {sortedGroupNames.map(groupName => {
                                     const ports = groupedTunnels[groupName];
                                     const activeCount = ports.filter(t => t.status === 'active').length;
@@ -549,7 +549,7 @@ export function GlobalTunnelList() {
                                             {/* Ports Grid/List */}
                                             {!isCollapsed && (
                                                 viewMode === 'grid' ? (
-                                                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                                                    <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-3 2xl:grid-cols-4">
                                                         {ports.map((tunnel) => {
                                                             const conn = connections.find(c => c.id === tunnel.connectionId);
                                                             const hostLabel = conn
@@ -579,7 +579,7 @@ export function GlobalTunnelList() {
                                                     </div>
                                                 ) : (
                                                     // List View
-                                                    <div className="space-y-1">
+                                                    <div className="flex w-full flex-col gap-1.5">
                                                         {ports.map((tunnel) => {
                                                             const conn = connections.find(c => c.id === tunnel.connectionId);
                                                             const hostLabel = conn

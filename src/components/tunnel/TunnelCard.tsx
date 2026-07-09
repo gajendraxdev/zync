@@ -48,38 +48,23 @@ interface TunnelCardProps {
     onCopy: (text: string) => void;
 }
 
-const TYPE_TONE: Record<TunnelType, { dot: string; ring: string; text: string }> = {
-    local: {
-        dot: 'bg-sky-400',
-        ring: 'ring-sky-400/20',
-        text: 'text-sky-400/90',
-    },
-    remote: {
-        dot: 'bg-amber-400',
-        ring: 'ring-amber-400/20',
-        text: 'text-amber-400/90',
-    },
-    dynamic: {
-        dot: 'bg-violet-400',
-        ring: 'ring-violet-400/20',
-        text: 'text-violet-400/90',
-    },
+const TYPE_BADGE_STYLE: Record<TunnelType, string> = {
+    local: 'border-sky-400/20 bg-sky-400/10 text-sky-400',
+    remote: 'border-amber-400/20 bg-amber-400/10 text-amber-400',
+    dynamic: 'border-violet-400/20 bg-violet-400/10 text-violet-400',
 };
 
-function TypeIndicator({ type }: { type: TunnelType }) {
+function TypeMetaBadge({ type }: { type: TunnelType }) {
     const meta = TUNNEL_TYPE_META[type];
-    const tone = TYPE_TONE[type];
     return (
         <span
             className={cn(
-                'inline-flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 ring-1 ring-inset',
-                tone.ring,
-                'bg-app-surface/40',
+                'rounded-full border px-2 py-0.5 text-[9px] font-semibold',
+                TYPE_BADGE_STYLE[type],
             )}
         >
-            <span className={cn('h-1.5 w-1.5 rounded-full', tone.dot)} />
-            <span className={cn('text-[10px] font-medium', tone.text)}>{meta.label}</span>
-            <span className="font-mono text-[9px] text-app-muted/60">{meta.flag}</span>
+            {meta.label}
+            <span className="ml-1 font-mono opacity-80">{meta.flag}</span>
         </span>
     );
 }
@@ -217,17 +202,21 @@ function TunnelMetaBadges({ tunnel }: { tunnel: TunnelConfig }) {
 
     if (tunnel.status === 'error' && tunnel.error) {
         return (
-            <span
-                className="rounded-full border border-red-400/20 bg-red-400/10 px-2 py-0.5 text-[9px] font-semibold text-red-400"
-                title={tunnel.error}
-            >
-                Error
-            </span>
+            <>
+                <TypeMetaBadge type={tunnel.type} />
+                <span
+                    className="rounded-full border border-red-400/20 bg-red-400/10 px-2 py-0.5 text-[9px] font-semibold text-red-400"
+                    title={tunnel.error}
+                >
+                    Error
+                </span>
+            </>
         );
     }
 
     return (
         <>
+            <TypeMetaBadge type={tunnel.type} />
             {tunnel.bindToAny && (
                 <span className="rounded-full border border-orange-400/20 bg-orange-400/10 px-2 py-0.5 text-[9px] font-semibold text-orange-400">
                     Public
@@ -247,8 +236,17 @@ function TunnelMetaBadges({ tunnel }: { tunnel: TunnelConfig }) {
     );
 }
 
+function CardActionsBar({ children }: { children: ReactNode }) {
+    return (
+        <div className="flex shrink-0 rounded-md bg-app-panel/90 shadow-sm ring-1 ring-app-border/30 backdrop-blur-sm">
+            {children}
+        </div>
+    );
+}
+
 function CardActions({
     tunnel,
+    isActive,
     isDynamic,
     onCopy,
     onOpenBrowser,
@@ -256,6 +254,7 @@ function CardActions({
     onDelete,
 }: {
     tunnel: TunnelConfig;
+    isActive: boolean;
     isDynamic: boolean;
     onCopy: () => void;
     onOpenBrowser: (port: number) => void;
@@ -263,7 +262,7 @@ function CardActions({
     onDelete: () => void;
 }) {
     return (
-        <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+        <div className="flex items-center gap-0.5">
             {(tunnel.type === 'local' || isDynamic) && (
                 <button
                     type="button"
@@ -274,7 +273,7 @@ function CardActions({
                     <Copy size={13} />
                 </button>
             )}
-            {tunnel.type === 'local' && (
+            {tunnel.type === 'local' && isActive && (
                 <button
                     type="button"
                     onClick={() => onOpenBrowser(tunnel.localPort)}
@@ -343,7 +342,7 @@ export function TunnelCard({
 
     if (viewMode === 'list') {
         return (
-            <div className={cn(shellClass, 'flex items-center gap-3 py-2.5 pl-3 pr-3')}>
+            <div className={cn(shellClass, 'flex w-full items-center gap-3 py-2.5 pl-3 pr-3')}>
                 {statusRail}
 
                 <div
@@ -358,12 +357,9 @@ export function TunnelCard({
                 </div>
 
                 <div className="min-w-0 flex-1">
-                    <div className="flex min-w-0 items-center gap-2">
-                        <span className="truncate text-[13px] font-semibold tracking-tight text-app-text">
-                            {tunnel.name}
-                        </span>
-                        <TypeIndicator type={tunnel.type} />
-                    </div>
+                    <span className="block truncate text-[13px] font-semibold tracking-tight text-app-text">
+                        {tunnel.name}
+                    </span>
                     {showHostSubtitle && (
                         <p className="mt-0.5 truncate text-[11px] text-app-muted/80">{displayHost}</p>
                     )}
@@ -392,14 +388,17 @@ export function TunnelCard({
 
                 <StatusToggle isActive={isActive} onClick={() => onToggle(tunnel)} />
 
-                <CardActions
-                    tunnel={tunnel}
-                    isDynamic={isDynamic}
-                    onCopy={copyFlow}
-                    onOpenBrowser={onOpenBrowser}
-                    onEdit={() => onEdit(tunnel)}
-                    onDelete={() => onDelete(tunnel.id)}
-                />
+                <CardActionsBar>
+                    <CardActions
+                        tunnel={tunnel}
+                        isActive={isActive}
+                        isDynamic={isDynamic}
+                        onCopy={copyFlow}
+                        onOpenBrowser={onOpenBrowser}
+                        onEdit={() => onEdit(tunnel)}
+                        onDelete={() => onDelete(tunnel.id)}
+                    />
+                </CardActionsBar>
             </div>
         );
     }
@@ -420,29 +419,28 @@ export function TunnelCard({
                     <OSIcon icon={connectionIcon || 'Server'} className="h-3.5 w-3.5" />
                 </div>
 
-                <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-2">
-                        <span className="truncate text-[13px] font-semibold leading-tight tracking-tight text-app-text">
-                            {tunnel.name}
-                        </span>
-                        <TypeIndicator type={tunnel.type} />
-                    </div>
+                <div className="min-w-0 flex-1 pr-14">
+                    <span className="block truncate text-[13px] font-semibold leading-tight tracking-tight text-app-text">
+                        {tunnel.name}
+                    </span>
                     {showHostSubtitle && (
                         <p className="mt-0.5 truncate text-[10px] text-app-muted/75">{displayHost}</p>
                     )}
                 </div>
-
             </div>
 
-            <div className="absolute right-2 top-2 flex rounded-md bg-app-panel/90 opacity-0 shadow-sm ring-1 ring-app-border/30 backdrop-blur-sm transition-opacity group-hover:opacity-100">
-                <CardActions
-                    tunnel={tunnel}
-                    isDynamic={isDynamic}
-                    onCopy={copyFlow}
-                    onOpenBrowser={onOpenBrowser}
-                    onEdit={() => onEdit(tunnel)}
-                    onDelete={() => onDelete(tunnel.id)}
-                />
+            <div className="absolute right-2 top-2">
+                <CardActionsBar>
+                    <CardActions
+                        tunnel={tunnel}
+                        isActive={isActive}
+                        isDynamic={isDynamic}
+                        onCopy={copyFlow}
+                        onOpenBrowser={onOpenBrowser}
+                        onEdit={() => onEdit(tunnel)}
+                        onDelete={() => onDelete(tunnel.id)}
+                    />
+                </CardActionsBar>
             </div>
 
             <button

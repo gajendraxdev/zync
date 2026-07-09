@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import { Button } from '../ui/Button';
 import { cn } from '../../lib/utils';
-import { Plus, Network, ChevronDown, FileText, Play, Square, Folder, FolderOpen, ArrowRight } from 'lucide-react';
+import { Plus, Network, ChevronDown, FileText, Play, Square, Folder, FolderOpen, LayoutGrid, List, ArrowRight } from 'lucide-react';
 import { TUNNEL_PRESETS, TunnelPreset } from '../../lib/tunnelPresets';
 import { AddTunnelModal } from '../modals/AddTunnelModal';
 import { ImportSSHCommandModal } from '../modals/ImportSSHCommandModal';
@@ -41,6 +41,7 @@ export function TunnelManager({ connectionId }: { connectionId?: string }) {
   const [editingTunnel, setEditingTunnel] = useState<TunnelConfig | null>(null);
   const [showPresetDropdown, setShowPresetDropdown] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Port suggestion dialog state
@@ -239,7 +240,33 @@ export function TunnelManager({ connectionId }: { connectionId?: string }) {
             </span>
           )}
         </div>
-        <div className="flex gap-1.5">
+        <div className="flex items-center gap-1.5">
+          <div className="flex bg-app-surface/50 p-0.5 rounded-lg border border-app-border/40">
+            <button
+              onClick={() => setViewMode('grid')}
+              className={cn(
+                'p-1.5 rounded transition-all',
+                viewMode === 'grid'
+                  ? 'bg-app-accent text-white shadow-sm'
+                  : 'text-app-muted hover:text-app-text hover:bg-app-highlight/30',
+              )}
+              title="Grid View"
+            >
+              <LayoutGrid size={14} />
+            </button>
+            <button
+              onClick={() => setViewMode('list')}
+              className={cn(
+                'p-1.5 rounded transition-all',
+                viewMode === 'list'
+                  ? 'bg-app-accent text-white shadow-sm'
+                  : 'text-app-muted hover:text-app-text hover:bg-app-highlight/30',
+              )}
+              title="List View"
+            >
+              <List size={14} />
+            </button>
+          </div>
           <Button
             variant="ghost"
             onClick={() => setShowImportModal(true)}
@@ -321,7 +348,7 @@ export function TunnelManager({ connectionId }: { connectionId?: string }) {
             </Button>
           </div>
         ) : (
-          <div className="space-y-8">
+          <div className="w-full space-y-8">
             {(() => {
               // Group tunnels
               const groups: Record<string, TunnelConfig[]> = {};
@@ -387,28 +414,53 @@ export function TunnelManager({ connectionId }: { connectionId?: string }) {
                       </div>
                     </div>
 
-                    <div className="space-y-1.5">
-                      {groupTunnels.map(port => (
-                        <TunnelCard
-                          key={port.id}
-                          tunnel={port}
-                          connectionIcon={conn?.icon}
-                          hostLabel={conn ? getConnectionDisplayLabels(conn, false).primary : undefined}
-                          viewMode="list"
-                          onToggle={handleToggleTunnel}
-                          onEdit={(t) => {
-                            setEditingTunnel(t);
-                            setIsAddModalOpen(true);
-                          }}
-                          onDelete={handleDeleteTunnel}
-                          onOpenBrowser={handleOpenBrowser}
-                          onCopy={(text) => {
-                            navigator.clipboard.writeText(text);
-                            showToast('success', 'Copied');
-                          }}
-                        />
-                      ))}
-                    </div>
+                    {viewMode === 'grid' ? (
+                      <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-3 2xl:grid-cols-4">
+                        {groupTunnels.map(port => (
+                          <TunnelCard
+                            key={port.id}
+                            tunnel={port}
+                            connectionIcon={conn?.icon}
+                            hostLabel={conn ? getConnectionDisplayLabels(conn, false).primary : undefined}
+                            viewMode="grid"
+                            onToggle={handleToggleTunnel}
+                            onEdit={(t) => {
+                              setEditingTunnel(t);
+                              setIsAddModalOpen(true);
+                            }}
+                            onDelete={handleDeleteTunnel}
+                            onOpenBrowser={handleOpenBrowser}
+                            onCopy={(text) => {
+                              navigator.clipboard.writeText(text);
+                              showToast('success', 'Copied');
+                            }}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex w-full flex-col gap-1.5">
+                        {groupTunnels.map(port => (
+                          <TunnelCard
+                            key={port.id}
+                            tunnel={port}
+                            connectionIcon={conn?.icon}
+                            hostLabel={conn ? getConnectionDisplayLabels(conn, false).primary : undefined}
+                            viewMode="list"
+                            onToggle={handleToggleTunnel}
+                            onEdit={(t) => {
+                              setEditingTunnel(t);
+                              setIsAddModalOpen(true);
+                            }}
+                            onDelete={handleDeleteTunnel}
+                            onOpenBrowser={handleOpenBrowser}
+                            onCopy={(text) => {
+                              navigator.clipboard.writeText(text);
+                              showToast('success', 'Copied');
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               });

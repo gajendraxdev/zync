@@ -12,19 +12,17 @@ export function tunnelHostDisplayLabel(hostLabel: string | undefined): string | 
     return label || null;
 }
 
-/** Remote-side endpoint for flow display — IPs become a connection tag, never raw addresses. */
+/** Remote-side endpoint for flow display on tunnel cards. */
 export function formatTunnelServiceEndpoint(
     remoteHost: string,
     port: number,
-    hostLabel?: string,
 ): { host: string; port: number; tagged: boolean } {
     const h = remoteHost.trim();
     if (h === '127.0.0.1' || h === 'localhost') {
         return { host: 'localhost', port, tagged: false };
     }
     if (isLikelyIpAddress(h)) {
-        const label = tunnelHostDisplayLabel(hostLabel);
-        return { host: label ?? 'remote', port, tagged: !!label };
+        return { host: h, port, tagged: false };
     }
     return { host: h, port, tagged: false };
 }
@@ -58,7 +56,7 @@ export function formatTunnelFlow(
     }
 
     if (tunnel.type === 'local') {
-        const endpoint = formatTunnelServiceEndpoint(tunnel.remoteHost, tunnel.remotePort, hostLabel);
+        const endpoint = formatTunnelServiceEndpoint(tunnel.remoteHost, tunnel.remotePort);
         return {
             source: String(tunnel.localPort),
             targetHost: endpoint.host,
