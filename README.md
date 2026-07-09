@@ -107,7 +107,7 @@ See vendor websites for current pricing and plan details.
 ### Connect
 
 - SSH with key or password auth, **jump hosts**, and connection folders
-- **SSH config import** and visual **tunnel** + **port forwarding** management
+- **SSH config import** and visual **port forwarding** — local (`-L`), remote (`-R`), and SOCKS (`-D`); paste `ssh` commands to import; per-host and global dashboard; auto-start and reconnect restore ([docs/TUNNELS.md](docs/TUNNELS.md))
 - Jump from **local shells** to remote sessions in the same app (see [Local terminal](#local-terminal))
 
 ### Work
@@ -210,7 +210,7 @@ sudo apt update && sudo apt install zync
 | [docs/VAULT.md](docs/VAULT.md) | Vault, credentials, Google sync |
 | [docs/TERMINAL.md](docs/TERMINAL.md) | Terminal system (IPC, renderer, lifecycle, settings) |
 | [docs/TERMINAL_GHOST.md](docs/TERMINAL_GHOST.md) | Ghost completions (inline, history, paths, suggestion engine) |
-| [docs/TUNNELS.md](docs/TUNNELS.md) | Port forwarding (local/remote, auto-start, sync, roadmap) |
+| [docs/TUNNELS.md](docs/TUNNELS.md) | Port forwarding architecture — local/remote/SOCKS, lifecycle, reconnect, sync, design decisions |
 | [docs/SESSION_PERSISTENCE.md](docs/SESSION_PERSISTENCE.md) | Tab and terminal restore across restarts |
 | [docs/SETTINGS_SYSTEM.md](docs/SETTINGS_SYSTEM.md) | Global settings and `settings.json` |
 
@@ -270,13 +270,14 @@ More targets (`test:vault-*`, `test:session-persistence`, `test:terminal-rendere
 src/features/ (React UI)  →  Zustand  →  Tauri IPC  →  src-tauri/ (Rust)
                               invoke (request/response)     ├── SSH / SFTP (russh)
                               Channel (streaming I/O)       ├── PTY (portable-pty)
+                                                            ├── Tunnels (port forwards, SOCKS)
                                                             ├── Vault + sync (crypto, redb, keyring)
                                                             └── Ghost, AI agent, session persistence
 ```
 
 **Layout:** UI and feature logic live in `src/features/`; native work runs in `src-tauri/`. One-shot work uses `invoke`; streaming paths (notably terminal PTY output) use Tauri `Channel`s.
 
-**Start here:** [docs/TERMINAL.md](docs/TERMINAL.md) for IPC, lifecycle, and renderer patterns. Command families include `ssh_*`, `terminal_*`, `vault_*`, `sync_*`, `ghost_*`, `ai_agent_*`, `session_*`, and `settings_*`. See the docs table above for other subsystem guides.
+**Start here:** [docs/TERMINAL.md](docs/TERMINAL.md) for terminal IPC, lifecycle, and renderer patterns; [docs/TUNNELS.md](docs/TUNNELS.md) for port forwarding architecture and reconnect behavior. Command families include `ssh_*`, `terminal_*`, `tunnel_*`, `vault_*`, `sync_*`, `ghost_*`, `ai_agent_*`, `session_*`, and `settings_*`. See the docs table above for other subsystem guides.
 
 ## Extensions
 
