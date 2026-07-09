@@ -15,6 +15,7 @@ use tauri::{AppHandle, Manager, State};
 use tauri_plugin_store::StoreExt;
 use tokio::sync::Mutex;
 
+use crate::tunnels::session_failure::{session_failure_channel, spawn_session_failure_watcher};
 use crate::tunnels::TunnelManager;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -478,13 +479,16 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(data_dir: std::path::PathBuf, app_handle: tauri::AppHandle) -> Self {
+        let (failure_tx, failure_rx) = session_failure_channel();
+        spawn_session_failure_watcher(app_handle.clone(), failure_rx);
+
         Self {
             app_handle,
             connections: Arc::new(Mutex::new(HashMap::new())),
             pty_manager: Arc::new(PtyManager::new()),
             file_system: Arc::new(FileSystem::new()),
             ssh_manager: Arc::new(SshManager::new()),
-            tunnel_manager: Arc::new(TunnelManager::new()),
+            tunnel_manager: Arc::new(TunnelManager::new(failure_tx)),
             snippets_manager: Arc::new(crate::snippets::SnippetsManager::new(data_dir.clone())),
             transfers: Arc::new(Mutex::new(HashMap::new())),
             agent_runs: Arc::new(Mutex::new(HashMap::new())),
@@ -1117,6 +1121,18 @@ pub async fn ssh_migrate_all_keys(app_handle: tauri::AppHandle) -> Result<usize,
     }
 
     Ok(migrated_count)
+}
+
+/// Drop a dead SSH session after unexpected transport loss.
+/// Unlike `ssh_disconnect`, does not tear down terminal tabs — PTYs are already EOF or frontend-suspended.
+#[tauri::command]
+pub async fn ssh_transport_lost(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mut connections = state.connections.lock().await;
+    connections.remove(&id);
+    Ok(())
 }
 
 #[tauri::command]

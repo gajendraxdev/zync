@@ -2,14 +2,173 @@ use crate::commands::{get_data_dir, AppState};
 use super::{remote_forward_map_key, tunnel_runtime_id};
 use crate::types::{SavedTunnel, SavedTunnelsData};
 use serde::Serialize;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
+use tokio::sync::Mutex;
 
 #[derive(Debug, Serialize, Clone)]
 pub struct TunnelStatusChange {
     pub id: String,
     pub status: String,
     pub error: Option<String>,
+}
+
+fn connection_has_live_session(
+    connections: &std::collections::HashMap<String, crate::commands::ConnectionHandle>,
+    connection_id: &str,
+) -> bool {
+    connections
+        .get(connection_id)
+        .and_then(|handle| handle.session.as_ref())
+        .is_some()
+}
+
+/// Tear down runtime listeners when the SSH session is gone but listeners were left behind.
+pub(crate) async fn reconcile_stale_tunnel_runtime(
+    app: &AppHandle,
+    state: &AppState,
+    connection_ids: &[String],
+) {
+    if connection_ids.is_empty() {
+        return;
+    }
+
+    let data_dir = get_data_dir(app);
+    let file_path = data_dir.join("tunnels.json");
+    if !file_path.exists() {
+        return;
+    }
+
+    let saved_data: SavedTunnelsData = match std::fs::read_to_string(&file_path)
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+    {
+        Some(data) => data,
+        None => return,
+    };
+
+    let id_set: HashSet<&str> = connection_ids.iter().map(String::as_str).collect();
+
+    let stale_tunnels: Vec<SavedTunnel> = {
+        let connections = state.connections.lock().await;
+        let local_listeners = state.tunnel_manager.local_listeners.lock().await;
+        let remote_forwards = state.tunnel_manager.remote_forwards.lock().await;
+
+        saved_data
+            .tunnels
+            .into_iter()
+            .filter(|tunnel| {
+                if !id_set.contains(tunnel.connection_id.as_str()) {
+                    return false;
+                }
+                let has_session = connection_has_live_session(&connections, &tunnel.connection_id);
+                has_session == false && tunnel_is_active(tunnel, &local_listeners, &remote_forwards)
+            })
+            .collect()
+    };
+
+    for tunnel in stale_tunnels {
+        let _ = state.tunnel_manager.stop_tunnel(None, &tunnel).await;
+        let _ = app.emit(
+            "tunnel:status-change",
+            TunnelStatusChange {
+                id: tunnel.id,
+                status: "stopped".to_string(),
+                error: None,
+            },
+        );
+    }
+}
+
+async fn ssh_session_is_usable(
+    session: &Arc<Mutex<russh::client::Handle<crate::ssh::Client>>>,
+) -> bool {
+    let channel_result = {
+        let guard = session.lock().await;
+        guard.channel_open_session().await
+    };
+
+    match channel_result {
+        Ok(channel) => {
+            let _ = channel.close().await;
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+async fn apply_runtime_tunnel_status(
+    app: &AppHandle,
+    state: &AppState,
+    tunnels: &mut [SavedTunnel],
+) {
+    if tunnels.is_empty() {
+        return;
+    }
+
+    let connection_ids: Vec<String> = tunnels
+        .iter()
+        .map(|tunnel| tunnel.connection_id.clone())
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    reconcile_stale_tunnel_runtime(app, state, &connection_ids).await;
+
+    let sessions_by_connection: HashMap<String, Arc<Mutex<russh::client::Handle<crate::ssh::Client>>>> =
+        {
+            let connections = state.connections.lock().await;
+            connection_ids
+                .iter()
+                .filter_map(|connection_id| {
+                    connections
+                        .get(connection_id)
+                        .and_then(|handle| handle.session.clone())
+                        .map(|session| (connection_id.clone(), session))
+                })
+                .collect()
+        };
+
+    let active_connection_ids: HashSet<String> = {
+        let local_listeners = state.tunnel_manager.local_listeners.lock().await;
+        let remote_forwards = state.tunnel_manager.remote_forwards.lock().await;
+        tunnels
+            .iter()
+            .filter(|tunnel| tunnel_is_active(tunnel, &local_listeners, &remote_forwards))
+            .map(|tunnel| tunnel.connection_id.clone())
+            .collect()
+    };
+
+    let mut dead_connections = Vec::new();
+    for connection_id in active_connection_ids {
+        let usable = match sessions_by_connection.get(&connection_id) {
+            Some(session) => ssh_session_is_usable(session).await,
+            None => false,
+        };
+        if !usable {
+            dead_connections.push(connection_id);
+        }
+    }
+
+    for connection_id in dead_connections {
+        let _ = stop_tunnels_for_connections(app, state, &[connection_id]).await;
+    }
+
+    let connections = state.connections.lock().await;
+    let local_listeners = state.tunnel_manager.local_listeners.lock().await;
+    let remote_forwards = state.tunnel_manager.remote_forwards.lock().await;
+
+    for tunnel in tunnels.iter_mut() {
+        let has_session = connection_has_live_session(&connections, &tunnel.connection_id);
+        tunnel.status = Some(
+            if has_session && tunnel_is_active(tunnel, &local_listeners, &remote_forwards) {
+                "active".to_string()
+            } else {
+                "stopped".to_string()
+            },
+        );
+    }
 }
 
 pub(crate) async fn stop_tunnels_for_connections(
@@ -30,11 +189,20 @@ pub(crate) async fn stop_tunnels_for_connections(
     let data = std::fs::read_to_string(file_path).map_err(|e| e.to_string())?;
     let saved_data: SavedTunnelsData = serde_json::from_str(&data).map_err(|e| e.to_string())?;
     let connection_id_set: HashSet<&str> = connection_ids.iter().map(String::as_str).collect();
-    let tunnels = saved_data
+    let tunnels_for_connection: Vec<SavedTunnel> = saved_data
         .tunnels
         .into_iter()
         .filter(|t| connection_id_set.contains(t.connection_id.as_str()))
-        .collect::<Vec<_>>();
+        .collect();
+
+    let tunnels = {
+        let local_listeners = state.tunnel_manager.local_listeners.lock().await;
+        let remote_forwards = state.tunnel_manager.remote_forwards.lock().await;
+        tunnels_for_connection
+            .into_iter()
+            .filter(|tunnel| tunnel_is_active(tunnel, &local_listeners, &remote_forwards))
+            .collect::<Vec<_>>()
+    };
 
     for tunnel in tunnels {
         let session = {
@@ -95,6 +263,7 @@ pub async fn tunnel_start_local(
         .tunnel_manager
         .start_local_forwarding(
             session,
+            connection_id,
             runtime_id,
             bind_addr,
             local_port,
@@ -227,18 +396,18 @@ pub async fn tunnel_list(
         .filter(|t| t.connection_id == connection_id)
         .collect();
 
-    let local_listeners = state.tunnel_manager.local_listeners.lock().await;
-    let remote_forwards = state.tunnel_manager.remote_forwards.lock().await;
-
-    for t in &mut tunnels {
-        if tunnel_is_active(t, &local_listeners, &remote_forwards) {
-            t.status = Some("active".to_string());
-        } else {
-            t.status = Some("stopped".to_string());
-        }
-    }
+    apply_runtime_tunnel_status(&app, &state, &mut tunnels).await;
 
     Ok(tunnels)
+}
+
+#[tauri::command]
+pub async fn tunnel_reconcile_connection(
+    app: AppHandle,
+    connection_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    stop_tunnels_for_connections(&app, &state, &[connection_id]).await
 }
 
 fn tunnel_is_active(
@@ -363,7 +532,13 @@ pub async fn tunnel_start(
             .unwrap_or_else(|| "127.0.0.1".to_string());
         state
             .tunnel_manager
-            .start_dynamic_forwarding(session, runtime_id, bind_addr, tunnel.local_port)
+            .start_dynamic_forwarding(
+                session,
+                tunnel.connection_id.clone(),
+                runtime_id,
+                bind_addr,
+                tunnel.local_port,
+            )
             .await
     } else if tunnel.tunnel_type == "local" {
         let bind_addr = tunnel
@@ -374,6 +549,7 @@ pub async fn tunnel_start(
             .tunnel_manager
             .start_local_forwarding(
                 session,
+                tunnel.connection_id.clone(),
                 runtime_id,
                 bind_addr,
                 tunnel.local_port,
@@ -440,16 +616,7 @@ pub async fn tunnel_get_all(
 
     let mut tunnels = saved_data.tunnels;
 
-    let local_listeners = state.tunnel_manager.local_listeners.lock().await;
-    let remote_forwards = state.tunnel_manager.remote_forwards.lock().await;
-
-    for t in &mut tunnels {
-        if tunnel_is_active(t, &local_listeners, &remote_forwards) {
-            t.status = Some("active".to_string());
-        } else {
-            t.status = Some("stopped".to_string());
-        }
-    }
+    apply_runtime_tunnel_status(&app, &state, &mut tunnels).await;
 
     Ok(tunnels)
 }

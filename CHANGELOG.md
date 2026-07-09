@@ -16,6 +16,11 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Add Tunnel modal**: Label clarified to “Auto-start tunnel when connection opens”.
 
 ### Fixed
+- **Tunnel status on transport drop**: Active tunnels flip Off when the SSH pipe breaks (WiFi loss, idle timeout). Backend detects fatal session errors (`Channel send error`, etc.), probes the session every 15s while a forward is running, and tears down listeners via `session_failure.rs` watcher.
+- **Transport drop scope**: `stop_tunnels_for_connections` stops only **runtime-active** forwards — saved but idle tunnel configs on the same host are no longer spammed with “not found in listeners”.
+- **Transport drop + terminals**: `connection:transport-lost` uses `handleTransportLost` (suspend PTY, preserve tabs/scrollback, `pendingRestore`) instead of full `disconnect()` — terminal tabs no longer disappear on unexpected disconnect.
+- **Transport drop backend**: New `ssh_transport_lost` drops the dead session without `close_by_connection`; PTY EOF also emits `connection:transport-lost`.
+- **Tunnel list reconcile**: `tunnel:list` / `tunnel:reconcileConnection` probe dead sessions and sync stale “active” status.
 - **Tunnel IPC**: `tunnel:start` mapping in `tauri-ipc.ts` — was missing `{ id }` payload after unify.
 - **SSH disconnect**: `ssh_disconnect` now stops runtime tunnels for the connection (no leaked listeners / stale active status).
 - **Tunnel runtime IDs**: Scoped by `connectionId` + endpoints — fixes cross-connection port collision.

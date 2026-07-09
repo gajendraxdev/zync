@@ -1,6 +1,7 @@
 //! Dynamic (SOCKS5) port forwarding — local proxy through an SSH session.
 
 use crate::ssh::Client;
+use crate::tunnels::session_failure::{is_ssh_session_fatal_error, SessionFailureSender};
 use crate::tunnels::socks5::{
     self, connect_success_reply, error_reply, method_selection_reply, parse_connect_request,
     socks5_error_to_reply, Socks5Error, ATYP_DOMAIN, ATYP_IPV4, ATYP_IPV6, CMD_CONNECT, VERSION,
@@ -15,9 +16,21 @@ use tokio::sync::{broadcast, Mutex};
 pub async fn handle_socks5_client(
     mut client: TcpStream,
     session: Arc<Mutex<Handle<Client>>>,
+    connection_id: String,
+    failure_tx: SessionFailureSender,
+    stop_tx: broadcast::Sender<()>,
     mut cancel: broadcast::Receiver<()>,
 ) {
-    if let Err(error) = run_socks5_client(&mut client, session, &mut cancel).await {
+    if let Err(error) = run_socks5_client(
+        &mut client,
+        session,
+        &connection_id,
+        &failure_tx,
+        &stop_tx,
+        &mut cancel,
+    )
+    .await
+    {
         eprintln!("[TUNNEL][SOCKS] client handler error: {error}");
     }
 }
@@ -25,6 +38,9 @@ pub async fn handle_socks5_client(
 async fn run_socks5_client(
     client: &mut TcpStream,
     session: Arc<Mutex<Handle<Client>>>,
+    connection_id: &str,
+    failure_tx: &SessionFailureSender,
+    stop_tx: &broadcast::Sender<()>,
     cancel: &mut broadcast::Receiver<()>,
 ) -> Result<()> {
     let mut greeting = [0u8; 2];
@@ -66,6 +82,14 @@ async fn run_socks5_client(
             let _ = client
                 .write_all(&error_reply(socks5::REP_GENERAL_FAILURE))
                 .await;
+            if is_ssh_session_fatal_error(&error) {
+                println!(
+                    "[TUNNEL][SOCKS] SSH session lost for {}; stopping tunnels",
+                    connection_id
+                );
+                let _ = stop_tx.send(());
+                let _ = failure_tx.send(connection_id.to_string());
+            }
             return Err(error.into());
         }
     };

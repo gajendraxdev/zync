@@ -155,7 +155,8 @@ Equivalent to `ssh -D [bind:]localPort`.
 | **Create / edit** | `tunnel:save` → `tunnels.json` |
 | **Start** | Requires connected session; emits `tunnel:status-change` → `active` or `error` |
 | **Stop** | `tunnel:stop` → tears down listener or `cancel_tcpip_forward` |
-| **SSH disconnect** | Runtime tunnels stopped; persisted config remains `stopped` |
+| **SSH disconnect** | Runtime tunnels stopped; `tunnel:status-change` → `stopped` |
+| **Transport drop** (pipe break) | Fatal SSH errors + 15s session probe stop active listeners; `connection:transport-lost` → `handleTransportLost` (suspend PTY, keep tabs) + active-only tunnel stop; `tunnel:list` probes dead sessions |
 | **Reconnect** | Restarts tunnels that were **active before disconnect** plus any with `autoStart: true` (`tunnelReconnectService.ts`) |
 | **Delete** | `tunnel:delete` removes config (stop first if active) |
 

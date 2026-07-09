@@ -137,6 +137,7 @@ const ipcRenderer = {
     const channelMap: Record<string, string> = {
       'ssh:connect': 'ssh_connect',
       'ssh:disconnect': 'ssh_disconnect',
+      'ssh:transportLost': 'ssh_transport_lost',
       'terminal:write': 'terminal_write',
       'terminal:resize': 'terminal_resize',
       'terminal:create': 'terminal_create',
@@ -182,6 +183,7 @@ const ipcRenderer = {
       'tunnel:list': 'tunnel_list',
       'tunnel:save': 'tunnel_save',
       'tunnel:delete': 'tunnel_delete',
+      'tunnel:reconcileConnection': 'tunnel_reconcile_connection',
       'window:is-maximized': 'window_is_maximized',
       // Dialog commands handled specially below
       'dialog:openFile': 'dialog_open_file',
@@ -352,7 +354,7 @@ const ipcRenderer = {
       // Manual argument mapping for mismatched commands
       if (tauriCommand === 'ssh_connect' || tauriCommand === 'ssh_test_connection') {
         payload = { config: args[0] };
-      } else if (tauriCommand === 'ssh_disconnect') {
+      } else if (tauriCommand === 'ssh_disconnect' || tauriCommand === 'ssh_transport_lost') {
         payload = { id: args[0] };
       } else if (tauriCommand === 'ssh_exec') {
         // Handle both object style {connectionId, command} and positional args

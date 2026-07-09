@@ -46,7 +46,7 @@ import { connectionErrorMessage } from '../features/connections/domain/errorSani
 import { useVaultStore } from '../vault/useVaultStore';
 import { isVaultInUseError, VAULT_IN_USE_USER_MESSAGE } from '../vault/vaultLoading';
 import { isVaultLockedError } from '../vault/vaultUnlockPrompt';
-import { connectIpc, disconnectIpc, getRemoteCwdIpc } from '../features/connections/infrastructure/connectionIpc';
+import { connectIpc, disconnectIpc, getRemoteCwdIpc, transportLostIpc } from '../features/connections/infrastructure/connectionIpc';
 import { seedRemoteGhostHistory } from '../lib/ghostSuggestions/client';
 import { ghostDebug } from '../lib/ghostSuggestions/ghostDebug';
 import { runSerializedConnectionOp } from '../features/connections/infrastructure/connectionOpQueue';
@@ -92,6 +92,8 @@ export interface ConnectionSlice {
     // Connection Actions
     connect: (id: string, options?: { skipVaultPrompt?: boolean }) => Promise<void>;
     disconnect: (id: string) => Promise<void>;
+    /** WiFi drop / SSH EOF — stop active tunnels, keep terminal tabs and scrollback. */
+    handleTransportLost: (id: string) => Promise<void>;
     /** Connect when a host tab is opened or restored and the SSH session is not live. */
     autoConnectIfNeeded: (connectionId: string) => void;
 
@@ -543,6 +545,42 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                 return { connections: nextConnections };
             });
         }
+        });
+    },
+
+    handleTransportLost: async (id) => {
+        return runSerializedConnectionOp(id, async () => {
+        markConnectionBackendOffline(id);
+
+        try {
+            await get().loadTunnels(id);
+            snapshotActiveTunnelsForReconnect(id, get().tunnels[id] || []);
+        } catch (err) {
+            console.error('[TUNNEL] Failed to snapshot tunnels on transport lost:', err);
+        }
+
+        try {
+            await transportLostIpc(id);
+        } catch (error) {
+            console.error('Failed to mark transport lost on backend:', error);
+        }
+
+        const tabs = get().terminals[id] || [];
+        if (id !== 'local' && tabs.length > 0) {
+            set(state => ({
+                connections: markConnectionStatus(state.connections, id, 'disconnected'),
+                terminals: {
+                    ...state.terminals,
+                    [id]: tabs.map(t => ({ ...t, pendingRestore: true })),
+                },
+            }));
+        } else {
+            set(state => ({
+                connections: markConnectionStatus(state.connections, id, 'disconnected'),
+            }));
+        }
+
+        await get().reconcileTunnelsForConnection(id);
         });
     },
 

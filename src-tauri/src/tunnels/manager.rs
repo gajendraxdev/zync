@@ -1,13 +1,17 @@
 use crate::ssh::Client;
 use crate::tunnels::dynamic;
+use crate::tunnels::session_failure::{is_ssh_session_fatal_error, SessionFailureSender};
 use crate::types::SavedTunnel;
 use anyhow::{anyhow, Result};
 use log::warn;
 use russh::client::Handle;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
+
+const SESSION_PROBE_INTERVAL_SECS: u64 = 15;
 
 /// Stable runtime key for a saved tunnel config (unique per connection + endpoints).
 pub fn tunnel_runtime_id(tunnel: &SavedTunnel) -> String {
@@ -53,19 +57,22 @@ pub struct TunnelManager {
     /// `tunnel_runtime_id` -> listener abort handle + cancel sender
     pub local_listeners:
         Arc<Mutex<HashMap<String, (tokio::task::AbortHandle, tokio::sync::broadcast::Sender<()>)>>>,
+    failure_tx: SessionFailureSender,
 }
 
 impl TunnelManager {
-    pub fn new() -> Self {
+    pub fn new(failure_tx: SessionFailureSender) -> Self {
         Self {
             remote_forwards: Arc::new(Mutex::new(HashMap::new())),
             local_listeners: Arc::new(Mutex::new(HashMap::new())),
+            failure_tx,
         }
     }
 
     pub async fn start_local_forwarding(
         &self,
         session: Arc<Mutex<Handle<Client>>>,
+        connection_id: String,
         runtime_id: String,
         bind_address: String,
         local_port: u16,
@@ -109,6 +116,7 @@ impl TunnelManager {
             Err(e) => return Err(e.into()),
         };
         let session = session.clone();
+        let failure_tx = self.failure_tx.clone();
 
         println!(
             "[TUNNEL] Starting local forwarding {} on port {} to {}:{} (bind {})",
@@ -119,6 +127,10 @@ impl TunnelManager {
         let tx_for_store = tx.clone();
 
         let handle = tokio::spawn(async move {
+            let mut session_probe =
+                tokio::time::interval(Duration::from_secs(SESSION_PROBE_INTERVAL_SECS));
+            session_probe.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
             loop {
                 let accept_fut = listener.accept();
                 let mut rx = tx.subscribe();
@@ -128,6 +140,9 @@ impl TunnelManager {
                          let session = session.clone();
                          let remote_host = remote_host.clone();
                          let mut inner_rx = tx.subscribe();
+                         let stop_tx = tx.clone();
+                         let failure_tx = failure_tx.clone();
+                         let connection_id = connection_id.clone();
 
                          tokio::spawn(async move {
                             let channel = {
@@ -136,6 +151,14 @@ impl TunnelManager {
                                      Ok(c) => Some(c),
                                      Err(e) => {
                                          eprintln!("[TUNNEL] Failed to open direct-tcpip channel: {}", e);
+                                         if is_ssh_session_fatal_error(&e) {
+                                             println!(
+                                                 "[TUNNEL] SSH session lost for {}; stopping tunnels",
+                                                 connection_id
+                                             );
+                                             let _ = stop_tx.send(());
+                                             let _ = failure_tx.send(connection_id);
+                                         }
                                          None
                                      }
                                 }
@@ -161,6 +184,17 @@ impl TunnelManager {
                         println!("[TUNNEL] Listener stopped via signal");
                         break;
                     }
+                    _ = session_probe.tick() => {
+                        if !ssh_session_is_alive(&session).await {
+                            println!(
+                                "[TUNNEL] SSH session probe failed for {}; stopping tunnels",
+                                connection_id
+                            );
+                            let _ = tx.send(());
+                            let _ = failure_tx.send(connection_id.clone());
+                            break;
+                        }
+                    }
                 }
             }
         });
@@ -177,6 +211,7 @@ impl TunnelManager {
     pub async fn start_dynamic_forwarding(
         &self,
         session: Arc<Mutex<Handle<Client>>>,
+        connection_id: String,
         runtime_id: String,
         bind_address: String,
         local_port: u16,
@@ -226,8 +261,13 @@ impl TunnelManager {
         let (tx, _rx) = tokio::sync::broadcast::channel(1);
         let tx_for_store = tx.clone();
         let session = session.clone();
+        let failure_tx = self.failure_tx.clone();
 
         let handle = tokio::spawn(async move {
+            let mut session_probe =
+                tokio::time::interval(Duration::from_secs(SESSION_PROBE_INTERVAL_SECS));
+            session_probe.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
             loop {
                 let accept_fut = listener.accept();
                 let mut rx = tx.subscribe();
@@ -236,13 +276,35 @@ impl TunnelManager {
                     Ok((client_stream, _)) = accept_fut => {
                         let session = session.clone();
                         let client_rx = tx.subscribe();
+                        let stop_tx = tx.clone();
+                        let failure_tx = failure_tx.clone();
+                        let connection_id = connection_id.clone();
                         tokio::spawn(async move {
-                            dynamic::handle_socks5_client(client_stream, session, client_rx).await;
+                            dynamic::handle_socks5_client(
+                                client_stream,
+                                session,
+                                connection_id,
+                                failure_tx,
+                                stop_tx,
+                                client_rx,
+                            )
+                            .await;
                         });
                     }
                     _ = rx.recv() => {
                         println!("[TUNNEL] Dynamic listener stopped via signal");
                         break;
+                    }
+                    _ = session_probe.tick() => {
+                        if !ssh_session_is_alive(&session).await {
+                            println!(
+                                "[TUNNEL] SSH session probe failed for {}; stopping tunnels",
+                                connection_id
+                            );
+                            let _ = tx.send(());
+                            let _ = failure_tx.send(connection_id.clone());
+                            break;
+                        }
                     }
                 }
             }
@@ -375,6 +437,20 @@ impl TunnelManager {
             }
         }
         Ok(())
+    }
+}
+
+async fn ssh_session_is_alive(session: &Arc<Mutex<Handle<Client>>>) -> bool {
+    let channel_result = {
+        let guard = session.lock().await;
+        guard.channel_open_session().await
+    };
+    match channel_result {
+        Ok(channel) => {
+            let _ = channel.close().await;
+            true
+        }
+        Err(_) => false,
     }
 }
 

@@ -49,6 +49,8 @@ export function TunnelManager({ connectionId }: { connectionId?: string }) {
   } | null>(null);
   const [customPort, setCustomPort] = useState<string>(''); // For custom port input
 
+  const connectionStatus = conn?.status;
+
   useEffect(() => {
     if (!activeConnectionId) return;
     void loadTunnels(activeConnectionId);
@@ -62,6 +64,12 @@ export function TunnelManager({ connectionId }: { connectionId?: string }) {
       window.ipcRenderer.off('tunnel:status-change', handleStatusChange);
     };
   }, [activeConnectionId, loadTunnels, updateTunnelStatus]);
+
+  useEffect(() => {
+    if (!activeConnectionId || connectionStatus === 'connected') return;
+    const reconcile = useAppStore.getState().reconcileTunnelsForConnection;
+    void reconcile(activeConnectionId);
+  }, [activeConnectionId, connectionStatus]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
