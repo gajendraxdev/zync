@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import { useAppStore, Connection, Folder } from '../../store/useAppStore';
-import { Files, Info, Network, Pencil, Power, Search, TerminalIcon, Trash2 } from 'lucide-react';
+import { Files, Info, Network, Pencil, Plus, Power, RefreshCw, Search, Server, TerminalIcon, Trash2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ContextMenu, type ContextMenuItem } from '../ui/ContextMenu';
 import { ConfirmModal } from '../ui/ConfirmModal';
@@ -12,9 +12,17 @@ import { FolderItem } from './sidebar/FolderItem';
 import { FolderFormModal } from './sidebar/FolderFormModal';
 import { SidebarActionButton } from './sidebar/SidebarActionButton';
 import { VaultNavSection } from './sidebar/VaultNavSection';
+import { RemoteHostItem } from './sidebar/RemoteHostItem';
 import { AddConnectionModal } from '../modals/AddConnectionModal';
 import { AddTunnelModal } from '../modals/AddTunnelModal';
-import { normalizeFolderPath } from '../../features/connections/domain';
+import {
+    connectionLogicalId,
+    normalizeFolderPath,
+    type HostCatalogEntry,
+    type HostCatalogFilter,
+} from '../../features/connections/domain';
+import { materializeHostsOnDevice } from '../../features/connections/domain/hostMaterialize';
+import { useHostCatalog } from '../../features/connections/presentation/useHostCatalog';
 import {
     exportConnectionsToFileIpc,
     type ConnectionExchangeExportFormat,
@@ -34,6 +42,12 @@ const FEATURE_ITEMS: Array<{ id: FeatureId; label: string }> = [
 ];
 
 
+const HOST_FILTERS: Array<{ id: HostCatalogFilter; label: string }> = [
+    { id: 'all', label: 'All' },
+    { id: 'local', label: 'Local' },
+    { id: 'remote', label: 'Remote' },
+];
+
 export function Sidebar({ className }: { className?: string }) {
     const [viewingDetailsId, setViewingDetailsId] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
@@ -51,6 +65,7 @@ export function Sidebar({ className }: { className?: string }) {
     const renameFolder = useAppStore(state => state.renameFolder);
     const connect = useAppStore(state => state.connect);
     const disconnect = useAppStore(state => state.disconnect);
+    const loadConnections = useAppStore(state => state.loadConnections);
     
     // Settings Store Hooks
     const settings = useAppStore(state => state.settings);
@@ -142,25 +157,75 @@ export function Sidebar({ className }: { className?: string }) {
         };
     }, [isResizing, updateSettings]);
 
-    // Compute Active Connections
-    const activeConnections = useMemo(() => {
-        const normalizedSearch = searchTerm.trim().toLowerCase();
-        return connections.filter((c: Connection) => {
-            if (c.status !== 'connected') return false;
-            if (!normalizedSearch) return true;
-            return (
-                (c.name ?? '').toLowerCase().includes(normalizedSearch) ||
-                (c.host ?? '').toLowerCase().includes(normalizedSearch) ||
-                (c.username ?? '').toLowerCase().includes(normalizedSearch) ||
-                (c.tags ?? []).some((tag) => tag.toLowerCase().includes(normalizedSearch))
-            );
-        });
-    }, [connections, searchTerm]);
+    const hostCatalog = useHostCatalog(connections, searchTerm);
+    const {
+        filter: hostFilter,
+        setFilter: setHostFilter,
+        localConnections: catalogLocalConnections,
+        remoteOnlyEntries,
+        locationsByLogicalId,
+        inventoryStatus,
+        inventoryFromCache,
+        inventoryError,
+        providerConnected,
+        refreshInventory,
+        materializingIds,
+        setMaterializing,
+        filteredEntries,
+        entries: catalogEntries,
+    } = hostCatalog;
 
-    const hostCountLabel = useMemo(() => {
-        const hostCount = connections.filter((c: Connection) => c.id !== 'local').length;
-        return hostCount > 99 ? '99+' : String(hostCount);
+    // Without a provider, All/Local/Remote filters are meaningless — force All.
+    useEffect(() => {
+        if (!providerConnected && hostFilter !== 'all') {
+            setHostFilter('all');
+        }
+    }, [providerConnected, hostFilter, setHostFilter]);
+
+    // Active sessions stay visible regardless of All Hosts search/filter (those live inside All Hosts).
+    const activeConnections = useMemo(() => {
+        return connections.filter((c: Connection) => c.status === 'connected');
     }, [connections]);
+
+    const filteredHostCount = filteredEntries.length;
+    const totalHostCount = catalogEntries.length;
+    const hasAnyHosts = totalHostCount > 0;
+
+    const materializeHost = useCallback(async (
+        entry: HostCatalogEntry,
+        options: { silentSuccess?: boolean; openAfter?: boolean },
+    ) => {
+        setMaterializing(entry.logicalId, true);
+        try {
+            const result = await materializeHostsOnDevice({
+                logicalIds: [entry.logicalId],
+                includeBundle: false,
+                silentSuccess: options.silentSuccess,
+                showToast,
+                loadConnections,
+            });
+            if (options.openAfter && result.ok) {
+                // Unblock UI and open before any inventory re-list.
+                setMaterializing(entry.logicalId, false);
+                openTab(entry.logicalId);
+                void refreshInventory();
+                return;
+            }
+            // Keep-only: inventory refresh is non-blocking (Drive re-list felt slow).
+            void refreshInventory();
+        } finally {
+            setMaterializing(entry.logicalId, false);
+        }
+    }, [loadConnections, openTab, refreshInventory, setMaterializing, showToast]);
+
+    const handleKeepOnDevice = useCallback(async (entry: HostCatalogEntry) => {
+        await materializeHost(entry, { silentSuccess: false, openAfter: false });
+    }, [materializeHost]);
+
+    const handleKeepAndConnect = useCallback(async (entry: HostCatalogEntry) => {
+        // Fast path: host + credentials only (no tunnels/snippets). Open tab ASAP.
+        await materializeHost(entry, { silentSuccess: true, openAfter: true });
+    }, [materializeHost]);
 
     const openEditConnection = useCallback((conn: Connection) => {
         openConnectionModal(conn.id);
@@ -180,13 +245,16 @@ export function Sidebar({ className }: { className?: string }) {
         };
     }, []);
 
-    // Filter out active connections for the main tree
+    // Filter out active connections for the main tree; respect catalog filter (local subset).
     const treeConnections = useMemo(() => {
-        return connections.filter((c: Connection) => c.status !== 'connected');
-    }, [connections]);
+        return catalogLocalConnections.filter((c: Connection) => c.status !== 'connected');
+    }, [catalogLocalConnections]);
 
-    // Build Recursive Tree
-    const treeRoot = useMemo(() => buildTree(treeConnections, folders, searchTerm), [treeConnections, folders, searchTerm]);
+    // Build Recursive Tree (search already applied in catalog for remote rows; re-apply for tree safety)
+    const treeRoot = useMemo(
+        () => buildTree(treeConnections, folders, hostFilter === 'all' || hostFilter === 'local' ? searchTerm : searchTerm),
+        [treeConnections, folders, searchTerm, hostFilter],
+    );
 
     const toggleExpandedFolder = useAppStore(state => state.toggleExpandedFolder);
 
@@ -395,6 +463,11 @@ export function Sidebar({ className }: { className?: string }) {
         const allHostConnections = connections.filter((connection) => connection.id !== 'local');
         return [
             {
+                label: 'New host',
+                icon: <Plus size={14} />,
+                action: () => openConnectionModal(),
+            },
+            {
                 label: 'Export...',
                 icon: <Files size={14} />,
                 disabled: allHostConnections.length === 0,
@@ -409,51 +482,302 @@ export function Sidebar({ className }: { className?: string }) {
                 },
             },
         ];
-    }, [allHostsContextMenu, connections]);
+    }, [allHostsContextMenu, connections, openConnectionModal]);
 
     const connectionItemProps = useMemo(() => ({
         onEdit: openEditConnection,
         onOpenContextMenu: openConnectionContextMenu,
-    }), [openEditConnection, openConnectionContextMenu]);
+        getLocations: (conn: Connection) => locationsByLogicalId.get(connectionLogicalId(conn)),
+    }), [locationsByLogicalId, openEditConnection, openConnectionContextMenu]);
 
-    const allHostsContent = useMemo(() => (
-        <div
-            className="pl-1 min-h-6"
-            onDragOver={handleAllHostsDragOver}
-            onDrop={handleAllHostsDrop}
-        >
-            {Object.keys(treeRoot.children).sort().map(key => (
-                <FolderItem
-                    key={key}
-                    node={treeRoot.children[key]}
-                    isCollapsed={false}
-                    compactMode={compactMode}
-                    expandedFolders={expandedFolders}
-                    toggleFolder={toggleFolder}
-                    updateConnectionFolder={updateConnectionFolder}
-                    onDeleteFolder={(f) => setDeletingFolder(f)}
-                    onRenameFolder={handleRenameFolder}
-                    onMoveFolder={renameFolder}
-                    onOpenContextMenu={(folderPath, x, y) => setFolderContextMenu({ folderPath, x, y })}
-                    connectionItemProps={connectionItemProps}
-                />
-            ))}
-            {treeRoot.connections.map(conn => (
-                <ConnectionItem
-                    key={conn.id}
-                    conn={conn}
-                    isCollapsed={false}
-                    {...connectionItemProps}
-                />
-            ))}
+    const inventoryHint = useMemo(() => {
+        if (inventoryStatus === 'loading' && !inventoryFromCache) return 'Loading remote hosts…';
+        if (inventoryStatus === 'not_configured') {
+            return 'Set up Google encryption in Sync & Backup to list remote hosts.';
+        }
+        if (inventoryStatus === 'locked') {
+            return inventoryFromCache
+                ? 'Showing last-known remote hosts · unlock Google encryption to refresh.'
+                : 'Unlock Google encryption in Sync & Backup to list remote hosts.';
+        }
+        if (inventoryStatus === 'cached') {
+            return 'Showing last-known remote hosts.';
+        }
+        if (inventoryStatus === 'unavailable') {
+            return inventoryFromCache ? 'Showing last-known remote hosts · provider offline.' : null;
+        }
+        if (inventoryStatus === 'error') {
+            if (inventoryFromCache) return 'Showing last-known remote hosts · refresh failed.';
+            return inventoryError ?? 'Could not load remote hosts.';
+        }
+        return null;
+    }, [inventoryError, inventoryFromCache, inventoryStatus]);
+
+    const searchPlaceholder = useMemo(() => {
+        if (filteredHostCount <= 0) return 'Search hosts';
+        const n = filteredHostCount > 99 ? '99+' : String(filteredHostCount);
+        return `Search ${n} host${filteredHostCount === 1 ? '' : 's'}`;
+    }, [filteredHostCount]);
+
+    const emptyListMessage = useMemo(() => {
+        if (searchTerm.trim()) {
+            return {
+                title: 'No matches',
+                detail: 'Try a different search.',
+            };
+        }
+        if (providerConnected && hostFilter === 'local') {
+            return {
+                title: 'No local hosts',
+                detail: 'Hosts only on a provider appear under Remote. Keep one to use it here.',
+            };
+        }
+        if (providerConnected && hostFilter === 'remote') {
+            if (inventoryStatus === 'not_configured') {
+                return {
+                    title: 'Encryption not set up',
+                    detail: 'Open Sync & Backup and set up Google encryption first.',
+                };
+            }
+            if (inventoryStatus === 'locked') {
+                return {
+                    title: 'Encryption locked',
+                    detail: 'Unlock Google encryption in Sync & Backup, then refresh.',
+                };
+            }
+            if (inventoryStatus === 'error') {
+                return {
+                    title: 'Could not load remote hosts',
+                    detail: inventoryError
+                        ?? 'Refresh failed. Check encryption passphrase and try again.',
+                };
+            }
+            if (inventoryStatus === 'loading') {
+                return {
+                    title: 'Loading remote hosts…',
+                    detail: 'Fetching encrypted host list from the provider.',
+                };
+            }
+            return {
+                title: 'No remote hosts',
+                detail: 'This collection has no host records, or refresh to try again.',
+            };
+        }
+        if (!hasAnyHosts) {
+            return {
+                title: 'No hosts yet',
+                detail: providerConnected
+                    ? 'Use New host above, or refresh Remote after unlocking sync.'
+                    : 'Use New host above to get started.',
+            };
+        }
+        return {
+            title: 'Nothing here',
+            detail: 'No hosts match the current view.',
+        };
+    }, [hasAnyHosts, hostFilter, inventoryError, inventoryStatus, providerConnected, searchTerm]);
+
+    const allHostsToolbar = useMemo(() => (
+        <div className="space-y-2">
+            {/* Empty catalog only — hide once at least one host exists */}
+            {!hasAnyHosts && (
+                <button
+                    type="button"
+                    onClick={() => openConnectionModal()}
+                    className={cn(
+                        'flex w-full items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5',
+                        'text-[11px] font-medium',
+                        'border border-app-border/40 bg-app-surface/50 text-app-text',
+                        'hover:bg-app-surface hover:border-app-border/60 transition-colors',
+                    )}
+                >
+                    <Plus size={13} aria-hidden />
+                    New host
+                </button>
+            )}
+            {/* Search only when there is something to search, or user is mid-query */}
+            {(hasAnyHosts || searchTerm.trim()) && (
+                <div className="relative">
+                    <Search
+                        size={12}
+                        className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-app-muted/55"
+                        aria-hidden="true"
+                    />
+                    <input
+                        type="text"
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        aria-label="Search hosts"
+                        placeholder={searchPlaceholder}
+                        className={cn(
+                            'w-full rounded-md border border-app-border/30 bg-app-bg/50',
+                            'pl-8 pr-3 py-1.5 text-[11px] text-app-text',
+                            'placeholder:text-app-muted/50',
+                            'focus:outline-none focus:border-app-accent/50 focus:bg-app-bg/70',
+                        )}
+                    />
+                </div>
+            )}
+            {/* All / Local / Remote only when a sync provider is connected */}
+            {providerConnected && (
+                <div className="flex items-center gap-1">
+                    <div
+                        className="inline-flex flex-1 min-w-0 rounded-md border border-app-border/30 bg-app-bg/40 p-0.5"
+                        role="tablist"
+                        aria-label="Host location filter"
+                    >
+                        {HOST_FILTERS.map(item => (
+                            <button
+                                key={item.id}
+                                type="button"
+                                role="tab"
+                                aria-selected={hostFilter === item.id}
+                                onClick={() => setHostFilter(item.id)}
+                                className={cn(
+                                    'flex-1 min-w-0 truncate rounded px-1.5 py-1 text-[10px] font-medium transition-colors',
+                                    hostFilter === item.id
+                                        ? 'bg-app-surface text-app-text shadow-sm'
+                                        : 'text-app-muted hover:text-app-text',
+                                )}
+                            >
+                                {item.label}
+                            </button>
+                        ))}
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => { void refreshInventory(); }}
+                        className={cn(
+                            'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md',
+                            'border border-app-border/30 bg-app-bg/40 text-app-muted',
+                            'hover:text-app-text hover:bg-app-surface/60',
+                        )}
+                        title="Refresh provider host list"
+                        aria-label="Refresh provider host list"
+                    >
+                        <RefreshCw size={12} className={cn(inventoryStatus === 'loading' && 'animate-spin')} />
+                    </button>
+                </div>
+            )}
         </div>
     ), [
+        hasAnyHosts,
+        hostFilter,
+        inventoryStatus,
+        openConnectionModal,
+        providerConnected,
+        refreshInventory,
+        searchPlaceholder,
+        searchTerm,
+        setHostFilter,
+    ]);
+
+    const allHostsContent = useMemo(() => {
+        const showEmpty =
+            remoteOnlyEntries.length === 0
+            && treeRoot.connections.length === 0
+            && Object.keys(treeRoot.children).length === 0;
+
+        return (
+            <div
+                className={cn(
+                    'rounded-lg border border-app-border/25 bg-app-surface/15',
+                    'flex flex-col flex-1 min-h-0 overflow-hidden',
+                )}
+            >
+                {/* Toolbar stays fixed; only the host list scrolls */}
+                <div className="shrink-0 space-y-2 p-2 pb-0">
+                    {allHostsToolbar}
+
+                    {inventoryHint && (
+                        <p
+                            className={cn(
+                                'px-0.5 text-[10px] leading-snug',
+                                inventoryStatus === 'error'
+                                    ? 'rounded-md border border-amber-500/25 bg-amber-500/10 px-2 py-1.5 text-amber-900 dark:text-amber-200/90'
+                                    : 'text-app-muted/60',
+                            )}
+                        >
+                            {inventoryHint}
+                        </p>
+                    )}
+                </div>
+
+                <div
+                    className="flex-1 min-h-0 overflow-y-auto scrollbar-hide space-y-0.5 p-2 pt-2"
+                    onDragOver={handleAllHostsDragOver}
+                    onDrop={handleAllHostsDrop}
+                >
+                    {Object.keys(treeRoot.children).sort().map(key => (
+                        <FolderItem
+                            key={key}
+                            node={treeRoot.children[key]}
+                            isCollapsed={false}
+                            compactMode={compactMode}
+                            expandedFolders={expandedFolders}
+                            toggleFolder={toggleFolder}
+                            updateConnectionFolder={updateConnectionFolder}
+                            onDeleteFolder={(f) => setDeletingFolder(f)}
+                            onRenameFolder={handleRenameFolder}
+                            onMoveFolder={renameFolder}
+                            onOpenContextMenu={(folderPath, x, y) => setFolderContextMenu({ folderPath, x, y })}
+                            connectionItemProps={connectionItemProps}
+                        />
+                    ))}
+                    {treeRoot.connections.map(conn => (
+                        <ConnectionItem
+                            key={conn.id}
+                            conn={conn}
+                            isCollapsed={false}
+                            locations={connectionItemProps.getLocations?.(conn)}
+                            onEdit={connectionItemProps.onEdit}
+                            onOpenContextMenu={connectionItemProps.onOpenContextMenu}
+                        />
+                    ))}
+
+                    {/* Provider-only hosts in the same list (chips show provider). */}
+                    {remoteOnlyEntries.map(entry => (
+                        <RemoteHostItem
+                            key={`remote-${entry.logicalId}`}
+                            entry={entry}
+                            compactMode={compactMode}
+                            isMaterializing={materializingIds.has(entry.logicalId)}
+                            onKeepOnDevice={handleKeepOnDevice}
+                            onKeepAndConnect={handleKeepAndConnect}
+                        />
+                    ))}
+
+                    {showEmpty && (
+                        <div className="flex flex-col items-center gap-2 px-3 py-6 text-center">
+                            <Server size={18} className="text-app-muted/40" aria-hidden />
+                            <div className="space-y-0.5">
+                                <p className="text-[12px] font-medium text-app-muted/80">
+                                    {emptyListMessage.title}
+                                </p>
+                                <p className="text-[10px] leading-relaxed text-app-muted/55 max-w-[14rem]">
+                                    {emptyListMessage.detail}
+                                </p>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+    }, [
+        allHostsToolbar,
         compactMode,
         connectionItemProps,
+        emptyListMessage,
         expandedFolders,
         handleAllHostsDragOver,
         handleAllHostsDrop,
+        handleKeepAndConnect,
+        handleKeepOnDevice,
         handleRenameFolder,
+        inventoryHint,
+        inventoryStatus,
+        materializingIds,
+        remoteOnlyEntries,
         renameFolder,
         toggleFolder,
         treeRoot.children,
@@ -494,28 +818,8 @@ export function Sidebar({ className }: { className?: string }) {
                 style={{ width: width, minWidth: width }}
                 className="flex flex-col h-full pt-1.5"
             >
-                <div className={cn(compactMode ? "px-3 py-2" : "px-4 py-3")}>
-                    <div className="relative">
-                        <input
-                            type="text"
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            aria-label="Search connections"
-                            placeholder={`Connections ${hostCountLabel}`}
-                            className="w-full rounded-lg border border-app-border/40 bg-app-surface/40 pl-3 pr-8 py-1.5 text-xs text-app-text placeholder:text-app-muted/70 focus:outline-none focus:border-app-accent/60"
-                        />
-                        <Search
-                            size={13}
-                            className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-app-muted/70"
-                            aria-hidden="true"
-                        />
-                    </div>
-                </div>
-
-
-
-                {/* System Actions Column */}
-                <div className={cn(compactMode ? "px-3 mb-2" : "px-4 mb-2")}>
+                {/* System Actions Column — top nav matches Terminal / Port Forwarding / Vault */}
+                <div className={cn(compactMode ? "px-3 pt-2 mb-2" : "px-4 pt-3 mb-2")}>
                     <div className="flex flex-col gap-1.5 w-full">
                         <SidebarActionButton
                             icon={<TerminalIcon size={13} />}
@@ -535,50 +839,50 @@ export function Sidebar({ className }: { className?: string }) {
 
                 <div className="h-px bg-app-border/20 mb-2 mx-4" />
 
-                {/* List */}
+                {/* List: Active + All Hosts (header/search sticky; host list scrolls) */}
                 <div className={cn(
-                    "flex-1 overflow-y-auto pb-4 scrollbar-hide",
-                    compactMode ? "px-2 space-y-0.5" : "px-3 space-y-2"
+                    "flex-1 min-h-0 flex flex-col overflow-hidden pb-3",
+                    compactMode ? "px-2 gap-1.5" : "px-3 gap-1.5"
                 )}>
-                    {/* VISUAL SECTIONS LOGIC */}
-                    {activeConnections.length > 0 ? (
-                        <>
-                            <SidebarSection title="Active" count={activeConnections.length} compactMode={compactMode}>
-                                <div className={cn("space-y-1 mb-2 pl-1", compactMode && "space-y-0.5")}>
+                    {activeConnections.length > 0 && (
+                        <div className="shrink-0 max-h-[30%] overflow-y-auto scrollbar-hide">
+                            <SidebarSection
+                                title="Active"
+                                count={activeConnections.length}
+                                compactMode={compactMode}
+                                variant="action"
+                                icon={<Power size={13} />}
+                            >
+                                <div className={cn("space-y-1 mb-1 pl-1", compactMode && "space-y-0.5")}>
                                     {activeConnections.map((conn: Connection) => (
                                         <ConnectionItem
                                             key={`active-${conn.id}`}
                                             conn={conn}
                                             isCollapsed={false}
-                                            {...connectionItemProps}
+                                            locations={connectionItemProps.getLocations?.(conn)}
+                                            onEdit={connectionItemProps.onEdit}
+                                            onOpenContextMenu={connectionItemProps.onOpenContextMenu}
                                         />
                                     ))}
                                 </div>
                             </SidebarSection>
-
-                            <SidebarSection
-                                title="All Hosts"
-                                compactMode={compactMode}
-                                onContextMenu={(event) => {
-                                    event.preventDefault();
-                                    setAllHostsContextMenu({ x: event.clientX, y: event.clientY });
-                                }}
-                            >
-                                {allHostsContent}
-                            </SidebarSection>
-                        </>
-                    ) : (
-                        <SidebarSection
-                            title="All Hosts"
-                            compactMode={compactMode}
-                            onContextMenu={(event) => {
-                                event.preventDefault();
-                                setAllHostsContextMenu({ x: event.clientX, y: event.clientY });
-                            }}
-                        >
-                            {allHostsContent}
-                        </SidebarSection>
+                        </div>
                     )}
+
+                    <SidebarSection
+                        title="All Hosts"
+                        compactMode={compactMode}
+                        variant="action"
+                        fill
+                        icon={<Server size={13} />}
+                        count={filteredEntries.length > 0 ? filteredEntries.length : undefined}
+                        onContextMenu={(event) => {
+                            event.preventDefault();
+                            setAllHostsContextMenu({ x: event.clientX, y: event.clientY });
+                        }}
+                    >
+                        {allHostsContent}
+                    </SidebarSection>
                 </div>
             </div>
 

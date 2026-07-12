@@ -1,4 +1,5 @@
-import { X, Settings as SettingsIcon, PanelLeft, Network, Gift, Plus, Laptop, FolderPlus, Sparkles, Home, Shield, UserRound, ChevronDown, LogOut, Cloud, RefreshCw } from 'lucide-react';
+import { X, Settings as SettingsIcon, PanelLeft, Network, Gift, Plus, Laptop, FolderPlus, Sparkles, Home, Shield, UserRound, ChevronDown, LogOut, RefreshCw } from 'lucide-react';
+import { GoogleMarkIcon } from '../icons/providerIcons';
 import { OSIcon } from '../icons/OSIcon';
 import { useAppStore, Tab, Connection } from '../../store/useAppStore'; // Updated Import
 import { cn } from '../../lib/utils';
@@ -35,7 +36,7 @@ function getIconForTab(tab: Tab, connections: Connection[], size: 12 | 13 = 12) 
     if (tab.type === 'settings') return <SettingsIcon size={size} />;
     if (tab.type === 'release-notes') return <Gift size={size} className="text-[var(--color-app-accent)]" />;
     if (tab.type === 'vault') return <Shield size={size} />;
-    if (tab.type === 'sync') return <Cloud size={size} />;
+    if (tab.type === 'sync') return <GoogleMarkIcon size={size} variant="mono" />;
 
     const conn = connections.find((c: Connection) => c.id === tab.connectionId);
     const iconClassName = size === 13 ? "w-[13px] h-[13px]" : "w-[12px] h-[12px]";
@@ -502,7 +503,7 @@ export function TabBar() {
                                             }}
                                             className="w-full text-left px-3 py-2 text-xs font-medium text-app-text hover:bg-black/5 dark:hover:bg-white/10 rounded-lg flex items-center gap-2 transition-colors"
                                         >
-                                            <Cloud size={13} className="text-app-muted" />
+                                            <GoogleMarkIcon size={13} variant="mono" className="text-app-muted" />
                                             <span>Sync & Backup</span>
                                         </button>
                                         <button

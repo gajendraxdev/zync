@@ -5,6 +5,8 @@ import { Settings } from 'lucide-react';
 import { OSIcon } from '../../icons/OSIcon';
 import { cn } from '../../../lib/utils';
 import { useConnectionDisplayLabels } from '../../../features/connections/presentation/useConnectionDisplayLabels';
+import type { HostLocationTag } from '../../../features/connections/domain/hostCatalog';
+import { HostLocationChips } from './HostLocationChips';
 
 
 interface ConnectionItemComponentProps {
@@ -12,9 +14,11 @@ interface ConnectionItemComponentProps {
     isCollapsed: boolean;
     onEdit: (c: Connection) => void;
     onOpenContextMenu: (c: Connection, x: number, y: number) => void;
+    /** Multi-location chips (local / google / …). Optional for callers that do not load catalog yet. */
+    locations?: HostLocationTag[];
 }
 
-export const ConnectionItem = memo(function ConnectionItem({ conn, isCollapsed, onEdit, onOpenContextMenu }: ConnectionItemComponentProps) {
+export const ConnectionItem = memo(function ConnectionItem({ conn, isCollapsed, onEdit, onOpenContextMenu, locations }: ConnectionItemComponentProps) {
     // Selective subscriptions — only re-render when relevant values change
     const isActive = useAppStore(state => state.activeConnectionId === conn.id);
     const hasTab = useAppStore(state => state.tabs.some((t: Tab) => t.connectionId === conn.id));
@@ -106,11 +110,11 @@ export const ConnectionItem = memo(function ConnectionItem({ conn, isCollapsed, 
                     isCollapsed
                         ? "justify-center p-2 rounded-xl mx-auto w-12 h-12"
                         : compactMode
-                            ? "gap-2 p-1.5 rounded-lg mx-1"
-                            : "gap-3 p-3 rounded-xl mx-2",
-                    "border-transparent hover:bg-app-surface/50",
+                            ? "gap-2 px-2 py-1.5 rounded-lg"
+                            : "gap-2.5 px-2.5 py-2 rounded-lg",
+                    "border-transparent hover:bg-app-surface/45 hover:border-app-border/15",
                     isActive
-                        ? "bg-app-accent/5"
+                        ? "bg-app-accent/8 border-app-accent/15"
                         : "text-app-muted hover:text-app-text",
                     dropTargetId === conn.id && "bg-app-accent/20 border-app-accent ring-2 ring-app-accent/30"
                 )}
@@ -188,20 +192,20 @@ export const ConnectionItem = memo(function ConnectionItem({ conn, isCollapsed, 
                 </div>
 
                 {!isCollapsed && (
-                    <div className="flex flex-col overflow-hidden min-w-0 flex-1">
-                        <div className="flex items-center justify-between gap-2">
+                    <div className="flex flex-col overflow-hidden min-w-0 flex-1 gap-0.5">
+                        <div className="flex items-center justify-between gap-2 min-w-0">
                             <span className={cn(
-                                "truncate font-medium leading-tight transition-colors",
-                                compactMode ? "text-sm" : "text-[14px]",
-                                isActive ? "text-app-text font-semibold" : "text-app-text/80 group-hover:text-app-text"
+                                "truncate font-medium leading-tight transition-colors min-w-0",
+                                compactMode ? "text-[13px]" : "text-[13px]",
+                                isActive ? "text-app-text font-semibold" : "text-app-text/85 group-hover:text-app-text"
                             )}>
                                 {primary}
                             </span>
 
                             {/* Hover Actions */}
-                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                                 <button
-                                    className="p-1 rounded hover:bg-app-surface hover:text-app-text text-app-muted transition-colors"
+                                    className="p-1 rounded-md hover:bg-app-surface hover:text-app-text text-app-muted transition-colors"
                                     onClick={(e) => {
                                         e.stopPropagation();
                                         onEdit(conn);
@@ -209,17 +213,27 @@ export const ConnectionItem = memo(function ConnectionItem({ conn, isCollapsed, 
                                     aria-label="Edit connection"
                                     title="Edit Connection"
                                 >
-                                    <Settings size={10} />
+                                    <Settings size={12} />
                                 </button>
                             </div>
                         </div>
-                        <span className={cn(
-                            "truncate leading-tight",
-                            compactMode ? "text-[10px] mt-0.5" : "text-xs mt-0.5",
-                            "text-app-muted/50 group-hover:text-app-muted/70 transition-colors"
-                        )}>
-                            {secondary}
-                        </span>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                            <span className={cn(
+                                "truncate leading-tight min-w-0",
+                                compactMode ? "text-[10px]" : "text-[11px]",
+                                "text-app-muted/50 group-hover:text-app-muted/70 transition-colors"
+                            )}>
+                                {secondary}
+                            </span>
+                            {locations && locations.length > 0 && (
+                                <HostLocationChips
+                                    locations={locations}
+                                    compact
+                                    hideLocalOnly
+                                    className="ml-auto"
+                                />
+                            )}
+                        </div>
                     </div>
                 )}
             </div>

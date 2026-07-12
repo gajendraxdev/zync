@@ -196,6 +196,7 @@ export const FolderItem = memo(function FolderItem({
                             isCollapsed={isCollapsed}
                             onEdit={connectionItemProps.onEdit}
                             onOpenContextMenu={connectionItemProps.onOpenContextMenu}
+                            locations={connectionItemProps.getLocations?.(conn)}
                         />
                     ))}
                 </div>

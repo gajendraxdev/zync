@@ -1,4 +1,5 @@
 import type { Connection } from '../../../store/useAppStore';
+import type { HostLocationTag } from '../../../features/connections/domain/hostCatalog';
 
 export interface TreeNode {
     name: string;
@@ -11,4 +12,6 @@ export interface TreeNode {
 export interface ConnectionItemProps {
     onEdit: (conn: Connection) => void;
     onOpenContextMenu: (conn: Connection, x: number, y: number) => void;
+    /** Optional multi-location chips by connection / logical id. */
+    getLocations?: (conn: Connection) => HostLocationTag[] | undefined;
 }
