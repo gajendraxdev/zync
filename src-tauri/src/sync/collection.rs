@@ -138,6 +138,21 @@ pub fn apply_remote_key_wrap_to_manifest(
     manifest: &mut SyncCollectionManifest,
     wrap: &RemoteCollectionKeyWrapV1,
 ) -> SyncResult<()> {
+    if wrap.version != REMOTE_KEY_WRAP_VERSION {
+        return Err(SyncError::new(
+            "sync_collection_key_wrap_version_unsupported",
+            format!(
+                "Remote key wrap version {} is not supported (expected {}).",
+                wrap.version, REMOTE_KEY_WRAP_VERSION
+            ),
+        ));
+    }
+    if wrap.provider != manifest.provider {
+        return Err(SyncError::new(
+            "sync_collection_key_wrap_mismatch",
+            "Remote key wrap belongs to a different provider.",
+        ));
+    }
     if wrap.sync_collection_id != manifest.sync_collection_id {
         return Err(SyncError::new(
             "sync_collection_key_wrap_mismatch",

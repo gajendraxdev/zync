@@ -58,7 +58,6 @@ import { suspendAllTerminalsForConnection } from '../lib/terminal/suspendAllTerm
 import { loadConnectionsIpc, saveConnectionsIpc, type LoadConnectionsIpcResult } from '../features/connections/infrastructure/connectionPersistence';
 import { clearRemoteShellCache } from '../lib/shells/cache';
 import {
-    clearAllHostInventoryCaches,
     CONNECTIONS_CLEARED_EVENT,
 } from '../features/connections/domain/hostInventoryCache';
 import {
@@ -402,9 +401,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
         });
         saveToMain([], []);
         get().saveSession();
-        // Drop session Google (etc.) host inventory so sidebar does not keep
-        // showing provider-only rows after local connections were wiped.
-        clearAllHostInventoryCaches();
+        // Catalog drops inventory via CONNECTIONS_CLEARED_EVENT (single owner).
         if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent(CONNECTIONS_CLEARED_EVENT));
         }

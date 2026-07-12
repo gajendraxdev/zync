@@ -250,10 +250,10 @@ export function Sidebar({ className }: { className?: string }) {
         return catalogLocalConnections.filter((c: Connection) => c.status !== 'connected');
     }, [catalogLocalConnections]);
 
-    // Build Recursive Tree (search already applied in catalog for remote rows; re-apply for tree safety)
+    // Build Recursive Tree (search already applied in catalog; re-apply for tree safety)
     const treeRoot = useMemo(
-        () => buildTree(treeConnections, folders, hostFilter === 'all' || hostFilter === 'local' ? searchTerm : searchTerm),
-        [treeConnections, folders, searchTerm, hostFilter],
+        () => buildTree(treeConnections, folders, searchTerm),
+        [treeConnections, folders, searchTerm],
     );
 
     const toggleExpandedFolder = useAppStore(state => state.toggleExpandedFolder);

@@ -247,7 +247,7 @@ export function VaultSyncCard({
   const googleStatusTone = googleSync?.connected
     ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
     : 'bg-[var(--color-app-surface)] text-[var(--color-app-muted)] border-[var(--color-app-border)]/60';
-  // Domain ops only — Google OAuth connect (isSyncing) must not block Upload/Restore.
+  // Domain Upload/Restore must not wait on Google OAuth connect (isSyncing).
   const isDomainActionInFlight =
     isSyncingVault
     || isRestoringVault
@@ -261,15 +261,18 @@ export function VaultSyncCard({
     || isRestoringSnippets
     || isSyncingSettings
     || isRestoringSettings;
-  const isCollectionActionBlocked =
-    isDomainActionInFlight
-    || isSettingUpCollection
+  // Collection setup / unlock / lock / recovery — include OAuth connect in-flight.
+  const isCollectionLifecycleBlocked =
+    isSettingUpCollection
     || isUnlockingCollection
     || isLockingCollection
     || isRegeneratingCollectionRecoveryKey
-    || isSyncing; // still block while OAuth connect is running
+    || isSyncing;
+  const isCollectionActionBlocked =
+    isDomainActionInFlight
+    || isCollectionLifecycleBlocked;
   const isProviderDomainActionDisabled =
-    isCollectionActionBlocked
+    isDomainActionInFlight
     || !googleCollection?.configured
     || !googleCollection?.keyCached;
   const providerReadiness = getProviderReadiness(googleSync, googleCollection);

@@ -996,7 +996,14 @@ async fn collect_remote_host_records(
             continue;
         }
         if let Some(filter) = logical_id_filter {
-            if !filter.contains(&encrypted.logical_id) {
+            let lid = encrypted.logical_id.as_str();
+            let lid_norm = normalize_host_connection_id(lid);
+            let matched = filter.contains(lid)
+                || filter.contains(&lid_norm)
+                || filter
+                    .iter()
+                    .any(|candidate| normalize_host_connection_id(candidate) == lid_norm);
+            if !matched {
                 skipped = skipped.saturating_add(1);
                 continue;
             }
@@ -2061,6 +2068,7 @@ struct ConnectionsRestoreScope {
     failed: u64,
 }
 
+/// Trim-only filter for object-name construction (preserves original casing).
 fn normalize_host_logical_id_filter(ids: Option<Vec<String>>) -> Option<HashSet<String>> {
     ids.map(|ids| {
         ids.into_iter()
@@ -2112,19 +2120,35 @@ async fn prepare_connections_restore_scope(
     }
 
     // Filtered restore (Keep / Keep-and-open): also pull jump-host chain so connect works.
-    let mut pending: HashSet<String> = initial_filter.unwrap_or_default();
-    let mut fetched: HashSet<String> = HashSet::new();
+    // Membership uses normalized ids; object names keep original casing via fetch_name_by_norm.
+    let mut pending_norm: HashSet<String> = HashSet::new();
+    let mut fetch_name_by_norm: HashMap<String, String> = HashMap::new();
+    for id in initial_filter.unwrap_or_default() {
+        let norm = normalize_host_connection_id(&id);
+        if norm.is_empty() {
+            continue;
+        }
+        pending_norm.insert(norm.clone());
+        fetch_name_by_norm.entry(norm).or_insert(id);
+    }
+
+    let mut fetched_norm: HashSet<String> = HashSet::new();
     let mut by_logical_id: HashMap<String, HostSyncRecord> = HashMap::new();
     let mut scanned = 0u64;
     let mut skipped = 0u64;
     let mut failed = 0u64;
 
     for _depth in 0..10 {
-        let to_fetch: HashSet<String> = pending
-            .difference(&fetched)
-            .cloned()
+        let to_fetch_names: HashSet<String> = pending_norm
+            .difference(&fetched_norm)
+            .map(|norm| {
+                fetch_name_by_norm
+                    .get(norm)
+                    .cloned()
+                    .unwrap_or_else(|| norm.clone())
+            })
             .collect();
-        if to_fetch.is_empty() {
+        if to_fetch_names.is_empty() {
             break;
         }
 
@@ -2134,7 +2158,7 @@ async fn prepare_connections_restore_scope(
             kind,
             manifest,
             secret_key,
-            Some(&to_fetch),
+            Some(&to_fetch_names),
         )
         .await
         .map_err(|message| {
@@ -2146,9 +2170,13 @@ async fn prepare_connections_restore_scope(
         skipped = skipped.saturating_add(collected.skipped);
         failed = failed.saturating_add(collected.failed);
 
-        pending.clear();
+        pending_norm.clear();
         for (record, _revision) in collected.records {
-            fetched.insert(record.logical_id.clone());
+            let record_key = normalize_host_connection_id(&record.logical_id);
+            fetched_norm.insert(record_key.clone());
+            fetch_name_by_norm
+                .entry(record_key.clone())
+                .or_insert_with(|| record.logical_id.clone());
             if let Some(jump_id) = record
                 .jump_server_id
                 .as_ref()
@@ -2156,14 +2184,15 @@ async fn prepare_connections_restore_scope(
                 .filter(|id| !id.is_empty())
             {
                 let jump_key = normalize_host_connection_id(&jump_id);
-                let already_local = local_ids.contains(&jump_key) || local_ids.contains(&jump_id);
+                let already_local = local_ids.contains(&jump_key);
                 let already_batch =
-                    fetched.contains(&jump_id) || by_logical_id.contains_key(&jump_id);
+                    fetched_norm.contains(&jump_key) || by_logical_id.contains_key(&jump_key);
                 if !already_local && !already_batch {
-                    pending.insert(jump_id);
+                    pending_norm.insert(jump_key.clone());
+                    fetch_name_by_norm.entry(jump_key).or_insert(jump_id);
                 }
             }
-            by_logical_id.insert(record.logical_id.clone(), record);
+            by_logical_id.insert(record_key, record);
         }
     }
 
@@ -2948,14 +2977,11 @@ async fn download_remote_collection_key_wrap(
     };
     let bytes = match provider_impl.read_credential_record(app, &object).await {
         Ok(bytes) => bytes,
+        // Only the explicit missing-object code means "no wrap yet" (older backups).
+        // Do not match substring "not found" — HTTP 404/401 messages can contain that
+        // and would hide real provider/auth failures.
         Err(error) if error.code == "provider_object_not_found" => return Ok(None),
-        Err(error) => {
-            // Older collections may not have a wrap file yet.
-            if error.message.contains("not found") || error.code.contains("not_found") {
-                return Ok(None);
-            }
-            return Err(sync_error_to_string(&error));
-        }
+        Err(error) => return Err(sync_error_to_string(&error)),
     };
     let wrap: RemoteCollectionKeyWrapV1 = serde_json::from_slice(&bytes).map_err(|e| {
         format!("[sync_collection_key_wrap_parse_failed] Invalid remote key wrap: {e}")

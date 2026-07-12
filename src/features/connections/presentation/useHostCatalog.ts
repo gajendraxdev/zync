@@ -13,6 +13,7 @@ import {
 } from '../domain/hostCatalog';
 import {
   clearAllHostInventoryCaches,
+  clearHostInventoryCache,
   CONNECTIONS_CLEARED_EVENT,
   readHostInventoryCache,
   writeHostInventoryCache,
@@ -63,8 +64,16 @@ export interface UseHostCatalogResult {
 
 const PRIMARY_PROVIDER: SyncProvider = 'google';
 
-function hostsFromCache(provider: SyncProvider): SyncRemoteHostInventoryItem[] {
-  return readHostInventoryCache(provider)?.hosts ?? [];
+function currentAccountKey(): string | undefined {
+  const email = useSyncReadinessStore.getState().oauth?.email?.trim();
+  return email || undefined;
+}
+
+function hostsFromCache(
+  provider: SyncProvider,
+  accountKey?: string | null,
+): SyncRemoteHostInventoryItem[] {
+  return readHostInventoryCache(provider, accountKey)?.hosts ?? [];
 }
 
 /**
@@ -85,19 +94,20 @@ export function useHostCatalog(
 
   // Shared with Sync & Backup — never re-derive OAuth / encryption separately.
   const readiness = useSyncReadinessStore(s => s.readiness);
+  const accountEmail = useSyncReadinessStore(s => s.oauth?.email);
   const refreshReadiness = useSyncReadinessStore(s => s.refresh);
   const providerConnected = readiness.isConnected;
   const providerReady = readiness.isProviderReady;
 
   const [filter, setFilterState] = useState<HostCatalogFilter>('all');
   const [inventory, setInventory] = useState<SyncRemoteHostInventoryItem[]>(() =>
-    hostsFromCache(PRIMARY_PROVIDER),
+    hostsFromCache(PRIMARY_PROVIDER, currentAccountKey()),
   );
   const [inventoryStatus, setInventoryStatus] = useState<HostInventoryStatus>(() =>
-    hostsFromCache(PRIMARY_PROVIDER).length > 0 ? 'cached' : 'idle',
+    hostsFromCache(PRIMARY_PROVIDER, currentAccountKey()).length > 0 ? 'cached' : 'idle',
   );
   const [inventoryFromCache, setInventoryFromCache] = useState(
-    () => hostsFromCache(PRIMARY_PROVIDER).length > 0,
+    () => hostsFromCache(PRIMARY_PROVIDER, currentAccountKey()).length > 0,
   );
   const [inventoryError, setInventoryError] = useState<string | undefined>();
   const [lastInventoryScan, setLastInventoryScan] = useState<
@@ -114,8 +124,11 @@ export function useHostCatalog(
     });
   }, []);
 
-  const applyCachedInventory = useCallback((status: HostInventoryStatus) => {
-    const cached = hostsFromCache(PRIMARY_PROVIDER);
+  const applyCachedInventory = useCallback((
+    status: HostInventoryStatus,
+    accountKey?: string | null,
+  ) => {
+    const cached = hostsFromCache(PRIMARY_PROVIDER, accountKey);
     if (cached.length > 0) {
       setInventory(cached);
       setInventoryFromCache(true);
@@ -129,25 +142,28 @@ export function useHostCatalog(
 
   const refreshInventory = useCallback(async () => {
     setInventoryError(undefined);
-    // Only show full loading when we have nothing to display yet.
-    if (hostsFromCache(PRIMARY_PROVIDER).length === 0) {
-      setInventoryStatus('loading');
-    }
     try {
       // One readiness refresh — same store Sync & Backup uses.
       await refreshReadiness(PRIMARY_PROVIDER);
-      const { readiness: next } = useSyncReadinessStore.getState();
+      const { readiness: next, oauth } = useSyncReadinessStore.getState();
+      const accountKey = oauth?.email?.trim() || undefined;
 
       if (!next.isConnected) {
-        if (!applyCachedInventory('unavailable')) {
-          setInventory([]);
-          setInventoryStatus('unavailable');
-        }
+        // Drop provider inventory so a previous Google account cannot linger.
+        clearHostInventoryCache(PRIMARY_PROVIDER);
+        setInventory([]);
+        setInventoryFromCache(false);
+        setInventoryStatus('unavailable');
         return;
       }
 
+      // Only show full loading when we have nothing for this account yet.
+      if (hostsFromCache(PRIMARY_PROVIDER, accountKey).length === 0) {
+        setInventoryStatus('loading');
+      }
+
       if (!next.isEncryptionConfigured) {
-        if (!applyCachedInventory('not_configured')) {
+        if (!applyCachedInventory('not_configured', accountKey)) {
           setInventory([]);
           setInventoryStatus('not_configured');
         }
@@ -156,7 +172,7 @@ export function useHostCatalog(
 
       // Locked: do NOT clear inventory and do NOT re-fetch encrypted objects.
       if (!next.isEncryptionUnlocked) {
-        if (!applyCachedInventory('locked')) {
+        if (!applyCachedInventory('locked', accountKey)) {
           setInventory([]);
           setInventoryStatus('locked');
         }
@@ -192,6 +208,7 @@ export function useHostCatalog(
       setInventoryStatus('ready');
       writeHostInventoryCache({
         provider: PRIMARY_PROVIDER,
+        accountKey,
         collectionId: result.collectionId,
         fetchedAt: Date.now(),
         hosts,
@@ -201,12 +218,24 @@ export function useHostCatalog(
       setInventoryError(message);
       // Keep OAuth "connected" UI; inventory failure is not a disconnect.
       // Keep last-known locations on error instead of wiping chips.
-      if (!applyCachedInventory('error')) {
+      if (!applyCachedInventory('error', currentAccountKey())) {
         setInventory([]);
         setInventoryStatus('error');
       }
     }
   }, [applyCachedInventory, refreshReadiness]);
+
+  // Account switch: re-bind inventory to the signed-in identity.
+  useEffect(() => {
+    if (!providerConnected) return;
+    const accountKey = accountEmail?.trim() || undefined;
+    const cached = hostsFromCache(PRIMARY_PROVIDER, accountKey);
+    if (cached.length > 0 && inventoryStatus !== 'ready') {
+      setInventory(cached);
+      setInventoryFromCache(true);
+      setInventoryStatus(prev => (prev === 'idle' ? 'cached' : prev));
+    }
+  }, [accountEmail, inventoryStatus, providerConnected]);
 
   useEffect(() => {
     void refreshInventory();

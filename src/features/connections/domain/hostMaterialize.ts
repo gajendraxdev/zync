@@ -57,9 +57,11 @@ export async function materializeHostsOnDevice(
   }
 
   // Restore succeeded — reload is best-effort and must not report as restore failure.
+  let reloadOk = true;
   try {
     await options.loadConnections();
   } catch (error) {
+    reloadOk = false;
     const message = error instanceof Error ? error.message : String(error);
     options.showToast(
       'error',
@@ -67,7 +69,8 @@ export async function materializeHostsOnDevice(
     );
   }
 
-  if (!options.silentSuccess) {
+  // Do not celebrate success if the local list failed to refresh (avoids mixed toasts).
+  if (reloadOk && !options.silentSuccess) {
     options.showToast('success', formatConnectionsRestoreSuccessMessage(result));
   }
   reportConnectionsRestoreWarnings(result, options.showToast);
