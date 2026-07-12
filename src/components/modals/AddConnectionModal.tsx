@@ -277,8 +277,24 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
                     <div className="flex-1 flex items-center justify-center p-8">
                         <div className="w-full max-w-lg space-y-4">
                             <h4 className="text-base font-semibold text-app-text text-center tracking-tight">Choose how to create this connection</h4>
-                            <p className="text-xs text-app-muted text-center leading-relaxed">You can import existing hosts from ~/.ssh/config or add one manually.</p>
+                            <p className="text-xs text-app-muted text-center leading-relaxed">Create a host yourself, or import from SSH config or a file.</p>
                             <div className="flex flex-col gap-2.5">
+                                <button
+                                    type="button"
+                                    onClick={() => setEntryMode('manual')}
+                                    className="group rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/35 p-3.5 text-left transition-all hover:border-[var(--color-app-accent)]/35 hover:bg-[var(--color-app-surface)]"
+                                >
+                                    <div className="flex items-start gap-3">
+                                        <div className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--color-app-border)] bg-[var(--color-app-bg)] text-[var(--color-app-accent)]">
+                                            <Laptop className="w-4 h-4" />
+                                        </div>
+                                        <div className="flex min-w-0 flex-1 flex-col">
+                                            <span className="text-sm font-semibold text-app-text">New host</span>
+                                            <span className="mt-0.5 text-xs text-app-muted leading-relaxed">Enter identity, auth, and optional jump settings</span>
+                                            <span className="mt-2 text-[11px] font-medium text-app-accent/90">Best for one-off quick entries</span>
+                                        </div>
+                                    </div>
+                                </button>
                                 <button
                                     type="button"
                                     onClick={() => setIsImportModalOpen(true)}
@@ -308,22 +324,6 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
                                             <span className="text-sm font-semibold text-app-text">Import File</span>
                                             <span className="mt-0.5 text-xs text-app-muted leading-relaxed">Load connections from Zync, JSON, or CSV export files</span>
                                             <span className="mt-2 text-[11px] font-medium text-app-accent/90">Best for bulk secure-to-vault cleanup</span>
-                                        </div>
-                                    </div>
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setEntryMode('manual')}
-                                    className="group rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/35 p-3.5 text-left transition-all hover:border-[var(--color-app-accent)]/35 hover:bg-[var(--color-app-surface)]"
-                                >
-                                    <div className="flex items-start gap-3">
-                                        <div className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--color-app-border)] bg-[var(--color-app-bg)] text-[var(--color-app-accent)]">
-                                            <Laptop className="w-4 h-4" />
-                                        </div>
-                                        <div className="flex min-w-0 flex-1 flex-col">
-                                            <span className="text-sm font-semibold text-app-text">Add Manually</span>
-                                            <span className="mt-0.5 text-xs text-app-muted leading-relaxed">Enter identity, auth, and optional jump settings</span>
-                                            <span className="mt-2 text-[11px] font-medium text-app-accent/90">Best for one-off quick entries</span>
                                         </div>
                                     </div>
                                 </button>

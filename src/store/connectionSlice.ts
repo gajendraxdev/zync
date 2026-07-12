@@ -58,6 +58,9 @@ import { suspendAllTerminalsForConnection } from '../lib/terminal/suspendAllTerm
 import { loadConnectionsIpc, saveConnectionsIpc, type LoadConnectionsIpcResult } from '../features/connections/infrastructure/connectionPersistence';
 import { clearRemoteShellCache } from '../lib/shells/cache';
 import {
+    CONNECTIONS_CLEARED_EVENT,
+} from '../features/connections/domain/hostInventoryCache';
+import {
     dispatchTerminalConnectionWakeup,
     resetTerminalPtyForReconnect,
 } from '../lib/terminal';
@@ -398,6 +401,10 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
         });
         saveToMain([], []);
         get().saveSession();
+        // Catalog drops inventory via CONNECTIONS_CLEARED_EVENT (single owner).
+        if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent(CONNECTIONS_CLEARED_EVENT));
+        }
     },
 
     connect: async (id, options) => {
@@ -423,7 +430,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                 const message = configResult.reason === 'missing-auth'
                     ? `Connection "${conn.name}" has no authentication configured. Add a password, private key, or vault credential.`
                     : configResult.reason === 'jump-host-failure'
-                        ? `Couldn't build connection config for "${conn.name}". If this uses a jump host, re-import your SSH config to repair the reference.`
+                        ? `Couldn't build connection config for "${conn.name}". Its jump host is missing on this device — keep the jump host from your sync provider (or restore the connection chain), then try again.`
                         : `Couldn't build connection config for "${conn.name}".`;
                 set(state => ({
                     connections: markConnectionErrorIfNeeded(state.connections, id, message),

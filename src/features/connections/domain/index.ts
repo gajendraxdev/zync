@@ -8,4 +8,6 @@ export * from './credentialAssignments.js';
 export * from './credentialRef.js';
 export * from './importPlan.js';
 export * from './connectionDisplay.js';
+export * from './hostCatalog.js';
+export * from './hostMaterialize.js';
 export * from './types.js';
