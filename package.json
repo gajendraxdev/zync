@@ -23,6 +23,7 @@
     "test:redact": "npm run compile:agent-tests && node tests/redactContext.test.mjs",
     "test:agent-run-store": "npm run compile:agent-tests && node tests/agentRunStore.partialize.test.mjs",
     "test:connection-domain": "npm run compile:agent-tests && node tests/connectionDomain.test.mjs",
+    "test:host-catalog": "npm run compile:agent-tests && node tests/hostCatalog.test.mjs",
     "test:connection-display": "npm run compile:agent-tests && node tests/connectionDisplay.test.mjs",
     "test:connection-form-transforms": "npm run compile:agent-tests && node tests/connectionFormTransforms.test.mjs",
     "test:connection-service": "npm run compile:agent-tests && node tests/connectionService.test.mjs",
