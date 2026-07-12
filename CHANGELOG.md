@@ -4,6 +4,23 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Added
+- **Multi-location host catalog**: Merge local hosts with provider inventory by stable `logicalId`; All / Local / Remote filters, session inventory cache, and Keep / Keep-and-open materialize (host + referenced credentials). ([5abc280], [f6a5e06])
+- **Shared sync readiness store**: Single source of truth for Google OAuth + collection encryption (`connected` / `configured` / `keyCached`) used by Sync & Backup and All Hosts so status cannot diverge. ([c0c46a0])
+- **Vault sidebar attention**: Quiet cues for setup / unsecured credentials / locked vault without nagging when nothing needs action; Vault destinations open from a compact popup menu. ([c0c46a0])
+
+### Changed
+- **All Hosts chrome**: Sticky section header and search/filter bar; host list scrolls underneath. New host button only when the catalog is empty. ([f6a5e06])
+- **Location chips**: Hide local-only badges; multi-location rows still show provider marks with theme-token chip chrome. ([f6a5e06])
+- **Provider collection lifecycle**: Unlock / lock / setup / recovery-key changes notify listeners so host inventory refreshes with encryption state. ([c0c46a0])
+
+### Fixed
+- **Stale “Unlock Google encryption” on All Hosts**: Inventory gates on shared readiness after Sync & Backup unlock. ([c0c46a0])
+- **Theme-token warning banners**: Recovery key, Sync setup, Sync card, Vault secure-to-vault, and domain gate copy use `--color-app-*` (Zync themes via `data-theme`, not Tailwind `dark:`). ([c0c46a0])
+- **Secure-to-vault badge noise**: Missing key-file hosts no longer count as forever-unsecured. ([c0c46a0])
+- **Key-wrap download errors**: Transient provider failures are not misclassified as unrecoverable missing wrap. ([c0c46a0])
+- **Keep / materialize error handling**: Restore vs local reload failures separated; remote Keep actions clear busy state without unhandled rejections. ([5abc280], [f6a5e06])
+
 ## [2.21.0] - 2026-07-09
 
 ### Added
