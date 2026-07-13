@@ -104,6 +104,7 @@ export const TerminalComponent = memo(function TerminalComponent({
 
   const {
     ghostSuggestion,
+    ghostLayout,
     acceptGhostSuffix,
     truncateLabel,
     resetGhostUi,
@@ -209,6 +210,7 @@ export const TerminalComponent = memo(function TerminalComponent({
       onCloseContextMenu={() => setContextMenu(null)}
       ghostSettings={ghostSettings}
       ghostSuggestion={ghostSuggestion}
+      ghostLayout={ghostLayout}
       truncateLabel={truncateLabel}
       onAcceptGhostSuffix={acceptGhostSuffix}
     />

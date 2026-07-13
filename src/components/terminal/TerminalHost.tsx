@@ -2,6 +2,7 @@ import { memo, type CSSProperties, type RefObject } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { cn } from '../../lib/utils';
 import type { AppSettings } from '../../store/settingsSlice';
+import type { GhostLayoutHint } from '../../lib/ghostSuggestions/cursorPosition';
 import { GhostSuggestionOverlay } from './GhostSuggestionOverlay';
 import { TerminalSearchBar } from './TerminalSearchBar';
 import { TerminalContextMenu } from './TerminalContextMenu';
@@ -26,6 +27,7 @@ export interface TerminalHostProps {
   onCloseContextMenu: () => void;
   ghostSettings: AppSettings['ghostSuggestions'];
   ghostSuggestion: string;
+  ghostLayout?: GhostLayoutHint | null;
   truncateLabel: (label: string, max?: number) => string;
   onAcceptGhostSuffix: (suffix: string) => void;
 }
@@ -50,6 +52,7 @@ export const TerminalHost = memo(function TerminalHost({
   onCloseContextMenu,
   ghostSettings,
   ghostSuggestion,
+  ghostLayout,
   truncateLabel,
   onAcceptGhostSuffix,
 }: TerminalHostProps) {
@@ -107,7 +110,11 @@ export const TerminalHost = memo(function TerminalHost({
           />
           {termRef.current && ghostSettings.inlineEnabled && ghostSuggestion && (
             <div className="absolute inset-0 pointer-events-none overflow-hidden">
-              <GhostSuggestionOverlay term={termRef.current} suggestion={ghostSuggestion} />
+              <GhostSuggestionOverlay
+                term={termRef.current}
+                suggestion={ghostSuggestion}
+                layout={ghostLayout}
+              />
             </div>
           )}
         </div>

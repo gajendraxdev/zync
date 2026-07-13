@@ -336,6 +336,11 @@ async fn path_suggestions(params: PathSuggestionsParams<'_>) -> Vec<String> {
     let mut dir = String::new();
     let mut partial;
     let mut sep = infer_separator(params.cwd);
+    // True when the completion is a brand-new path token after a bare command
+    // (`cd` → ` Documents/`), not a mid-token fragment (`cd Doc` → `uments/`).
+    // Path owns this leading space so history mid-token (`ls` → `blk`) never
+    // gets a space invented by suffix normalize.
+    let mut new_path_arg = false;
 
     if has_path_separator(&last_arg) {
         let Some((d, p, s)) = split_path(&last_arg) else {
@@ -369,6 +374,9 @@ async fn path_suggestions(params: PathSuggestionsParams<'_>) -> Vec<String> {
         partial = last_arg.clone();
         if is_directory_only && partial.to_ascii_lowercase() == command_name.to_ascii_lowercase() {
             partial.clear();
+            new_path_arg = true;
+        } else if last_arg.is_empty() {
+            new_path_arg = true;
         }
     }
 
@@ -566,7 +574,12 @@ async fn path_suggestions(params: PathSuggestionsParams<'_>) -> Vec<String> {
                 String::new()
             }
         };
-        out.push(format!("{name_suffix}{trailing_sep}"));
+        let piece = format!("{name_suffix}{trailing_sep}");
+        if new_path_arg && !piece.is_empty() && !piece.starts_with([' ', '\t']) {
+            out.push(format!(" {piece}"));
+        } else {
+            out.push(piece);
+        }
     }
     out
 }

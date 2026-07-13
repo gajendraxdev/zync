@@ -10,6 +10,15 @@ import {
   normalizeSuggestionSuffix,
 } from '../.tmp-agent-tests/src/lib/ghostSuggestions/suggestionSuffix.js';
 import {
+  resolveGhostCellPosition,
+  wrapCellPosition,
+} from '../.tmp-agent-tests/src/lib/ghostSuggestions/cursorPosition.js';
+import {
+  codePointDisplayWidth,
+  segmentTerminalCells,
+  stringDisplayWidth,
+} from '../.tmp-agent-tests/src/lib/ghostSuggestions/displayWidth.js';
+import {
   handleGhostInputEvent,
 } from '../.tmp-agent-tests/src/lib/ghostSuggestions/runtime.js';
 import {
@@ -222,17 +231,69 @@ await runTest('isBareDirectoryListingLine matches bare cd token', () => {
   assert.equal(isBareDirectoryListingLine('cd data'), false);
 });
 
-await runTest('normalizeSuggestionSuffix adds space when line lacks trailing whitespace', () => {
-  assert.equal(normalizeSuggestionSuffix('echo hi && git', 'checkout staging'), ' checkout staging');
-  assert.equal(normalizeSuggestionSuffix('echo hi && git ', 'checkout staging'), 'checkout staging');
+await runTest('stringDisplayWidth matches terminal cell counts', () => {
+  assert.equal(stringDisplayWidth('lsblk'), 5);
+  assert.equal(stringDisplayWidth(''), 0);
+  assert.equal(codePointDisplayWidth(0x0301), 0); // combining acute
+  assert.equal(stringDisplayWidth('e\u0301'), 1); // e + combining mark
+  // Fullwidth / CJK wide
+  assert.equal(codePointDisplayWidth(0x4e2d), 2); // 中
+  assert.equal(stringDisplayWidth('中'), 2);
+});
+
+await runTest('segmentTerminalCells sizes wide glyphs', () => {
+  const ascii = segmentTerminalCells('blk');
+  assert.equal(ascii.length, 3);
+  assert.ok(ascii.every((s) => s.cells === 1));
+  const wide = segmentTerminalCells('中');
+  assert.equal(wide.length, 1);
+  assert.equal(wide[0].cells, 2);
+});
+
+await runTest('normalizeSuggestionSuffix never invents leading space', () => {
+  // History includes leading space for new words; keep it.
   assert.equal(normalizeSuggestionSuffix('echo hi && git', ' checkout staging'), ' checkout staging');
+  assert.equal(normalizeSuggestionSuffix('echo hi && git ', 'checkout staging'), 'checkout staging');
+  assert.equal(normalizeSuggestionSuffix('echo hi && git ', ' checkout staging'), 'checkout staging');
+  // Mid-token: pass through (never invent a space — that caused `ls blk`).
+  assert.equal(normalizeSuggestionSuffix('echo hi && git', 'checkout staging'), 'checkout staging');
   assert.equal(normalizeSuggestionSuffix('cd Doc', 'uments/'), 'uments/');
   assert.equal(normalizeSuggestionSuffix('c', 'lear'), 'lear');
-  assert.equal(normalizeSuggestionSuffix('c', ' lear'), 'lear');
-  assert.equal(normalizeSuggestionSuffix('cd', '.acme.sh/'), ' .acme.sh/');
-  assert.equal(normalizeSuggestionSuffix('cd', '/usr'), ' /usr');
+  assert.equal(normalizeSuggestionSuffix('c', ' lear'), ' lear');
+  // Path provider must emit the leading space for bare `cd` new args.
+  assert.equal(normalizeSuggestionSuffix('cd', ' .acme.sh/'), ' .acme.sh/');
+  assert.equal(normalizeSuggestionSuffix('cd', ' /usr'), ' /usr');
   assert.equal(normalizeSuggestionSuffix('cd .acme.sh/', 'dnsapi/'), 'dnsapi/');
   assert.equal(normalizeSuggestionSuffix('git status', ' modified'), ' modified');
+  assert.equal(normalizeSuggestionSuffix('s', 'sh 172.16.9.9'), 'sh 172.16.9.9');
+  assert.equal(normalizeSuggestionSuffix('ss', 'h 172.16.9.9'), 'h 172.16.9.9');
+  assert.equal(normalizeSuggestionSuffix('ssh', ' 172.16.9.9'), ' 172.16.9.9');
+  // History `lsblk` after typing `ls` — the critical regression.
+  assert.equal(normalizeSuggestionSuffix('ls', 'blk'), 'blk');
+  assert.equal(normalizeSuggestionSuffix('lsb', 'lk'), 'lk');
+  assert.equal(normalizeSuggestionSuffix('cd', ' Documents/'), ' Documents/');
+});
+
+await runTest('resolveGhostCellPosition predicts ahead of lagging SSH caret', () => {
+  // Typed "clear" (5) at prompt col 20; echo has not advanced caret yet.
+  const origin = { col: 20, row: 5 };
+  assert.deepEqual(
+    resolveGhostCellPosition(20, 5, origin, 5, 80, 24),
+    { col: 25, row: 5 },
+  );
+  // Echo caught up to end of typed line — stick to live caret.
+  assert.deepEqual(
+    resolveGhostCellPosition(25, 5, origin, 5, 80, 24),
+    { col: 25, row: 5 },
+  );
+  // Partial echo (3 of 5) — still predict full typed end for ghost placement.
+  assert.deepEqual(
+    resolveGhostCellPosition(23, 5, origin, 5, 80, 24),
+    { col: 25, row: 5 },
+  );
+  assert.deepEqual(wrapCellPosition(78, 2, 5, 80), { col: 3, row: 3 });
+  // Past viewport bottom: clamp row to last visible line (rows=10 → max row 9).
+  assert.deepEqual(wrapCellPosition(0, 8, 200, 80, 10), { col: 40, row: 9 });
 });
 
 await runTest('extractActiveSegment parses pipeline and separator tails', () => {

@@ -56,11 +56,30 @@ fn suffix_bonus_for_command(prefix: &str, suffix: &str) -> i32 {
     bonus
 }
 
+/// True when the suffix continues the current token (e.g. `ls` + `blk` → `lsblk`)
+/// rather than starting a new word (`ls` + ` blk` / `ssh` + ` 172…`).
+fn is_mid_token_suffix(prefix: &str, suffix: &str) -> bool {
+    if prefix.ends_with(' ') || prefix.ends_with('\t') {
+        return false;
+    }
+    if suffix.is_empty() {
+        return false;
+    }
+    !suffix.starts_with(' ') && !suffix.starts_with('\t')
+}
+
+/// Frecency + structural preference. Mid-token command continuations outrank
+/// spaced new-word suffixes so a real `lsblk` history beat beats a corrupted
+/// `ls blk` entry that may have been accepted from a buggy ghost.
+fn effective_rank_score(frecency: f64, bonus: i32, mid_token: bool) -> f64 {
+    let mid = if mid_token { 50.0 } else { 0.0 };
+    frecency + mid + f64::from(bonus)
+}
+
 /// Return the best inline suffix for a prefix match, ranked by:
-///   1. highest frecency score
-///   2. higher command bonus
-///   3. shorter suffix length
-///   4. recency order in history (stable fallback)
+///   1. effective score (frecency + mid-token preference + command bonus)
+///   2. shorter suffix length
+///   3. recency order in history (stable fallback)
 pub fn best_suffix_for_prefix(
     scope: &ScopeHistory,
     prefix: &str,
@@ -68,9 +87,8 @@ pub fn best_suffix_for_prefix(
     context: RankingContext<'_>,
 ) -> Option<String> {
     let mut best_suffix: Option<String> = None;
-    let mut best_score = f64::NEG_INFINITY;
+    let mut best_effective = f64::NEG_INFINITY;
     let mut best_suffix_len = usize::MAX;
-    let mut best_bonus = i32::MIN;
     let mut best_idx = usize::MAX;
 
     for (idx, cmd) in scope.history.iter().enumerate() {
@@ -86,18 +104,17 @@ pub fn best_suffix_for_prefix(
         let bonus = suffix_bonus_for_command(prefix, &suffix)
             + cwd_context_bonus(prefix, cmd, context.cwd)
             + recent_session_bonus(cmd, context.recent_commands);
+        let mid_token = is_mid_token_suffix(prefix, &suffix);
+        let effective = effective_rank_score(score, bonus, mid_token);
 
-        if score > best_score
-            || (score == best_score && bonus > best_bonus)
-            || (score == best_score && bonus == best_bonus && suffix_len < best_suffix_len)
-            || (score == best_score
-                && bonus == best_bonus
+        if effective > best_effective
+            || (effective == best_effective && suffix_len < best_suffix_len)
+            || (effective == best_effective
                 && suffix_len == best_suffix_len
                 && idx < best_idx)
         {
             best_suffix = Some(suffix);
-            best_score = score;
-            best_bonus = bonus;
+            best_effective = effective;
             best_suffix_len = suffix_len;
             best_idx = idx;
         }
@@ -116,7 +133,7 @@ pub fn ranked_candidates_for_prefix(
     if limit == 0 {
         return Vec::new();
     }
-    let mut candidates: Vec<(String, f64, i32, usize, usize)> = Vec::new();
+    let mut candidates: Vec<(String, f64, usize, usize)> = Vec::new();
 
     for (idx, cmd) in scope.history.iter().enumerate() {
         if !history_entry_safe_to_store(cmd) {
@@ -131,22 +148,23 @@ pub fn ranked_candidates_for_prefix(
         let bonus = suffix_bonus_for_command(prefix, &suffix)
             + cwd_context_bonus(prefix, cmd, context.cwd)
             + recent_session_bonus(cmd, context.recent_commands);
-        candidates.push((suffix, score, bonus, suffix_len, idx));
+        let mid_token = is_mid_token_suffix(prefix, &suffix);
+        let effective = effective_rank_score(score, bonus, mid_token);
+        candidates.push((suffix, effective, suffix_len, idx));
     }
 
     candidates.sort_by(|a, b| {
-        // score desc, command bonus desc, suffix_len asc, recency asc(index)
+        // effective score desc, suffix_len asc, recency asc(index)
         b.1.partial_cmp(&a.1)
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| b.2.cmp(&a.2))
+            .then_with(|| a.2.cmp(&b.2))
             .then_with(|| a.3.cmp(&b.3))
-            .then_with(|| a.4.cmp(&b.4))
     });
 
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
     let mut seen_ci = std::collections::HashSet::new();
-    for (suffix, _, _, _, _) in candidates {
+    for (suffix, _, _, _) in candidates {
         let suffix_ci = suffix.to_ascii_lowercase();
         if seen.insert(suffix.clone()) && seen_ci.insert(suffix_ci) {
             out.push(suffix);
@@ -262,6 +280,29 @@ mod tests {
             best_suffix_for_prefix(&scope, "git ", false, RankingContext::empty()),
             Some("checkout staging".to_string())
         );
+    }
+
+    #[test]
+    fn prefers_command_name_continuation_over_spaced_arg() {
+        // Real history: `lsblk`. Corrupted/accepted ghost history: `ls blk`.
+        // Typing `ls` must complete to `lsblk` (suffix `blk`), not `ls blk`.
+        use crate::ghost::types::FrecencyEntry;
+        let mut scores = std::collections::HashMap::new();
+        // Give the spaced entry much higher raw frecency — mid-token must still win.
+        let mut spaced = FrecencyEntry::new_with_bump();
+        spaced.bump();
+        spaced.bump();
+        spaced.bump();
+        spaced.bump();
+        scores.insert("ls blk".to_string(), spaced);
+        scores.insert("lsblk".to_string(), FrecencyEntry::new_with_bump());
+        let scope = ScopeHistory {
+            history: vec!["ls blk".to_string(), "lsblk".to_string()],
+            scores,
+        };
+        let best = best_suffix_for_prefix(&scope, "ls", false, RankingContext::empty())
+            .expect("expected suffix");
+        assert_eq!(best, "blk");
     }
 
     #[test]
