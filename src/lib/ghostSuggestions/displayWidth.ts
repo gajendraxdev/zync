@@ -52,6 +52,11 @@ function isWideCodePoint(cp: number): boolean {
   return false;
 }
 
+/** Fitzpatrick skin-tone modifiers. */
+function isEmojiSkinTone(cp: number): boolean {
+  return cp >= 0x1f3fb && cp <= 0x1f3ff;
+}
+
 /** Display cells for a single Unicode code point (0, 1, or 2). */
 export function codePointDisplayWidth(cp: number): number {
   if (isZeroWidthCodePoint(cp)) return 0;
@@ -59,50 +64,88 @@ export function codePointDisplayWidth(cp: number): number {
   return 1;
 }
 
-/** Total terminal cells for a string (code-point walk with wcwidth rules). */
-export function stringDisplayWidth(text: string): number {
-  if (!text) return 0;
-  let width = 0;
-  for (const ch of text) {
+/**
+ * Terminal width of one grapheme cluster.
+ * - Combining marks on a base letter → width of base (usually 1).
+ * - ZWJ / skin-tone emoji sequences → 2 (do not sum component widths).
+ */
+export function graphemeDisplayWidth(grapheme: string): number {
+  if (!grapheme) return 0;
+
+  let sum = 0;
+  let max = 0;
+  let hasWide = false;
+  let hasNonZero = false;
+  let hasZwj = false;
+  let hasSkinTone = false;
+  let codePointCount = 0;
+
+  for (const ch of grapheme) {
     const cp = ch.codePointAt(0);
     if (cp === undefined) continue;
-    width += codePointDisplayWidth(cp);
+    codePointCount += 1;
+    if (cp === 0x200d) hasZwj = true;
+    if (isEmojiSkinTone(cp)) hasSkinTone = true;
+    const w = codePointDisplayWidth(cp);
+    sum += w;
+    if (w > max) max = w;
+    if (w === 2) hasWide = true;
+    if (w > 0) hasNonZero = true;
+  }
+
+  if (!hasNonZero) return 0;
+
+  // Multi-codepoint emoji presentation: terminals typically reserve 2 cells.
+  if (codePointCount > 1 && (hasWide || hasZwj || hasSkinTone)) {
+    return Math.max(max, 2);
+  }
+
+  return sum;
+}
+
+/** Total terminal cells for a string (grapheme-aware when Segmenter is available). */
+export function stringDisplayWidth(text: string): number {
+  if (!text) return 0;
+  const clusters = splitGraphemeClusters(text);
+  let width = 0;
+  for (const cluster of clusters) {
+    width += graphemeDisplayWidth(cluster);
   }
   return width;
 }
 
 export interface TerminalCellSegment {
-  /** Grapheme (or code-point fallback) text. */
+  /** Grapheme (or merged code-point) text. */
   text: string;
   /** Columns this segment occupies on the terminal grid. */
   cells: number;
 }
 
-/**
- * Split text into terminal cells for overlay rendering.
- * Prefers Intl.Segmenter grapheme clusters when available.
- */
-export function segmentTerminalCells(text: string): TerminalCellSegment[] {
-  if (!text) return [];
+export interface SegmentTerminalCellsOptions {
+  /** Force code-point split (tests the no-Intl.Segmenter fallback). */
+  forceCodePointSplit?: boolean;
+}
 
+function splitGraphemeClusters(text: string, forceCodePointSplit = false): string[] {
   const segments: string[] = [];
-  // Intl.Segmenter is in modern WebView2 / Chromium; types may lag local TS lib.
-  const IntlWithSegmenter = Intl as typeof Intl & {
-    Segmenter?: new (
-      locales?: string | string[],
-      options?: { granularity?: 'grapheme' | 'word' | 'sentence' },
-    ) => {
-      segment: (input: string) => Iterable<{ segment: string }>;
+  if (!forceCodePointSplit) {
+    const IntlWithSegmenter = Intl as typeof Intl & {
+      Segmenter?: new (
+        locales?: string | string[],
+        options?: { granularity?: 'grapheme' | 'word' | 'sentence' },
+      ) => {
+        segment: (input: string) => Iterable<{ segment: string }>;
+      };
     };
-  };
-  if (typeof Intl !== 'undefined' && typeof IntlWithSegmenter.Segmenter === 'function') {
-    try {
-      const segmenter = new IntlWithSegmenter.Segmenter(undefined, { granularity: 'grapheme' });
-      for (const { segment } of segmenter.segment(text)) {
-        if (segment) segments.push(segment);
+    if (typeof Intl !== 'undefined' && typeof IntlWithSegmenter.Segmenter === 'function') {
+      try {
+        const segmenter = new IntlWithSegmenter.Segmenter(undefined, { granularity: 'grapheme' });
+        for (const { segment } of segmenter.segment(text)) {
+          if (segment) segments.push(segment);
+        }
+      } catch {
+        // fall through
       }
-    } catch {
-      // fall through to code-point split
     }
   }
   if (segments.length === 0) {
@@ -110,12 +153,39 @@ export function segmentTerminalCells(text: string): TerminalCellSegment[] {
       segments.push(ch);
     }
   }
+  return segments;
+}
 
-  return segments.map((segment) => {
-    const cells = stringDisplayWidth(segment);
-    // Empty/zero-width marks still need a span only if they have visible text;
-    // zero-cell segments are kept so combining marks stay with their cluster
-    // when Segmenter already attached them. Standalone ZW chars get 0 cells.
-    return { text: segment, cells: cells > 0 ? cells : 0 };
-  }).filter((s) => s.text.length > 0);
+/**
+ * Build overlay segments: merge zero-width code points into the previous base
+ * glyph so combining marks are never rendered in a width-0 overflow-hidden span.
+ */
+function buildCellSegments(rawSegments: string[]): TerminalCellSegment[] {
+  const out: TerminalCellSegment[] = [];
+  for (const segment of rawSegments) {
+    if (!segment) continue;
+    const cells = graphemeDisplayWidth(segment);
+    if (cells === 0) {
+      if (out.length > 0) {
+        out[out.length - 1].text += segment;
+      }
+      // Leading-only ZW with no base: drop (invisible).
+      continue;
+    }
+    out.push({ text: segment, cells });
+  }
+  return out;
+}
+
+/**
+ * Split text into terminal cells for overlay rendering.
+ * Prefers Intl.Segmenter grapheme clusters when available.
+ */
+export function segmentTerminalCells(
+  text: string,
+  options?: SegmentTerminalCellsOptions,
+): TerminalCellSegment[] {
+  if (!text) return [];
+  const raw = splitGraphemeClusters(text, options?.forceCodePointSplit === true);
+  return buildCellSegments(raw);
 }

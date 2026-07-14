@@ -68,11 +68,15 @@ fn is_mid_token_suffix(prefix: &str, suffix: &str) -> bool {
     !suffix.starts_with(' ') && !suffix.starts_with('\t')
 }
 
+/// Rank boost for mid-token (no leading-space) history suffixes so `lsblk`
+/// outranks a corrupted spaced entry like `ls blk` even with higher frecency.
+const MID_TOKEN_RANK_BONUS: f64 = 50.0;
+
 /// Frecency + structural preference. Mid-token command continuations outrank
 /// spaced new-word suffixes so a real `lsblk` history beat beats a corrupted
 /// `ls blk` entry that may have been accepted from a buggy ghost.
 fn effective_rank_score(frecency: f64, bonus: i32, mid_token: bool) -> f64 {
-    let mid = if mid_token { 50.0 } else { 0.0 };
+    let mid = if mid_token { MID_TOKEN_RANK_BONUS } else { 0.0 };
     frecency + mid + f64::from(bonus)
 }
 

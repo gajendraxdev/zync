@@ -15,6 +15,7 @@ import {
 } from '../.tmp-agent-tests/src/lib/ghostSuggestions/cursorPosition.js';
 import {
   codePointDisplayWidth,
+  graphemeDisplayWidth,
   segmentTerminalCells,
   stringDisplayWidth,
 } from '../.tmp-agent-tests/src/lib/ghostSuggestions/displayWidth.js';
@@ -248,6 +249,22 @@ await runTest('segmentTerminalCells sizes wide glyphs', () => {
   const wide = segmentTerminalCells('中');
   assert.equal(wide.length, 1);
   assert.equal(wide[0].cells, 2);
+});
+
+await runTest('segmentTerminalCells merges combining marks in code-point fallback', () => {
+  const segs = segmentTerminalCells('e\u0301', { forceCodePointSplit: true });
+  assert.equal(segs.length, 1);
+  assert.equal(segs[0].text, 'e\u0301');
+  assert.equal(segs[0].cells, 1);
+  // No standalone zero-width span
+  assert.ok(segs.every((s) => s.cells > 0));
+});
+
+await runTest('graphemeDisplayWidth does not over-sum ZWJ emoji parts', () => {
+  // Base emoji + ZWJ + second emoji — terminal width is 2, not 4.
+  const family = '\u{1F468}\u200D\u{1F469}';
+  assert.equal(graphemeDisplayWidth(family), 2);
+  assert.equal(stringDisplayWidth('e\u0301'), 1);
 });
 
 await runTest('normalizeSuggestionSuffix never invents leading space', () => {
