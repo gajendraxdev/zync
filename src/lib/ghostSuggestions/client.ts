@@ -78,6 +78,7 @@ export async function resolveInlineSuggestion({
     suppressReason: response.suppressReason ?? null,
   });
 
+  // Backend owns spacing/ranking (mid-token vs new-word). Do not rewrite suffixes here.
   return response.suffix;
 }
 

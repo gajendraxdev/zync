@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import type { Terminal as XTerm } from '@xterm/xterm';
 import { useAppStore } from '../../store/useAppStore';
 import { InputTracker } from '../../lib/ghostSuggestions/inputTracker';
 import {
@@ -18,6 +19,8 @@ import {
   cwdForWslPathCompletion,
   resolveWslShellIdForPathCompletion,
 } from '../../lib/ghostSuggestions/wslShell';
+import type { GhostLayoutHint, GhostLineOrigin } from '../../lib/ghostSuggestions/cursorPosition';
+import { stringDisplayWidth } from '../../lib/ghostSuggestions/displayWidth';
 import type { AppSettings } from '../../store/settingsSlice';
 import { extractRecentCommands } from '../../lib/ghostSuggestions/recentCommands';
 import {
@@ -59,14 +62,49 @@ export function useTerminalGhost({
   isConnectedRef,
 }: UseTerminalGhostOptions) {
   const [ghostSuggestion, setGhostSuggestion] = useState('');
+  const [ghostLayout, setGhostLayout] = useState<GhostLayoutHint>({
+    typedCellCount: 0,
+    origin: null,
+  });
   const ghostTrackerRef = useRef<InputTracker | null>(null);
   const ghostSettingsRef = useRef(ghostSettings);
+  /** First-cell screen position for the current typed line (pre-echo). */
+  const lineOriginRef = useRef<GhostLineOrigin | null>(null);
+  const termRefForLayout = useRef<XTerm | null>(null);
+
+  const syncGhostLayout = useCallback((tracker: InputTracker | null | undefined, term?: XTerm | null) => {
+    const activeTerm = term ?? termRefForLayout.current;
+    if (!tracker || tracker.isDesynced() || tracker.isSecretInputMode()) {
+      lineOriginRef.current = null;
+      setGhostLayout({ typedCellCount: 0, origin: null });
+      return;
+    }
+    const line = tracker.getLineBuffer();
+    if (!line) {
+      lineOriginRef.current = null;
+      setGhostLayout({ typedCellCount: 0, origin: null });
+      return;
+    }
+    // Capture origin on the first keystroke of a line, while the caret is still
+    // at the prompt — before remote echo advances cursorX.
+    if (!lineOriginRef.current && activeTerm) {
+      const buf = activeTerm.buffer.active;
+      lineOriginRef.current = { col: buf.cursorX, row: buf.cursorY };
+    }
+    setGhostLayout({
+      // Terminal columns (wide CJK/emoji = 2, combining marks = 0), not JS code points.
+      typedCellCount: stringDisplayWidth(line),
+      origin: lineOriginRef.current,
+    });
+  }, []);
 
   useEffect(() => {
     ghostSettingsRef.current = ghostSettings;
     if (!ghostSettings.inlineEnabled) {
       setGhostSuggestion('');
       ghostTrackerRef.current?.clearSuggestion();
+      lineOriginRef.current = null;
+      setGhostLayout({ typedCellCount: 0, origin: null });
     }
   }, [ghostSettings]);
 
@@ -78,7 +116,8 @@ export function useTerminalGhost({
     queueTerminalInput(sessionId, suffix);
     acceptGhostCommand(cached?.ghostTracker?.getLineBuffer() ?? '', ghostScope).catch(() => {});
     setGhostSuggestion('');
-  }, [sessionId, ghostScope]);
+    syncGhostLayout(cached?.ghostTracker ?? null);
+  }, [sessionId, ghostScope, syncGhostLayout]);
 
   const truncateLabel = useCallback((label: string, max = 60) => {
     if (label.length <= max) return label;
@@ -87,6 +126,8 @@ export function useTerminalGhost({
 
   const resetGhostUi = useCallback(() => {
     setGhostSuggestion('');
+    lineOriginRef.current = null;
+    setGhostLayout({ typedCellCount: 0, origin: null });
   }, []);
 
   const initGhostTracker = useCallback((termSessionId: string) => {
@@ -100,6 +141,7 @@ export function useTerminalGhost({
   }, []);
 
   const onBindMount = useCallback(({ term, sessionId: mountSessionId }: TerminalMountContext) => {
+    termRefForLayout.current = term;
     const cachedGhostTracker = terminalCache.get(mountSessionId)?.ghostTracker;
     ghostTrackerRef.current = cachedGhostTracker ?? null;
     if (!ghostSettingsRef.current.inlineEnabled) {
@@ -168,16 +210,24 @@ export function useTerminalGhost({
             providers: ghostSettingsRef.current.providers,
           });
         },
-        onSuggestion: (suffix) => {
+        onSuggestion: (suffix, line) => {
+          syncGhostLayout(cachedGhostTracker, term);
           if (ghostSettingsRef.current.inlineEnabled) {
             setGhostSuggestion(suffix);
           } else {
             setGhostSuggestion('');
           }
+          ghostDebug('layout', {
+            phase: 'suggestion',
+            lineLen: line.length,
+            origin: lineOriginRef.current,
+            suffix: suffix || null,
+          });
         },
         onAccept: (suffix, lineAfterAccept) => {
           queueTerminalInput(mountSessionId, suffix);
           acceptGhostCommand(lineAfterAccept, ghostScope).catch(() => {});
+          syncGhostLayout(cachedGhostTracker, term);
         },
         onHistoryCommit: (cmd) => {
           commitGhostCommand(cmd, ghostScope).catch(() => {});
@@ -190,6 +240,9 @@ export function useTerminalGhost({
         },
         onClearUI: () => {
           setGhostSuggestion('');
+          // Keep origin while the line still has local typed text (suggestion
+          // cleared mid-debounce); drop it when the line buffer is empty/desynced.
+          syncGhostLayout(cachedGhostTracker, term);
         },
       })
       : () => {};
@@ -245,11 +298,30 @@ export function useTerminalGhost({
             );
             scheduleZshAutosuggestProbe(mountSessionId, terminalKey, shellAfterSpawn);
             setGhostSuggestion('');
+            lineOriginRef.current = null;
+            setGhostLayout({ typedCellCount: 0, origin: null });
             return;
           }
 
           if (isVisibleRef.current) {
-            const handledByGhost = handleGhostInputEvent(data, cached?.ghostTracker);
+            // Capture line origin *before* feed when the buffer is empty so we
+            // pin to the prompt caret even if local echo is extremely fast.
+            const tracker = cached?.ghostTracker;
+            const wasEmpty = !tracker?.getLineBuffer();
+            if (wasEmpty && tracker && !tracker.isDesynced() && !tracker.isSecretInputMode()) {
+              const buf = term.buffer.active;
+              // Only seed origin for printable input; feed() decides if it sticks.
+              const hasPrintable = [...data].some((ch) => {
+                const code = ch.charCodeAt(0);
+                return code >= 0x20 && code !== 0x7f;
+              });
+              if (hasPrintable) {
+                lineOriginRef.current = { col: buf.cursorX, row: buf.cursorY };
+              }
+            }
+
+            const handledByGhost = handleGhostInputEvent(data, tracker);
+            syncGhostLayout(tracker, term);
             if (handledByGhost) return;
           }
 
@@ -258,17 +330,22 @@ export function useTerminalGhost({
       });
     }
 
-    return unbindGhostTracker;
+    return () => {
+      termRefForLayout.current = null;
+      unbindGhostTracker();
+    };
   }, [
     terminalKey,
     ghostScope,
     spawnConnectionId,
     isVisibleRef,
     isConnectedRef,
+    syncGhostLayout,
   ]);
 
   return {
     ghostSuggestion,
+    ghostLayout,
     acceptGhostSuffix,
     truncateLabel,
     resetGhostUi,

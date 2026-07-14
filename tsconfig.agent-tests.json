@@ -63,6 +63,8 @@
         "src/lib/ghostSuggestions/recentCommands.ts",
         "src/lib/ghostSuggestions/client.ts",
         "src/lib/ghostSuggestions/suggestionSuffix.ts",
+        "src/lib/ghostSuggestions/cursorPosition.ts",
+        "src/lib/ghostSuggestions/displayWidth.ts",
         "src/lib/ghostSuggestions/cwdTracking.ts",
         "src/lib/ghostSuggestions/ghostDebug.ts",
         "src/lib/ghostSuggestions/types.ts",

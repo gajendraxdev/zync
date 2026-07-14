@@ -320,6 +320,36 @@ fn path_entry_suffix(entry_name: &str, partial: &str) -> String {
     entry_name.to_string()
 }
 
+/// True when the active segment is only the command token (optional trailing space).
+/// `cd` / `cd ` → true; `cd cd` / `cd Doc` → false.
+fn is_bare_directory_command_line(parse_line: &str) -> bool {
+    parse_line.trim_end().split_whitespace().count() <= 1
+}
+
+/// Classify path partial + whether a leading space is required for a new arg.
+/// Extracted for unit tests (avoids async fs listing).
+fn classify_directory_path_partial(
+    parse_line: &str,
+    last_arg: &str,
+    command_name: &str,
+    is_directory_only: bool,
+) -> (String, bool) {
+    let mut partial = last_arg.to_string();
+    let mut new_path_arg = false;
+    let bare_command = is_bare_directory_command_line(parse_line);
+    if is_directory_only
+        && bare_command
+        && !partial.is_empty()
+        && partial.to_ascii_lowercase() == command_name.to_ascii_lowercase()
+    {
+        partial.clear();
+        new_path_arg = true;
+    } else if last_arg.is_empty() {
+        new_path_arg = true;
+    }
+    (partial, new_path_arg)
+}
+
 async fn path_suggestions(params: PathSuggestionsParams<'_>) -> Vec<String> {
     let timeout_ms = fs_list_timeout_ms(params.connection_id, params.wsl_shell_id);
     let parse_line = line_for_suggestion_parsing(params.line);
@@ -334,8 +364,13 @@ async fn path_suggestions(params: PathSuggestionsParams<'_>) -> Vec<String> {
     let is_file_aware = is_file_aware_command(&command_name);
 
     let mut dir = String::new();
-    let mut partial;
+    let partial;
     let mut sep = infer_separator(params.cwd);
+    // True when the completion is a brand-new path token after a bare command
+    // (`cd` → ` Documents/`), not a mid-token fragment (`cd Doc` → `uments/`).
+    // Path owns this leading space so history mid-token (`ls` → `blk`) never
+    // gets a space invented by suffix normalize.
+    let mut new_path_arg = false;
 
     if has_path_separator(&last_arg) {
         let Some((d, p, s)) = split_path(&last_arg) else {
@@ -366,10 +401,14 @@ async fn path_suggestions(params: PathSuggestionsParams<'_>) -> Vec<String> {
                 return Vec::new();
             }
         }
-        partial = last_arg.clone();
-        if is_directory_only && partial.to_ascii_lowercase() == command_name.to_ascii_lowercase() {
-            partial.clear();
-        }
+        let (classified_partial, classified_new) = classify_directory_path_partial(
+            &parse_line,
+            &last_arg,
+            &command_name,
+            is_directory_only,
+        );
+        partial = classified_partial;
+        new_path_arg = classified_new;
     }
 
     let use_wsl = params
@@ -566,7 +605,12 @@ async fn path_suggestions(params: PathSuggestionsParams<'_>) -> Vec<String> {
                 String::new()
             }
         };
-        out.push(format!("{name_suffix}{trailing_sep}"));
+        let piece = format!("{name_suffix}{trailing_sep}");
+        if new_path_arg && !piece.is_empty() && !piece.starts_with([' ', '\t']) {
+            out.push(format!(" {piece}"));
+        } else {
+            out.push(piece);
+        }
     }
     out
 }
@@ -596,5 +640,42 @@ mod tests {
     fn path_entry_suffix_preserves_entry_casing() {
         assert_eq!(path_entry_suffix("Documents", "doc"), "uments");
         assert_eq!(path_entry_suffix("Documents", "Doc"), "uments");
+    }
+
+    #[test]
+    fn bare_cd_clears_partial_and_marks_new_arg() {
+        let (partial, new_arg) = classify_directory_path_partial("cd", "cd", "cd", true);
+        assert_eq!(partial, "");
+        assert!(new_arg);
+
+        let (partial_sp, new_arg_sp) = classify_directory_path_partial("cd ", "", "cd", true);
+        assert_eq!(partial_sp, "");
+        assert!(new_arg_sp);
+    }
+
+    #[test]
+    fn cd_cd_keeps_partial_without_leading_space() {
+        // Argument equals command name but is a second token — not bare `cd`.
+        let (partial, new_arg) = classify_directory_path_partial("cd cd", "cd", "cd", true);
+        assert_eq!(partial, "cd");
+        assert!(!new_arg);
+
+        let (partial_pd, new_arg_pd) =
+            classify_directory_path_partial("pushd pushd", "pushd", "pushd", true);
+        assert_eq!(partial_pd, "pushd");
+        assert!(!new_arg_pd);
+
+        // Mid-token path fragment still glues without new-arg space.
+        let (partial_doc, new_arg_doc) =
+            classify_directory_path_partial("cd Doc", "Doc", "cd", true);
+        assert_eq!(partial_doc, "Doc");
+        assert!(!new_arg_doc);
+    }
+
+    #[test]
+    fn path_entry_suffix_for_cd_cd_style_partial() {
+        // Completing an arg that starts with "cd" should glue, not inject a space.
+        assert_eq!(path_entry_suffix("cdrom", "cd"), "rom");
+        assert_eq!(path_entry_suffix("cd", "cd"), "");
     }
 }

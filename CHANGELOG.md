@@ -4,6 +4,16 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.22.1] - 2026-07-14
+
+### Fixed
+- **Ghost mid-token spacing**: History completions no longer invent a leading space (e.g. `ls` + `lsblk` no longer ghosts as `ls blk`). Normalize passes provider suffixes through; path suggest owns spaces for bare `cd` path args; ranking prefers mid-token matches over spaced new-word entries. ([34192d9])
+- **Ghost SSH echo lag**: Inline ghost positions from line origin + typed display cells when the caret lags remote echo, so faded text does not stack under delayed keystrokes. ([34192d9])
+- **Ghost overlay cell metrics**: Overlay segments use terminal display width (wide CJK/emoji, combining marks) and measured xterm cell size; wrap prediction clamps to the viewport bottom row. ([34192d9])
+
+### Changed
+- **Ghost spacing ownership**: Frontend no longer rewrites suggestion suffixes; backend ranking and normalize own mid-token vs new-word boundaries. ([34192d9])
+
 ## [2.22.0] - 2026-07-12
 
 ### Added
@@ -900,7 +910,8 @@ All notable changes to Zync are documented in this file. The format is based on 
 - Auto-updates
 - Multiple themes (Dark, Light, Dracula)
 
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.22.0...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.22.1...HEAD
+[2.22.1]: https://github.com/zync-sh/zync/compare/v2.22.0...v2.22.1
 [2.22.0]: https://github.com/zync-sh/zync/compare/v2.21.0...v2.22.0
 [2.21.0]: https://github.com/zync-sh/zync/compare/v2.20.1...v2.21.0
 [2.20.1]: https://github.com/zync-sh/zync/compare/v2.19.2...v2.20.1
