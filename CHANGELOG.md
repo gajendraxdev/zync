@@ -10,9 +10,12 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Ghost mid-token spacing**: History completions no longer invent a leading space (e.g. `ls` + `lsblk` no longer ghosts as `ls blk`). Normalize passes provider suffixes through; path suggest owns spaces for bare `cd` path args; ranking prefers mid-token matches over spaced new-word entries. ([34192d9])
 - **Ghost SSH echo lag**: Inline ghost positions from line origin + typed display cells when the caret lags remote echo, so faded text does not stack under delayed keystrokes. ([34192d9])
 - **Ghost overlay cell metrics**: Overlay segments use terminal display width (wide CJK/emoji, combining marks) and measured xterm cell size; wrap prediction clamps to the viewport bottom row. ([34192d9])
+- **Path bare-command false positive**: `cd cd` (and similar) is no longer treated as bare `cd`; partial stays the argument and no leading space is injected. ([64fb421])
+- **Ghost overlay combining marks / emoji width**: Zero-width marks merge into the previous base glyph; ZWJ/skin-tone clusters use grapheme-aware cell width. ([64fb421])
 
 ### Changed
 - **Ghost spacing ownership**: Frontend no longer rewrites suggestion suffixes; backend ranking and normalize own mid-token vs new-word boundaries. ([34192d9])
+- **Mid-token ranking constant**: History mid-token score boost is a named constant. ([64fb421])
 
 ## [2.22.0] - 2026-07-12
 
