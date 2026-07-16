@@ -7,7 +7,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 ## [2.22.2] - 2026-07-16
 
 ### Fixed
-- **Vault list privacy**: Credential labels, assignment/detail/history/restore modals, and related confirms/toasts respect **Settings → General → Show host addresses in lists**, so demos no longer leak IPs from vault UI. New secured-key labels avoid embedding `user@ip`. ([5dd0c07])
+- **Vault list privacy**: Credential labels, assignment/detail/history/restore modals, and related confirms/toasts respect **Settings → General → Show host addresses in lists**, so host addresses stay hidden in vault UI when that option is off. New secured-key labels avoid embedding `user@ip`. ([5dd0c07])
 - **AI provider selection**: Partial `settings.ai` (e.g. Mistral without `enabled`) no longer fails parse and silently falls back to Ollama. Serde defaults, soft recovery on read, and full AI object persistence when changing provider/model. ([5dd0c07])
 - **Agent mode routing**: Short greetings no longer force Ask mode while Agent is selected. ([5dd0c07])
 - **Missing API key UX**: Cloud providers fail fast in the AI sidebar with a clear in-chat message and **Open Settings → AI** deep link (all BYOK providers, not only Mistral). ([5dd0c07])
