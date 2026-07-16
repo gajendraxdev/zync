@@ -1,4 +1,6 @@
 import type { VaultItem } from '../../../../vault/ipc';
+import { formatPrivacyAwareLabel } from '../../../../features/connections/domain/connectionDisplay';
+import { useShowHostAddressesInLists } from '../../../../features/connections/presentation/useConnectionDisplayLabels';
 import { Button } from '../../../ui/Button';
 import { Input } from '../../../ui/Input';
 import { Modal } from '../../../ui/Modal';
@@ -34,11 +36,16 @@ export function RotateCredentialModal({
   onNotesChange,
   onSubmit,
 }: RotateCredentialModalProps) {
+  const showHostAddressesInLists = useShowHostAddressesInLists();
+  const displayTitle = item
+    ? formatPrivacyAwareLabel(item.label, showHostAddressesInLists)
+    : null;
+
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={item ? `Rotate "${item.label}"` : 'Rotate Credential'}
+      title={displayTitle ? `Rotate "${displayTitle}"` : 'Rotate Credential'}
       subtitle="Replace the encrypted secret while keeping the same stable credential identity."
       width="max-w-lg"
     >

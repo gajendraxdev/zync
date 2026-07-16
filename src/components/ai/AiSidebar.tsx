@@ -17,10 +17,16 @@ import {
 } from './providerCatalog';
 import { useAiProviderModels } from './useAiProviderModels';
 import { collectAiRequestContext } from '../../lib/aiContext';
-import { startAgentRun, stopAgentRun, clearBrainSessions } from '../../ai/services/aiClient';
+import { getSavedProviderKey, startAgentRun, stopAgentRun, clearBrainSessions } from '../../ai/services/aiClient';
 import { useAgentRunStore } from '../../ai/store/agentRunStore';
 import {
-    shouldTreatAgentInputAsAsk,
+    formatMissingApiKeyMessage,
+    NO_MODEL_SELECTED_MESSAGE,
+    OLLAMA_NO_MODEL_MESSAGE,
+    OLLAMA_NOT_RUNNING_MESSAGE,
+    providerRequiresApiKey,
+} from './aiSetupErrors';
+import {
     submitAgentGoal,
     submitAskQuery,
 } from './sidebarSubmit';
@@ -302,6 +308,33 @@ export function AiSidebar({ connectionId, activeTermId: activeTermIdProp, onRunC
         }
     }, [activeRunId, showToast]);
 
+    /** Post a setup/auth error into the visible chat thread (Ask or Agent). */
+    const postSetupErrorInChat = useCallback((userQuery: string, setupMessage: string) => {
+        if (isAgentMode) {
+            // Show the user turn + error in the agent thread without starting a network run.
+            const localRunId = crypto.randomUUID();
+            agentAct().startRun(agentScope, localRunId, userQuery);
+            agentAct().addError(agentScope, setupMessage);
+            agentAct().endRun(agentScope);
+            return;
+        }
+
+        if (connectionId) {
+            addToDisplayHistory(connectionId, {
+                id: crypto.randomUUID(),
+                query: userQuery,
+                result: null,
+                error: setupMessage,
+                contextSnapshot: attachedContext?.content ?? null,
+                timestamp: Date.now(),
+            });
+            return;
+        }
+
+        // No host selected — still surface the message.
+        showToast('warning', setupMessage);
+    }, [isAgentMode, agentScope, connectionId, attachedContext, addToDisplayHistory, showToast]);
+
     const handleSubmit = useCallback(async () => {
         const trimmed = query.trim();
         if (!trimmed || isLoading || agentRunning) return;
@@ -309,35 +342,35 @@ export function AiSidebar({ connectionId, activeTermId: activeTermIdProp, onRunC
 
         if (providerNeedsSetup) {
             const setupMessage = activeProviderValue === 'ollama'
-                ? (!ollamaAvailable
-                    ? 'Ollama is not running. Start Ollama or switch to another provider.'
-                    : 'No Ollama model found. Pull a model (for example: ollama pull llama3.2) or switch provider.')
-                : 'No model selected for the current provider. Please select a model and try again.';
+                ? (!ollamaAvailable ? OLLAMA_NOT_RUNNING_MESSAGE : OLLAMA_NO_MODEL_MESSAGE)
+                : NO_MODEL_SELECTED_MESSAGE;
 
-            if (isAgentMode) {
-                agentAct().addError(agentScope, setupMessage);
-            } else if (connectionId) {
-                addToDisplayHistory(connectionId, {
-                    id: crypto.randomUUID(),
-                    query: trimmed,
-                    result: null,
-                    error: setupMessage,
-                    contextSnapshot: attachedContext?.content ?? null,
-                    timestamp: Date.now(),
-                });
-            } else {
-                showToast('warning', setupMessage);
-            }
+            postSetupErrorInChat(trimmed, setupMessage);
+            setQuery('');
+            if (inputRef.current) inputRef.current.style.height = 'auto';
             return;
         }
 
-        if (isAgentMode) {
-            if (shouldTreatAgentInputAsAsk(trimmed)) {
-                setAiMode('ask');
-                await handleSubmitAsk(trimmed);
-            } else {
-                await handleSubmitAgent(trimmed);
+        // BYOK providers: fail fast in-chat with a Settings CTA instead of a raw network error.
+        if (providerRequiresApiKey(activeProviderValue)) {
+            try {
+                const key = await getSavedProviderKey(activeProviderValue);
+                if (!key?.trim()) {
+                    postSetupErrorInChat(trimmed, formatMissingApiKeyMessage(activeProviderValue));
+                    setQuery('');
+                    if (inputRef.current) inputRef.current.style.height = 'auto';
+                    return;
+                }
+            } catch (error) {
+                console.error('[AiSidebar] Failed to check provider API key', error);
+                // Fall through to normal submit; backend will still return a clear key error.
             }
+        }
+
+        // Agent mode always uses the agent path — do not silently flip to Ask
+        // for greetings (that made it look like the wrong mode was responding).
+        if (isAgentMode) {
+            await handleSubmitAgent(trimmed);
         } else {
             await handleSubmitAsk(trimmed);
         }
@@ -350,14 +383,9 @@ export function AiSidebar({ connectionId, activeTermId: activeTermIdProp, onRunC
         providerNeedsSetup,
         activeProviderValue,
         ollamaAvailable,
-        agentScope,
-        connectionId,
-        attachedContext,
-        addToDisplayHistory,
-        showToast,
+        postSetupErrorInChat,
         handleSubmitAgent,
         handleSubmitAsk,
-        setAiMode,
     ]);
 
     const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {

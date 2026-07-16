@@ -24,6 +24,7 @@ import { disconnectVaultBackedIpc } from '../../../../../features/connections/in
 import type { VaultItem } from '../../../../../vault/ipc';
 import type { ToastType } from '../../../../../store/toastSlice';
 import type { Connection, Tab } from '../../../../../features/connections/domain/types';
+import { privacyLabel } from '../privacyLabel';
 
 interface UseVaultPanelActionsOptions {
   connections: Connection[];
@@ -616,6 +617,7 @@ export function useVaultPanelActions({
 
   const handleSyncCredentialItem = async (itemId: string, label: string) => {
     if (!ensureProviderAction('sync', 'credentials')) return;
+    const displayLabel = privacyLabel(label);
     setSyncingItemId(itemId);
     try {
       const result = await syncIpc.uploadCredential('google', { itemId });
@@ -625,10 +627,10 @@ export function useVaultPanelActions({
         lastErrorCode: undefined,
       });
       await loadGoogleSync();
-      showToast('success', `Synced "${label}" to Google (${result.logicalId.slice(0, 8)}).`);
+      showToast('success', `Synced "${displayLabel}" to Google (${result.logicalId.slice(0, 8)}).`);
     } catch (error) {
       const msg = parseSyncInvokeError(error).message;
-      showToast('error', `Failed to sync "${label}": ${msg}`);
+      showToast('error', `Failed to sync "${displayLabel}": ${msg}`);
     } finally {
       setSyncingItemId(null);
     }
@@ -902,9 +904,10 @@ export function useVaultPanelActions({
 
   // ── Delete item ───────────────────────────────────────────────────────────
   const handleDeleteItem = async (itemId: string, label: string) => {
+    const displayLabel = privacyLabel(label);
     const confirmed = await showConfirmDialog({
       title: 'Delete Vault Item',
-      message: `Delete "${label}"? Connections referencing this item will fail to connect.`,
+      message: `Delete "${displayLabel}"? Connections referencing this item will fail to connect.`,
       confirmText: 'Delete',
       variant: 'danger',
     });
@@ -913,7 +916,7 @@ export function useVaultPanelActions({
     try {
       await vaultIpc.itemDelete(itemId);
       await onRefreshItems();
-      showToast('success', `Deleted "${label}".`);
+      showToast('success', `Deleted "${displayLabel}".`);
     } catch (e: unknown) {
       const msg = extractErrorMessage(e);
       showToast('error', `Failed to delete: ${msg}`);

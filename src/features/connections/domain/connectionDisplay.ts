@@ -126,3 +126,62 @@ export function getConnectionDisplayLabels(
         endpoint: formatConnectionEndpoint(conn),
     };
 }
+
+const IPV4_IN_TEXT_RE = /\b(?:\d{1,3}\.){3}\d{1,3}\b/g;
+// Bare `user@host` / `user@host:port` (host may be IPv4, hostname, or simple IPv6).
+const BARE_USER_HOST_RE = /([^\s@()[\]]+)@([^\s@()[\],;]+)(?::\d+)?/g;
+
+/**
+ * Privacy-safe display for free-text labels that may embed endpoints
+ * (e.g. vault items like `ci-staging key (jenkins@140.238.226.234)`).
+ * Does not rewrite stored data — display only.
+ *
+ * Contract when `showHostAddressesInLists` is false:
+ * - Strip embedded `user@host` endpoints (parenthetical or bare), any host form.
+ * - Redact leftover literal IPv4.
+ * - Standalone non-IP hostnames used as display names (not `user@host`) stay visible —
+ *   same intent as {@link getConnectionPrimaryLabel}.
+ */
+export function formatPrivacyAwareLabel(
+    label: string,
+    showHostAddressesInLists: boolean = DEFAULT_SHOW_HOST_ADDRESSES_IN_LISTS,
+): string {
+    if (showHostAddressesInLists || !label) return label;
+
+    // `(user@host[:port])` → `(user)` (common auto-vault naming)
+    let result = label.replace(/\(([^@()\s]+)@[^)\s]+\)/g, '($1)');
+
+    // Bare `user@host[:port]` → `user` (IPs and hostnames)
+    result = result.replace(BARE_USER_HOST_RE, '$1');
+
+    // Any remaining literal IPv4
+    result = result.replace(IPV4_IN_TEXT_RE, '•••');
+
+    return result.replace(/\(\s*\)/g, '').replace(/\s{2,}/g, ' ').trim();
+}
+
+/**
+ * Default vault credential label for a secured key.
+ *
+ * Never embeds `user@host` endpoints (so privacy redaction is not required for
+ * new labels). Prefers custom name; falls back to a non-IP hostname as a
+ * display name (aligned with {@link getConnectionPrimaryLabel}); never uses a
+ * raw IP as the label stem.
+ */
+export function buildDefaultKeyVaultLabel(
+    formData: Partial<Pick<Connection, 'name' | 'host' | 'username'>>,
+): string {
+    const name = formData.name?.trim();
+    const username = formData.username?.trim() || 'user';
+    const host = formData.host?.trim() || '';
+
+    if (name) {
+        return `${name} key (${username})`;
+    }
+
+    if (host && !isLikelyIpAddress(host)) {
+        return `${host} key (${username})`;
+    }
+
+    return `${username} key`;
+}

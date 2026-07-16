@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import {
   DEFAULT_SHOW_HOST_ADDRESSES_IN_LISTS,
+  buildDefaultKeyVaultLabel,
   formatConnectionEndpoint,
   formatConnectionListEndpoint,
+  formatPrivacyAwareLabel,
   getConnectionBrowseAriaLabel,
   getConnectionDisplayLabels,
   getConnectionPrimaryLabel,
@@ -135,4 +137,47 @@ runTest('getConnectionBrowseAriaLabel reflects privacy mode', () => {
     getConnectionBrowseAriaLabel(unnamedIpConn, true),
     'Connection 192.168.1.10, admin@192.168.1.10',
   );
+});
+
+runTest('formatPrivacyAwareLabel strips parenthesized user@host endpoints', () => {
+  assert.equal(
+    formatPrivacyAwareLabel('ci-staging key (jenkins@140.238.226.234)', false),
+    'ci-staging key (jenkins)',
+  );
+  assert.equal(
+    formatPrivacyAwareLabel('api key (deploy@prod.example.com:2222)', false),
+    'api key (deploy)',
+  );
+});
+
+runTest('formatPrivacyAwareLabel strips bare user@host and leftover IPv4', () => {
+  assert.equal(formatPrivacyAwareLabel('jenkins@140.238.226.234', false), 'jenkins');
+  assert.equal(formatPrivacyAwareLabel('ops@prod-web.internal', false), 'ops');
+  assert.equal(formatPrivacyAwareLabel('backup 10.0.0.5 key', false), 'backup ••• key');
+});
+
+runTest('formatPrivacyAwareLabel cleans empty parens / whitespace and respects show mode', () => {
+  assert.equal(formatPrivacyAwareLabel('key ()', false), 'key');
+  assert.equal(formatPrivacyAwareLabel('backup  10.0.0.5  key', false), 'backup ••• key');
+  assert.equal(
+    formatPrivacyAwareLabel('ci-staging key (jenkins@140.238.226.234)', true),
+    'ci-staging key (jenkins@140.238.226.234)',
+  );
+  assert.equal(formatPrivacyAwareLabel('', false), '');
+});
+
+runTest('buildDefaultKeyVaultLabel prefers name and never embeds endpoints', () => {
+  assert.equal(
+    buildDefaultKeyVaultLabel({ name: 'ci-staging', host: '140.238.226.234', username: 'jenkins' }),
+    'ci-staging key (jenkins)',
+  );
+  assert.equal(
+    buildDefaultKeyVaultLabel({ name: '', host: 'prod-web.internal', username: 'ops' }),
+    'prod-web.internal key (ops)',
+  );
+  assert.equal(
+    buildDefaultKeyVaultLabel({ name: '', host: '10.0.0.1', username: 'root' }),
+    'root key',
+  );
+  assert.equal(buildDefaultKeyVaultLabel({}), 'user key');
 });

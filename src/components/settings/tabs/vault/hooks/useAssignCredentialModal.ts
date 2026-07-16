@@ -4,6 +4,7 @@ import { saveConnectionsIpc } from '../../../../../features/connections/infrastr
 import type { VaultItem } from '../../../../../vault/ipc';
 import type { ToastType } from '../../../../../store/toastSlice';
 import type { Connection, Folder } from '../../../../../features/connections/domain/types';
+import { privacyLabel } from '../privacyLabel';
 
 interface UseAssignCredentialModalOptions {
   items: VaultItem[];
@@ -132,13 +133,14 @@ export function useAssignCredentialModal({
         await onAssigned();
         setIsAssigning(false);
         close();
+        const displayLabel = privacyLabel(item.label);
         showToast(
           'success',
-          `Updated assignments for "${item.label}" across ${affectedConnectionIds.length} host${affectedConnectionIds.length === 1 ? '' : 's'}.`,
+          `Updated assignments for "${displayLabel}" across ${affectedConnectionIds.length} host${affectedConnectionIds.length === 1 ? '' : 's'}.`,
         );
         await onPromptDisconnect(
           affectedConnectionIds,
-          `Updating assignments for "${item.label}"`,
+          `Updating assignments for "${displayLabel}"`,
         );
       } catch (e: unknown) {
         const msg = String((e as { message?: unknown } | null | undefined)?.message ?? e);

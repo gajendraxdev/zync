@@ -1,5 +1,7 @@
 import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 import type { SyncRestoreConflictItem, SyncRestorePreviewResult } from '../../../../vault/syncIpc';
+import { formatPrivacyAwareLabel } from '../../../../features/connections/domain/connectionDisplay';
+import { useShowHostAddressesInLists } from '../../../../features/connections/presentation/useConnectionDisplayLabels';
 import { Button } from '../../../ui/Button';
 import { Modal } from '../../../ui/Modal';
 
@@ -44,6 +46,7 @@ export function RestoreConflictModal({
   onClearAll,
   onConfirmRestore,
 }: RestoreConflictModalProps) {
+  const showHostAddressesInLists = useShowHostAddressesInLists();
   const selectedSet = new Set(selectedLogicalIds);
   const hasConflicts = conflicts.length > 0;
 
@@ -130,7 +133,7 @@ export function RestoreConflictModal({
                     />
                     <div className="min-w-0">
                       <p className="text-sm text-app-text font-medium truncate">
-                        {conflict.label}
+                        {formatPrivacyAwareLabel(conflict.label, showHostAddressesInLists)}
                         <span className="ml-2 text-xs text-app-muted">{conflict.kind}</span>
                       </p>
                       <p className="text-[11px] text-app-muted mt-0.5 break-all">

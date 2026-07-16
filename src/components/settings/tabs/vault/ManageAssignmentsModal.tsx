@@ -1,4 +1,9 @@
 import type { Connection } from '../../../../features/connections/domain/types';
+import {
+  formatPrivacyAwareLabel,
+  getConnectionDisplayLabels,
+} from '../../../../features/connections/domain/connectionDisplay';
+import { useShowHostAddressesInLists } from '../../../../features/connections/presentation/useConnectionDisplayLabels';
 import { Button } from '../../../ui/Button';
 import { Input } from '../../../ui/Input';
 import { Modal } from '../../../ui/Modal';
@@ -32,11 +37,16 @@ export function ManageAssignmentsModal({
   onClear,
   onSubmit,
 }: ManageAssignmentsModalProps) {
+  const showHostAddressesInLists = useShowHostAddressesInLists();
+  const displayItemLabel = itemLabel
+    ? formatPrivacyAwareLabel(itemLabel, showHostAddressesInLists)
+    : null;
+
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={itemLabel ? `Manage "${itemLabel}" Assignments` : 'Manage Credential Assignments'}
+      title={displayItemLabel ? `Manage "${displayItemLabel}" Assignments` : 'Manage Credential Assignments'}
       subtitle="Selected hosts will use this vault credential. Deselecting a currently assigned host removes the credential from that host."
       width="max-w-2xl"
     >
@@ -56,6 +66,7 @@ export function ManageAssignmentsModal({
             </div>
           ) : filteredConnections.map((connection) => {
             const checked = selectedAssignConnectionIds.includes(connection.id);
+            const labels = getConnectionDisplayLabels(connection, showHostAddressesInLists);
             return (
               <label
                 key={connection.id}
@@ -69,10 +80,8 @@ export function ManageAssignmentsModal({
                   className="mt-1 h-4 w-4 rounded border-app-border bg-app-surface"
                 />
                 <div className="min-w-0">
-                  <p className="text-sm text-app-text font-medium truncate">{connection.name}</p>
-                  <p className="text-xs text-app-muted">
-                    {connection.username}@{connection.host}:{connection.port}
-                  </p>
+                  <p className="text-sm text-app-text font-medium truncate">{labels.primary}</p>
+                  <p className="text-xs text-app-muted">{labels.secondary}</p>
                   {connection.authRef && (
                     <p className="text-[11px] text-app-muted/70 mt-1">
                       Current vault ref · {connection.authRef.credentialId?.slice(0, 8) || connection.authRef.itemId.slice(0, 8)}

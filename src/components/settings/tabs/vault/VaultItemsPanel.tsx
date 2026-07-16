@@ -4,6 +4,8 @@ import {
   getCredentialKindLabel,
   isHostAssignableCredentialKind,
 } from '../../../../vault/credentialTypes';
+import { formatPrivacyAwareLabel } from '../../../../features/connections/domain/connectionDisplay';
+import { useShowHostAddressesInLists } from '../../../../features/connections/presentation/useConnectionDisplayLabels';
 import { Button } from '../../../ui/Button';
 
 interface VaultItemsPanelProps {
@@ -45,6 +47,8 @@ export function VaultItemsPanel({
   syncingItemId,
   assignedHostCounts,
 }: VaultItemsPanelProps) {
+  const showHostAddressesInLists = useShowHostAddressesInLists();
+
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between px-1">
@@ -107,7 +111,9 @@ export function VaultItemsPanel({
                 <p className="text-xs text-app-muted">No items match &quot;{itemSearch}&quot;</p>
               </div>
             ) : (
-              filteredItems.map((item) => (
+              filteredItems.map((item) => {
+                const displayLabel = formatPrivacyAwareLabel(item.label, showHostAddressesInLists);
+                return (
                 <div
                   key={item.id}
                   className="flex items-center justify-between px-4 py-3 group transition-colors hover:bg-app-surface/20"
@@ -116,12 +122,12 @@ export function VaultItemsPanel({
                     <button
                       type="button"
                       onClick={() => onInspect(item.id)}
-                      aria-label={`Inspect ${item.label}`}
-                      title={`Inspect ${item.label}`}
+                      aria-label={`Inspect ${displayLabel}`}
+                      title={`Inspect ${displayLabel}`}
                       className="block min-w-0 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-accent/40 focus-visible:ring-offset-2 focus-visible:ring-offset-app-panel"
                     >
                       <p className="text-sm text-app-text font-medium truncate hover:text-app-accent transition-colors">
-                        {item.label}
+                        {displayLabel}
                       </p>
                     </button>
                     <div className="mt-1 flex flex-wrap items-center gap-1.5">
@@ -170,7 +176,7 @@ export function VaultItemsPanel({
                             ? 'Sync credential to cloud provider'
                             : 'Connect provider + set up Google encryption first'
                       }
-                      aria-label={syncingItemId === item.id ? `Syncing ${item.label}` : `Sync ${item.label}`}
+                      aria-label={syncingItemId === item.id ? `Syncing ${displayLabel}` : `Sync ${displayLabel}`}
                     >
                       <Upload size={12} />
                       {syncingItemId === item.id ? 'Syncing…' : 'Sync'}
@@ -189,7 +195,7 @@ export function VaultItemsPanel({
                       onClick={() => onHistory(item.id)}
                       className="h-7 gap-1 px-2 text-[11px]"
                       title="View revision history"
-                      aria-label={`View history for ${item.label}`}
+                      aria-label={`View history for ${displayLabel}`}
                     >
                       <History size={12} />
                       History
@@ -199,13 +205,14 @@ export function VaultItemsPanel({
                       onClick={() => onDelete(item.id, item.label)}
                       className="focus:opacity-100 focus-visible:opacity-100 focus:outline-none focus:ring-2 focus:ring-red-400/40 p-1.5 rounded-md text-[var(--color-app-muted)] hover:text-red-400 hover:bg-red-400/10 transition-all"
                       title="Delete item"
-                      aria-label={`Delete ${item.label}`}
+                      aria-label={`Delete ${displayLabel}`}
                     >
                       <Trash2 size={14} />
                     </button>
                   </div>
                 </div>
-              ))
+                );
+              })
             )}
           </div>
         </>

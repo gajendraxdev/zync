@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { shouldTreatAgentInputAsAsk } from '../.tmp-agent-tests/src/components/ai/sidebarSubmit.js';
+import {
+  submitAgentGoal,
+  submitAskQuery,
+} from '../.tmp-agent-tests/src/components/ai/sidebarSubmit.js';
 
 function runTest(name, fn) {
   try {
@@ -11,14 +14,65 @@ function runTest(name, fn) {
   }
 }
 
-runTest('routes short greetings to ask mode', () => {
-  assert.equal(shouldTreatAgentInputAsAsk('hello'), true);
-  assert.equal(shouldTreatAgentInputAsAsk('thank you'), true);
+runTest('submitAskQuery collects context then submits', async () => {
+  const calls = [];
+  await submitAskQuery({
+    trimmed: 'hello',
+    connectionId: 'c1',
+    resetInput: () => calls.push('reset'),
+    collectContext: async () => {
+      calls.push('ctx');
+      return { os: 'linux' };
+    },
+    submitAiQuery: async (query, context, connectionId) => {
+      calls.push({ query, context, connectionId });
+    },
+  });
+
+  assert.deepEqual(calls, [
+    'ctx',
+    { query: 'hello', context: { os: 'linux' }, connectionId: 'c1' },
+    'reset',
+  ]);
 });
 
-runTest('keeps non-greeting work requests in agent mode', () => {
-  assert.equal(shouldTreatAgentInputAsAsk('restart nginx and inspect the logs'), false);
-  assert.equal(shouldTreatAgentInputAsAsk('hello there can you inspect the production redis issue now'), false);
+runTest('submitAgentGoal starts a run with history and approved plan', async () => {
+  const calls = [];
+  await submitAgentGoal({
+    goal: 'restart nginx',
+    agentRunning: false,
+    agentScope: 'global',
+    connectionId: null,
+    connectionLabel: null,
+    resetInput: () => calls.push('reset'),
+    collectContext: async () => ({ os: 'linux' }),
+    agentActions: {
+      getHistory: () => [{ role: 'user', text: 'prev' }],
+      getLastApprovedPlan: () => null,
+      startRun: (scope, runId, goal) => calls.push({ startRun: { scope, runId, goal } }),
+      addError: () => {},
+      endRun: () => {},
+    },
+    startAgentRun: async (payload) => {
+      calls.push({
+        startAgentRun: {
+          goal: payload.goal,
+          history: payload.history,
+          connectionId: payload.connectionId,
+        },
+      });
+    },
+  });
+
+  assert.equal(calls[0].startRun.scope, 'global');
+  assert.equal(calls[0].startRun.goal, 'restart nginx');
+  assert.equal(typeof calls[0].startRun.runId, 'string');
+  assert.deepEqual(calls[1].startAgentRun, {
+    goal: 'restart nginx',
+    history: [{ role: 'user', text: 'prev' }],
+    connectionId: null,
+  });
+  assert.equal(calls[2], 'reset');
 });
 
 console.log('Sidebar submit tests passed.');
