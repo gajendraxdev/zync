@@ -156,6 +156,13 @@ runTest('formatPrivacyAwareLabel strips bare user@host and leftover IPv4', () =>
   assert.equal(formatPrivacyAwareLabel('backup 10.0.0.5 key', false), 'backup ••• key');
 });
 
+runTest('formatPrivacyAwareLabel redacts IPv6 and bracketed endpoints', () => {
+  assert.equal(formatPrivacyAwareLabel('backup fe80::1 key', false), 'backup ••• key');
+  assert.equal(formatPrivacyAwareLabel('ops@[fe80::1]', false), 'ops');
+  assert.equal(formatPrivacyAwareLabel('key (ops@[fe80::1])', false), 'key (ops)');
+  assert.equal(formatPrivacyAwareLabel('node [2001:db8::1] ready', false), 'node ••• ready');
+});
+
 runTest('formatPrivacyAwareLabel cleans empty parens / whitespace and respects show mode', () => {
   assert.equal(formatPrivacyAwareLabel('key ()', false), 'key');
   assert.equal(formatPrivacyAwareLabel('backup  10.0.0.5  key', false), 'backup ••• key');
@@ -179,5 +186,15 @@ runTest('buildDefaultKeyVaultLabel prefers name and never embeds endpoints', () 
     buildDefaultKeyVaultLabel({ name: '', host: '10.0.0.1', username: 'root' }),
     'root key',
   );
+  assert.equal(
+    buildDefaultKeyVaultLabel({ name: '', host: '[fe80::1]', username: 'ops' }),
+    'ops key',
+  );
   assert.equal(buildDefaultKeyVaultLabel({}), 'user key');
+});
+
+runTest('isLikelyIpAddress treats bracketed IPv6 as IP', () => {
+  assert.equal(isLikelyIpAddress('[fe80::1]'), true);
+  assert.equal(isLikelyIpAddress('fe80::1'), true);
+  assert.equal(isLikelyIpAddress('prod.local'), false);
 });

@@ -450,15 +450,21 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
         };
         set({ settings: updated });
         const changedKeys = Object.keys(updates) as Array<keyof AppSettings['ai']>;
+        const optimisticAi = nextAi;
         try {
             await persistSettings({ ai: nextAi });
         } catch (error) {
             console.error('Failed to save AI settings:', error);
             const current = get().settings;
-            // Revert only keys this call changed so concurrent AI updates are kept.
+            // Revert only keys this call still owns (value unchanged since optimistic set).
             const rollbackPatch = Object.fromEntries(
-                changedKeys.map((key) => [key, previous.ai[key]]),
+                changedKeys
+                    .filter((key) => current.ai[key] === optimisticAi[key])
+                    .map((key) => [key, previous.ai[key]]),
             ) as Partial<AppSettings['ai']>;
+            if (Object.keys(rollbackPatch).length === 0) {
+                throw error;
+            }
             set({ settings: { ...current, ai: { ...current.ai, ...rollbackPatch } } });
             throw error;
         }

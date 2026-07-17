@@ -4,9 +4,9 @@ import {
   submitAskQuery,
 } from '../.tmp-agent-tests/src/components/ai/sidebarSubmit.js';
 
-function runTest(name, fn) {
+async function runTest(name, fn) {
   try {
-    fn();
+    await fn();
     console.log(`PASS ${name}`);
   } catch (error) {
     console.error(`FAIL ${name}`);
@@ -14,7 +14,7 @@ function runTest(name, fn) {
   }
 }
 
-runTest('submitAskQuery collects context then submits', async () => {
+await runTest('submitAskQuery collects context then submits', async () => {
   const calls = [];
   await submitAskQuery({
     trimmed: 'hello',
@@ -36,7 +36,7 @@ runTest('submitAskQuery collects context then submits', async () => {
   ]);
 });
 
-runTest('submitAgentGoal starts a run with history and approved plan', async () => {
+await runTest('submitAgentGoal starts a run with history and approved plan', async () => {
   const calls = [];
   await submitAgentGoal({
     goal: 'restart nginx',
