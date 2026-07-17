@@ -6,14 +6,45 @@ use serde::{Deserialize, Serialize};
 
 use crate::ai::AiTranslateResponse;
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+fn default_ai_provider() -> String {
+    "ollama".to_string()
+}
+
+fn default_ai_enabled() -> bool {
+    true
+}
+
+fn default_ollama_url() -> Option<String> {
+    Some("http://localhost:11434".to_string())
+}
+
+/// Partial `settings.ai` objects (e.g. only `{ provider, model }`) must still deserialize.
+/// Missing `enabled` previously failed parse and silently fell back to Ollama defaults.
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct AiConfig {
+    #[serde(default = "default_ai_provider")]
     pub provider: String,
+    #[serde(default)]
     pub keys: Option<HashMap<String, String>>,
+    #[serde(default)]
     pub model: Option<String>,
+    #[serde(default = "default_ollama_url")]
     pub ollama_url: Option<String>,
+    #[serde(default = "default_ai_enabled")]
     pub enabled: bool,
+}
+
+impl Default for AiConfig {
+    fn default() -> Self {
+        Self {
+            provider: default_ai_provider(),
+            keys: None,
+            model: None,
+            ollama_url: default_ollama_url(),
+            enabled: default_ai_enabled(),
+        }
+    }
 }
 
 impl AiConfig {

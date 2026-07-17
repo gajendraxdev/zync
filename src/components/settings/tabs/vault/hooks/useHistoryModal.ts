@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { vaultIpc, type RevisionMeta, type VaultItem } from '../../../../../vault/ipc';
 import type { ToastType } from '../../../../../store/toastSlice';
 import type { Connection } from '../../../../../features/connections/domain/types';
+import { privacyLabel } from '../privacyLabel';
 
 interface UseHistoryModalOptions {
   items: VaultItem[];
@@ -63,9 +64,10 @@ export function useHistoryModal({
     if (isRestoring) return;
     if (!item) return;
 
+    const displayLabel = privacyLabel(item.label);
     const confirmed = await showConfirmDialog({
       title: 'Restore Previous Revision',
-      message: `Restore revision ${revision} of "${item.label}"? The current secret will be saved to history first.`,
+      message: `Restore revision ${revision} of "${displayLabel}"? The current secret will be saved to history first.`,
       confirmText: 'Restore',
     });
     if (!confirmed) return;
@@ -95,14 +97,14 @@ export function useHistoryModal({
 
       showToast(
         'success',
-        `Restored revision ${revision} of "${item.label}". Hosts keep the same credential identity.`,
+        `Restored revision ${revision} of "${displayLabel}". Hosts keep the same credential identity.`,
       );
       try {
         await onRestored();
         // Reload history so the modal reflects the new state.
         const updated = await vaultIpc.itemRevisionHistory(item.id);
         setRevisions(updated);
-        await onPromptDisconnect(affectedConnectionIds, `Restoring "${item.label}"`);
+        await onPromptDisconnect(affectedConnectionIds, `Restoring "${displayLabel}"`);
       } catch (e: unknown) {
         showToast('error', `Restored revision, but post-restore refresh failed: ${getErrorMessage(e)}`);
       }

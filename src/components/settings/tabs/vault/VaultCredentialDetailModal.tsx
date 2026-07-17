@@ -3,6 +3,11 @@ import { KeyRound, ShieldCheck, ShieldEllipsis } from 'lucide-react';
 import type { VaultItemDetail } from '../../../../vault/ipc';
 import { getCredentialKindLabel, type CredentialField } from '../../../../vault/credentialTypes';
 import type { Connection } from '../../../../features/connections/domain/types';
+import {
+  formatPrivacyAwareLabel,
+  getConnectionDisplayLabels,
+} from '../../../../features/connections/domain/connectionDisplay';
+import { useShowHostAddressesInLists } from '../../../../features/connections/presentation/useConnectionDisplayLabels';
 import { Button } from '../../../ui/Button';
 import { Modal } from '../../../ui/Modal';
 
@@ -45,14 +50,18 @@ export function VaultCredentialDetailModal({
   isLoading,
   onClose,
 }: VaultCredentialDetailModalProps) {
+  const showHostAddressesInLists = useShowHostAddressesInLists();
   const fields = item?.credential?.fields ?? [];
   const summary = secretFieldSummary(fields);
+  const displayLabel = item
+    ? formatPrivacyAwareLabel(item.label, showHostAddressesInLists)
+    : null;
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={item ? `${item.label} Details` : 'Credential Details'}
+      title={displayLabel ? `${displayLabel} Details` : 'Credential Details'}
       subtitle="Credential information and assigned hosts. Secret values stay inside the encrypted vault."
       width="max-w-2xl"
     >
@@ -103,17 +112,18 @@ export function VaultCredentialDetailModal({
               {assignedConnections.length === 0 ? (
                 <p className="text-xs text-app-muted">No hosts currently reference this credential.</p>
               ) : (
-                assignedConnections.map((connection) => (
-                  <div
-                    key={connection.id}
-                    className="rounded-lg border border-app-border/40 bg-app-bg/30 px-3 py-2"
-                  >
-                    <p className="text-xs font-semibold text-app-text">{connection.name}</p>
-                    <p className="mt-1 text-[11px] text-app-muted">
-                      {connection.username}@{connection.host}:{connection.port}
-                    </p>
-                  </div>
-                ))
+                assignedConnections.map((connection) => {
+                  const labels = getConnectionDisplayLabels(connection, showHostAddressesInLists);
+                  return (
+                    <div
+                      key={connection.id}
+                      className="rounded-lg border border-app-border/40 bg-app-bg/30 px-3 py-2"
+                    >
+                      <p className="text-xs font-semibold text-app-text">{labels.primary}</p>
+                      <p className="mt-1 text-[11px] text-app-muted">{labels.secondary}</p>
+                    </div>
+                  );
+                })
               )}
             </div>
           </div>

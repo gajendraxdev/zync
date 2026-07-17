@@ -29,13 +29,7 @@ fn merge_secret_keys(app: &AppHandle, mut config: AiConfig) -> AiConfig {
 }
 
 fn default_ai_config() -> AiConfig {
-    AiConfig {
-        provider: "ollama".to_string(),
-        keys: None,
-        model: None,
-        ollama_url: Some("http://localhost:11434".to_string()),
-        enabled: true,
-    }
+    AiConfig::default()
 }
 
 pub fn read_ai_config(app: &AppHandle) -> AiConfig {
@@ -44,10 +38,34 @@ pub fn read_ai_config(app: &AppHandle) -> AiConfig {
             if let Some(ai) = settings.get("ai") {
                 match serde_json::from_value::<AiConfig>(ai.clone()) {
                     Ok(config) => return merge_secret_keys(app, config),
-                    #[cfg(debug_assertions)]
-                    Err(e) => eprintln!("[zync/ai] Failed to parse AI config from effective settings: {e}"),
-                    #[cfg(not(debug_assertions))]
-                    Err(_) => {}
+                    Err(e) => {
+                        // Soft-parse: fill missing fields from defaults instead of
+                        // throwing away a valid provider selection (e.g. mistral without `enabled`).
+                        #[cfg(debug_assertions)]
+                        eprintln!(
+                            "[zync/ai] Partial AI config parse failed ({e}); merging with defaults"
+                        );
+                        let defaults = serde_json::to_value(AiConfig::default())
+                            .unwrap_or_else(|_| serde_json::json!({}));
+                        // Only apply non-null overlay fields so explicit JSON null
+                        // cannot wipe valid defaults (e.g. "enabled": null).
+                        let merged = match (defaults, ai.clone()) {
+                            (serde_json::Value::Object(mut base), serde_json::Value::Object(overlay)) => {
+                                for (k, v) in overlay {
+                                    if !v.is_null() {
+                                        base.insert(k, v);
+                                    }
+                                }
+                                serde_json::Value::Object(base)
+                            }
+                            (_, overlay) => overlay,
+                        };
+                        if let Ok(config) = serde_json::from_value::<AiConfig>(merged) {
+                            return merge_secret_keys(app, config);
+                        }
+                        #[cfg(debug_assertions)]
+                        eprintln!("[zync/ai] Failed to recover AI config after merge with defaults");
+                    }
                 }
             } else {
                 #[cfg(debug_assertions)]

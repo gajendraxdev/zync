@@ -20,6 +20,7 @@ import { useAgentRunStore } from '../../ai/store/agentRunStore';
 import { ToolCallBlock } from './ToolCallBlock';
 import { CheckpointBlock } from './CheckpointBlock';
 import { PlanBubble } from './PlanBubble';
+import { AiSetupErrorCard } from './AiSetupErrorCard';
 import { respondToCheckpoint, whitelistCommand } from '../../ai/services/aiClient';
 import type {
   AgentThinkingEvent,
@@ -228,9 +229,11 @@ function DoneBubble({ success, summary, actions = [], sessionPath }: { success: 
 
 function ErrorBubble({ message }: { message: string }) {
   return (
-    <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-xl border bg-red-500/5 border-red-500/20">
-      <XCircle size={14} className="shrink-0 text-red-400 mt-0.5" />
-      <p className="text-[12px] text-red-300/80 leading-relaxed">{message}</p>
+    <div className="px-1">
+      <AiSetupErrorCard
+        message={message}
+        className="flex flex-col gap-2 px-3 py-2.5 rounded-xl border bg-red-500/5 border-red-500/20 text-red-300/90"
+      />
     </div>
   );
 }

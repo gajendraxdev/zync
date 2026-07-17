@@ -40,6 +40,8 @@ const BUILTIN_ICON_THEME_COUNT = 2; // VSCode Icons + Lucide
 
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     const settings = useAppStore(state => state.settings);
+    const settingsFocusTab = useAppStore(state => state.settingsFocusTab);
+    const clearSettingsFocusTab = useAppStore(state => state.clearSettingsFocusTab);
     const updateSettings = useAppStore(state => state.updateSettings);
     const updateAiSettings = useAppStore(state => state.updateAiSettings);
     const updateTerminalSettings = useAppStore(state => state.updateTerminalSettings);
@@ -82,6 +84,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     const [pluginTab, setPluginTab] = useState<'installed' | 'marketplace' | 'developer'>('installed');
     const [isTransitioning, setIsTransitioning] = useState(false);
     const [wslDistros, setWslDistros] = useState<string[]>([]);
+
+    // Deep-link from chat / command palette: open Settings already focused on a tab.
+    useEffect(() => {
+        if (!isOpen || !settingsFocusTab) return;
+        setActiveTab(settingsFocusTab);
+        clearSettingsFocusTab();
+    }, [isOpen, settingsFocusTab, clearSettingsFocusTab]);
 
     // Global Update State
     const updateStatus = useAppStore(state => state.updateStatus);

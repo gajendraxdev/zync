@@ -1,6 +1,8 @@
 import { History, RotateCcw } from 'lucide-react';
 import { useMemo } from 'react';
 import type { RevisionMeta, VaultItem } from '../../../../vault/ipc';
+import { formatPrivacyAwareLabel } from '../../../../features/connections/domain/connectionDisplay';
+import { useShowHostAddressesInLists } from '../../../../features/connections/presentation/useConnectionDisplayLabels';
 import { Button } from '../../../ui/Button';
 import { Modal } from '../../../ui/Modal';
 
@@ -43,13 +45,18 @@ export function CredentialHistoryModal({
   onClose,
   onRestore,
 }: CredentialHistoryModalProps) {
+  const showHostAddressesInLists = useShowHostAddressesInLists();
   // Memoize the reversed array so we don't allocate on every render.
   const sortedHistory = useMemo(() => [...history].reverse(), [history]);
+  const displayItemLabel = item
+    ? formatPrivacyAwareLabel(item.label, showHostAddressesInLists)
+    : null;
+
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={item ? `History — "${item.label}"` : 'Credential History'}
+      title={displayItemLabel ? `History — "${displayItemLabel}"` : 'Credential History'}
       subtitle="Previous revisions of this credential. Restoring a revision re-encrypts it as the new current value."
       width="max-w-lg"
     >
@@ -92,14 +99,16 @@ export function CredentialHistoryModal({
               Previous revisions — newest first
             </p>
             <div className="rounded-xl border border-app-border/60 bg-app-surface/25 divide-y divide-app-border/30 max-h-72 overflow-y-auto">
-              {sortedHistory.map((rev) => (
+              {sortedHistory.map((rev) => {
+                const revDisplayLabel = formatPrivacyAwareLabel(rev.label, showHostAddressesInLists);
+                return (
                 <div
                   key={`${rev.itemId}-${rev.revision}`}
                   className="flex items-center justify-between px-4 py-3 gap-3 group"
                 >
                   <div className="min-w-0">
                     <p className="text-sm text-app-text font-medium truncate">
-                      {rev.label}
+                      {revDisplayLabel}
                       <span className="ml-2 text-xs font-normal text-app-muted">
                         rev {rev.revision}
                       </span>
@@ -115,13 +124,14 @@ export function CredentialHistoryModal({
                     disabled={isRestoring}
                     className="shrink-0 h-7 gap-1 px-2 text-[11px] md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 transition-opacity"
                     title={`Restore revision ${rev.revision}`}
-                    aria-label={`Restore revision ${rev.revision} of ${rev.label}`}
+                    aria-label={`Restore revision ${rev.revision} of ${revDisplayLabel}`}
                   >
                     <RotateCcw size={11} />
                     Restore
                   </Button>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}

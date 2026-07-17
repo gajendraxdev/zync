@@ -298,9 +298,22 @@ async function persistSettings(settings: Record<string, unknown>): Promise<void>
     await invoke('settings_set', { settings });
 }
 
+/** Built-in settings sidebar tabs (matches SettingsModal). */
+export type SettingsTabId =
+    | 'general'
+    | 'terminal'
+    | 'appearance'
+    | 'fileManager'
+    | 'shortcuts'
+    | 'plugins'
+    | 'ai'
+    | 'about';
+
 export interface SettingsSlice {
     settings: AppSettings;
     isSettingsOpen: boolean;
+    /** When set, SettingsModal focuses this tab on open, then clears it. */
+    settingsFocusTab: SettingsTabId | null;
     isLoadingSettings: boolean;
     appRoot: string | null;
 
@@ -316,7 +329,8 @@ export interface SettingsSlice {
     updateKeybindings: (updates: Partial<AppSettings['keybindings']>) => Promise<void>;
     toggleExpandedFolder: (folderPath: string) => Promise<void>;
 
-    openSettings: () => void;
+    openSettings: (tab?: SettingsTabId) => void;
+    clearSettingsFocusTab: () => void;
     closeSettings: () => void;
     loadSettings: () => Promise<void>;
     fetchSystemInfo: () => Promise<void>;
@@ -325,6 +339,7 @@ export interface SettingsSlice {
 export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> = (set, get) => ({
     settings: defaultSettings,
     isSettingsOpen: false,
+    settingsFocusTab: null,
     isLoadingSettings: true,
     appRoot: null,
 
@@ -426,20 +441,30 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
 
     updateAiSettings: async (updates) => {
         const previous = get().settings;
+        // Always persist the full ai object so required fields (enabled, ollamaUrl)
+        // are not dropped when the picker only patches provider/model.
+        const nextAi = { ...previous.ai, ...updates };
         const updated = {
             ...previous,
-            ai: { ...previous.ai, ...updates }
+            ai: nextAi,
         };
         set({ settings: updated });
         const changedKeys = Object.keys(updates) as Array<keyof AppSettings['ai']>;
+        const optimisticAi = nextAi;
         try {
-            await persistSettings({ ai: updates });
+            await persistSettings({ ai: nextAi });
         } catch (error) {
             console.error('Failed to save AI settings:', error);
             const current = get().settings;
+            // Revert only keys this call still owns (value unchanged since optimistic set).
             const rollbackPatch = Object.fromEntries(
-                changedKeys.map((key) => [key, previous.ai[key]])
+                changedKeys
+                    .filter((key) => current.ai[key] === optimisticAi[key])
+                    .map((key) => [key, previous.ai[key]]),
             ) as Partial<AppSettings['ai']>;
+            if (Object.keys(rollbackPatch).length === 0) {
+                throw error;
+            }
             set({ settings: { ...current, ai: { ...current.ai, ...rollbackPatch } } });
             throw error;
         }
@@ -658,8 +683,12 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
         }
     },
 
-    openSettings: () => set({ isSettingsOpen: true }),
-    closeSettings: () => set({ isSettingsOpen: false }),
+    openSettings: (tab) => set({
+        isSettingsOpen: true,
+        settingsFocusTab: tab ?? null,
+    }),
+    clearSettingsFocusTab: () => set({ settingsFocusTab: null }),
+    closeSettings: () => set({ isSettingsOpen: false, settingsFocusTab: null }),
     fetchSystemInfo: async () => {
         try {
             const info = await invoke<{ app_root: string }>('get_system_info');

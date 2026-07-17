@@ -15,11 +15,6 @@ export interface AgentRunActions {
     endRun: (scope: string) => void;
 }
 
-export function shouldTreatAgentInputAsAsk(query: string): boolean {
-    return /^(hi|hello|hey|sup|yo|greetings|howdy|good morning|good afternoon|good evening|thanks|thank you)\b/i.test(query)
-        && query.length < 35;
-}
-
 export async function submitAskQuery(params: {
     trimmed: string;
     connectionId: string | null;

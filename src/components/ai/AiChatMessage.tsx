@@ -1,8 +1,11 @@
 import { memo, useCallback } from 'react';
-import { Copy, Play, ShieldCheck, ShieldAlert, AlertTriangle, Terminal, User, AlertCircle } from 'lucide-react';
+import { Copy, Play, ShieldCheck, ShieldAlert, AlertTriangle, Terminal, User } from 'lucide-react';
 import { AgentIcon } from './AgentIcon';
 import { cn } from '../../lib/utils';
 import type { AiDisplayEntry } from '../../ai/types/common';
+import { AiSetupErrorCard } from './AiSetupErrorCard';
+import { useAppStore } from '../../store/useAppStore';
+import type { ProviderValue } from './providerCatalog';
 
 interface AiChatMessageProps {
     entry: AiDisplayEntry;
@@ -76,6 +79,7 @@ function FormattedText({ text }: { text: string }) {
 
 export const AiChatMessage = memo(function AiChatMessage({ entry, onRunCommand }: AiChatMessageProps) {
     const { query, result, error, contextSnapshot, timestamp } = entry;
+    const aiProvider = useAppStore((s) => s.settings.ai?.provider) as ProviderValue | undefined;
     const time = new Date(timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
 
     return (
@@ -108,10 +112,7 @@ export const AiChatMessage = memo(function AiChatMessage({ entry, onRunCommand }
                 </div>
                 <div className="flex-1 min-w-0 space-y-3 pt-0.5">
                     {error ? (
-                        <div className="flex items-start gap-2 p-2.5 rounded-lg bg-red-500/8 border border-red-500/15 text-red-400">
-                            <AlertCircle size={12} className="shrink-0 mt-0.5" />
-                            <p className="text-[11px] leading-relaxed">{error}</p>
-                        </div>
+                        <AiSetupErrorCard message={error} provider={aiProvider} />
                     ) : result ? (
                         <>
                             {/* Main Answer (for conversational / Q&A responses) */}

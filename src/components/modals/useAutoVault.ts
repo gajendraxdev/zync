@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAppStore, Connection } from '../../store/useAppStore';
 import { useVaultStore } from '../../vault/useVaultStore';
 import { vaultIpc } from '../../vault/ipc';
-import { buildConnectionSavePayload } from '../../features/connections/domain';
+import { buildConnectionSavePayload, buildDefaultKeyVaultLabel } from '../../features/connections/domain';
 import { ToastType } from '../../store/toastSlice';
 
 interface UseAutoVaultOptions {
@@ -44,7 +44,11 @@ export function useAutoVault({
         setKeyVaultLabel('');
     }, [isOpen]);
 
-    const defaultKeyVaultLabel = `${formData.name || formData.host || 'credential'} key (${formData.username || 'user'}@${formData.host || 'host'})`;
+    const defaultKeyVaultLabel = buildDefaultKeyVaultLabel({
+        name: formData.name,
+        host: formData.host,
+        username: formData.username,
+    });
     const effectiveKeyVaultLabel = keyVaultLabel.trim() || defaultKeyVaultLabel;
     const keyVaultLabelConflict = vaultStatus?.status === 'unlocked'
         && authMethod === 'key'
