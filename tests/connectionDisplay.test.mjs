@@ -161,6 +161,9 @@ runTest('formatPrivacyAwareLabel redacts IPv6 and bracketed endpoints', () => {
   assert.equal(formatPrivacyAwareLabel('ops@[fe80::1]', false), 'ops');
   assert.equal(formatPrivacyAwareLabel('key (ops@[fe80::1])', false), 'key (ops)');
   assert.equal(formatPrivacyAwareLabel('node [2001:db8::1] ready', false), 'node ••• ready');
+  // Ordinary short labels must not be treated as bracketed IPv6.
+  assert.equal(formatPrivacyAwareLabel('task [1] done', false), 'task [1] done');
+  assert.equal(formatPrivacyAwareLabel('tag [db] only', false), 'tag [db] only');
 });
 
 runTest('formatPrivacyAwareLabel cleans empty parens / whitespace and respects show mode', () => {

@@ -137,8 +137,8 @@ export function getConnectionDisplayLabels(
 }
 
 const IPV4_IN_TEXT_RE = /\b(?:\d{1,3}\.){3}\d{1,3}\b/g;
-// Bracketed IPv6 host forms common in labels: `[fe80::1]`
-const IPV6_BRACKETED_IN_TEXT_RE = /\[[0-9a-fA-F:.]+\]/g;
+// Bracketed IPv6 host forms: require ≥2 colons so tags like `[1]` / `[db]` are kept.
+const IPV6_BRACKETED_IN_TEXT_RE = /\[[0-9a-fA-F.]*:[0-9a-fA-F.]*:[0-9a-fA-F.:]*\]/g;
 // Bare IPv6 with ≥2 colons (avoids single-colon tokens like `time:out`).
 const IPV6_BARE_IN_TEXT_RE = /(?<![:\w.])(?:[0-9a-fA-F]{0,4}:){2,}[0-9a-fA-F]{0,4}(?![:\w.])/g;
 // Bare `user@host` / `user@[ipv6]` / optional `:port`.
