@@ -6,7 +6,7 @@ import type React from 'react';
 import { cn, formatBytes, formatDate } from '../../lib/utils';
 import type { FileEntry } from './types';
 import { useAppStore } from '../../store/useAppStore';
-import { useState, useMemo, useEffect, useCallback, useRef, memo, type CSSProperties } from 'react';
+import { useState, useMemo, useEffect, useLayoutEffect, useCallback, useRef, memo, type CSSProperties } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 
@@ -420,6 +420,8 @@ function FileListRow({
 type FileGridCellExtra = FileListRowExtra & {
   columnCount: number;
   rowCount: number;
+  columnWidth: number;
+  rowHeight: number;
   compactMode: boolean;
   gap: number;
 };
@@ -501,13 +503,6 @@ export function FileGrid({
   const gridRef = useGridRef(null);
   const gridColumnCountRef = useRef(1);
   const lastReportedColumnCountRef = useRef<number | null>(null);
-  const gridLayoutRef = useRef({
-    columnCount: 1,
-    columnWidth: 0,
-    rowHeight: 0,
-    gap: 0,
-    rowCount: 1,
-  });
 
   const reportColumnCount = useCallback((count: number) => {
     gridColumnCountRef.current = count;
@@ -516,14 +511,12 @@ export function FileGrid({
     onGridColumnCount?.(count);
   }, [onGridColumnCount]);
 
-  const getGridColumnWidth = useCallback((index: number) => {
-    const layout = gridLayoutRef.current;
-    return fileGridSlotSize(index, layout.columnCount, layout.columnWidth, layout.gap);
+  const getGridColumnWidth = useCallback((index: number, cellProps: FileGridCellExtra) => {
+    return fileGridSlotSize(index, cellProps.columnCount, cellProps.columnWidth, cellProps.gap);
   }, []);
 
-  const getGridRowHeight = useCallback((index: number) => {
-    const layout = gridLayoutRef.current;
-    return fileGridSlotSize(index, layout.rowCount, layout.rowHeight, layout.gap);
+  const getGridRowHeight = useCallback((index: number, cellProps: FileGridCellExtra) => {
+    return fileGridSlotSize(index, cellProps.rowCount, cellProps.rowHeight, cellProps.gap);
   }, []);
 
   const scrollFocusedListRow = useCallback(() => {
@@ -546,7 +539,7 @@ export function FileGrid({
     });
   }, [viewMode, focusedFile, files, gridRef]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const listEl = listRef.current?.element;
     if (listEl) listEl.scrollTop = 0;
     const gridEl = gridRef.current?.element;
@@ -725,13 +718,6 @@ export function FileGrid({
                 getScrollbarSize(),
               );
               const rowCount = Math.max(1, Math.ceil(files.length / metrics.columnCount));
-              gridLayoutRef.current = {
-                columnCount: metrics.columnCount,
-                columnWidth: metrics.columnWidth,
-                rowHeight: metrics.rowHeight,
-                gap: metrics.gap,
-                rowCount,
-              };
               gridColumnCountRef.current = metrics.columnCount;
               if (lastReportedColumnCountRef.current !== metrics.columnCount) {
                 queueMicrotask(() => {
@@ -747,6 +733,8 @@ export function FileGrid({
                     ...listRowProps,
                     columnCount: metrics.columnCount,
                     rowCount,
+                    columnWidth: metrics.columnWidth,
+                    rowHeight: metrics.rowHeight,
                     compactMode,
                     gap: metrics.gap,
                   }}
