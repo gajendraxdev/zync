@@ -18,7 +18,7 @@ import { Tooltip } from '../ui/Tooltip';
 import { getScrollbarSize, Grid, List, useGridRef, useListRef } from 'react-window';
 import { AutoSizer } from 'react-virtualized-auto-sizer';
 import {
-  computeFileGridMetrics,
+  computeFileGridMetricsForViewport,
   FILE_LIST_COLUMNS,
   FILE_LIST_ROW_HEIGHT,
   fileGridSlotSize,
@@ -501,6 +501,13 @@ export function FileGrid({
   const gridRef = useGridRef(null);
   const gridColumnCountRef = useRef(1);
   const lastReportedColumnCountRef = useRef<number | null>(null);
+  const gridLayoutRef = useRef({
+    columnCount: 1,
+    columnWidth: 0,
+    rowHeight: 0,
+    gap: 0,
+    rowCount: 1,
+  });
 
   const reportColumnCount = useCallback((count: number) => {
     gridColumnCountRef.current = count;
@@ -508,6 +515,16 @@ export function FileGrid({
     lastReportedColumnCountRef.current = count;
     onGridColumnCount?.(count);
   }, [onGridColumnCount]);
+
+  const getGridColumnWidth = useCallback((index: number) => {
+    const layout = gridLayoutRef.current;
+    return fileGridSlotSize(index, layout.columnCount, layout.columnWidth, layout.gap);
+  }, []);
+
+  const getGridRowHeight = useCallback((index: number) => {
+    const layout = gridLayoutRef.current;
+    return fileGridSlotSize(index, layout.rowCount, layout.rowHeight, layout.gap);
+  }, []);
 
   const scrollFocusedListRow = useCallback(() => {
     if (viewMode !== 'list' || !focusedFile) return;
@@ -530,6 +547,16 @@ export function FileGrid({
   }, [viewMode, focusedFile, files, gridRef]);
 
   useEffect(() => {
+    const listEl = listRef.current?.element;
+    if (listEl) listEl.scrollTop = 0;
+    const gridEl = gridRef.current?.element;
+    if (gridEl) {
+      gridEl.scrollTop = 0;
+      gridEl.scrollLeft = 0;
+    }
+  }, [currentPath, listRef, gridRef]);
+
+  useEffect(() => {
     if (!focusedFile) return;
     if (viewMode === 'list') {
       scrollFocusedListRow();
@@ -538,7 +565,7 @@ export function FileGrid({
     if (viewMode === 'grid') {
       scrollFocusedGridCell(gridColumnCountRef.current);
     }
-  }, [focusedFile, viewMode, scrollFocusedListRow, scrollFocusedGridCell]);
+  }, [focusedFile, viewMode, compactMode, scrollFocusedListRow, scrollFocusedGridCell]);
 
   const listRowProps = useMemo(
     () => ({
@@ -690,12 +717,28 @@ export function FileGrid({
             style={{ height: '100%', width: '100%' }}
             renderProp={({ height, width }) => {
               if (!height || !width) return null;
-              const metrics = computeFileGridMetrics(width, compactMode);
+              const metrics = computeFileGridMetricsForViewport(
+                width,
+                height,
+                files.length,
+                compactMode,
+                getScrollbarSize(),
+              );
+              const rowCount = Math.max(1, Math.ceil(files.length / metrics.columnCount));
+              gridLayoutRef.current = {
+                columnCount: metrics.columnCount,
+                columnWidth: metrics.columnWidth,
+                rowHeight: metrics.rowHeight,
+                gap: metrics.gap,
+                rowCount,
+              };
               gridColumnCountRef.current = metrics.columnCount;
               if (lastReportedColumnCountRef.current !== metrics.columnCount) {
-                queueMicrotask(() => reportColumnCount(metrics.columnCount));
+                queueMicrotask(() => {
+                  reportColumnCount(metrics.columnCount);
+                  scrollFocusedGridCell(metrics.columnCount);
+                });
               }
-              const rowCount = Math.max(1, Math.ceil(files.length / metrics.columnCount));
               return (
                 <Grid
                   gridRef={gridRef}
@@ -708,13 +751,9 @@ export function FileGrid({
                     gap: metrics.gap,
                   }}
                   columnCount={metrics.columnCount}
-                  columnWidth={(index) =>
-                    fileGridSlotSize(index, metrics.columnCount, metrics.columnWidth, metrics.gap)
-                  }
+                  columnWidth={getGridColumnWidth}
                   rowCount={rowCount}
-                  rowHeight={(index) =>
-                    fileGridSlotSize(index, rowCount, metrics.rowHeight, metrics.gap)
-                  }
+                  rowHeight={getGridRowHeight}
                   overscanCount={4}
                   style={{ height, width }}
                   onResize={() => {

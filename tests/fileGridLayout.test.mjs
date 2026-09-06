@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import {
   computeFileGridMetrics,
+  computeFileGridMetricsForViewport,
   FILE_LIST_COLUMNS,
+  fileGridContentHeight,
   fileGridKeyboardIndex,
   fileGridSlotSize,
   sortFileEntries,
@@ -52,6 +54,23 @@ runTest('fileGridSlotSize adds gap except on the last track', () => {
   assert.equal(fileGridSlotSize(0, 3, 100, 8), 108);
   assert.equal(fileGridSlotSize(2, 3, 100, 8), 100);
   assert.equal(fileGridSlotSize(0, 1, 120, 16), 120);
+});
+
+runTest('computeFileGridMetricsForViewport keeps full width when content fits', () => {
+  const full = computeFileGridMetrics(500, false);
+  const fitted = computeFileGridMetricsForViewport(500, 400, 2, false, 17);
+  assert.equal(fitted.columnCount, full.columnCount);
+  assert.equal(fitted.columnWidth, full.columnWidth);
+  assert.ok(fileGridContentHeight(2, fitted) <= 400);
+});
+
+runTest('computeFileGridMetricsForViewport subtracts scrollbar when rows overflow', () => {
+  const full = computeFileGridMetrics(500, false);
+  const overflowed = computeFileGridMetricsForViewport(500, 200, 40, false, 17);
+  const guttered = computeFileGridMetrics(500 - 17, false);
+  assert.ok(fileGridContentHeight(40, full) > 200);
+  assert.equal(overflowed.columnCount, guttered.columnCount);
+  assert.equal(overflowed.columnWidth, guttered.columnWidth);
 });
 
 runTest('fileGridKeyboardIndex is row-major', () => {

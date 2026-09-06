@@ -182,6 +182,12 @@ export const FileManager = memo(function FileManager({
   const [sortColumn, setSortColumn] = useState<FileSortColumn>('name');
   const [sortDirection, setSortDirection] = useState<FileSortDirection>('asc');
   const [gridColumnCount, setGridColumnCount] = useState(1);
+  const [selectionPath, setSelectionPath] = useState(currentPath);
+  if (selectionPath !== currentPath) {
+    setSelectionPath(currentPath);
+    setSelectedFiles([]);
+    setFocusedFile(null);
+  }
   const [searchTerm, setSearchTerm] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isEditingPath, setIsEditingPath] = useState(false);
@@ -438,7 +444,7 @@ export const FileManager = memo(function FileManager({
     await executeFileOperations(ops);
   }, [activeConnectionId, clipboard, currentPath, executeFileOperations]);
 
-  const handleMoveFiles = async (moves: { source: string; target: string; sourceConnectionId?: string }[]) => {
+  const handleMoveFiles = useCallback(async (moves: { source: string; target: string; sourceConnectionId?: string }[]) => {
     if (!activeConnectionId || moves.length === 0) return;
 
     const ops = moves.map(m => ({
@@ -453,7 +459,7 @@ export const FileManager = memo(function FileManager({
     const targetDir = firstTarget ? firstTarget.substring(0, firstTarget.lastIndexOf('/')) || '/' : undefined;
 
     await executeFileOperations(ops, targetDir);
-  };
+  }, [activeConnectionId, executeFileOperations]);
 
   const resolveConflict = async (action: ConflictAction, applyToAll = false) => {
     if (!currentConflict || !activeConnectionId || isProcessing) return;
@@ -835,7 +841,7 @@ export const FileManager = memo(function FileManager({
     }
   }, [activeConnectionId, editingFile, currentPath, handleConnectionError, showToast]);
 
-  const handleSelect = (filename: string, multi: boolean) => {
+  const handleSelect = useCallback((filename: string, multi: boolean) => {
     if (!filename) {
       setSelectedFiles([]);
       return;
@@ -847,23 +853,17 @@ export const FileManager = memo(function FileManager({
       setSelectedFiles([filename]);
       setFocusedFile(filename);
     }
-  };
+  }, []);
 
-  const handleContextMenu = (e: React.MouseEvent, file?: FileEntry) => {
+  const handleContextMenu = useCallback((e: React.MouseEvent, file?: FileEntry) => {
     e.preventDefault();
-    e.stopPropagation(); // Just in case
+    e.stopPropagation();
     setContextMenu({ x: e.clientX, y: e.clientY, file: file || null });
 
-    // Only select if it's a file context menu
     if (file) {
-      if (!selectedFiles.includes(file.name)) {
-        setSelectedFiles([file.name]);
-      }
-    } else {
-      // Background context menu - maybe clear selection?
-      // setSelectedFiles([]); // Optional: clear selection on background right-click
+      setSelectedFiles((prev) => (prev.includes(file.name) ? prev : [file.name]));
     }
-  };
+  }, []);
 
   const showHiddenFiles = settings.fileManager.showHiddenFiles;
   const filteredFiles = useMemo(

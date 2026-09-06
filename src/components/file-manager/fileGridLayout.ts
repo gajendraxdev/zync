@@ -66,6 +66,27 @@ export function fileGridSlotSize(index: number, count: number, track: number, ga
   return track + gap;
 }
 
+export function fileGridContentHeight(fileCount: number, metrics: FileGridMetrics): number {
+  if (fileCount <= 0) return 0;
+  const rowCount = Math.max(1, Math.ceil(fileCount / metrics.columnCount));
+  return rowCount * metrics.rowHeight + Math.max(0, rowCount - 1) * metrics.gap;
+}
+
+/** Shrink the layout width when a classic vertical scrollbar will appear. */
+export function computeFileGridMetricsForViewport(
+  width: number,
+  height: number,
+  fileCount: number,
+  compactMode: boolean,
+  scrollbarSize: number,
+): FileGridMetrics {
+  const full = computeFileGridMetrics(width, compactMode);
+  if (fileCount <= 0 || scrollbarSize <= 0 || fileGridContentHeight(fileCount, full) <= height) {
+    return full;
+  }
+  return computeFileGridMetrics(Math.max(0, width - scrollbarSize), compactMode);
+}
+
 export function fileGridKeyboardIndex(row: number, col: number, columnCount: number): number {
   return row * Math.max(1, columnCount) + col;
 }
