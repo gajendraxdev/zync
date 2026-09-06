@@ -15,6 +15,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { forwardRef } from 'react';
 import { buildDragData, startInternalDrag, validateAndBuildMoves } from './dragDropUtils';
 import { Tooltip } from '../ui/Tooltip';
+import { sortFileEntries, type FileSortColumn, type FileSortDirection } from './fileGridLayout';
 
 // Extended Icon Selector with Colors
 const FileIcon = memo(function FileIcon({ file, size }: { file: FileEntry; size: number }) {
@@ -358,8 +359,8 @@ interface FileGridProps {
   onMove?: (moves: { source: string; target: string; sourceConnectionId?: string }[]) => void;
 }
 
-type SortColumn = 'name' | 'size' | 'type' | 'modified';
-type SortDirection = 'asc' | 'desc';
+type SortColumn = FileSortColumn;
+type SortDirection = FileSortDirection;
 
 export function FileGrid({
   files,
@@ -397,31 +398,10 @@ export function FileGrid({
     }
   };
 
-  const sortedFiles = useMemo(() => {
-    return [...files].sort((a, b) => {
-      if (a.type === 'd' && b.type !== 'd') return -1;
-      if (a.type !== 'd' && b.type === 'd') return 1;
-
-      let comparison = 0;
-      switch (sortColumn) {
-        case 'name':
-          comparison = a.name.localeCompare(b.name);
-          break;
-        case 'size':
-          comparison = a.size - b.size;
-          break;
-        case 'type':
-          const extA = a.name.split('.').pop()?.toLowerCase() || '';
-          const extB = b.name.split('.').pop()?.toLowerCase() || '';
-          comparison = extA.localeCompare(extB);
-          break;
-        case 'modified':
-          comparison = a.lastModified - b.lastModified;
-          break;
-      }
-      return sortDirection === 'asc' ? comparison : -comparison;
-    });
-  }, [files, sortColumn, sortDirection]);
+  const sortedFiles = useMemo(
+    () => sortFileEntries(files, sortColumn, sortDirection),
+    [files, sortColumn, sortDirection],
+  );
 
 
 

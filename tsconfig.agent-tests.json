@@ -113,6 +113,8 @@
         "src/lib/paneLayout/persist.ts",
         "src/lib/paneLayout/groups.ts",
         "src/lib/paneLayout/index.ts",
+        "src/components/file-manager/types.ts",
+        "src/components/file-manager/fileGridLayout.ts",
         "src/components/layout/featureMeta.ts",
         "src/lib/shells/types.ts",
         "src/components/layout/workspaceOpen/types.ts",
