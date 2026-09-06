@@ -211,11 +211,12 @@ Public surface exported from `index.ts`. Key modules:
 
 | File | Responsibility |
 |------|------|
-| `src-tauri/src/pty.rs` | PtyManager: local spawn/read/write/resize/close; remote SSH reader; output batching (8ms / 4KB); explicit `child.kill()` on close |
-| `src-tauri/src/commands.rs` | `terminal_create` (accepts output `Channel`), `terminal_write`, `terminal_resize`, `terminal_has_active_processes`, close variants |
+| `src-tauri/src/pty.rs` | PtyManager: local spawn/read/write/resize/close; remote SSH reader; output flush via `pty_output_flush`; explicit `child.kill()` on close |
+| `src-tauri/src/pty_output_flush.rs` | Idle-immediate + fixed 12 ms burst epoch + 128 KiB flush **threshold** (not max frame size). Process-wide flush-reason counters. |
+| `src-tauri/src/commands.rs` | `terminal_create` (accepts output `Channel`), `terminal_write`, `terminal_resize`, `terminal_has_active_processes`, `terminal_flush_stats` (process-wide flush-reason snapshot; not on the output Channel), close variants |
 | `src-tauri/src/ghost/*` | Ghost suggestion persistence, parser, ranking, Tauri commands |
 
-**Output batching (remote & local):** `REMOTE_OUTPUT_BATCH_MS` / `OUTPUT_FLUSH_THRESHOLD` coalesce before sending to frontend channel.
+**Output flush (remote & local):** `OUTPUT_BURST_EPOCH_MS` (12 ms **fixed epoch**, not a debounce) and `OUTPUT_BURST_FLUSH_THRESHOLD` (128 KiB — flush at least this soon while bursting, not a max frame size). First bytes after idle send immediately; later packets in the epoch accumulate; close/EOF/`output_rx` None always drain the tail. Frame layout is unchanged: `u32` LE generation + raw bytes.
 
 **Resize (remote):** SSH resize channel drains to latest cols/rows (trailing coalesce).
 
@@ -230,6 +231,7 @@ Public surface exported from `index.ts`. Key modules:
 - `terminal:resize` — cols/rows from unified resize scheduler
 - `terminal:close` / `terminal:close_by_connection` — programmatic teardown (**no** `terminal-exit`)
 - `terminal_has_active_processes` — local sysinfo child-tree probe
+- `terminal:flush-stats` / `terminal_flush_stats` — process-wide flush-reason counters (`idle_first` / `timer` / `threshold` / `close`). Debug only. Not on the PTY output Channel.
 
 ### Events (listen)
 
@@ -310,7 +312,9 @@ xterm.onData
 [ u32 generation (LE) ][ raw PTY bytes... ]
 ```
 
-Decoded in `terminalOutputStream.ts` → `term.write()` after generation check.
+Decoded in `terminalOutputStream.ts` → generation check → sniffers → `term.write()` of the **full** frame.
+
+Sniffers (secret prompt / prompt cwd) are reading aids. Frames ≤ 8 KiB are scanned in full. Larger frames scan only the last 4 KiB (`selectSnifferBytes`). A prompt is detected iff it appears in a ≤8 KiB frame or in that tail. `term.write` is never sliced (byte-exact xterm). OSC 7 cwd is parsed inside xterm, not these sniffers.
 
 **Legacy:** `terminal-output-*` events removed. `terminalOutputPayload.ts` retains base64/array decode for older dev builds.
 
@@ -536,6 +540,7 @@ src/index.css              # .terminal-container, xterm 6 viewport overrides
 
 ```
 src-tauri/src/pty.rs
+src-tauri/src/pty_output_flush.rs
 src-tauri/src/commands.rs
 src-tauri/src/ghost/
 ```

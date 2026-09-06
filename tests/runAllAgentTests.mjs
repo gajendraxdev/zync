@@ -57,6 +57,7 @@ const tests = [
   'tests/connectionService.test.mjs',
   'tests/connectionTabService.test.mjs',
   'tests/ghostSuggestionsHelpers.test.mjs',
+  'tests/terminalOutputStream.test.mjs',
   'tests/providerCatalog.test.mjs',
   'tests/quickConnectParsing.test.mjs',
   'tests/quickConnectSubcomponents.test.mjs',

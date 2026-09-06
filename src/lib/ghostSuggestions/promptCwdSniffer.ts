@@ -73,16 +73,19 @@ export function extractCwdFromPromptOutput(text: string): string | null {
 const sniffBuffers = new Map<string, string>();
 const sniffDecoders = new Map<string, TextDecoder>();
 
+export type CwdSnifferFeedOptions = { resetDecoder?: boolean };
+
 /** Feed PTY output bytes; invokes onCwd when a prompt path is recognized. */
 export function feedPromptCwdSniffer(
   termId: string,
   data: Uint8Array,
   onCwd: (path: string) => void,
+  options?: CwdSnifferFeedOptions,
 ): void {
   if (!data.length) return;
 
   let decoder = sniffDecoders.get(termId);
-  if (!decoder) {
+  if (options?.resetDecoder || !decoder) {
     decoder = new TextDecoder('utf-8', { fatal: false });
     sniffDecoders.set(termId, decoder);
   }

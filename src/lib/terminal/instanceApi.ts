@@ -5,6 +5,7 @@ import { disposeTerminalLigatures } from './ligatures.js';
 import { clearTerminalPendingInput, terminalCache } from './terminalCache.js';
 import { clearTerminalInputQueue } from './inputQueue.js';
 import { silenceTerminalOutputChannel } from './terminalReloadTeardown.js';
+import { clearTerminalIoDebug } from './terminalIoDebug.js';
 export function getTerminalRecentLines(termId: string, lineCount = 20): string | null {
   if (!termId) {
     return null;
@@ -47,6 +48,7 @@ export function destroyTerminalInstance(termId: string): void {
 
   silenceTerminalOutputChannel(cached.outputChannel);
   cached.outputChannel = undefined;
+  clearTerminalIoDebug(termId);
 
   try {
     cached.term.dispose();

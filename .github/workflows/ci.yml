@@ -74,6 +74,8 @@ jobs:
           cargo test local_only
           cargo test commands::private_key_inspection_tests
           cargo test ssh::tests -- --test-threads=1
+          cargo test pty_output_flush
+          cargo test pty::tests
 
       - name: Run ignored SSH security tests on Linux
         if: matrix.platform == 'ubuntu-22.04'

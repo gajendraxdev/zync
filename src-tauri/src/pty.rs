@@ -5,19 +5,17 @@ use russh::{Channel, ChannelMsg};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::mem;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc as std_mpsc;
 use std::sync::Arc;
 use tauri::ipc::{Channel as IpcChannel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc, Mutex};
-use tokio::time::{Duration, Instant};
+use tokio::time::Instant;
 
-/// Maximum time to hold PTY output before emitting a combined frontend event.
-const OUTPUT_BATCH_MS: u64 = 8;
-/// Flush buffered PTY output immediately once it reaches this many bytes.
-const OUTPUT_FLUSH_THRESHOLD: usize = 4096;
+use crate::pty_output_flush::{
+    encode_output_frame, record_flush_reason, FlushInstruction, FlushReason, OutputFlushPolicy,
+};
 
 enum LocalReaderEvent {
     Data(Vec<u8>),
@@ -243,27 +241,43 @@ struct TerminalLifecycleEvent {
     exit_code: Option<u32>,
 }
 
-/// Flushes buffered PTY output through the streaming IPC channel.
+/// Flushes PTY bytes through the streaming IPC channel.
 ///
 /// Frames are `generation` (u32 LE) + raw PTY bytes so the frontend can ignore
-/// stale chunks after suspend/restart races.
-fn flush_pending_output(
-    output_channel: &IpcChannel,
-    generation: u32,
-    pending_output: &mut Vec<u8>,
-) {
-    if pending_output.is_empty() {
+/// stale chunks after suspend/restart races. Layout must not change.
+fn flush_output_frame(output_channel: &IpcChannel, generation: u32, bytes: Vec<u8>) {
+    if bytes.is_empty() {
         return;
     }
 
-    let output = mem::take(pending_output);
-    let mut frame = Vec::with_capacity(4 + output.len());
-    frame.extend_from_slice(&generation.to_le_bytes());
-    frame.extend_from_slice(&output);
-
+    let frame = encode_output_frame(generation, &bytes);
     if let Err(e) = output_channel.send(InvokeResponseBody::Raw(frame)) {
         eprintln!("[PTY] Failed to send output on channel: {}", e);
     }
+}
+
+fn apply_flush_instruction(
+    output_channel: &IpcChannel,
+    generation: u32,
+    instruction: FlushInstruction,
+) {
+    if let FlushInstruction::Flush {
+        bytes,
+        reason,
+        rearm_burst: _,
+    } = instruction {
+        record_flush_reason(reason);
+        flush_output_frame(output_channel, generation, bytes);
+    }
+}
+
+fn flush_policy_tail(output_channel: &IpcChannel, generation: u32, policy: &mut OutputFlushPolicy) {
+    let tail = policy.take_tail_on_close();
+    if tail.is_empty() {
+        return;
+    }
+    record_flush_reason(FlushReason::Close);
+    flush_output_frame(output_channel, generation, tail);
 }
 
 fn process_tree_has_children(root_pid: u32) -> bool {
@@ -324,20 +338,17 @@ fn remote_wait_action(msg: Option<&ChannelMsg>) -> RemoteWaitAction {
 
 fn buffer_remote_wait_output(
     msg: &ChannelMsg,
-    pending_output: &mut Vec<u8>,
-    flush_deadline: &mut Option<Instant>,
+    policy: &mut OutputFlushPolicy,
     output_channel: &IpcChannel,
     generation: u32,
 ) {
     match msg {
         ChannelMsg::Data { data } | ChannelMsg::ExtendedData { data, .. } => {
-            pending_output.extend_from_slice(data.as_ref());
-            if pending_output.len() >= OUTPUT_FLUSH_THRESHOLD {
-                flush_pending_output(output_channel, generation, pending_output);
-                *flush_deadline = None;
-            } else if flush_deadline.is_none() {
-                *flush_deadline = Some(Instant::now() + Duration::from_millis(OUTPUT_BATCH_MS));
-            }
+            apply_flush_instruction(
+                output_channel,
+                generation,
+                policy.on_bytes(data.as_ref(), Instant::now()),
+            );
         }
         _ => {}
     }
@@ -673,25 +684,22 @@ impl PtyManager {
         let term_id_for_exit = term_id.clone();
 
         let reader_handle = tokio::spawn(async move {
-            let mut pending_output = Vec::new();
-            let mut flush_deadline: Option<Instant> = None;
+            let mut policy = OutputFlushPolicy::new();
 
             loop {
+                let deadline = policy.deadline();
                 tokio::select! {
                     event = output_rx.recv() => {
                         match event {
                             Some(LocalReaderEvent::Data(chunk)) => {
-                                pending_output.extend_from_slice(&chunk);
-
-                                if pending_output.len() >= OUTPUT_FLUSH_THRESHOLD {
-                                    flush_pending_output(&output_channel_clone, generation, &mut pending_output);
-                                    flush_deadline = None;
-                                } else if flush_deadline.is_none() {
-                                    flush_deadline = Some(Instant::now() + Duration::from_millis(OUTPUT_BATCH_MS));
-                                }
+                                apply_flush_instruction(
+                                    &output_channel_clone,
+                                    generation,
+                                    policy.on_bytes(&chunk, Instant::now()),
+                                );
                             }
                             Some(LocalReaderEvent::Finished { exit_code }) => {
-                                flush_pending_output(&output_channel_clone, generation, &mut pending_output);
+                                flush_policy_tail(&output_channel_clone, generation, &mut policy);
                                 if !exit_emitted_clone.swap(true, Ordering::SeqCst) {
                                     emit_terminal_exit(
                                         &app_handle_clone,
@@ -712,17 +720,23 @@ impl PtyManager {
                                 }
                                 break;
                             }
-                            None => break,
+                            None => {
+                                flush_policy_tail(&output_channel_clone, generation, &mut policy);
+                                break;
+                            }
                         }
                     }
 
                     _ = async {
-                        if let Some(deadline) = flush_deadline {
-                            tokio::time::sleep_until(deadline).await;
+                        if let Some(d) = deadline {
+                            tokio::time::sleep_until(d).await;
                         }
-                    }, if flush_deadline.is_some() => {
-                        flush_pending_output(&output_channel_clone, generation, &mut pending_output);
-                        flush_deadline = None;
+                    }, if deadline.is_some() => {
+                        apply_flush_instruction(
+                            &output_channel_clone,
+                            generation,
+                            policy.on_timer(Instant::now()),
+                        );
                     }
                 }
             }
@@ -897,12 +911,12 @@ impl PtyManager {
         // output/exit events can never arrive before the frontend has seen ready.
         let task_handle = tokio::task::spawn(async move {
             let app_handle = app_handle_clone;
-            let mut pending_output = Vec::new();
-            let mut flush_deadline: Option<Instant> = None;
+            let mut policy = OutputFlushPolicy::new();
             let drop_transport;
             let exit_code;
 
             loop {
+                let deadline = policy.deadline();
                 tokio::select! {
                     msg = channel.wait() => {
                         match remote_wait_action(msg.as_ref()) {
@@ -910,21 +924,20 @@ impl PtyManager {
                                 if let Some(ref msg) = msg {
                                     buffer_remote_wait_output(
                                         msg,
-                                        &mut pending_output,
-                                        &mut flush_deadline,
+                                        &mut policy,
                                         &output_channel_clone,
                                         generation,
                                     );
                                 }
                             }
                             RemoteWaitAction::PaneExit { exit_code: code } => {
-                                flush_pending_output(&output_channel_clone, generation, &mut pending_output);
+                                flush_policy_tail(&output_channel_clone, generation, &mut policy);
                                 drop_transport = false;
                                 exit_code = Some(code);
                                 break;
                             }
                             RemoteWaitAction::TransportDrop => {
-                                flush_pending_output(&output_channel_clone, generation, &mut pending_output);
+                                flush_policy_tail(&output_channel_clone, generation, &mut policy);
                                 exit_code = Some(None);
                                 drop_transport = true;
                                 break;
@@ -935,12 +948,15 @@ impl PtyManager {
                     }
 
                     _ = async {
-                        if let Some(deadline) = flush_deadline {
-                            tokio::time::sleep_until(deadline).await;
+                        if let Some(d) = deadline {
+                            tokio::time::sleep_until(d).await;
                         }
-                    }, if flush_deadline.is_some() => {
-                        flush_pending_output(&output_channel_clone, generation, &mut pending_output);
-                        flush_deadline = None;
+                    }, if deadline.is_some() => {
+                        apply_flush_instruction(
+                            &output_channel_clone,
+                            generation,
+                            policy.on_timer(Instant::now()),
+                        );
                     }
 
                     Some(input) = rx.recv() => {
@@ -964,7 +980,7 @@ impl PtyManager {
                 }
             }
 
-            flush_pending_output(&output_channel_clone, generation, &mut pending_output);
+            flush_policy_tail(&output_channel_clone, generation, &mut policy);
             let _ = channel.close().await;
 
             let mut sessions = sessions_for_exit.lock().await;

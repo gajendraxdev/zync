@@ -160,11 +160,16 @@ export {
   type LegacyTerminalOutputData,
   type TerminalOutputData,
 } from './terminalOutputPayload.js';
+export { attachTerminalOutputChannel } from './terminalOutputStream.js';
 export {
-  attachTerminalOutputChannel,
   decodeTerminalOutputChannelFrame,
   type TerminalOutputChannelFrame,
-} from './terminalOutputStream.js';
+} from './terminalOutputFrame.js';
+export {
+  selectSnifferBytes,
+  SNIFF_FULL_MAX_BYTES,
+  SNIFF_TAIL_BYTES,
+} from './terminalSnifferBytes.js';
 export {
   disposeTerminalOutputChannel,
   registerTerminalReloadTeardown,
