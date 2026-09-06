@@ -42,6 +42,7 @@ Thank you for your interest in contributing to Zync. This document provides guid
    npm run type-check
    npm run tauri build
    ```
+   Release Rust uses thin LTO (`src-tauri/Cargo.toml` `[profile.release]`). `tauri dev` is unchanged.
 
 4. Commit with clear, descriptive messages:
    ```bash
