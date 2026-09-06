@@ -23,6 +23,7 @@ import { isMatch } from '../lib/keyboard';
 import { FileEditor } from './FileEditor';
 import { CopyToServerModal } from './file-manager/CopyToServerModal';
 import { FileGrid } from './file-manager/FileGrid';
+import { sortFileEntries, type FileSortColumn, type FileSortDirection } from './file-manager/fileGridLayout';
 import { getCurrentDragSource } from '../lib/dragDrop';
 import { FileToolbar } from './file-manager/FileToolbar';
 import type { FileEntry } from './file-manager/types';
@@ -178,6 +179,8 @@ export const FileManager = memo(function FileManager({
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [focusedFile, setFocusedFile] = useState<string | null>(null);
+  const [sortColumn, setSortColumn] = useState<FileSortColumn>('name');
+  const [sortDirection, setSortDirection] = useState<FileSortDirection>('asc');
   const [searchTerm, setSearchTerm] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isEditingPath, setIsEditingPath] = useState(false);
@@ -865,6 +868,20 @@ export const FileManager = memo(function FileManager({
     if (!settings.fileManager.showHiddenFiles && f.name.startsWith('.')) return false;
     return f.name.toLowerCase().includes(searchTerm.toLowerCase());
   });
+  const paintedFiles = useMemo(
+    () => sortFileEntries(filteredFiles, sortColumn, sortDirection),
+    [filteredFiles, sortColumn, sortDirection],
+  );
+  const handleSort = useCallback((column: FileSortColumn) => {
+    setSortColumn((current) => {
+      if (current === column) {
+        setSortDirection((dir) => (dir === 'asc' ? 'desc' : 'asc'));
+        return current;
+      }
+      setSortDirection('asc');
+      return column;
+    });
+  }, []);
 
   // --- Action Handlers (Create, Rename, Upload, Delete, Download) ---
 
@@ -1371,16 +1388,12 @@ export const FileManager = memo(function FileManager({
         }
       }
 
-      const filteredFiles = files.filter((f) =>
-        f.name.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-
       const bindings = settings.keybindings || {};
 
       // Select All
       if (isMatch(e, bindings.fmSelectAll || 'Mod+A')) {
         e.preventDefault();
-        setSelectedFiles(filteredFiles.map((f) => f.name));
+        setSelectedFiles(paintedFiles.map((f) => f.name));
         return;
       }
 
@@ -1509,9 +1522,9 @@ export const FileManager = memo(function FileManager({
         return;
       }
 
-      if (filteredFiles.length === 0) return;
+      if (paintedFiles.length === 0) return;
 
-      const currentIndex = focusedFile ? filteredFiles.findIndex((f) => f.name === focusedFile) : -1;
+      const currentIndex = focusedFile ? paintedFiles.findIndex((f) => f.name === focusedFile) : -1;
 
       // Arrow Keys: Navigate
       // Note: These are standard navigation keys, not strictly "commands"
@@ -1525,14 +1538,14 @@ export const FileManager = memo(function FileManager({
           // We measure the DOM to find how many items fit in one row
           let gridCols = settings.compactMode ? 12 : 6; // Default fallback
 
-          if (filteredFiles.length > 0) {
-            const firstItem = document.getElementById(`file-item-${filteredFiles[0].name}`);
+          if (paintedFiles.length > 0) {
+            const firstItem = document.getElementById(`file-item-${paintedFiles[0].name}`);
             if (firstItem && firstItem.parentElement) {
               const baseTop = firstItem.offsetTop;
               let count = 0;
               // distinct scan to find row break
-              for (let i = 0; i < filteredFiles.length; i++) {
-                const el = document.getElementById(`file-item-${filteredFiles[i].name}`);
+              for (let i = 0; i < paintedFiles.length; i++) {
+                const el = document.getElementById(`file-item-${paintedFiles[i].name}`);
                 if (el && Math.abs(el.offsetTop - baseTop) < 10) {
                   count++;
                 } else {
@@ -1545,18 +1558,18 @@ export const FileManager = memo(function FileManager({
             }
           }
 
-          if (e.key === 'ArrowDown') newIndex = Math.min(currentIndex + gridCols, filteredFiles.length - 1);
+          if (e.key === 'ArrowDown') newIndex = Math.min(currentIndex + gridCols, paintedFiles.length - 1);
           else if (e.key === 'ArrowUp') newIndex = Math.max(currentIndex - gridCols, 0);
-          else if (e.key === 'ArrowRight') newIndex = Math.min(currentIndex + 1, filteredFiles.length - 1);
+          else if (e.key === 'ArrowRight') newIndex = Math.min(currentIndex + 1, paintedFiles.length - 1);
           else if (e.key === 'ArrowLeft') newIndex = Math.max(currentIndex - 1, 0);
         } else {
           // List view: only up/down
-          if (e.key === 'ArrowDown') newIndex = Math.min(currentIndex + 1, filteredFiles.length - 1);
+          if (e.key === 'ArrowDown') newIndex = Math.min(currentIndex + 1, paintedFiles.length - 1);
           else if (e.key === 'ArrowUp') newIndex = Math.max(currentIndex - 1, 0);
         }
 
         if (newIndex === -1) newIndex = 0;
-        const newFocused = filteredFiles[newIndex]?.name;
+        const newFocused = paintedFiles[newIndex]?.name;
         setFocusedFile(newFocused);
 
         // Update selection if Shift is held
@@ -1580,14 +1593,14 @@ export const FileManager = memo(function FileManager({
       // Home
       if (e.key === 'Home') {
         e.preventDefault();
-        if (filteredFiles.length > 0) setFocusedFile(filteredFiles[0].name);
+        if (paintedFiles.length > 0) setFocusedFile(paintedFiles[0].name);
         return;
       }
 
       // End
       if (e.key === 'End') {
         e.preventDefault();
-        if (filteredFiles.length > 0) setFocusedFile(filteredFiles[filteredFiles.length - 1].name);
+        if (paintedFiles.length > 0) setFocusedFile(paintedFiles[paintedFiles.length - 1].name);
         return;
       }
     };
@@ -1595,7 +1608,7 @@ export const FileManager = memo(function FileManager({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
-    activeConnectionId, searchTerm, isSearchOpen, files, settings, isNewFolderModalOpen, isNewFileModalOpen, isRenameModalOpen,
+    activeConnectionId, searchTerm, isSearchOpen, files, paintedFiles, settings, isNewFolderModalOpen, isNewFileModalOpen, isRenameModalOpen,
     editingFile, selectedFiles, focusedFile, handleNavigate, handleCopy, handlePaste,
     handleDelete, navigateBack, navigateForward, isCopyModalOpen, isPropertiesOpen, viewMode, isConnected, isFilesSurfaceActive,
   ]);
@@ -1716,7 +1729,7 @@ export const FileManager = memo(function FileManager({
           />
         ) : (
           <FileGrid
-            files={filteredFiles}
+            files={paintedFiles}
             selectedFiles={selectedFiles}
             focusedFile={focusedFile || undefined}
             onSelect={handleSelect}
@@ -1727,6 +1740,9 @@ export const FileManager = memo(function FileManager({
             connectionId={activeConnectionId || undefined}
             currentPath={currentPath}
             onMove={handleMoveFiles}
+            sortColumn={sortColumn}
+            sortDirection={sortDirection}
+            onSort={handleSort}
           />
         )}
       </div>

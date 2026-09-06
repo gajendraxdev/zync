@@ -6,6 +6,9 @@ export type FileSortDirection = 'asc' | 'desc';
 /** List-row height from FileListItem (`py-2` + 20px icon + border). Compact does not change list rows. */
 export const FILE_LIST_ROW_HEIGHT = 40;
 
+/** Shared header/row tracks: Name | Size (w-24) | Type (w-32) | Modified (w-40). */
+export const FILE_LIST_COLUMNS = 'minmax(0, 1fr) 6rem 8rem 10rem';
+
 export interface FileGridMetrics {
   columnCount: number;
   columnWidth: number;

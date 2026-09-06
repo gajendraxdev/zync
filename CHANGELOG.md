@@ -7,6 +7,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 ### Changed
 - **Terminal output flush:** First PTY bytes after quiet go to the terminal immediately (typing echo no longer waits up to 8 ms). Busy output merges for a 12 ms burst, or sooner at 128 KiB. The live Channel frame is still generation + raw bytes. Debug: `localStorage.zyncTerminalIoDebug = '1'`.
 - **Terminal sniffers:** Secret/cwd helpers scan at most the last 4 KiB of large PTY frames so `cat` does not regex the whole dump. The terminal still receives every byte.
+- **File list windowing:** The file manager list view only paints visible rows. Sort lives on FileManager so keyboard order matches the list. Grid view is unchanged for now.
 
 ### Added
 - **Smooth splits**: New panes grow in (about 280ms) instead of jumping to 50/50 — keyboard split, split icons, drag-to-dock, and Open in split / Open here. A quiet accent veil marks the incoming pane. Drag-to-split preview eases between edges. Divider drag stays immediate (no laggy flex transition). `prefers-reduced-motion` skips the intro. PTY resize waits until the intro ends, same as a divider drag. ([2d3b7c8])

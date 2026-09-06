@@ -6,7 +6,7 @@ import type React from 'react';
 import { cn, formatBytes, formatDate } from '../../lib/utils';
 import type { FileEntry } from './types';
 import { useAppStore } from '../../store/useAppStore';
-import { useState, useMemo, useEffect, memo } from 'react';
+import { useState, useMemo, useEffect, memo, type CSSProperties } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 
@@ -15,7 +15,14 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { forwardRef } from 'react';
 import { buildDragData, startInternalDrag, validateAndBuildMoves } from './dragDropUtils';
 import { Tooltip } from '../ui/Tooltip';
-import { sortFileEntries, type FileSortColumn, type FileSortDirection } from './fileGridLayout';
+import { List, useListRef } from 'react-window';
+import { AutoSizer } from 'react-virtualized-auto-sizer';
+import {
+  FILE_LIST_COLUMNS,
+  FILE_LIST_ROW_HEIGHT,
+  type FileSortColumn,
+  type FileSortDirection,
+} from './fileGridLayout';
 
 // Extended Icon Selector with Colors
 const FileIcon = memo(function FileIcon({ file, size }: { file: FileEntry; size: number }) {
@@ -218,8 +225,8 @@ const FileGridItem = memo(forwardRef<HTMLDivElement, {
   );
 }));
 
-// Memoized File List Item Component
-const FileListItem = memo(forwardRef<HTMLTableRowElement, {
+// Memoized File List Item Component — plain div (windowed rows must not replay motion enter).
+const FileListItem = memo(forwardRef<HTMLDivElement, {
   file: FileEntry;
   isSelected: boolean;
   selectedFiles: string[];
@@ -245,12 +252,9 @@ const FileListItem = memo(forwardRef<HTMLTableRowElement, {
   const isFolder = file.type === 'd';
 
   return (
-    <motion.tr
+    <div
       ref={ref}
-      initial={{ opacity: 0, x: -10 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: 10 }}
-      transition={{ duration: 0.2 }}
+      role="row"
       id={`file-item-${file.name}`}
       draggable={connectionId !== undefined}
       onDragStart={(e: any) => {
@@ -312,15 +316,17 @@ const FileListItem = memo(forwardRef<HTMLTableRowElement, {
         onContextMenu(e, file);
       }}
       className={cn(
-        'border-b border-app-border/20 cursor-pointer transition-colors outline-none',
+        'h-full border-b border-app-border/20 cursor-pointer transition-colors outline-none',
+        'grid items-center',
         'hover:bg-app-surface/40',
         isSelected && 'bg-app-accent/10 hover:bg-app-accent/15',
         isFocused && !isSelected && 'ring-1 ring-inset ring-app-accent/50 bg-app-surface/60',
         isFocused && isSelected && 'ring-1 ring-inset ring-app-accent',
       )}
+      style={{ gridTemplateColumns: FILE_LIST_COLUMNS }}
     >
-      <td className="py-2 px-4">
-        <div className="flex items-center gap-3">
+      <div className="py-2 px-4 min-w-0">
+        <div className="flex items-center gap-3 min-w-0">
           <FileIcon file={file} size={20} />
           <Tooltip content={file.name} position="right">
             <span className={cn('font-medium truncate', isSelected ? 'text-app-accent' : 'text-app-text')}>
@@ -328,17 +334,17 @@ const FileListItem = memo(forwardRef<HTMLTableRowElement, {
             </span>
           </Tooltip>
         </div>
-      </td>
-      <td className="py-2 px-4 text-sm text-app-muted font-mono">
+      </div>
+      <div className="py-2 px-4 text-sm text-app-muted font-mono">
         {isFolder ? '—' : formatBytes(file.size)}
-      </td>
-      <td className="py-2 px-4 text-sm text-app-muted">
+      </div>
+      <div className="py-2 px-4 text-sm text-app-muted">
         {isFolder ? 'Folder' : (file.name.split('.').pop()?.toUpperCase() || '—')}
-      </td>
-      <td className="py-2 px-4 text-sm text-app-muted">
+      </div>
+      <div className="py-2 px-4 text-sm text-app-muted">
         {formatDate(file.lastModified)}
-      </td>
-    </motion.tr>
+      </div>
+    </div>
   );
 }));
 
@@ -357,10 +363,60 @@ interface FileGridProps {
   currentPath?: string;
   focusedFile?: string | null;
   onMove?: (moves: { source: string; target: string; sourceConnectionId?: string }[]) => void;
+  sortColumn: FileSortColumn;
+  sortDirection: FileSortDirection;
+  onSort: (column: FileSortColumn) => void;
 }
 
-type SortColumn = FileSortColumn;
-type SortDirection = FileSortDirection;
+type FileListRowExtra = {
+  files: FileEntry[];
+  selectedFiles: string[];
+  focusedFile?: string | null;
+  connectionId?: string;
+  currentPath?: string;
+  onSelect: (name: string, multi: boolean) => void;
+  onNavigate: (name: string) => void;
+  onContextMenu: (e: React.MouseEvent, file?: FileEntry) => void;
+  onMove?: (moves: { source: string; target: string; sourceConnectionId?: string }[]) => void;
+};
+
+function FileListRow({
+  index,
+  style,
+  ariaAttributes,
+  files,
+  selectedFiles,
+  focusedFile,
+  connectionId,
+  currentPath,
+  onSelect,
+  onNavigate,
+  onContextMenu,
+  onMove,
+}: {
+  index: number;
+  style: CSSProperties;
+  ariaAttributes: { 'aria-posinset': number; 'aria-setsize': number; role: 'listitem' };
+} & FileListRowExtra) {
+  const file = files[index];
+  if (!file) return null;
+  return (
+    <div style={style} {...ariaAttributes}>
+      <FileListItem
+        file={file}
+        isSelected={selectedFiles.includes(file.name)}
+        selectedFiles={selectedFiles}
+        isFocused={focusedFile === file.name}
+        connectionId={connectionId}
+        currentPath={currentPath}
+        onSelect={onSelect}
+        onNavigate={onNavigate}
+        onContextMenu={onContextMenu}
+        onMove={onMove}
+      />
+    </div>
+  );
+}
 
 export function FileGrid({
   files,
@@ -374,33 +430,50 @@ export function FileGrid({
   currentPath,
   focusedFile,
   onMove,
+  sortColumn,
+  sortDirection,
+  onSort,
 }: FileGridProps) {
   const settings = useAppStore(state => state.settings);
   const compactMode = settings.compactMode;
-  const [sortColumn, setSortColumn] = useState<SortColumn>('name');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+  const listRef = useListRef(null);
 
   useEffect(() => {
-    if (focusedFile) {
-      const element = document.getElementById(`file-item-${focusedFile}`);
-      if (element) {
-        element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (!focusedFile) return;
+    if (viewMode === 'list') {
+      const index = files.findIndex((f) => f.name === focusedFile);
+      if (index >= 0) {
+        listRef.current?.scrollToRow({ index, align: 'smart', behavior: 'smooth' });
       }
+      return;
     }
-  }, [focusedFile]);
+    const element = document.getElementById(`file-item-${focusedFile}`);
+    element?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [focusedFile, files, viewMode, listRef]);
 
-  const handleSort = (column: SortColumn) => {
-    if (sortColumn === column) {
-      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortColumn(column);
-      setSortDirection('asc');
-    }
-  };
-
-  const sortedFiles = useMemo(
-    () => sortFileEntries(files, sortColumn, sortDirection),
-    [files, sortColumn, sortDirection],
+  const listRowProps = useMemo(
+    () => ({
+      files,
+      selectedFiles,
+      focusedFile,
+      connectionId,
+      currentPath,
+      onSelect,
+      onNavigate,
+      onContextMenu,
+      onMove,
+    }),
+    [
+      files,
+      selectedFiles,
+      focusedFile,
+      connectionId,
+      currentPath,
+      onSelect,
+      onNavigate,
+      onContextMenu,
+      onMove,
+    ],
   );
 
 
@@ -409,7 +482,7 @@ export function FileGrid({
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: <explanation>
     <div
-      className="flex-1 overflow-y-auto p-4 relative"
+      className="flex-1 min-h-0 overflow-hidden p-4 relative flex flex-col"
       onClick={() => onSelect('', false)}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -463,7 +536,7 @@ export function FileGrid({
       </AnimatePresence>
 
       <div className={cn(
-        "flex-1 h-full transition-all duration-500",
+        "flex-1 min-h-0 h-full transition-all duration-500",
         isLoading && "opacity-40 grayscale-[0.3] scale-[0.99] pointer-events-none cursor-wait"
       )}>
         {files.length === 0 ? (
@@ -482,64 +555,50 @@ export function FileGrid({
             })()}
           </motion.div>
         ) : viewMode === 'list' ? (
-        <table className="w-full border-collapse">
-          <thead className="sticky top-0 bg-app-panel/95 backdrop-blur-sm z-10 border-b border-app-border/40">
-            <tr className="text-left text-xs text-app-muted uppercase tracking-wider">
-              <th className="py-3 px-4 cursor-pointer hover:bg-app-surface/30 transition-colors group" onClick={() => handleSort('name')}>
-                <div className="flex items-center gap-2">
-                  Name
-                  {sortColumn === 'name' && (sortDirection === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />)}
-                  {sortColumn !== 'name' && <ArrowUpDown size={14} className="opacity-0 group-hover:opacity-40" />}
-                </div>
-              </th>
-              <th className="py-3 px-4 cursor-pointer hover:bg-app-surface/30 transition-colors group w-24" onClick={() => handleSort('size')}>
-                <div className="flex items-center gap-2">
-                  Size
-                  {sortColumn === 'size' && (sortDirection === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />)}
-                  {sortColumn !== 'size' && <ArrowUpDown size={14} className="opacity-0 group-hover:opacity-40" />}
-                </div>
-              </th>
-              <th className="py-3 px-4 cursor-pointer hover:bg-app-surface/30 transition-colors group w-32" onClick={() => handleSort('type')}>
-                <div className="flex items-center gap-2">
-                  Type
-                  {sortColumn === 'type' && (sortDirection === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />)}
-                  {sortColumn !== 'type' && <ArrowUpDown size={14} className="opacity-0 group-hover:opacity-40" />}
-                </div>
-              </th>
-              <th className="py-3 px-4 cursor-pointer hover:bg-app-surface/30 transition-colors group w-40" onClick={() => handleSort('modified')}>
-                <div className="flex items-center gap-2">
-                  Modified
-                  {sortColumn === 'modified' && (sortDirection === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />)}
-                  {sortColumn !== 'modified' && <ArrowUpDown size={14} className="opacity-0 group-hover:opacity-40" />}
-                </div>
-              </th>
-            </tr>
-          </thead>
-          <tbody className="relative">
-            <AnimatePresence mode="popLayout">
-              {sortedFiles.map((file) => (
-                <FileListItem
-                  key={file.name}
-                  file={file}
-                  isSelected={selectedFiles.includes(file.name)}
-                  selectedFiles={selectedFiles}
-                  isFocused={focusedFile === file.name}
-                  connectionId={connectionId}
-                  currentPath={currentPath}
-                  onSelect={onSelect}
-                  onNavigate={onNavigate}
-                  onContextMenu={onContextMenu}
-                  onMove={onMove}
-                />
-              ))}
-            </AnimatePresence>
-          </tbody>
-        </table>
+        <div className="flex flex-col h-full min-h-0">
+          <div
+            className="shrink-0 grid items-center text-left text-xs text-app-muted uppercase tracking-wider bg-app-panel/95 backdrop-blur-sm z-10 border-b border-app-border/40"
+            style={{ gridTemplateColumns: FILE_LIST_COLUMNS }}
+          >
+            {(['name', 'size', 'type', 'modified'] as const).map((column) => (
+              <button
+                key={column}
+                type="button"
+                className="py-3 px-4 text-left cursor-pointer hover:bg-app-surface/30 transition-colors group"
+                onClick={() => onSort(column)}
+              >
+                <span className="flex items-center gap-2">
+                  {column === 'name' ? 'Name' : column === 'size' ? 'Size' : column === 'type' ? 'Type' : 'Modified'}
+                  {sortColumn === column && (sortDirection === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />)}
+                  {sortColumn !== column && <ArrowUpDown size={14} className="opacity-0 group-hover:opacity-40" />}
+                </span>
+              </button>
+            ))}
+          </div>
+          <div className="flex-1 min-h-0">
+            <AutoSizer
+              style={{ height: '100%', width: '100%' }}
+              renderProp={({ height, width }) =>
+                height && width ? (
+                  <List
+                    listRef={listRef}
+                    rowCount={files.length}
+                    rowHeight={FILE_LIST_ROW_HEIGHT}
+                    rowComponent={FileListRow}
+                    rowProps={listRowProps}
+                    overscanCount={8}
+                    style={{ height, width }}
+                  />
+                ) : null
+              }
+            />
+          </div>
+        </div>
       ) : (
         <div
           key={currentPath}
           className={cn(
-            'animate-in slide-in-from-bottom-2 fade-in duration-300 ease-out',
+            'h-full overflow-y-auto animate-in slide-in-from-bottom-2 fade-in duration-300 ease-out',
             viewMode === 'grid'
               ? cn(
                 "grid content-start w-full",
@@ -551,7 +610,7 @@ export function FileGrid({
           )}
         >
           <AnimatePresence mode="popLayout">
-            {sortedFiles.map((file) => (
+            {files.map((file) => (
               <FileGridItem
                 key={file.name}
                 file={file}

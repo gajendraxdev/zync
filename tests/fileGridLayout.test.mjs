@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   computeFileGridMetrics,
+  FILE_LIST_COLUMNS,
   fileGridKeyboardIndex,
   sortFileEntries,
 } from '../.tmp-agent-tests/src/components/file-manager/fileGridLayout.js';
@@ -46,6 +47,11 @@ runTest('computeFileGridMetrics compact column count', () => {
 
 runTest('fileGridKeyboardIndex is row-major', () => {
   assert.equal(fileGridKeyboardIndex(1, 2, 4), 6);
+});
+
+runTest('FILE_LIST_COLUMNS includes name flex track and size column', () => {
+  assert.equal(FILE_LIST_COLUMNS.includes('minmax(0, 1fr)'), true);
+  assert.equal(FILE_LIST_COLUMNS.includes('6rem'), true);
 });
 
 console.log('fileGridLayout tests passed.');
