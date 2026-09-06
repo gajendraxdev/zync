@@ -3,6 +3,7 @@ import {
   computeFileGridMetrics,
   FILE_LIST_COLUMNS,
   fileGridKeyboardIndex,
+  fileGridSlotSize,
   sortFileEntries,
 } from '../.tmp-agent-tests/src/components/file-manager/fileGridLayout.js';
 
@@ -43,6 +44,14 @@ runTest('computeFileGridMetrics compact column count', () => {
   assert.equal(m.gap, 8);
   assert.equal(m.columnCount, 3);
   assert.ok(m.columnWidth > 100);
+  const filled = m.columnWidth * m.columnCount + m.gap * (m.columnCount - 1);
+  assert.ok(Math.abs(filled - 332) < 0.001);
+});
+
+runTest('fileGridSlotSize adds gap except on the last track', () => {
+  assert.equal(fileGridSlotSize(0, 3, 100, 8), 108);
+  assert.equal(fileGridSlotSize(2, 3, 100, 8), 100);
+  assert.equal(fileGridSlotSize(0, 1, 120, 16), 120);
 });
 
 runTest('fileGridKeyboardIndex is row-major', () => {

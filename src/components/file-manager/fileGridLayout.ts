@@ -60,6 +60,12 @@ export function computeFileGridMetrics(containerWidth: number, compactMode: bool
   return { columnCount, columnWidth, rowHeight, gap };
 }
 
+/** react-window slot size: track plus inter-item gap, except the last row/column. */
+export function fileGridSlotSize(index: number, count: number, track: number, gap: number): number {
+  if (count <= 1 || index >= count - 1) return track;
+  return track + gap;
+}
+
 export function fileGridKeyboardIndex(row: number, col: number, columnCount: number): number {
   return row * Math.max(1, columnCount) + col;
 }

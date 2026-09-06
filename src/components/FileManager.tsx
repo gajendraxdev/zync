@@ -181,6 +181,7 @@ export const FileManager = memo(function FileManager({
   const [focusedFile, setFocusedFile] = useState<string | null>(null);
   const [sortColumn, setSortColumn] = useState<FileSortColumn>('name');
   const [sortDirection, setSortDirection] = useState<FileSortDirection>('asc');
+  const [gridColumnCount, setGridColumnCount] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isEditingPath, setIsEditingPath] = useState(false);
@@ -1536,29 +1537,7 @@ export const FileManager = memo(function FileManager({
         let newIndex = currentIndex;
 
         if (viewMode === 'grid') {
-          // Dynamic Grid Column Calculation
-          // We measure the DOM to find how many items fit in one row
-          let gridCols = settings.compactMode ? 12 : 6; // Default fallback
-
-          if (paintedFiles.length > 0) {
-            const firstItem = document.getElementById(`file-item-${paintedFiles[0].name}`);
-            if (firstItem && firstItem.parentElement) {
-              const baseTop = firstItem.offsetTop;
-              let count = 0;
-              // distinct scan to find row break
-              for (let i = 0; i < paintedFiles.length; i++) {
-                const el = document.getElementById(`file-item-${paintedFiles[i].name}`);
-                if (el && Math.abs(el.offsetTop - baseTop) < 10) {
-                  count++;
-                } else {
-                  break; // Found the break
-                }
-                // Safety break for huge lists if layout is weird (e.g. all horizontal)
-                if (count > 50) break;
-              }
-              if (count > 0) gridCols = count;
-            }
-          }
+          const gridCols = Math.max(1, gridColumnCount);
 
           if (e.key === 'ArrowDown') newIndex = Math.min(currentIndex + gridCols, paintedFiles.length - 1);
           else if (e.key === 'ArrowUp') newIndex = Math.max(currentIndex - gridCols, 0);
@@ -1611,7 +1590,7 @@ export const FileManager = memo(function FileManager({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
     activeConnectionId, searchTerm, isSearchOpen, files, paintedFiles, settings, isNewFolderModalOpen, isNewFileModalOpen, isRenameModalOpen,
-    editingFile, selectedFiles, focusedFile, handleNavigate, handleCopy, handlePaste,
+    editingFile, selectedFiles, focusedFile, handleNavigate, handleCopy, handlePaste, gridColumnCount,
     handleDelete, navigateBack, navigateForward, isCopyModalOpen, isPropertiesOpen, viewMode, isConnected, isFilesSurfaceActive,
   ]);
 
@@ -1745,6 +1724,7 @@ export const FileManager = memo(function FileManager({
             sortColumn={sortColumn}
             sortDirection={sortDirection}
             onSort={handleSort}
+            onGridColumnCount={setGridColumnCount}
           />
         )}
       </div>

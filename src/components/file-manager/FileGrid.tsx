@@ -6,7 +6,7 @@ import type React from 'react';
 import { cn, formatBytes, formatDate } from '../../lib/utils';
 import type { FileEntry } from './types';
 import { useAppStore } from '../../store/useAppStore';
-import { useState, useMemo, useEffect, useCallback, memo, type CSSProperties } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef, memo, type CSSProperties } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 
@@ -15,11 +15,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { forwardRef } from 'react';
 import { buildDragData, startInternalDrag, validateAndBuildMoves } from './dragDropUtils';
 import { Tooltip } from '../ui/Tooltip';
-import { getScrollbarSize, List, useListRef } from 'react-window';
+import { getScrollbarSize, Grid, List, useGridRef, useListRef } from 'react-window';
 import { AutoSizer } from 'react-virtualized-auto-sizer';
 import {
+  computeFileGridMetrics,
   FILE_LIST_COLUMNS,
   FILE_LIST_ROW_HEIGHT,
+  fileGridSlotSize,
   type FileSortColumn,
   type FileSortDirection,
 } from './fileGridLayout';
@@ -91,12 +93,8 @@ const FileGridItem = memo(forwardRef<HTMLDivElement, {
   }, [file.path]);
 
   return (
-    <motion.div
+    <div
       ref={ref}
-      initial={{ opacity: 0, scale: 0.98 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.98 }}
-      transition={{ duration: 0.2 }}
       id={`file-item-${file.name}`}
       draggable={connectionId !== undefined}
       onDragStart={(e: any) => {
@@ -164,9 +162,9 @@ const FileGridItem = memo(forwardRef<HTMLDivElement, {
         'active:scale-95 duration-75',
         viewMode === 'grid'
           ? cn(
-            "flex flex-col items-center justify-start rounded-xl border border-transparent",
+            "flex flex-col items-center justify-start rounded-xl border border-transparent w-full h-full min-w-0",
             "hover:bg-app-surface/50",
-            compactMode ? "w-[100px] h-[120px] p-2 gap-1" : "w-[120px] h-[140px] p-3 gap-2"
+            compactMode ? "p-2 gap-1" : "p-3 gap-2"
           )
           : cn(
             "flex items-center rounded-lg border border-transparent hover:bg-app-surface/50",
@@ -221,7 +219,7 @@ const FileGridItem = memo(forwardRef<HTMLDivElement, {
           </div>
         )}
       </div>
-    </motion.div>
+    </div>
   );
 }));
 
@@ -366,6 +364,7 @@ interface FileGridProps {
   sortColumn: FileSortColumn;
   sortDirection: FileSortDirection;
   onSort: (column: FileSortColumn) => void;
+  onGridColumnCount?: (columnCount: number) => void;
 }
 
 type FileListRowExtra = {
@@ -418,6 +417,67 @@ function FileListRow({
   );
 }
 
+type FileGridCellExtra = FileListRowExtra & {
+  columnCount: number;
+  rowCount: number;
+  compactMode: boolean;
+  gap: number;
+};
+
+function FileGridCell({
+  columnIndex,
+  rowIndex,
+  style,
+  ariaAttributes,
+  files,
+  columnCount,
+  rowCount,
+  compactMode,
+  gap,
+  selectedFiles,
+  focusedFile,
+  connectionId,
+  currentPath,
+  onSelect,
+  onNavigate,
+  onContextMenu,
+  onMove,
+}: {
+  columnIndex: number;
+  rowIndex: number;
+  style: CSSProperties;
+  ariaAttributes: { 'aria-colindex': number; role: 'gridcell' };
+} & FileGridCellExtra) {
+  const index = rowIndex * columnCount + columnIndex;
+  const file = files[index];
+  const cellStyle: CSSProperties = {
+    ...style,
+    paddingRight: columnIndex < columnCount - 1 ? gap : 0,
+    paddingBottom: rowIndex < rowCount - 1 ? gap : 0,
+  };
+  if (!file) {
+    return <div style={cellStyle} />;
+  }
+  return (
+    <div style={cellStyle} {...ariaAttributes}>
+      <FileGridItem
+        file={file}
+        viewMode="grid"
+        compactMode={compactMode}
+        isSelected={selectedFiles.includes(file.name)}
+        selectedFiles={selectedFiles}
+        isFocused={focusedFile === file.name}
+        connectionId={connectionId}
+        currentPath={currentPath}
+        onSelect={onSelect}
+        onNavigate={onNavigate}
+        onContextMenu={onContextMenu}
+        onMove={onMove}
+      />
+    </div>
+  );
+}
+
 export function FileGrid({
   files,
   selectedFiles,
@@ -433,10 +493,21 @@ export function FileGrid({
   sortColumn,
   sortDirection,
   onSort,
+  onGridColumnCount,
 }: FileGridProps) {
   const settings = useAppStore(state => state.settings);
   const compactMode = settings.compactMode;
   const listRef = useListRef(null);
+  const gridRef = useGridRef(null);
+  const gridColumnCountRef = useRef(1);
+  const lastReportedColumnCountRef = useRef<number | null>(null);
+
+  const reportColumnCount = useCallback((count: number) => {
+    gridColumnCountRef.current = count;
+    if (lastReportedColumnCountRef.current === count) return;
+    lastReportedColumnCountRef.current = count;
+    onGridColumnCount?.(count);
+  }, [onGridColumnCount]);
 
   const scrollFocusedListRow = useCallback(() => {
     if (viewMode !== 'list' || !focusedFile) return;
@@ -445,15 +516,29 @@ export function FileGrid({
     listRef.current?.scrollToRow({ index, align: 'smart', behavior: 'auto' });
   }, [viewMode, focusedFile, files, listRef]);
 
+  const scrollFocusedGridCell = useCallback((columnCount: number) => {
+    if (viewMode !== 'grid' || !focusedFile || columnCount < 1) return;
+    const index = files.findIndex((f) => f.name === focusedFile);
+    if (index < 0) return;
+    gridRef.current?.scrollToCell({
+      rowIndex: Math.floor(index / columnCount),
+      columnIndex: index % columnCount,
+      rowAlign: 'smart',
+      columnAlign: 'smart',
+      behavior: 'auto',
+    });
+  }, [viewMode, focusedFile, files, gridRef]);
+
   useEffect(() => {
     if (!focusedFile) return;
     if (viewMode === 'list') {
       scrollFocusedListRow();
       return;
     }
-    const element = document.getElementById(`file-item-${focusedFile}`);
-    element?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
-  }, [focusedFile, viewMode, scrollFocusedListRow]);
+    if (viewMode === 'grid') {
+      scrollFocusedGridCell(gridColumnCountRef.current);
+    }
+  }, [focusedFile, viewMode, scrollFocusedListRow, scrollFocusedGridCell]);
 
   const listRowProps = useMemo(
     () => ({
@@ -600,39 +685,46 @@ export function FileGrid({
           </div>
         </div>
       ) : (
-        <div
-          key={currentPath}
-          className={cn(
-            'h-full overflow-y-auto animate-in slide-in-from-bottom-2 fade-in duration-300 ease-out',
-            viewMode === 'grid'
-              ? cn(
-                "grid content-start w-full",
-                compactMode
-                  ? "grid-cols-[repeat(auto-fill,minmax(100px,1fr))] gap-2"
-                  : "grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-4"
-              )
-              : 'flex flex-col gap-1',
-          )}
-        >
-          <AnimatePresence mode="popLayout">
-            {files.map((file) => (
-              <FileGridItem
-                key={file.name}
-                file={file}
-                viewMode={viewMode}
-                compactMode={compactMode}
-                isSelected={selectedFiles.includes(file.name)}
-                selectedFiles={selectedFiles}
-                isFocused={focusedFile === file.name}
-                connectionId={connectionId}
-                currentPath={currentPath}
-                onSelect={onSelect}
-                onNavigate={onNavigate}
-                onContextMenu={onContextMenu}
-                onMove={onMove}
-              />
-            ))}
-          </AnimatePresence>
+        <div className="h-full min-h-0">
+          <AutoSizer
+            style={{ height: '100%', width: '100%' }}
+            renderProp={({ height, width }) => {
+              if (!height || !width) return null;
+              const metrics = computeFileGridMetrics(width, compactMode);
+              gridColumnCountRef.current = metrics.columnCount;
+              if (lastReportedColumnCountRef.current !== metrics.columnCount) {
+                queueMicrotask(() => reportColumnCount(metrics.columnCount));
+              }
+              const rowCount = Math.max(1, Math.ceil(files.length / metrics.columnCount));
+              return (
+                <Grid
+                  gridRef={gridRef}
+                  cellComponent={FileGridCell}
+                  cellProps={{
+                    ...listRowProps,
+                    columnCount: metrics.columnCount,
+                    rowCount,
+                    compactMode,
+                    gap: metrics.gap,
+                  }}
+                  columnCount={metrics.columnCount}
+                  columnWidth={(index) =>
+                    fileGridSlotSize(index, metrics.columnCount, metrics.columnWidth, metrics.gap)
+                  }
+                  rowCount={rowCount}
+                  rowHeight={(index) =>
+                    fileGridSlotSize(index, rowCount, metrics.rowHeight, metrics.gap)
+                  }
+                  overscanCount={4}
+                  style={{ height, width }}
+                  onResize={() => {
+                    reportColumnCount(metrics.columnCount);
+                    scrollFocusedGridCell(metrics.columnCount);
+                  }}
+                />
+              );
+            }}
+          />
         </div>
       )}
       </div>
