@@ -6,7 +6,7 @@ import type React from 'react';
 import { cn, formatBytes, formatDate } from '../../lib/utils';
 import type { FileEntry } from './types';
 import { useAppStore } from '../../store/useAppStore';
-import { useState, useMemo, useEffect, memo, type CSSProperties } from 'react';
+import { useState, useMemo, useEffect, useCallback, memo, type CSSProperties } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 
@@ -15,7 +15,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { forwardRef } from 'react';
 import { buildDragData, startInternalDrag, validateAndBuildMoves } from './dragDropUtils';
 import { Tooltip } from '../ui/Tooltip';
-import { List, useListRef } from 'react-window';
+import { getScrollbarSize, List, useListRef } from 'react-window';
 import { AutoSizer } from 'react-virtualized-auto-sizer';
 import {
   FILE_LIST_COLUMNS,
@@ -438,18 +438,22 @@ export function FileGrid({
   const compactMode = settings.compactMode;
   const listRef = useListRef(null);
 
+  const scrollFocusedListRow = useCallback(() => {
+    if (viewMode !== 'list' || !focusedFile) return;
+    const index = files.findIndex((f) => f.name === focusedFile);
+    if (index < 0) return;
+    listRef.current?.scrollToRow({ index, align: 'smart', behavior: 'auto' });
+  }, [viewMode, focusedFile, files, listRef]);
+
   useEffect(() => {
     if (!focusedFile) return;
     if (viewMode === 'list') {
-      const index = files.findIndex((f) => f.name === focusedFile);
-      if (index >= 0) {
-        listRef.current?.scrollToRow({ index, align: 'smart', behavior: 'smooth' });
-      }
+      scrollFocusedListRow();
       return;
     }
     const element = document.getElementById(`file-item-${focusedFile}`);
-    element?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }, [focusedFile, files, viewMode, listRef]);
+    element?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
+  }, [focusedFile, viewMode, scrollFocusedListRow]);
 
   const listRowProps = useMemo(
     () => ({
@@ -558,7 +562,7 @@ export function FileGrid({
         <div className="flex flex-col h-full min-h-0">
           <div
             className="shrink-0 grid items-center text-left text-xs text-app-muted uppercase tracking-wider bg-app-panel/95 backdrop-blur-sm z-10 border-b border-app-border/40"
-            style={{ gridTemplateColumns: FILE_LIST_COLUMNS }}
+            style={{ gridTemplateColumns: FILE_LIST_COLUMNS, paddingRight: getScrollbarSize() }}
           >
             {(['name', 'size', 'type', 'modified'] as const).map((column) => (
               <button
@@ -588,6 +592,7 @@ export function FileGrid({
                     rowProps={listRowProps}
                     overscanCount={8}
                     style={{ height, width }}
+                    onResize={() => scrollFocusedListRow()}
                   />
                 ) : null
               }

@@ -864,24 +864,26 @@ export const FileManager = memo(function FileManager({
     }
   };
 
-  const filteredFiles = files.filter((f) => {
-    if (!settings.fileManager.showHiddenFiles && f.name.startsWith('.')) return false;
-    return f.name.toLowerCase().includes(searchTerm.toLowerCase());
-  });
+  const showHiddenFiles = settings.fileManager.showHiddenFiles;
+  const filteredFiles = useMemo(
+    () => files.filter((f) => {
+      if (!showHiddenFiles && f.name.startsWith('.')) return false;
+      return f.name.toLowerCase().includes(searchTerm.toLowerCase());
+    }),
+    [files, showHiddenFiles, searchTerm],
+  );
   const paintedFiles = useMemo(
     () => sortFileEntries(filteredFiles, sortColumn, sortDirection),
     [filteredFiles, sortColumn, sortDirection],
   );
   const handleSort = useCallback((column: FileSortColumn) => {
-    setSortColumn((current) => {
-      if (current === column) {
-        setSortDirection((dir) => (dir === 'asc' ? 'desc' : 'asc'));
-        return current;
-      }
-      setSortDirection('asc');
-      return column;
-    });
-  }, []);
+    if (column === sortColumn) {
+      setSortDirection((dir) => (dir === 'asc' ? 'desc' : 'asc'));
+      return;
+    }
+    setSortColumn(column);
+    setSortDirection('asc');
+  }, [sortColumn]);
 
   // --- Action Handlers (Create, Rename, Upload, Delete, Download) ---
 
