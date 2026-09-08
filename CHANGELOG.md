@@ -7,7 +7,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 ### Changed
 - **Terminal output flush:** First PTY bytes after quiet go to the terminal immediately (typing echo no longer waits up to 8 ms). Busy output merges for a 12 ms burst, or sooner at 128 KiB. The live Channel frame is still generation + raw bytes. Debug: `localStorage.zyncTerminalIoDebug = '1'`.
 - **Terminal sniffers:** Secret/cwd helpers scan at most the last 4 KiB of large PTY frames so `cat` does not regex the whole dump. The terminal still receives every byte.
-- **File list and grid windowing:** File Manager list and icon grid only paint visible cells. Sort lives on FileManager so keyboard order matches the painted order. Grid arrows use the live column count instead of scanning the DOM.
+- **File list and grid windowing:** File Manager list and icon grid only paint visible cells. Sort lives on FileManager so keyboard order matches the painted order. Grid arrows use the live column count instead of scanning the DOM. Folder loads no longer grayscale/scale the listing; recycled cells skip Radix tooltips and icon fade-in so scroll and clicks stay immediate. Icon-grid tiles use a fixed row height so the first row stays on screen and selected folders are normal-sized cards.
 
 ### Added
 - **Smooth splits**: New panes grow in (about 280ms) instead of jumping to 50/50 — keyboard split, split icons, drag-to-dock, and Open in split / Open here. A quiet accent veil marks the incoming pane. Drag-to-split preview eases between edges. Divider drag stays immediate (no laggy flex transition). `prefers-reduced-motion` skips the intro. PTY resize waits until the intro ends, same as a divider drag. ([2d3b7c8])
@@ -18,7 +18,8 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Open here in split**: Terminal **Open File Manager Here** is one row with **In a new tab** / **Left** / **Right** / **Bottom**. Files **Open Terminal Here** and **Follow with Terminal** use the same submenu. Split docks beside the current pane (not a stray new tab). ([2d3b7c8])
 
 ### Fixed
-- **Files opening at `/`**: File Manager no longer treats `/` as home. Open File Manager Here uses the shell cwd (or a real `fs_cwd`), not the pre-connect placeholder. First open and reconnect do the same. On Windows, local home uses `%USERPROFILE%` instead of unset `HOME`. ([2d3b7c8])
+- **Files opening at `/`**: File Manager no longer treats `/` as home. Open File Manager Here uses the shell cwd (or a real `fs_cwd`), not the pre-connect placeholder. First open ignores a shell cwd of `/` and waits for a real home instead of listing root. Reconnect keeps `/` when that listing already has files (hash button). Switching hosts clears selection and the open editor. On Windows, local home uses `%USERPROFILE%` instead of unset `HOME`. ([2d3b7c8])
+
 - **Drag shell tab onto itself**: Dropping the current shell tab on its own split is a no-op again and restores Files / Dashboard / Snippets if the drag started from that overlay. ([2d3b7c8])
 - **Open here after a tab switch**: Open File Manager Here / Open Terminal Here keep the tab that opened the menu, instead of applying to whichever tab is active after the await. ([2d3b7c8])
 - **Files overlay vs Files pane**: The keep-alive overlay FileManager no longer steals focus or drives Follow-terminal while a Files pane is showing (and the reverse). ([2d3b7c8])

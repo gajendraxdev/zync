@@ -41,9 +41,11 @@ import { clearEditorOverlayOpen, markEditorOverlayOpen } from './editor/overlayS
 import { TerminalDisconnectedView } from './terminal/TerminalDisconnectedView';
 import { isFeaturePaneFocused, layoutForTerm } from '../lib/paneLayout';
 import type { AppStore } from '../store/useAppStore';
-import { canSplitBesideFiles, openHerePlacementItems, openTerminalHere, pickFilesOpenPath } from './layout/tabDock';
+import { canSplitBesideFiles, isUnresolvedFilesPath, openHerePlacementItems, openTerminalHere, pickFilesOpenPath } from './layout/tabDock';
 
 export type FileManagerSurface = 'overlay' | 'pane';
+
+const EMPTY_FILES: FileEntry[] = [];
 
 function isFileManagerActive(
   state: AppStore,
@@ -143,11 +145,17 @@ export const FileManager = memo(function FileManager({
   });
   const isFilesSurfaceActive = useAppStore((state) => isFileManagerActive(state, connectionId, surface));
 
-  // Zustand Store Hooks
-  const filesMap = useAppStore(state => state.files);
-  const currentPathMap = useAppStore(state => state.currentPath);
-  const loadingMap = useAppStore(state => state.isLoading);
-  const errorMap = useAppStore(state => state.error);
+  // Zustand Store Hooks — subscribe to this connection only so other hosts do not re-paint Files.
+  const files = useAppStore(state => (
+    activeConnectionId ? (state.files[activeConnectionId] ?? EMPTY_FILES) : EMPTY_FILES
+  ));
+  const currentPath = useAppStore(state => (
+    activeConnectionId ? (state.currentPath[activeConnectionId] ?? '') : ''
+  ));
+  const loading = useAppStore(state => Boolean(activeConnectionId && state.isLoading[activeConnectionId]));
+  const currentError = useAppStore(state => (
+    activeConnectionId ? (state.error[activeConnectionId] ?? null) : null
+  ));
   const loadFiles = useAppStore(state => state.loadFiles);
   const refreshFiles = useAppStore(state => state.refreshFiles);
   const createFolder = useAppStore(state => state.createFolder);
@@ -164,17 +172,20 @@ export const FileManager = memo(function FileManager({
   const updateFileManagerSettings = useAppStore(state => state.updateFileManagerSettings);
   // const downloadAction = useAppStore(state => state.downloadFiles); // Not implemented fully yet
 
-  // Derived State
-  const files = activeConnectionId ? (filesMap[activeConnectionId] || []) : [];
-  const currentPath = activeConnectionId ? (currentPathMap[activeConnectionId] || '') : '';
-  const loading = activeConnectionId ? (loadingMap[activeConnectionId] || false) : false;
-  const currentError = activeConnectionId ? (errorMap[activeConnectionId] || null) : null;
   const activeHistoryIndex = useAppStore(state => (
     activeConnectionId ? (state.historyIndex[activeConnectionId] || 0) : 0
   ));
   const activeHistoryLength = useAppStore(state => (
     activeConnectionId ? (state.history[activeConnectionId]?.length || 0) : 0
   ));
+  const filesOpenHint = useAppStore((state) => {
+    if (!activeConnectionId) return '';
+    const activeId = state.activeTerminalIds[activeConnectionId];
+    const tabs = state.terminals[activeConnectionId] || [];
+    const term = tabs.find((tab) => tab.id === activeId) ?? tabs.find((tab) => tab.tabVisible !== false);
+    const home = state.connections.find((item) => item.id === activeConnectionId)?.homePath;
+    return `${term?.lastKnownCwd || ''}|${term?.initialPath || ''}|${home || ''}`;
+  });
 
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
@@ -196,6 +207,15 @@ export const FileManager = memo(function FileManager({
   const [editingFile, setEditingFile] = useState<FileEntry | null>(null);
   const [editorContent, setEditorContent] = useState('');
   const [editorProviderOverride, setEditorProviderOverride] = useState<string | null>(null);
+  const [boundConnectionId, setBoundConnectionId] = useState(activeConnectionId);
+  if (boundConnectionId !== activeConnectionId) {
+    setBoundConnectionId(activeConnectionId);
+    setSelectedFiles([]);
+    setFocusedFile(null);
+    setEditingFile(null);
+    setEditorContent('');
+    setEditorProviderOverride(null);
+  }
 
   // Modal States
   const [isNewFolderModalOpen, setIsNewFolderModalOpen] = useState(false);
@@ -695,14 +715,18 @@ export const FileManager = memo(function FileManager({
       initialPath: term?.initialPath,
       homePath: connection?.homePath,
     });
+    // `/` from lastKnownCwd / homePath is the connect placeholder, not home.
+    const fromPick = isUnresolvedFilesPath(picked) ? '' : picked;
+    const listingIsPlaceholder = isUnresolvedFilesPath(currentPath) && files.length === 0;
 
-    if (!currentPath) {
+    if (listingIsPlaceholder) {
       try {
-        const cwd = picked || await window.ipcRenderer.invoke('fs_cwd', {
+        const cwd = fromPick || await window.ipcRenderer.invoke('fs_cwd', {
           connectionId: activeConnectionId,
         });
         const path = typeof cwd === 'string' ? cwd.trim() : '';
-        if (!path) return;
+        // Do not paint `/` as home. Retry when lastKnownCwd/homePath updates.
+        if (!path || isUnresolvedFilesPath(path)) return;
         loadFiles(activeConnectionId, path);
 
         const termId = ensureTerminal(activeConnectionId, path);
@@ -718,12 +742,12 @@ export const FileManager = memo(function FileManager({
           return;
         }
         console.error('Failed to get home dir:', error);
-        if (picked) loadFiles(activeConnectionId, picked);
+        if (fromPick) loadFiles(activeConnectionId, fromPick);
       }
     } else if (files.length === 0) {
       loadFiles(activeConnectionId, currentPath);
     }
-  }, [activeConnectionId, isConnected, currentPath, files.length, loadFiles, ensureTerminal]);
+  }, [activeConnectionId, isConnected, currentPath, files.length, filesOpenHint, loadFiles, ensureTerminal]);
 
   const handleReconnect = useCallback(async () => {
     if (!activeConnectionId || isLocal) return;
@@ -731,11 +755,14 @@ export const FileManager = memo(function FileManager({
       await connect(activeConnectionId);
       const reconnected = useAppStore.getState().connections.find((c) => c.id === activeConnectionId) as (Connection & { error?: string }) | undefined;
       if (reconnected?.status === 'connected') {
-        let nextPath = currentPath;
+        const listingIsPlaceholder = isUnresolvedFilesPath(currentPath) && files.length === 0;
+        let nextPath = listingIsPlaceholder ? '' : currentPath;
         if (!nextPath) {
           try {
             const cwd = await window.ipcRenderer.invoke('fs_cwd', { connectionId: activeConnectionId });
-            if (typeof cwd === 'string' && cwd.trim()) nextPath = cwd.trim();
+            if (typeof cwd === 'string' && cwd.trim() && !isUnresolvedFilesPath(cwd)) {
+              nextPath = cwd.trim();
+            }
           } catch {
             // Keep empty; listing `/` as a silent fallback hides the real home.
           }
@@ -748,7 +775,7 @@ export const FileManager = memo(function FileManager({
       const message = error instanceof Error ? error.message : String(error);
       showToast('error', `Failed to reconnect: ${message}`);
     }
-  }, [activeConnectionId, connect, currentPath, isLocal, loadFiles, showToast]);
+  }, [activeConnectionId, connect, currentPath, files.length, isLocal, loadFiles, showToast]);
 
   useEffect(() => {
     if (activeConnectionId && isConnected) {

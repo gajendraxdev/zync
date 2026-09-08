@@ -9,6 +9,7 @@ export {
     canSplitBesideFiles,
     filesAlreadyInSplit,
     directoryFromFileLocation,
+    isUnresolvedFilesPath,
     parentDirectory,
     pickFilesOpenPath,
     type OpenHereFile,

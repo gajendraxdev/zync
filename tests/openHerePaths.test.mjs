@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { directoryFromFileLocation, parentDirectory, pickFilesOpenPath } from '../.tmp-agent-tests/src/components/layout/tabDock/openHerePaths.js';
+import { directoryFromFileLocation, isUnresolvedFilesPath, parentDirectory, pickFilesOpenPath } from '../.tmp-agent-tests/src/components/layout/tabDock/openHerePaths.js';
 
 function runTest(name, fn) {
   try {
@@ -19,6 +19,14 @@ runTest('pickFilesOpenPath prefers shell cwd and ignores placeholder home /', ()
   assert.equal(pickFilesOpenPath({ homePath: '/' }), '');
   assert.equal(pickFilesOpenPath({ lastKnownCwd: '', initialPath: '', homePath: '/' }), '');
   assert.equal(pickFilesOpenPath({}), '');
+});
+
+runTest('isUnresolvedFilesPath treats empty and / as not a Files home', () => {
+  assert.equal(isUnresolvedFilesPath(''), true);
+  assert.equal(isUnresolvedFilesPath('/'), true);
+  assert.equal(isUnresolvedFilesPath(' / '), true);
+  assert.equal(isUnresolvedFilesPath('/home/appserver'), false);
+  assert.equal(isUnresolvedFilesPath('C:\\Users\\gajen'), false);
 });
 
 runTest('directory uses the listed Files path for empty space', () => {
