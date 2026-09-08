@@ -7,12 +7,12 @@ All notable changes to Zync are documented in this file. The format is based on 
 ## [2.30.0] - 2026-09-08
 
 ### Changed
-- **Terminal output flush:** First PTY bytes after quiet go to the terminal immediately (typing echo no longer waits up to 8 ms). Busy output merges for a 12 ms burst, or sooner at 128 KiB. The live Channel frame is still generation + raw bytes. Debug: `localStorage.zyncTerminalIoDebug = '1'`.
-- **Terminal sniffers:** Secret/cwd helpers scan at most the last 4 KiB of large PTY frames so `cat` does not regex the whole dump. The terminal still receives every byte.
-- **File list and grid windowing:** File Manager list and icon grid only paint visible cells. Sort lives on FileManager so keyboard order matches the painted order. Grid arrows use the live column count instead of scanning the DOM. Folder loads no longer grayscale/scale the listing; recycled cells skip Radix tooltips and icon fade-in so scroll and clicks stay immediate. Icon-grid tiles use a fixed row height so the first row stays on screen and selected folders are normal-sized cards.
+- **Terminal output flush:** First PTY bytes after quiet go to the terminal immediately (typing echo no longer waits up to 8 ms). Busy output merges for a 12 ms burst, or sooner at 128 KiB. The live Channel frame is still generation + raw bytes. Debug: `localStorage.zyncTerminalIoDebug = '1'`. ([2424743], [d6ca46b])
+- **Terminal sniffers:** Secret/cwd helpers scan at most the last 4 KiB of large PTY frames so `cat` does not regex the whole dump. The terminal still receives every byte. ([2424743], [1ed79d8])
+- **File list and grid windowing:** File Manager list and icon grid only paint visible cells. Sort lives on FileManager so keyboard order matches the painted order. Grid arrows use the live column count instead of scanning the DOM. Folder loads no longer grayscale/scale the listing; recycled cells skip Radix tooltips and icon fade-in so scroll and clicks stay immediate. Icon-grid tiles use a fixed row height so the first row stays on screen and selected folders are normal-sized cards. ([c266a76], [5750e36], [ccb38e4], [7fa63ae], [ae6b9fa], [ecdaefc], [e5c2254])
 
 ### Added
-- **What's New media**: Release notes show images, GIFs, and short videos inline (GitHub attachments, HTTPS `.gif`/`.png`/`.mp4` CDNs, and local files). A bare Demo URL is embedded instead of left as a link. Click an image to enlarge. GitHub alerts, `<kbd>`, and task lists render; HTML stays sanitized. ([84080c5])
+- **What's New media**: Release notes show images, GIFs, and short videos inline (GitHub attachments, HTTPS `.gif`/`.png`/`.mp4` CDNs, and local files). A bare Demo URL is embedded instead of left as a link. Click an image to enlarge. GitHub alerts, `<kbd>`, and task lists render; HTML stays sanitized. ([84080c5], [d6ca46b])
 - **Smooth splits**: New panes grow in (about 280ms) instead of jumping to 50/50 — keyboard split, split icons, drag-to-dock, and Open in split / Open here. A quiet accent veil marks the incoming pane. Drag-to-split preview eases between edges. Divider drag stays immediate (no laggy flex transition). `prefers-reduced-motion` skips the intro. PTY resize waits until the intro ends, same as a divider drag. ([2d3b7c8])
 - **Scroll to resize a split**: Hover the seam and use the mouse wheel or trackpad to move it. Drag and arrow keys still work. PTY resize waits until scrolling settles, same as a divider drag. Ctrl/Cmd+wheel is left for zoom. ([2d3b7c8])
 - **Files in split**: Open Files beside a shell in the same tab (folder button next to the split icons, or workspace **+ → Files in split**). Split icons and Ctrl+Shift+arrows still create a shell. Workspace **+ → Files** stays the full-view overlay. Closing the Files pane unsplits that leaf; the tab × still closes the whole group. Files counts toward the 4-pane cap and never replaces the last shell. ([2d3b7c8])
@@ -21,8 +21,8 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Open here in split**: Terminal **Open File Manager Here** is one row with **In a new tab** / **Left** / **Right** / **Bottom**. Files **Open Terminal Here** and **Follow with Terminal** use the same submenu. Split docks beside the current pane (not a stray new tab). ([2d3b7c8])
 
 ### Fixed
-- **Files opening at `/`**: File Manager no longer treats `/` as home. Open File Manager Here uses the shell cwd (or a real `fs_cwd`), not the pre-connect placeholder. First open ignores a shell cwd of `/` or `~` (SFTP cannot list a tilde) and expands to a real home instead of walking up to `/`. Reconnect keeps `/` when that listing already has files (hash button). Switching hosts clears selection and the open editor. On Windows, local home uses `%USERPROFILE%` instead of unset `HOME`. ([2d3b7c8])
-- **Icon grid right gap:** Grid columns fill the Files pane (no empty strip, no leftover 3-column layout in a wide window). Large folders re-render less while the shell cwd updates.
+- **Files opening at `/`**: File Manager no longer treats `/` as home. Open File Manager Here uses the shell cwd (or a real `fs_cwd`), not the pre-connect placeholder. First open ignores a shell cwd of `/` or `~` (SFTP cannot list a tilde) and expands to a real home instead of walking up to `/`. Reconnect keeps `/` when that listing already has files (hash button). Switching hosts clears selection and the open editor. On Windows, local home uses `%USERPROFILE%` instead of unset `HOME`. ([e5c2254], [e7334e6])
+- **Icon grid right gap:** Grid columns fill the Files pane (no empty strip, no leftover 3-column layout in a wide window). Large folders re-render less while the shell cwd updates. ([40f3988])
 
 - **Drag shell tab onto itself**: Dropping the current shell tab on its own split is a no-op again and restores Files / Dashboard / Snippets if the drag started from that overlay. ([2d3b7c8])
 - **Open here after a tab switch**: Open File Manager Here / Open Terminal Here keep the tab that opened the menu, instead of applying to whichever tab is active after the await. ([2d3b7c8])
@@ -1381,6 +1381,20 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [193f568]: https://github.com/zync-sh/zync/commit/193f568
 [Unreleased]: https://github.com/zync-sh/zync/compare/v2.30.0...HEAD
 [2.30.0]: https://github.com/zync-sh/zync/compare/v2.29.0...v2.30.0
+[2424743]: https://github.com/zync-sh/zync/commit/2424743
+[1ed79d8]: https://github.com/zync-sh/zync/commit/1ed79d8
+[c266a76]: https://github.com/zync-sh/zync/commit/c266a76
+[5750e36]: https://github.com/zync-sh/zync/commit/5750e36
+[ccb38e4]: https://github.com/zync-sh/zync/commit/ccb38e4
+[7fa63ae]: https://github.com/zync-sh/zync/commit/7fa63ae
+[ae6b9fa]: https://github.com/zync-sh/zync/commit/ae6b9fa
+[ecdaefc]: https://github.com/zync-sh/zync/commit/ecdaefc
+[e5c2254]: https://github.com/zync-sh/zync/commit/e5c2254
+[40f3988]: https://github.com/zync-sh/zync/commit/40f3988
+[e7334e6]: https://github.com/zync-sh/zync/commit/e7334e6
+[84080c5]: https://github.com/zync-sh/zync/commit/84080c5
+[d6ca46b]: https://github.com/zync-sh/zync/commit/d6ca46b
+[2d3b7c8]: https://github.com/zync-sh/zync/commit/2d3b7c8
 [2.29.0]: https://github.com/zync-sh/zync/compare/v2.28.0...v2.29.0
 [2.28.0]: https://github.com/zync-sh/zync/compare/v2.27.1...v2.28.0
 [5181d5e]: https://github.com/zync-sh/zync/commit/5181d5e
