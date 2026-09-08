@@ -91,12 +91,12 @@ export function attachTerminalOutputChannel(termId: string, term: XTerm): Channe
       feedSecretInputSniffer(termId, sniff, () => {
         const live = terminalCache.get(termId);
         live?.ghostTracker?.enterSecretInputMode();
-      }, { resetDecoder: large });
+      }, { resetDecoder: large, resetBuffer: large });
       if (outputMayContainPrompt(sniff)) {
         feedPromptCwdSniffer(termId, sniff, (path) => {
           entry.ghostTracker?.exitSecretInputMode();
           useAppStore.getState().setTerminalCwd(connectionId, termId, path);
-        }, { resetDecoder: large });
+        }, { resetDecoder: large, resetBuffer: large });
       }
     }
     const writeStarted = performance.now();

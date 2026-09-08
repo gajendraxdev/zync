@@ -127,7 +127,10 @@ function pumpVsync(termId: string, stats: SessionIoStats): void {
 function ensureDump(termId: string, stats: SessionIoStats): void {
   if (stats.dumpTimer !== null) return;
   stats.dumpTimer = setInterval(() => {
-    if (!isTerminalIoDebugEnabled()) return;
+    if (!isTerminalIoDebugEnabled()) {
+      clearTerminalIoDebug(termId);
+      return;
+    }
     dumpSession(termId, stats);
   }, DUMP_MS);
   pumpVsync(termId, stats);

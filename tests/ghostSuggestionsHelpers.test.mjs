@@ -561,6 +561,20 @@ await runTest('resetDecoder does not wipe rolling string across small then tail 
   }
 });
 
+await runTest('resetBuffer drops rolling string on truncated large frames', () => {
+  let calls = 0;
+  const termId = 'secret-sniffer-reset-buffer';
+  const encode = (value) => new TextEncoder().encode(value);
+  try {
+    feedSecretInputSniffer(termId, encode('Pass'), () => { calls += 1; });
+    assert.equal(calls, 0);
+    feedSecretInputSniffer(termId, encode('word:\n'), () => { calls += 1; }, { resetDecoder: true, resetBuffer: true });
+    assert.equal(calls, 0);
+  } finally {
+    clearSecretInputSniffer(termId);
+  }
+});
+
 await runTest('detectSecretPromptInOutput recognizes sudo and SSH password prompts', () => {
   assert.equal(detectSecretPromptInOutput('[sudo] password for gajen: '), true);
   assert.equal(detectSecretPromptInOutput("user@host's password: "), true);

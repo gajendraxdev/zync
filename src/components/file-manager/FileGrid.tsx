@@ -13,7 +13,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { forwardRef } from 'react';
 import { buildDragData, startInternalDrag, validateAndBuildMoves } from './dragDropUtils';
 import { getScrollbarSize, Grid, List, useGridRef, useListRef } from 'react-window';
-import { AutoSizer } from 'react-virtualized-auto-sizer';
 import {
   computeFileGridMetrics,
   FILE_LIST_COLUMNS,
@@ -469,8 +468,10 @@ export const FileGrid = memo(function FileGrid({
   const lastReportedColumnCountRef = useRef<number | null>(null);
   const [gridViewportWidth, setGridViewportWidth] = useState(0);
   const selectedFilesRef = useRef(selectedFiles);
-  selectedFilesRef.current = selectedFiles;
   const getSelectedFiles = useCallback(() => selectedFilesRef.current, []);
+  useLayoutEffect(() => {
+    selectedFilesRef.current = selectedFiles;
+  }, [selectedFiles]);
   const selectedSet = useMemo(() => new Set(selectedFiles), [selectedFiles]);
 
   const reportColumnCount = useCallback((count: number) => {
@@ -557,6 +558,10 @@ export const FileGrid = memo(function FileGrid({
     gridViewportWidth > 0 ? gridViewportWidth / gridMetrics.columnCount : gridMetrics.columnWidth,
   );
   const gridRowCount = Math.max(1, Math.ceil(files.length / gridMetrics.columnCount));
+
+  useEffect(() => {
+    reportColumnCount(gridMetrics.columnCount);
+  }, [gridMetrics.columnCount, reportColumnCount]);
 
 
 
@@ -657,23 +662,16 @@ export const FileGrid = memo(function FileGrid({
               </button>
             ))}
           </div>
-          <div className="flex-1 min-h-0">
-            <AutoSizer
+          <div className="flex-1 min-h-0 min-w-0">
+            <List
+              listRef={listRef}
+              rowCount={files.length}
+              rowHeight={FILE_LIST_ROW_HEIGHT}
+              rowComponent={FileListRow}
+              rowProps={listRowProps}
+              overscanCount={4}
               style={{ height: '100%', width: '100%' }}
-              renderProp={({ height, width }) =>
-                height && width ? (
-                  <List
-                    listRef={listRef}
-                    rowCount={files.length}
-                    rowHeight={FILE_LIST_ROW_HEIGHT}
-                    rowComponent={FileListRow}
-                    rowProps={listRowProps}
-                    overscanCount={4}
-                    style={{ height, width }}
-                    onResize={() => scrollFocusedListRow()}
-                  />
-                ) : null
-              }
+              onResize={() => scrollFocusedListRow()}
             />
           </div>
         </div>

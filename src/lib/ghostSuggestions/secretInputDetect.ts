@@ -38,7 +38,7 @@ export function detectSecretPromptInOutput(text: string): boolean {
   return SECRET_PROMPT_PATTERNS.some((pattern) => pattern.test(tail));
 }
 
-export type SnifferFeedOptions = { resetDecoder?: boolean };
+export type SnifferFeedOptions = { resetDecoder?: boolean; resetBuffer?: boolean };
 
 /** Feed PTY output; invokes onSecretPrompt when a hidden-input prompt is recognized. */
 export function feedSecretInputSniffer(
@@ -53,6 +53,9 @@ export function feedSecretInputSniffer(
   if (options?.resetDecoder || !decoder) {
     decoder = new TextDecoder('utf-8', { fatal: false });
     sniffDecoders.set(termId, decoder);
+  }
+  if (options?.resetBuffer) {
+    sniffBuffers.delete(termId);
   }
 
   const chunk = decoder.decode(data, { stream: true });

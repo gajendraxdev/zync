@@ -231,7 +231,7 @@ Public surface exported from `index.ts`. Key modules:
 - `terminal:resize` — cols/rows from unified resize scheduler
 - `terminal:close` / `terminal:close_by_connection` — programmatic teardown (**no** `terminal-exit`)
 - `terminal_has_active_processes` — local sysinfo child-tree probe
-- `terminal:flush-stats` / `terminal_flush_stats` — process-wide flush-reason counters (`idle_first` / `timer` / `threshold` / `close`). Debug only. Not on the PTY output Channel.
+- `terminal:flush-stats` / `terminal_flush_stats` — process-wide flush-reason counters (`idleFirst` / `timer` / `threshold` / `close`). Debug only. Not on the PTY output Channel.
 
 ### Events (listen)
 
