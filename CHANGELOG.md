@@ -4,6 +4,8 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.30.0] - 2026-09-08
+
 ### Changed
 - **Terminal output flush:** First PTY bytes after quiet go to the terminal immediately (typing echo no longer waits up to 8 ms). Busy output merges for a 12 ms burst, or sooner at 128 KiB. The live Channel frame is still generation + raw bytes. Debug: `localStorage.zyncTerminalIoDebug = '1'`.
 - **Terminal sniffers:** Secret/cwd helpers scan at most the last 4 KiB of large PTY frames so `cat` does not regex the whole dump. The terminal still receives every byte.
@@ -1377,7 +1379,8 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [d3f4060]: https://github.com/zync-sh/zync/commit/d3f4060
 [840afc2]: https://github.com/zync-sh/zync/commit/840afc2
 [193f568]: https://github.com/zync-sh/zync/commit/193f568
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.29.0...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.30.0...HEAD
+[2.30.0]: https://github.com/zync-sh/zync/compare/v2.29.0...v2.30.0
 [2.29.0]: https://github.com/zync-sh/zync/compare/v2.28.0...v2.29.0
 [2.28.0]: https://github.com/zync-sh/zync/compare/v2.27.1...v2.28.0
 [5181d5e]: https://github.com/zync-sh/zync/commit/5181d5e
