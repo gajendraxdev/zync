@@ -100,8 +100,9 @@ export function attachTerminalOutputChannel(termId: string, term: XTerm): Channe
       }
     }
     const writeStarted = performance.now();
-    term.write(data);
-    recordTermWrite(termId, performance.now() - writeStarted);
+    term.write(data, () => {
+      recordTermWrite(termId, performance.now() - writeStarted);
+    });
   });
 
   cached.outputChannel = channel;

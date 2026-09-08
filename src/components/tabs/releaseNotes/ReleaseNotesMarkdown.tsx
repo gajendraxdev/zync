@@ -2,13 +2,15 @@ import {
   Children,
   cloneElement,
   isValidElement,
+  memo,
   useEffect,
   useMemo,
   useRef,
   useState,
+  type ComponentProps,
   type ReactNode,
 } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
@@ -22,6 +24,13 @@ import { getNodeText } from '../../../lib/releaseNotes/reactText';
 import { RELEASE_NOTES_SANITIZE_SCHEMA } from '../../../lib/releaseNotes/sanitizeSchema';
 import { rehypeRewriteLocalMedia, releaseNotesUrlTransform } from '../../../lib/releaseNotes/urlTransform';
 import { ReleaseNotesImage, ReleaseNotesVideo } from './ReleaseNotesMedia';
+
+const REMARK_PLUGINS = [remarkGfm];
+const REHYPE_PLUGINS: NonNullable<ComponentProps<typeof ReactMarkdown>['rehypePlugins']> = [
+  rehypeRaw,
+  rehypeRewriteLocalMedia,
+  [rehypeSanitize, RELEASE_NOTES_SANITIZE_SCHEMA],
+];
 
 const ALERT_STYLES: Record<AlertKind, { label: string; className: string; icon: typeof Info }> = {
   note: {
@@ -183,7 +192,7 @@ function isBareMediaParagraph(children: ReactNode): boolean {
   return items[0].type === ReleaseNotesMarkdownImage || items[0].type === ReleaseNotesMarkdownVideo;
 }
 
-export function ReleaseNotesMarkdown({
+export const ReleaseNotesMarkdown = memo(function ReleaseNotesMarkdown({
   markdown,
   isLightTheme,
   renderHeading,
@@ -194,170 +203,168 @@ export function ReleaseNotesMarkdown({
 }) {
   const prepared = useMemo(() => rewriteMarkdownLocalMedia(markdown), [markdown]);
 
+  const components = useMemo((): Components => ({
+    h1: ({ children }) => renderHeading(1, children),
+    h2: ({ children }) => renderHeading(2, children),
+    h3: ({ children }) => renderHeading(3, children),
+    h4: ({ children }) => (
+      <h4 className="mb-2 mt-4 text-base font-semibold first:mt-0">{children}</h4>
+    ),
+    h5: ({ children }) => (
+      <h5 className="mb-2 mt-3 text-sm font-semibold first:mt-0">{children}</h5>
+    ),
+    h6: ({ children }) => (
+      <h6 className="mb-2 mt-3 text-sm font-medium text-[var(--color-app-muted)] first:mt-0">
+        {children}
+      </h6>
+    ),
+    img: ReleaseNotesMarkdownImage,
+    video: ReleaseNotesMarkdownVideo,
+    code({ className, children }) {
+      const language = /language-([\w-]+)/.exec(className || '')?.[1];
+      const codeContent = String(children).replace(/\n$/, '');
+      const isBlock = Boolean(language) || codeContent.includes('\n');
+
+      return isBlock ? (
+        <CodeBlock language={language} isLightTheme={isLightTheme}>
+          {codeContent}
+        </CodeBlock>
+      ) : (
+        <code className="rounded border border-[var(--color-app-border)]/50 bg-[var(--color-app-surface)] px-1.5 py-0.5 font-mono text-[12px] text-[var(--color-app-accent)]">
+          {children}
+        </code>
+      );
+    },
+    pre: ({ children }) => <>{children}</>,
+    p: ({ children }) =>
+      isBareMediaParagraph(children) ? (
+        <>{children}</>
+      ) : (
+        <p className="mb-3 leading-7">{children}</p>
+      ),
+    ul: ({ children, className }) => (
+      <ul
+        className={`mb-3 list-disc space-y-0.5 pl-5 ${className?.includes('contains-task-list') ? 'list-none pl-0' : ''}`}
+      >
+        {children}
+      </ul>
+    ),
+    ol: ({ children }) => (
+      <ol className="mb-3 list-decimal space-y-0.5 pl-5">{children}</ol>
+    ),
+    li: ({ children, className }) => (
+      <li
+        className={`leading-7 text-[var(--color-app-text)]/90 ${className?.includes('task-list-item') ? 'flex list-none items-start gap-2' : ''}`}
+      >
+        {children}
+      </li>
+    ),
+    input: (props) =>
+      props.type === 'checkbox' ? (
+        <input
+          type="checkbox"
+          checked={Boolean(props.checked)}
+          disabled
+          readOnly
+          className="mt-1.5 shrink-0 accent-[var(--color-app-accent)]"
+        />
+      ) : null,
+    a: ({ href, children }) => {
+      if (!href) return <span>{children}</span>;
+      const internal = href.startsWith('#');
+      return (
+        <a
+          href={href}
+          target={internal ? undefined : '_blank'}
+          rel={internal ? undefined : 'noreferrer'}
+          className="text-[var(--color-app-accent)] hover:underline"
+        >
+          {children}
+        </a>
+      );
+    },
+    blockquote: ({ children }) => {
+      const items = Children.toArray(children);
+      const first = items[0];
+      const alert = matchAlertPrefix(getNodeText(first));
+      if (alert) {
+        const rest = [...items];
+        if (isValidElement<{ children?: ReactNode }>(first)) {
+          const kept = stripAlertPrefixFromParts(Children.toArray(first.props.children));
+          if (kept.length === 0) {
+            rest.shift();
+          } else {
+            rest[0] = cloneElement(first, undefined, ...(kept as ReactNode[]));
+          }
+        } else {
+          rest.shift();
+        }
+        return <AlertBox kind={alert.kind}>{rest}</AlertBox>;
+      }
+      return (
+        <blockquote className="my-3 border-l-2 border-[var(--color-app-accent)]/50 pl-4 italic text-[var(--color-app-muted)]">
+          {children}
+        </blockquote>
+      );
+    },
+    hr: () => <hr className="my-5 border-[var(--color-app-border)]/40" />,
+    table: ({ children }) => (
+      <div className="my-3 overflow-x-auto rounded-lg border border-[var(--color-app-border)]/50">
+        <table className="w-full text-sm">{children}</table>
+      </div>
+    ),
+    th: ({ children }) => (
+      <th className="border-b border-[var(--color-app-border)]/50 bg-[var(--color-app-surface)] px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-[var(--color-app-muted)]">
+        {children}
+      </th>
+    ),
+    td: ({ children }) => (
+      <td className="border-b border-[var(--color-app-border)]/30 px-4 py-2.5 text-[var(--color-app-text)]/90">
+        {children}
+      </td>
+    ),
+    del: ({ children }) => (
+      <del className="text-[var(--color-app-muted)] line-through">{children}</del>
+    ),
+    kbd: ({ children }) => {
+      const label = getNodeText(children).trim();
+      return label ? <KeyboardKey>{label}</KeyboardKey> : null;
+    },
+    mark: ({ children }) => (
+      <mark className="rounded-sm bg-[var(--color-app-accent)]/20 px-0.5 text-[var(--color-app-text)]">
+        {children}
+      </mark>
+    ),
+    details: ({ children, open }) => (
+      <details
+        open={Boolean(open)}
+        className="my-3 overflow-hidden rounded-lg border border-[var(--color-app-border)]/50 bg-[var(--color-app-surface)]/40 [&>:not(summary)]:px-3 [&>:not(summary)]:pb-3"
+      >
+        {children}
+      </details>
+    ),
+    summary: ({ children }) => (
+      <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-[var(--color-app-text)]">
+        {children}
+      </summary>
+    ),
+    section: ({ children, className }) => (
+      <section
+        className={`mt-8 border-t border-[var(--color-app-border)]/40 pt-4 text-sm ${className ?? ''}`}
+      >
+        {children}
+      </section>
+    ),
+  }), [isLightTheme, renderHeading]);
+
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={REMARK_PLUGINS}
       urlTransform={releaseNotesUrlTransform}
-      rehypePlugins={[
-        rehypeRaw,
-        rehypeRewriteLocalMedia,
-        [rehypeSanitize, RELEASE_NOTES_SANITIZE_SCHEMA],
-      ]}
-      components={{
-        h1: ({ children }) => renderHeading(1, children),
-        h2: ({ children }) => renderHeading(2, children),
-        h3: ({ children }) => renderHeading(3, children),
-        h4: ({ children }) => (
-          <h4 className="mb-2 mt-4 text-base font-semibold first:mt-0">{children}</h4>
-        ),
-        h5: ({ children }) => (
-          <h5 className="mb-2 mt-3 text-sm font-semibold first:mt-0">{children}</h5>
-        ),
-        h6: ({ children }) => (
-          <h6 className="mb-2 mt-3 text-sm font-medium text-[var(--color-app-muted)] first:mt-0">
-            {children}
-          </h6>
-        ),
-        img: ReleaseNotesMarkdownImage,
-        video: ReleaseNotesMarkdownVideo,
-        code({ className, children }) {
-          const language = /language-([\w-]+)/.exec(className || '')?.[1];
-          const codeContent = String(children).replace(/\n$/, '');
-          const isBlock = Boolean(language) || codeContent.includes('\n');
-
-          return isBlock ? (
-            <CodeBlock language={language} isLightTheme={isLightTheme}>
-              {codeContent}
-            </CodeBlock>
-          ) : (
-            <code className="rounded border border-[var(--color-app-border)]/50 bg-[var(--color-app-surface)] px-1.5 py-0.5 font-mono text-[12px] text-[var(--color-app-accent)]">
-              {children}
-            </code>
-          );
-        },
-        pre: ({ children }) => <>{children}</>,
-        p: ({ children }) =>
-          isBareMediaParagraph(children) ? (
-            <>{children}</>
-          ) : (
-            <p className="mb-3 leading-7">{children}</p>
-          ),
-        ul: ({ children, className }) => (
-          <ul
-            className={`mb-3 list-disc space-y-0.5 pl-5 ${className?.includes('contains-task-list') ? 'list-none pl-0' : ''}`}
-          >
-            {children}
-          </ul>
-        ),
-        ol: ({ children }) => (
-          <ol className="mb-3 list-decimal space-y-0.5 pl-5">{children}</ol>
-        ),
-        li: ({ children, className }) => (
-          <li
-            className={`leading-7 text-[var(--color-app-text)]/90 ${className?.includes('task-list-item') ? 'flex list-none items-start gap-2' : ''}`}
-          >
-            {children}
-          </li>
-        ),
-        input: (props) =>
-          props.type === 'checkbox' ? (
-            <input
-              type="checkbox"
-              checked={Boolean(props.checked)}
-              disabled
-              readOnly
-              className="mt-1.5 shrink-0 accent-[var(--color-app-accent)]"
-            />
-          ) : null,
-        a: ({ href, children }) => {
-          if (!href) return <span>{children}</span>;
-          const internal = href.startsWith('#');
-          return (
-            <a
-              href={href}
-              target={internal ? undefined : '_blank'}
-              rel={internal ? undefined : 'noreferrer'}
-              className="text-[var(--color-app-accent)] hover:underline"
-            >
-              {children}
-            </a>
-          );
-        },
-        blockquote: ({ children }) => {
-          const items = Children.toArray(children);
-          const first = items[0];
-          const alert = matchAlertPrefix(getNodeText(first));
-          if (alert) {
-            const rest = [...items];
-            if (isValidElement<{ children?: ReactNode }>(first)) {
-              const kept = stripAlertPrefixFromParts(Children.toArray(first.props.children));
-              if (kept.length === 0) {
-                rest.shift();
-              } else {
-                rest[0] = cloneElement(first, undefined, ...(kept as ReactNode[]));
-              }
-            } else {
-              rest.shift();
-            }
-            return <AlertBox kind={alert.kind}>{rest}</AlertBox>;
-          }
-          return (
-            <blockquote className="my-3 border-l-2 border-[var(--color-app-accent)]/50 pl-4 italic text-[var(--color-app-muted)]">
-              {children}
-            </blockquote>
-          );
-        },
-        hr: () => <hr className="my-5 border-[var(--color-app-border)]/40" />,
-        table: ({ children }) => (
-          <div className="my-3 overflow-x-auto rounded-lg border border-[var(--color-app-border)]/50">
-            <table className="w-full text-sm">{children}</table>
-          </div>
-        ),
-        th: ({ children }) => (
-          <th className="border-b border-[var(--color-app-border)]/50 bg-[var(--color-app-surface)] px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-[var(--color-app-muted)]">
-            {children}
-          </th>
-        ),
-        td: ({ children }) => (
-          <td className="border-b border-[var(--color-app-border)]/30 px-4 py-2.5 text-[var(--color-app-text)]/90">
-            {children}
-          </td>
-        ),
-        del: ({ children }) => (
-          <del className="text-[var(--color-app-muted)] line-through">{children}</del>
-        ),
-        kbd: ({ children }) => {
-          const label = getNodeText(children).trim();
-          return label ? <KeyboardKey>{label}</KeyboardKey> : null;
-        },
-        mark: ({ children }) => (
-          <mark className="rounded-sm bg-[var(--color-app-accent)]/20 px-0.5 text-[var(--color-app-text)]">
-            {children}
-          </mark>
-        ),
-        details: ({ children, open }) => (
-          <details
-            open={Boolean(open)}
-            className="my-3 overflow-hidden rounded-lg border border-[var(--color-app-border)]/50 bg-[var(--color-app-surface)]/40 [&>:not(summary)]:px-3 [&>:not(summary)]:pb-3"
-          >
-            {children}
-          </details>
-        ),
-        summary: ({ children }) => (
-          <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-[var(--color-app-text)]">
-            {children}
-          </summary>
-        ),
-        section: ({ children, className }) => (
-          <section
-            className={`mt-8 border-t border-[var(--color-app-border)]/40 pt-4 text-sm ${className ?? ''}`}
-          >
-            {children}
-          </section>
-        ),
-      }}
+      rehypePlugins={REHYPE_PLUGINS}
+      components={components}
     >
       {prepared}
     </ReactMarkdown>
   );
-}
+});

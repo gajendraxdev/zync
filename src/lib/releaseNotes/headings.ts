@@ -67,3 +67,17 @@ export function extractToc(markdown: string): TocEntry[] {
 
   return entries;
 }
+
+/** First TOC id per level+text; later duplicates keep the first occurrence. */
+export function buildHeadingIdLookup(toc: TocEntry[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const entry of toc) {
+    const key = `${entry.level}:${entry.text}`;
+    if (!map.has(key)) map.set(key, entry.id);
+  }
+  return map;
+}
+
+export function headingLookupKey(level: 1 | 2 | 3, text: string): string {
+  return `${level}:${normalizeHeadingText(text)}`;
+}

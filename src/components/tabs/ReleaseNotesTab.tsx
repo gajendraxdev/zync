@@ -1,7 +1,13 @@
 import React, { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Gift, ExternalLink, ChevronDown, Tag } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
-import { extractToc, headingKey, slugify } from '../../lib/releaseNotes/headings';
+import {
+  buildHeadingIdLookup,
+  extractToc,
+  headingKey,
+  headingLookupKey,
+  slugify,
+} from '../../lib/releaseNotes/headings';
 import { getNodeText } from '../../lib/releaseNotes/reactText';
 import { ReleaseNotesMarkdown } from './releaseNotes/ReleaseNotesMarkdown';
 
@@ -152,24 +158,17 @@ const ReleaseNotesTab: React.FC = () => {
     target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, []);
 
-  let headingRenderIndex = 0;
-  const fallbackSlugMap = new Map<string, number>();
+  const headingIdByKey = useMemo(() => buildHeadingIdLookup(toc), [toc]);
+  const fallbackSlugMapRef = useRef(new Map<string, number>());
+  useEffect(() => {
+    fallbackSlugMapRef.current = new Map();
+  }, [toc]);
 
-  const resolveHeadingId = (level: 1 | 2 | 3, text: string): string => {
-    while (headingRenderIndex < toc.length) {
-      const entry = toc[headingRenderIndex];
-      headingRenderIndex += 1;
-      if (entry.level === level) {
-        return entry.id;
-      }
-    }
-
-    return slugify(text, fallbackSlugMap);
-  };
-
-  const renderHeading = (level: 1 | 2 | 3, children: ReactNode) => {
+  const renderHeading = useCallback((level: 1 | 2 | 3, children: ReactNode) => {
     const text = getNodeText(children);
-    const id = resolveHeadingId(level, text);
+    const id =
+      headingIdByKey.get(headingLookupKey(level, text)) ??
+      slugify(text, fallbackSlugMapRef.current);
     const badge = SECTION_BADGES[headingKey(text)];
 
     const inner = (
@@ -193,7 +192,7 @@ const ReleaseNotesTab: React.FC = () => {
     if (level === 1) return <h1 id={id} className="mb-3 mt-6 text-2xl font-bold first:mt-0">{inner}</h1>;
     if (level === 2) return <h2 id={id} className="mb-3 mt-6 text-xl font-bold first:mt-0">{inner}</h2>;
     return <h3 id={id} className="mb-2 mt-4 text-lg font-semibold first:mt-0">{inner}</h3>;
-  };
+  }, [headingIdByKey]);
 
   return (
     <div className="flex h-full flex-col bg-[var(--color-app-bg)]">

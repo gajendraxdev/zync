@@ -11,7 +11,12 @@ import {
   toFilesystemPath,
 } from '../.tmp-agent-tests/src/lib/releaseNotes/mediaUrls.js';
 import { matchAlertPrefix, stripAlertPrefixFromParts } from '../.tmp-agent-tests/src/lib/releaseNotes/alerts.js';
-import { extractToc, slugify } from '../.tmp-agent-tests/src/lib/releaseNotes/headings.js';
+import {
+  buildHeadingIdLookup,
+  extractToc,
+  headingLookupKey,
+  slugify,
+} from '../.tmp-agent-tests/src/lib/releaseNotes/headings.js';
 
 function runTest(name, fn) {
   try {
@@ -145,4 +150,20 @@ runTest('slugify uniquifies duplicate headings', () => {
   const used = new Map();
   assert.equal(slugify('Added', used), 'added');
   assert.equal(slugify('Added', used), 'added-1');
+});
+
+runTest('buildHeadingIdLookup keeps the first TOC id for duplicate texts', () => {
+  const toc = extractToc('## Added\n\n## Fixed\n\n## Added\n');
+  const lookup = buildHeadingIdLookup(toc);
+  assert.equal(lookup.get(headingLookupKey(2, 'Added')), 'added');
+  assert.equal(lookup.get(headingLookupKey(2, 'Fixed')), 'fixed');
+  assert.equal(lookup.get('2:Added'), 'added');
+});
+
+runTest('toFilesystemPath keeps UNC host from file URLs', () => {
+  const unc = '\\\\fileserver\\share\\demo.gif';
+  const fileUrl = rewriteLocalMediaSrc(unc);
+  assert.ok(fileUrl);
+  const fsPath = toFilesystemPath(fileUrl);
+  assert.match(fsPath.toLowerCase(), /^\\\\fileserver\\share\\demo\.gif$/);
 });

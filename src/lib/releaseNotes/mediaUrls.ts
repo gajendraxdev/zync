@@ -127,6 +127,10 @@ export function toFilesystemPath(raw: string): string {
   const url = new URL(trimmed);
   let path = decodeURIComponent(url.pathname);
   if (/^\/[a-zA-Z]:\//.test(path)) path = path.slice(1);
+  if (url.hostname) {
+    const rest = path.replace(/^\//, '').replace(/\//g, '\\');
+    return `\\\\${url.hostname}${rest ? `\\${rest}` : ''}`;
+  }
   return path;
 }
 
