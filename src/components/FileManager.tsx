@@ -180,6 +180,10 @@ export const FileManager = memo(function FileManager({
   ));
   const filesOpenHint = useAppStore((state) => {
     if (!activeConnectionId) return '';
+    const path = state.currentPath[activeConnectionId] ?? '';
+    const listing = state.files[activeConnectionId];
+    const waiting = (!path || path === '/') && (!listing || listing.length === 0);
+    if (!waiting) return '';
     const activeId = state.activeTerminalIds[activeConnectionId];
     const tabs = state.terminals[activeConnectionId] || [];
     const term = tabs.find((tab) => tab.id === activeId) ?? tabs.find((tab) => tab.tabVisible !== false);
@@ -1650,7 +1654,7 @@ export const FileManager = memo(function FileManager({
     <div
       ref={containerRef}
       tabIndex={0}
-      className={`flex-1 flex flex-col h-full bg-app-bg relative outline-none focus-within:ring-0 transition-all duration-150 ${isTauriDraggingOver ? 'ring-2 ring-app-accent ring-inset' : ''}`}
+      className={`flex-1 min-w-0 flex flex-col h-full bg-app-bg relative outline-none focus-within:ring-0 transition-all duration-150 ${isTauriDraggingOver ? 'ring-2 ring-app-accent ring-inset' : ''}`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -1710,7 +1714,7 @@ export const FileManager = memo(function FileManager({
       />
 
       {/* biome-ignore lint/a11y/noStaticElementInteractions: interactive div */}
-      <div className="flex-1 overflow-hidden relative flex flex-col" onClick={() => setContextMenu(null)}>
+      <div className="flex-1 min-h-0 min-w-0 overflow-hidden relative flex flex-col" onClick={() => setContextMenu(null)}>
         {(isReconnectPending || currentError === 'DISCONNECTED' || (!isConnected && !isLocal)) ? (
           <TerminalDisconnectedView
             connection={connection}

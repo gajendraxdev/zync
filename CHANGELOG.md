@@ -19,6 +19,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Fixed
 - **Files opening at `/`**: File Manager no longer treats `/` as home. Open File Manager Here uses the shell cwd (or a real `fs_cwd`), not the pre-connect placeholder. First open ignores a shell cwd of `/` and waits for a real home instead of listing root. Reconnect keeps `/` when that listing already has files (hash button). Switching hosts clears selection and the open editor. On Windows, local home uses `%USERPROFILE%` instead of unset `HOME`. ([2d3b7c8])
+- **Icon grid right gap:** Grid columns fill the Files pane (no empty strip, no leftover 3-column layout in a wide window). Large folders re-render less while the shell cwd updates.
 
 - **Drag shell tab onto itself**: Dropping the current shell tab on its own split is a no-op again and restores Files / Dashboard / Snippets if the drag started from that overlay. ([2d3b7c8])
 - **Open here after a tab switch**: Open File Manager Here / Open Terminal Here keep the tab that opened the menu, instead of applying to whichever tab is active after the await. ([2d3b7c8])

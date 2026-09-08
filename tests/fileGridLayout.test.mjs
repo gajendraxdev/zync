@@ -46,8 +46,7 @@ runTest('computeFileGridMetrics compact column count', () => {
   assert.equal(m.gap, 8);
   assert.equal(m.columnCount, 3);
   assert.ok(m.columnWidth > 100);
-  const filled = m.columnWidth * m.columnCount + m.gap * (m.columnCount - 1);
-  assert.ok(Math.abs(filled - 332) < 0.001);
+  assert.ok(Math.abs(m.columnWidth * m.columnCount - 332) < 0.001);
 });
 
 runTest('fileGridSlotSize adds gap except on the last track', () => {

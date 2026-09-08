@@ -56,7 +56,7 @@ export function computeFileGridMetrics(containerWidth: number, compactMode: bool
   const rowHeight = compactMode ? 120 : 140;
   const width = Math.max(0, containerWidth);
   const columnCount = Math.max(1, Math.floor((width + gap) / (minTrack + gap)));
-  const columnWidth = (width - gap * (columnCount - 1)) / columnCount;
+  const columnWidth = width / columnCount;
   return { columnCount, columnWidth, rowHeight, gap };
 }
 

@@ -6,7 +6,7 @@ import type React from 'react';
 import { cn, formatBytes, formatDate } from '../../lib/utils';
 import type { FileEntry } from './types';
 import { useAppStore } from '../../store/useAppStore';
-import { useMemo, useEffect, useLayoutEffect, useCallback, useRef, memo, type CSSProperties } from 'react';
+import { useMemo, useState, useEffect, useLayoutEffect, useCallback, useRef, memo, type CSSProperties } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import { setCurrentDragSource } from '../../lib/dragDrop';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -15,7 +15,7 @@ import { buildDragData, startInternalDrag, validateAndBuildMoves } from './dragD
 import { getScrollbarSize, Grid, List, useGridRef, useListRef } from 'react-window';
 import { AutoSizer } from 'react-virtualized-auto-sizer';
 import {
-  computeFileGridMetricsForViewport,
+  computeFileGridMetrics,
   FILE_LIST_COLUMNS,
   FILE_LIST_ROW_HEIGHT,
   type FileSortColumn,
@@ -31,7 +31,7 @@ const FileIcon = memo(function FileIcon({ file, size }: { file: FileEntry; size:
         <Folder
           size={size}
           fill="currentColor"
-          className="text-app-accent drop-shadow-sm transition-colors"
+          className="text-app-accent"
           strokeWidth={0.5}
         />
       </div>
@@ -43,7 +43,6 @@ const FileIcon = memo(function FileIcon({ file, size }: { file: FileEntry; size:
     <DynamicIcon
         type={file.name}
         size={size}
-        className="drop-shadow-sm"
     />
   );
 });
@@ -427,7 +426,7 @@ function FileGridCell({
     return <div style={style} />;
   }
   return (
-    <div style={style} {...ariaAttributes} className="min-w-0 p-1">
+    <div style={{ ...style, contain: 'layout paint' }} {...ariaAttributes} className="min-w-0 p-1">
       <FileGridItem
         file={file}
         viewMode="grid"
@@ -468,11 +467,11 @@ export const FileGrid = memo(function FileGrid({
   const gridRef = useGridRef(null);
   const gridColumnCountRef = useRef(1);
   const lastReportedColumnCountRef = useRef<number | null>(null);
+  const [gridViewportWidth, setGridViewportWidth] = useState(0);
   const selectedFilesRef = useRef(selectedFiles);
   selectedFilesRef.current = selectedFiles;
   const getSelectedFiles = useCallback(() => selectedFilesRef.current, []);
   const selectedSet = useMemo(() => new Set(selectedFiles), [selectedFiles]);
-  const scrollbarSize = useMemo(() => getScrollbarSize(), []);
 
   const reportColumnCount = useCallback((count: number) => {
     gridColumnCountRef.current = count;
@@ -549,13 +548,23 @@ export const FileGrid = memo(function FileGrid({
     ],
   );
 
+  const gridMetrics = useMemo(
+    () => computeFileGridMetrics(gridViewportWidth, compactMode),
+    [gridViewportWidth, compactMode],
+  );
+  const gridColumnWidth = Math.max(
+    1,
+    gridViewportWidth > 0 ? gridViewportWidth / gridMetrics.columnCount : gridMetrics.columnWidth,
+  );
+  const gridRowCount = Math.max(1, Math.ceil(files.length / gridMetrics.columnCount));
+
 
 
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: <explanation>
     <div
-      className="flex-1 min-h-0 overflow-hidden p-4 relative flex flex-col"
+      className="flex-1 min-h-0 min-w-0 overflow-hidden p-4 relative flex flex-col"
       onClick={() => onSelect('', false)}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -609,7 +618,7 @@ export const FileGrid = memo(function FileGrid({
       </AnimatePresence>
 
       <div className={cn(
-        "flex-1 min-h-0",
+        "flex-1 min-h-0 w-full",
         isLoading && "pointer-events-none cursor-wait"
       )}>
         {files.length === 0 ? (
@@ -669,53 +678,33 @@ export const FileGrid = memo(function FileGrid({
           </div>
         </div>
       ) : (
-        <div className="h-full min-h-0">
-          <AutoSizer
-            style={{ height: '100%', width: '100%' }}
-            renderProp={({ height, width }) => {
-              if (!height || !width) return null;
-              const metrics = computeFileGridMetricsForViewport(
-                width,
-                height,
-                files.length,
-                compactMode,
-                scrollbarSize,
-              );
-              const rowCount = Math.max(1, Math.ceil(files.length / metrics.columnCount));
-              gridColumnCountRef.current = metrics.columnCount;
-              if (lastReportedColumnCountRef.current !== metrics.columnCount) {
-                queueMicrotask(() => {
-                  reportColumnCount(metrics.columnCount);
-                  if (focusedFile) scrollFocusedGridCell(metrics.columnCount);
-                });
+        <div className="h-full w-full min-h-0 min-w-0">
+          <Grid
+            gridRef={gridRef}
+            cellComponent={FileGridCell}
+            cellProps={{
+              ...listRowProps,
+              columnCount: gridMetrics.columnCount,
+              compactMode,
+            }}
+            columnCount={gridMetrics.columnCount}
+            columnWidth={gridColumnWidth}
+            rowCount={gridRowCount}
+            rowHeight={gridMetrics.rowHeight}
+            overscanCount={1}
+            style={{ height: '100%', width: '100%', overflowX: 'hidden' }}
+            onResize={({ width }) => {
+              setGridViewportWidth(width);
+              const next = computeFileGridMetrics(width, compactMode);
+              gridColumnCountRef.current = next.columnCount;
+              reportColumnCount(next.columnCount);
+              const el = gridRef.current?.element;
+              if (el) el.scrollLeft = 0;
+              if (!focusedFile) {
+                if (el) el.scrollTop = 0;
+                return;
               }
-              return (
-                <Grid
-                  gridRef={gridRef}
-                  cellComponent={FileGridCell}
-                  cellProps={{
-                    ...listRowProps,
-                    columnCount: metrics.columnCount,
-                    compactMode,
-                  }}
-                  columnCount={metrics.columnCount}
-                  columnWidth={metrics.columnWidth}
-                  rowCount={rowCount}
-                  rowHeight={metrics.rowHeight}
-                  overscanCount={2}
-                  style={{ height, width }}
-                  onResize={() => {
-                    reportColumnCount(metrics.columnCount);
-                    const el = gridRef.current?.element;
-                    if (!focusedFile && el) {
-                      el.scrollTop = 0;
-                      el.scrollLeft = 0;
-                      return;
-                    }
-                    scrollFocusedGridCell(metrics.columnCount);
-                  }}
-                />
-              );
+              scrollFocusedGridCell(next.columnCount);
             }}
           />
         </div>
