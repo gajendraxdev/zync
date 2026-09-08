@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { directoryFromFileLocation, isUnresolvedFilesPath, parentDirectory, pickFilesOpenPath } from '../.tmp-agent-tests/src/components/layout/tabDock/openHerePaths.js';
+import { directoryFromFileLocation, expandTildeWithHome, isUnresolvedFilesPath, parentDirectory, pickFilesOpenPath } from '../.tmp-agent-tests/src/components/layout/tabDock/openHerePaths.js';
 
 function runTest(name, fn) {
   try {
@@ -14,6 +14,7 @@ function runTest(name, fn) {
 runTest('pickFilesOpenPath prefers shell cwd and ignores placeholder home /', () => {
   assert.equal(pickFilesOpenPath({ lastKnownCwd: '/home/appserver' }), '/home/appserver');
   assert.equal(pickFilesOpenPath({ lastKnownCwd: '/' }), '/');
+  assert.equal(pickFilesOpenPath({ lastKnownCwd: '~', homePath: '/home/appserver' }), '/home/appserver');
   assert.equal(pickFilesOpenPath({ initialPath: '/opt/app' }), '/opt/app');
   assert.equal(pickFilesOpenPath({ homePath: '/home/appserver' }), '/home/appserver');
   assert.equal(pickFilesOpenPath({ homePath: '/' }), '');
@@ -24,9 +25,16 @@ runTest('pickFilesOpenPath prefers shell cwd and ignores placeholder home /', ()
 runTest('isUnresolvedFilesPath treats empty and / as not a Files home', () => {
   assert.equal(isUnresolvedFilesPath(''), true);
   assert.equal(isUnresolvedFilesPath('/'), true);
+  assert.equal(isUnresolvedFilesPath('~'), true);
   assert.equal(isUnresolvedFilesPath(' / '), true);
   assert.equal(isUnresolvedFilesPath('/home/appserver'), false);
   assert.equal(isUnresolvedFilesPath('C:\\Users\\gajen'), false);
+});
+
+runTest('expandTildeWithHome maps ~ to a real home', () => {
+  assert.equal(expandTildeWithHome('~', '/home/appserver'), '/home/appserver');
+  assert.equal(expandTildeWithHome('~/src', '/home/appserver'), '/home/appserver/src');
+  assert.equal(expandTildeWithHome('~', '/'), '~');
 });
 
 runTest('directory uses the listed Files path for empty space', () => {

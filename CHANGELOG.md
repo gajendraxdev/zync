@@ -18,7 +18,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Open here in split**: Terminal **Open File Manager Here** is one row with **In a new tab** / **Left** / **Right** / **Bottom**. Files **Open Terminal Here** and **Follow with Terminal** use the same submenu. Split docks beside the current pane (not a stray new tab). ([2d3b7c8])
 
 ### Fixed
-- **Files opening at `/`**: File Manager no longer treats `/` as home. Open File Manager Here uses the shell cwd (or a real `fs_cwd`), not the pre-connect placeholder. First open ignores a shell cwd of `/` and waits for a real home instead of listing root. Reconnect keeps `/` when that listing already has files (hash button). Switching hosts clears selection and the open editor. On Windows, local home uses `%USERPROFILE%` instead of unset `HOME`. ([2d3b7c8])
+- **Files opening at `/`**: File Manager no longer treats `/` as home. Open File Manager Here uses the shell cwd (or a real `fs_cwd`), not the pre-connect placeholder. First open ignores a shell cwd of `/` or `~` (SFTP cannot list a tilde) and expands to a real home instead of walking up to `/`. Reconnect keeps `/` when that listing already has files (hash button). Switching hosts clears selection and the open editor. On Windows, local home uses `%USERPROFILE%` instead of unset `HOME`. ([2d3b7c8])
 - **Icon grid right gap:** Grid columns fill the Files pane (no empty strip, no leftover 3-column layout in a wide window). Large folders re-render less while the shell cwd updates.
 
 - **Drag shell tab onto itself**: Dropping the current shell tab on its own split is a no-op again and restores Files / Dashboard / Snippets if the drag started from that overlay. ([2d3b7c8])

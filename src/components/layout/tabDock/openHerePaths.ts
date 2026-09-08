@@ -15,7 +15,17 @@ function trimmed(value: string | null | undefined): string {
  */
 export function isUnresolvedFilesPath(path: string | null | undefined): boolean {
     const value = trimmed(path);
-    return value.length === 0 || value === '/';
+    return value.length === 0 || value === '/' || value === '~';
+}
+
+/** SFTP cannot list `~`; expand with a real home (`/home/user`). */
+export function expandTildeWithHome(path: string, home: string): string {
+    const value = trimmed(path);
+    const homePath = trimmed(home).replace(/\/+$/, '');
+    if (!homePath || homePath === '/' || homePath === '~') return value;
+    if (value === '~') return homePath;
+    if (value.startsWith('~/')) return `${homePath}/${value.slice(2)}`;
+    return value;
 }
 
 /**
@@ -28,7 +38,7 @@ export function pickFilesOpenPath(input: {
     homePath?: string | null;
 }): string {
     const cwd = trimmed(input.lastKnownCwd);
-    if (cwd) return cwd;
+    if (cwd && cwd !== '~') return cwd;
     const initial = trimmed(input.initialPath);
     if (initial) return initial;
     const home = trimmed(input.homePath);

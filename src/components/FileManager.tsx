@@ -182,7 +182,7 @@ export const FileManager = memo(function FileManager({
     if (!activeConnectionId) return '';
     const path = state.currentPath[activeConnectionId] ?? '';
     const listing = state.files[activeConnectionId];
-    const waiting = (!path || path === '/') && (!listing || listing.length === 0);
+    const waiting = (!path || path === '/' || path === '~') && (!listing || listing.length === 0);
     if (!waiting) return '';
     const activeId = state.activeTerminalIds[activeConnectionId];
     const tabs = state.terminals[activeConnectionId] || [];

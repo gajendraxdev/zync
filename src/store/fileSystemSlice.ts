@@ -2,6 +2,7 @@ import { StateCreator } from 'zustand';
 import type { AppStore } from './useAppStore';
 import { notify } from '../features/notifications';
 import type { FileEntry } from '../components/file-manager/types';
+import { expandTildeWithHome } from '../components/layout/tabDock/openHerePaths';
 
 // @ts-ignore
 const ipc = window.ipcRenderer;
@@ -87,8 +88,23 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
 
     loadFiles: async (connectionId, path, skipHistory = false, silent = false) => {
         const state = get();
-        const targetPath = (path !== undefined ? path : state.currentPath[connectionId] || '').trim();
+        let targetPath = (path !== undefined ? path : state.currentPath[connectionId] || '').trim();
         if (!targetPath) return;
+        if (targetPath === '~' || targetPath.startsWith('~/')) {
+            const conn = get().connections.find((c) => c.id === connectionId);
+            let home = (conn?.homePath ?? '').trim();
+            if (!home || home === '/' || home === '~') {
+                try {
+                    const cwd = await ipc.invoke('fs_cwd', { connectionId });
+                    if (typeof cwd === 'string') home = cwd.trim();
+                } catch {
+                    home = '';
+                }
+            }
+            const expanded = expandTildeWithHome(targetPath, home);
+            if (!expanded || expanded === '~' || expanded.startsWith('~/')) return;
+            targetPath = expanded;
+        }
 
         // History Logic
         if (!skipHistory && targetPath !== state.currentPath[connectionId]) {
@@ -169,6 +185,7 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
 
             // Handle "No such file" (Directory deleted?)
             if (osError.includes('No such file') || osError.includes('does not exist')) {
+                if (targetPath === '~' || targetPath.startsWith('~/')) return;
                 // If we are not at root, try moving up
                 if (targetPath !== '/' && targetPath !== '') {
                     const parent = targetPath.substring(0, targetPath.lastIndexOf('/')) || '/';
