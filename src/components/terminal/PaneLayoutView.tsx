@@ -228,7 +228,7 @@ function SplitFrame({
     return (
         <div
             data-pane-split=""
-            className={cn('relative isolate flex h-full w-full min-h-0 min-w-0', stacked ? 'flex-col' : 'flex-row')}
+            className={cn('relative flex h-full w-full min-h-0 min-w-0', stacked ? 'flex-col' : 'flex-row')}
         >
             <SplitBranch
                 grow={liveGrow[0]}

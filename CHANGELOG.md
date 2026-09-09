@@ -8,6 +8,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Terminal inline images:** Sixel and iTerm inline images render in the shell (`fastfetch` logos, `chafa`, `imgcat`). The terminal advertises cell/window size so those tools pick bitmap output instead of mosaic ASCII. On Windows, local shells sideload Windows Terminal’s ConPTY pair so Sixel is not stripped by in-box conhost. Local PTYs no longer inherit `TERM_PROGRAM=vscode` / `WT_SESSION` when Zync was started from an IDE. Kitty graphics are not supported yet. ([0a2a077])
 
 ### Fixed
+- **Sixel in a split:** Inline images no longer cover the rest of the pane with a black rectangle. The overlay stays transparent; the original shell recreates its image canvas after the split instead of keeping a black backing store.
 - **Split divider after a new pane:** The seam is an overlay above WebGL so it can be grabbed. Drag follows the pointer locally (no store write per pixel); the split is saved on release. Double-click / arrows ease to the new size. ([df639a8])
 - **Files grid crash on resize:** Switching away from Files after an upload could call `scrollToCell` with a column index the virtual grid had not adopted yet (`RangeError: Invalid index`). That took down the whole window. Scroll waits for the live column count; empty grids are skipped; a Files error no longer blanks the shell. ([2fb21e6])
 

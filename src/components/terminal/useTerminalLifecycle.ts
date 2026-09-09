@@ -28,6 +28,7 @@ import {
   buildXtermOptions,
   isTerminalIdleSuspended,
   loadTerminalImageAddon,
+  rebuildTerminalImageLayer,
   shouldUseWindowsLocalPtyOptions,
   writeIdleHostSuspendNotice,
 } from '../../lib/terminal';
@@ -204,6 +205,9 @@ export function useTerminalLifecycle({
 
     try {
       refreshTerminalScreen(term);
+      if (!isPaneSizeTransient()) {
+        rebuildTerminalImageLayer(term, terminalCache.get(sessionIdRef.current)?.imageAddon);
+      }
       const shouldSyncBackend = options?.syncBackend ?? true;
       if (shouldSyncBackend) {
         if (options?.forceSync) {

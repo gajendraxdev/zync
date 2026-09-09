@@ -268,7 +268,7 @@ otherwise                    → WebGL (if WebGL2 probe passes)
 
 **Ligatures:** Not mutually exclusive with WebGL. Activation order: **WebGL → LigaturesAddon → WebGL reactivate** so `font-feature-settings` reach the glyph atlas.
 
-**Inline images:** `@xterm/addon-image` draws Sixel / iTerm IIP on a canvas overlay (`.xterm-image-layer`) above WebGL or DOM. It is loaded after `term.open` (before PTY spawn) so `fastfetch` / `chafa` see Sixel in DA and CSI `t` size reports. Storage is 32 MB FIFO per shell. Kitty graphics are not implemented.
+**Inline images:** `@xterm/addon-image` draws Sixel / iTerm IIP on a canvas overlay (`.xterm-image-layer`) above WebGL or DOM. It is loaded after `term.open` (before PTY spawn) so `fastfetch` / `chafa` see Sixel in DA and CSI `t` size reports. Storage is 32 MB FIFO per shell. Kitty graphics are not implemented. Split pane ancestors must not use `transform` / `isolation` (that flattens the overlay’s transparent pixels to black in WebView2); pane clip is `overflow: clip` instead. After a split/resize settles, the overlay is recreated so the original shell does not keep a desynchronized canvas that Chromium paints black.
 
 **Windows local shells:** In-box `CreatePseudoConsole` (conhost) drops Sixel DCS, which is why the same `chafa` command looks sharp in Windows Terminal and blank in a stock ConPTY host. Zync sideloads Microsoft’s ConPTY redistributable (`vendor/conpty`, `windows_conpty.rs`) — the same `conpty.dll` + `OpenConsole.exe` pair WT uses. Release `build.rs` fails if that pair is missing; debug warns and uses in-box conhost. Remote SSH does not go through ConPTY on the client; those bytes already reach xterm.
 

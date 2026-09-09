@@ -361,9 +361,9 @@
 .pane-split-branch {
     min-height: 0;
     min-width: 0;
-    overflow: hidden;
-    isolation: isolate;
-    transform: translateZ(0);
+    /* Clip WebGL to the pane. Do not use transform/isolation here: Chromium then
+       composites ImageAddon's transparent .xterm-image-layer as opaque black. */
+    overflow: clip;
     transition: none;
 }
 

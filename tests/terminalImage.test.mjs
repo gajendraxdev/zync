@@ -3,6 +3,7 @@ import {
   buildTerminalImageAddonOptions,
   disposeTerminalImageAddon,
   loadTerminalImageAddon,
+  rebuildTerminalImageLayer,
   TERMINAL_IMAGE_STORAGE_LIMIT_MB,
 } from '../.tmp-agent-tests/src/lib/terminal/terminalImage.js';
 
@@ -62,6 +63,39 @@ runTest('disposeTerminalImageAddon clears the cache field', () => {
   assert.equal(cached.imageAddon, undefined);
   disposeTerminalImageAddon(cached);
   assert.equal(disposed, 1);
+});
+
+runTest('rebuildTerminalImageLayer is a no-op without a live overlay', () => {
+  let refreshed = 0;
+  rebuildTerminalImageLayer({ rows: 24, refresh() { refreshed += 1; } });
+  rebuildTerminalImageLayer(
+    { rows: 24, refresh() { refreshed += 1; } },
+    { _renderer: { removeLayerFromDom() { refreshed += 1; } } },
+  );
+  assert.equal(refreshed, 0);
+});
+
+runTest('rebuildTerminalImageLayer drops the overlay and refreshes', () => {
+  let removed = 0;
+  let refreshed = 0;
+  rebuildTerminalImageLayer(
+    {
+      rows: 24,
+      refresh(start, end) {
+        refreshed += 1;
+        assert.equal(start, 0);
+        assert.equal(end, 23);
+      },
+    },
+    {
+      _renderer: {
+        canvas: {},
+        removeLayerFromDom() { removed += 1; },
+      },
+    },
+  );
+  assert.equal(removed, 1);
+  assert.equal(refreshed, 1);
 });
 
 runTest('disposeTerminalImageAddon swallows dispose errors', () => {

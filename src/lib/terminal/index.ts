@@ -52,7 +52,9 @@ export {
   buildTerminalImageAddonOptions,
   createTerminalImageAddon,
   disposeTerminalImageAddon,
+  installImageLayerContextPatch,
   loadTerminalImageAddon,
+  rebuildTerminalImageLayer,
   TERMINAL_IMAGE_STORAGE_LIMIT_MB,
 } from './terminalImage.js';
 export type { TerminalImageAddon } from './terminalImage.js';
