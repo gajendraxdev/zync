@@ -1,7 +1,7 @@
 # Zync Terminal — Architecture & Reference
 
-**Last updated:** 2026-09-06  
-**Applies to:** Zync v2.29.0+
+**Last updated:** 2026-09-09  
+**Applies to:** Zync v2.30.0+
 
 This document describes **how Zync’s integrated terminal works today** — local and remote shells, stack choices, architecture, IPC, renderer, lifecycle, ghost suggestions, settings, and code layout. It is the single place to learn what the terminal system is and how it behaves, not a development plan or backlog.
 
@@ -57,12 +57,12 @@ Each workspace can have multiple shell tabs. A **local shell** (`LOCAL_TERMINAL_
 | Layer | Choice | Notes |
 |-------|--------|-------|
 | Terminal UI | `@xterm/xterm` **^6.0.0** | Core emulator |
-| Addons (always) | `fit`, `search`, `web-links` | Loaded per instance in lifecycle hook |
+| Addons (always) | `fit`, `search`, `web-links`, `image` | Loaded per instance in lifecycle hook. Image is Sixel + iTerm IIP |
 | GPU | `@xterm/addon-webgl` ^0.19.0 | Lazy-loaded; primary renderer when enabled |
 | Ligatures | `@xterm/addon-ligatures` ^0.10.0 | Compatible with WebGL via reactivate-after-ligatures order |
 | Fallback renderer | xterm **built-in DOM** | GPU off, WebGL init failure, or context loss |
 | Desktop bridge | Tauri 2.x | `terminal:*` commands + `Channel` for PTY output |
-| Local PTY | `portable-pty` (Rust) | Windows ConPTY, Unix pseudoterminals |
+| Local PTY | `portable-pty` (Rust) | Windows: sideloaded `conpty.dll` + `OpenConsole.exe` (Sixel passthrough); Unix PTYs |
 | Remote PTY | SSH channel in `pty.rs` | Batched read/write; resize coalescing |
 | Process probe | `sysinfo` (local) | Child-tree scan for idle-suspend deferral (fail-closed) |
 | State | Zustand `terminalSlice` + module `terminalCache` | Store owns tab metadata; cache owns live xterm/PTY binding |
@@ -170,8 +170,9 @@ Public surface exported from `index.ts`. Key modules:
 
 | Module | Responsibility |
 |--------|----------------|
-| `terminalCache.ts` | Module-level `Map<sessionId, TerminalCache>` — xterm, fit/search addons, generation, flags, output channel |
-| `xtermOptions.ts` | Central `buildXtermOptions()` — scrollback 5000, `reflowCursorLine: false`, `windowsPty` for local Win only |
+| `terminalCache.ts` | Module-level `Map<sessionId, TerminalCache>` — xterm, fit/search/image addons, generation, flags, output channel |
+| `xtermOptions.ts` | Central `buildXtermOptions()` — scrollback 5000, `reflowCursorLine: false`, `allowProposedApi` (ImageAddon), `windowsPty` for local Win only |
+| `terminalImage.ts` | `@xterm/addon-image` load/dispose — Sixel + iTerm IIP; 32 MB FIFO per shell; CSI 14/16/18 t size reports |
 | `ptyLifecycle.ts` | `spawnTerminalSession`, `suspendTerminalPty` |
 | `spawnContext.ts` | CWD / shell resolution for spawn |
 | `terminalSpawn.ts` | `spawnTerminalFromStoreContext` — store-aware spawn entry |
@@ -266,6 +267,12 @@ otherwise                    → WebGL (if WebGL2 probe passes)
 ```
 
 **Ligatures:** Not mutually exclusive with WebGL. Activation order: **WebGL → LigaturesAddon → WebGL reactivate** so `font-feature-settings` reach the glyph atlas.
+
+**Inline images:** `@xterm/addon-image` draws Sixel / iTerm IIP on a canvas overlay (`.xterm-image-layer`) above WebGL or DOM. It is loaded after `term.open` (before PTY spawn) so `fastfetch` / `chafa` see Sixel in DA and CSI `t` size reports. Storage is 32 MB FIFO per shell. Kitty graphics are not implemented.
+
+**Windows local shells:** In-box `CreatePseudoConsole` (conhost) drops Sixel DCS, which is why the same `chafa` command looks sharp in Windows Terminal and blank in a stock ConPTY host. Zync sideloads Microsoft’s ConPTY redistributable (`vendor/conpty`, `windows_conpty.rs`) — the same `conpty.dll` + `OpenConsole.exe` pair WT uses. Release `build.rs` fails if that pair is missing; debug warns and uses in-box conhost. Remote SSH does not go through ConPTY on the client; those bytes already reach xterm.
+
+**PTY identity:** Local shells set `TERM=xterm-256color`, `COLORTERM=truecolor`, `TERM_PROGRAM=zync`, and strip inherited `TERM_PROGRAM` / `VSCODE_*` / `WT_SESSION` so `fastfetch` does not report Visual Studio Code when Zync was launched from an IDE (`pty_term_env.rs`).
 
 ### Fallback chain
 
@@ -508,6 +515,9 @@ Minor items that do not change core shell behavior today:
 
 - Ghost suggestion behavior and edge cases — see [TERMINAL_GHOST.md](./TERMINAL_GHOST.md)
 - Rare Windows ConPTY edge cases (`windowsPty` / `reflowCursorLine` defaults in `xtermOptions.ts`)
+- Kitty terminal graphics protocol (TGP) — not in `@xterm/addon-image` 0.9
+- No Settings toggle for inline images (always on; load failure is text-only)
+- Inline images are not serialized with session restore (scrollback text only)
 
 ---
 
@@ -527,7 +537,7 @@ src/components/terminal/
 
 src/lib/paneLayout/        # Split tree, cap, persist, dock geometry, split intro; term + feature leaves
 src/components/layout/tabDock/  # Drag a tab to an edge to dock it as a pane
-src/lib/terminal/          # See §5 — 38 modules, index.ts public API
+src/lib/terminal/          # See §5 — 39 modules, index.ts public API
 src/lib/ghostSuggestions/  # See §15
 
 src/store/terminalSlice.ts
@@ -541,6 +551,9 @@ src/index.css              # .terminal-container, xterm 6 viewport overrides
 ```
 src-tauri/src/pty.rs
 src-tauri/src/pty_output_flush.rs
+src-tauri/src/windows_conpty.rs   # Sideload WT ConPTY (Sixel passthrough)
+src-tauri/src/pty_term_env.rs     # TERM / TERM_PROGRAM for local shells
+src-tauri/vendor/conpty/          # Microsoft.Windows.Console.ConPTY pair
 src-tauri/src/commands.rs
 src-tauri/src/ghost/
 ```

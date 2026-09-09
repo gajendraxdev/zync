@@ -76,6 +76,14 @@ jobs:
           cargo test ssh::tests -- --test-threads=1
           cargo test pty_output_flush
           cargo test pty::tests
+          cargo test pty_term_env
+
+      - name: Run Windows ConPTY sideload tests
+        if: matrix.platform == 'windows-latest'
+        working-directory: src-tauri
+        env:
+          GOOGLE_CLIENT_ID: ci-known-answer-test-client-id
+        run: cargo test windows_conpty
 
       - name: Run ignored SSH security tests on Linux
         if: matrix.platform == 'ubuntu-22.04'

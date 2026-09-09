@@ -29,6 +29,7 @@ runTest('buildXtermOptions keeps reflowCursorLine false', () => {
   });
   assert.equal(options.reflowCursorLine, false);
   assert.equal(options.cursorInactiveStyle, 'outline');
+  assert.equal(options.allowProposedApi, true);
 });
 
 runTest('buildXtermOptions sets scrollback above xterm default', () => {

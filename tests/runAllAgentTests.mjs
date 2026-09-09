@@ -73,6 +73,7 @@ const tests = [
   'tests/appAddItems.test.mjs',
   'tests/shellExit.test.mjs',
   'tests/shortcuts.test.mjs',
+  'tests/terminalImage.test.mjs',
   'tests/terminalRendererPolicy.test.mjs',
   'tests/terminalWebglCapability.test.mjs',
   'tests/terminalRendererSession.test.mjs',

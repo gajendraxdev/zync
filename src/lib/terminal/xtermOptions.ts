@@ -44,6 +44,7 @@ export function buildXtermOptions({
     cursorStyle: settings.cursorStyle,
     lineHeight: settings.lineHeight,
     allowTransparency: true,
+    // ImageAddon (Sixel / iTerm IIP) requires proposed APIs.
     allowProposedApi: true,
     minimumContrastRatio: isLightTheme() ? 4.5 : 1,
     theme,

@@ -48,6 +48,14 @@ export type { TerminalCache } from './terminalCache.js';
 export { clearTerminalPendingInput, terminalCache } from './terminalCache.js';
 
 export { setTerminalLigatures, disposeTerminalLigatures } from './ligatures.js';
+export {
+  buildTerminalImageAddonOptions,
+  createTerminalImageAddon,
+  disposeTerminalImageAddon,
+  loadTerminalImageAddon,
+  TERMINAL_IMAGE_STORAGE_LIMIT_MB,
+} from './terminalImage.js';
+export type { TerminalImageAddon } from './terminalImage.js';
 
 export type {
   TerminalRendererSetupSettings,

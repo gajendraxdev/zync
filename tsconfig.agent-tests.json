@@ -137,6 +137,8 @@
         "src/lib/terminal/rendererDiagnostics.ts",
         "src/lib/terminal/terminalCache.ts",
         "src/lib/terminal/ligatures.ts",
+        "src/lib/terminal/terminalImage.ts",
+        "src/lib/terminal/xtermOptions.ts",
         "src/lib/terminal/rendererSetup.ts",
         "src/lib/terminal/instanceApi.ts",
         "src/lib/terminal/inputPipeline.ts",

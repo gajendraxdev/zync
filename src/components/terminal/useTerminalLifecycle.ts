@@ -27,6 +27,7 @@ import {
   tryWakeTerminalOnReconnect,
   buildXtermOptions,
   isTerminalIdleSuspended,
+  loadTerminalImageAddon,
   shouldUseWindowsLocalPtyOptions,
   writeIdleHostSuspendNotice,
 } from '../../lib/terminal';
@@ -591,11 +592,13 @@ export function useTerminalLifecycle({
       });
 
       term.open(containerRef.current);
+      const imageAddon = loadTerminalImageAddon(term);
 
       terminalCache.set(sessionId, {
         term,
         fitAddon,
         searchAddon,
+        imageAddon,
         generation: 0,
         spawned: false,
         starting: false,

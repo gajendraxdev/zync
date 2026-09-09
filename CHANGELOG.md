@@ -4,6 +4,12 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Added
+- **Terminal inline images:** Sixel and iTerm inline images render in the shell (`fastfetch` logos, `chafa`, `imgcat`). The terminal advertises cell/window size so those tools pick bitmap output instead of mosaic ASCII. On Windows, local shells sideload Windows Terminal’s ConPTY pair so Sixel is not stripped by in-box conhost. Local PTYs no longer inherit `TERM_PROGRAM=vscode` / `WT_SESSION` when Zync was started from an IDE. Kitty graphics are not supported yet.
+
+### Fixed
+- **Files grid crash on resize:** Switching away from Files after an upload could call `scrollToCell` with a column index the virtual grid had not adopted yet (`RangeError: Invalid index`). That took down the whole window. Scroll waits for the live column count; empty grids are skipped; a Files error no longer blanks the shell. ([2fb21e6])
+
 ## [2.30.0] - 2026-09-08
 
 ### Changed
@@ -1380,6 +1386,7 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [840afc2]: https://github.com/zync-sh/zync/commit/840afc2
 [193f568]: https://github.com/zync-sh/zync/commit/193f568
 [Unreleased]: https://github.com/zync-sh/zync/compare/v2.30.0...HEAD
+[2fb21e6]: https://github.com/zync-sh/zync/commit/2fb21e6
 [2.30.0]: https://github.com/zync-sh/zync/compare/v2.29.0...v2.30.0
 [2424743]: https://github.com/zync-sh/zync/commit/2424743
 [1ed79d8]: https://github.com/zync-sh/zync/commit/1ed79d8
