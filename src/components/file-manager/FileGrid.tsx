@@ -15,6 +15,7 @@ import { buildDragData, startInternalDrag, validateAndBuildMoves } from './dragD
 import { getScrollbarSize, Grid, List, useGridRef, useListRef } from 'react-window';
 import {
   computeFileGridMetrics,
+  fileGridScrollTarget,
   FILE_LIST_COLUMNS,
   FILE_LIST_ROW_HEIGHT,
   type FileSortColumn,
@@ -491,10 +492,12 @@ export const FileGrid = memo(function FileGrid({
   const scrollFocusedGridCell = useCallback((columnCount: number) => {
     if (viewMode !== 'grid' || !focusedFile || columnCount < 1) return;
     const index = files.findIndex((f) => f.name === focusedFile);
-    if (index < 0) return;
+    const rowCount = Math.max(1, Math.ceil(files.length / columnCount));
+    const target = fileGridScrollTarget(index, columnCount, rowCount);
+    if (!target) return;
     gridRef.current?.scrollToCell({
-      rowIndex: Math.floor(index / columnCount),
-      columnIndex: index % columnCount,
+      rowIndex: target.rowIndex,
+      columnIndex: target.columnIndex,
       rowAlign: 'smart',
       columnAlign: 'smart',
       behavior: 'auto',
@@ -510,17 +513,6 @@ export const FileGrid = memo(function FileGrid({
       gridEl.scrollLeft = 0;
     }
   }, [currentPath, listRef, gridRef]);
-
-  useEffect(() => {
-    if (!focusedFile) return;
-    if (viewMode === 'list') {
-      scrollFocusedListRow();
-      return;
-    }
-    if (viewMode === 'grid') {
-      scrollFocusedGridCell(gridColumnCountRef.current);
-    }
-  }, [focusedFile, viewMode, compactMode, scrollFocusedListRow, scrollFocusedGridCell]);
 
   const listRowProps = useMemo(
     () => ({
@@ -562,6 +554,23 @@ export const FileGrid = memo(function FileGrid({
   useEffect(() => {
     reportColumnCount(gridMetrics.columnCount);
   }, [gridMetrics.columnCount, reportColumnCount]);
+
+  useLayoutEffect(() => {
+    if (!focusedFile) return;
+    if (viewMode === 'list') {
+      scrollFocusedListRow();
+      return;
+    }
+    scrollFocusedGridCell(gridMetrics.columnCount);
+  }, [
+    focusedFile,
+    viewMode,
+    compactMode,
+    gridMetrics.columnCount,
+    files.length,
+    scrollFocusedListRow,
+    scrollFocusedGridCell,
+  ]);
 
 
 
@@ -697,12 +706,10 @@ export const FileGrid = memo(function FileGrid({
               gridColumnCountRef.current = next.columnCount;
               reportColumnCount(next.columnCount);
               const el = gridRef.current?.element;
-              if (el) el.scrollLeft = 0;
-              if (!focusedFile) {
-                if (el) el.scrollTop = 0;
-                return;
+              if (el) {
+                el.scrollLeft = 0;
+                if (!focusedFile) el.scrollTop = 0;
               }
-              scrollFocusedGridCell(next.columnCount);
             }}
           />
         </div>

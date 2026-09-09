@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react';
 import type { SplitFeatureId } from '../../lib/paneLayout';
+import { ErrorBoundary } from '../ErrorBoundary';
 
 const FileManager = lazy(() => import('../FileManager').then((module) => ({ default: module.FileManager })));
 const Dashboard = lazy(() => import('../dashboard/Dashboard').then((module) => ({ default: module.Dashboard })));
@@ -22,7 +23,9 @@ export function FeaturePaneBody({
     return (
         <Suspense fallback={<FeaturePaneFallback />}>
             {featureId === 'files' && (
-                <FileManager connectionId={connectionId} surface="pane" />
+                <ErrorBoundary isolate>
+                    <FileManager connectionId={connectionId} surface="pane" />
+                </ErrorBoundary>
             )}
             {featureId === 'dashboard' && (
                 <Dashboard connectionId={connectionId} isVisible={visible} />

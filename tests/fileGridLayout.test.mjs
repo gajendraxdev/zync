@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   computeFileGridMetrics,
+  fileGridScrollTarget,
   FILE_LIST_COLUMNS,
   sortFileEntries,
 } from '../.tmp-agent-tests/src/components/file-manager/fileGridLayout.js';
@@ -43,6 +44,13 @@ runTest('computeFileGridMetrics compact column count', () => {
   assert.equal(m.columnCount, 3);
   assert.ok(m.columnWidth > 100);
   assert.ok(Math.abs(m.columnWidth * m.columnCount - 332) < 0.001);
+});
+
+runTest('fileGridScrollTarget rejects a cell past the live grid', () => {
+  assert.equal(fileGridScrollTarget(23, 8, 2), null);
+  assert.deepEqual(fileGridScrollTarget(23, 8, 4), { rowIndex: 2, columnIndex: 7 });
+  assert.equal(fileGridScrollTarget(-1, 8, 4), null);
+  assert.equal(fileGridScrollTarget(0, 8, 0), null);
 });
 
 runTest('FILE_LIST_COLUMNS includes name flex track and size column', () => {

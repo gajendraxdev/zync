@@ -50,6 +50,22 @@ export function sortFileEntries(
   });
 }
 
+/** Cell coordinates for a file index, or null if they would miss the current grid. */
+export function fileGridScrollTarget(
+  fileIndex: number,
+  columnCount: number,
+  rowCount: number,
+): { rowIndex: number; columnIndex: number } | null {
+  if (rowCount <= 0) return null;
+  const cols = Math.max(1, columnCount);
+  const rows = rowCount;
+  if (fileIndex < 0) return null;
+  const rowIndex = Math.floor(fileIndex / cols);
+  const columnIndex = fileIndex % cols;
+  if (rowIndex >= rows || columnIndex >= cols) return null;
+  return { rowIndex, columnIndex };
+}
+
 export function computeFileGridMetrics(containerWidth: number, compactMode: boolean): FileGridMetrics {
   const minTrack = compactMode ? 100 : 120;
   const gap = compactMode ? 8 : 16;

@@ -26,6 +26,7 @@ import {
 } from '../../features/survey';
 import { getDebugSurveyPromptKind, isDebugSurveyPromptEnabled } from '../../lib/debugFlags';
 import ReleaseNotesTab from '../tabs/ReleaseNotesTab';
+import { ErrorBoundary } from '../ErrorBoundary';
 import { SnippetSidebar } from '../snippets/SnippetSidebar';
 import { SetupWizard } from '../onboarding/SetupWizard';
 import { useFileSystemEvents } from '../../hooks/useFileSystemEvents';
@@ -620,7 +621,9 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
                                     )}
                                     inert={tab.view !== 'files' ? true : undefined}
                                 >
-                                    <FileManager connectionId={tab.connectionId} />
+                                    <ErrorBoundary isolate>
+                                        <FileManager connectionId={tab.connectionId} />
+                                    </ErrorBoundary>
                                 </div>
                             )}
                             {dashboardPanelMounted && (
