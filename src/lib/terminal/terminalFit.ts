@@ -54,36 +54,42 @@ export interface ResizeScheduleOptions {
 }
 
 /** Divider drag and split intro share this so PTY SIGWINCH waits until the size settles. */
-let paneTransientDepth = 0;
+const paneTransientHolds = new Set<symbol>();
 
-function beginPaneTransient(): void {
-  paneTransientDepth += 1;
+export type PaneTransientHold = symbol;
+
+function beginPaneTransient(): PaneTransientHold {
+  const hold = Symbol('pane-transient');
+  paneTransientHolds.add(hold);
+  return hold;
 }
 
-function endPaneTransient(): void {
-  paneTransientDepth = Math.max(0, paneTransientDepth - 1);
+function endPaneTransient(hold?: PaneTransientHold | null): void {
+  if (hold) {
+    paneTransientHolds.delete(hold);
+  }
 }
 
-export function beginPaneDividerDrag(): void {
-  beginPaneTransient();
+export function beginPaneDividerDrag(): PaneTransientHold {
+  return beginPaneTransient();
 }
 
-export function endPaneDividerDrag(): void {
-  endPaneTransient();
+export function endPaneDividerDrag(hold?: PaneTransientHold | null): void {
+  endPaneTransient(hold);
 }
 
-export function beginPaneSplitIntro(): void {
-  beginPaneTransient();
+export function beginPaneSplitIntro(): PaneTransientHold {
+  return beginPaneTransient();
 }
 
 /** @returns true when no divider drag or split intro is still holding PTY resize. */
-export function endPaneSplitIntro(): boolean {
-  endPaneTransient();
-  return paneTransientDepth === 0;
+export function endPaneSplitIntro(hold?: PaneTransientHold | null): boolean {
+  endPaneTransient(hold);
+  return paneTransientHolds.size === 0;
 }
 
 export function isPaneSizeTransient(): boolean {
-  return paneTransientDepth > 0;
+  return paneTransientHolds.size > 0;
 }
 
 /** True while a divider drag *or* split intro is in flight (PTY SIGWINCH held). */

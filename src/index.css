@@ -362,10 +362,28 @@
     min-height: 0;
     min-width: 0;
     overflow: hidden;
+    isolation: isolate;
+    transform: translateZ(0);
+    transition: none;
 }
 
 .pane-split-branch.is-intro {
     transition: flex-grow 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.pane-split-branch.is-settle {
+    transition: flex-grow 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.pane-split-branch.is-dragging {
+    transition: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .pane-split-branch.is-intro,
+    .pane-split-branch.is-settle {
+        transition: none;
+    }
 }
 
 .pane-split-intro-veil {
@@ -397,7 +415,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .pane-split-branch.is-intro,
     .tab-dock-preview {
         transition: none;
     }

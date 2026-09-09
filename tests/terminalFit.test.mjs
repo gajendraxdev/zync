@@ -20,18 +20,21 @@ function runTest(name, fn) {
 }
 
 function resetDrag() {
-  while (isPaneDividerDragging()) endPaneDividerDrag();
+  while (isPaneDividerDragging()) {
+    // tests must end the hold they created; leftover holds fail the suite
+    throw new Error('pane transient hold leaked into the next test');
+  }
 }
 
-runTest('pane divider drag depth nests and never goes negative', () => {
+runTest('pane divider drag holds nest and unmatched end is a no-op', () => {
   resetDrag();
   assert.equal(isPaneDividerDragging(), false);
-  beginPaneDividerDrag();
+  const first = beginPaneDividerDrag();
   assert.equal(isPaneDividerDragging(), true);
-  beginPaneDividerDrag();
-  endPaneDividerDrag();
+  const second = beginPaneDividerDrag();
+  endPaneDividerDrag(first);
   assert.equal(isPaneDividerDragging(), true);
-  endPaneDividerDrag();
+  endPaneDividerDrag(second);
   assert.equal(isPaneDividerDragging(), false);
   endPaneDividerDrag();
   assert.equal(isPaneDividerDragging(), false);
@@ -39,16 +42,27 @@ runTest('pane divider drag depth nests and never goes negative', () => {
 
 runTest('split intro shares the pane-size-transient hold with divider drag', () => {
   resetDrag();
-  beginPaneSplitIntro();
+  const intro = beginPaneSplitIntro();
   assert.equal(isPaneSizeTransient(), true);
   assert.equal(isPaneDividerDragging(), true);
-  assert.equal(endPaneSplitIntro(), true);
+  assert.equal(endPaneSplitIntro(intro), true);
   assert.equal(isPaneSizeTransient(), false);
-  beginPaneSplitIntro();
-  beginPaneDividerDrag();
-  assert.equal(endPaneSplitIntro(), false);
+  const intro2 = beginPaneSplitIntro();
+  const drag = beginPaneDividerDrag();
+  assert.equal(endPaneSplitIntro(intro2), false);
   assert.equal(isPaneSizeTransient(), true);
-  endPaneDividerDrag();
+  endPaneDividerDrag(drag);
+  assert.equal(isPaneSizeTransient(), false);
+});
+
+runTest('ending a split intro twice does not drop an active divider hold', () => {
+  resetDrag();
+  const intro = beginPaneSplitIntro();
+  const drag = beginPaneDividerDrag();
+  assert.equal(endPaneSplitIntro(intro), false);
+  assert.equal(endPaneSplitIntro(intro), false);
+  assert.equal(isPaneSizeTransient(), true);
+  endPaneDividerDrag(drag);
   assert.equal(isPaneSizeTransient(), false);
 });
 

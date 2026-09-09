@@ -62,7 +62,7 @@ export const TerminalHost = memo(function TerminalHost({
     <div
       key="connected"
       className={cn(
-        'h-full w-full relative group outline-none',
+        'h-full w-full min-h-0 min-w-0 relative group outline-none',
         terminalTransparencyEnabled ? 'terminal-transparent' : 'bg-app-bg',
       )}
       style={terminalHostStyle}

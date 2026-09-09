@@ -127,7 +127,7 @@ export {
   isPaneDividerDragging,
 } from './terminalFit.js';
 export { restoreTerminalDisplay } from './terminalPanelRestore.js';
-export type { ResizeScheduler, ResizeScheduleOptions } from './terminalFit.js';
+export type { ResizeScheduler, ResizeScheduleOptions, PaneTransientHold } from './terminalFit.js';
 
 export type { TerminalSpawnTabState } from './spawnContext.js';
 export { resolveTerminalSpawnParams } from './spawnContext.js';

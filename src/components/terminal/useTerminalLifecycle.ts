@@ -480,8 +480,11 @@ export function useTerminalLifecycle({
     };
 
     const handlePaneResizeEnd = () => {
-      if (isPaneSizeTransient()) return;
-      resizeSchedulerRef.current?.schedule({ forceSync: true, immediate: true });
+      resizeSchedulerRef.current?.schedule({
+        forceSync: true,
+        immediate: true,
+        syncBackend: !isPaneSizeTransient(),
+      });
     };
 
     window.addEventListener('zync:layout-transition-start', handleStart);

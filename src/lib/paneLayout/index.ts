@@ -22,6 +22,9 @@ export {
     prefersSplitIntroMotion,
     takeSplitIntro,
     SPLIT_INTRO_MS,
+    SPLIT_SETTLE_MS,
+    SPLIT_SASH_HIT_PX,
+    splitSashStyle,
     type SplitIntro,
 } from './intro';
 export { wheelAxisDelta, wheelDeltaToRatio } from './wheel';

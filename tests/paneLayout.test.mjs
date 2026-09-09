@@ -36,6 +36,8 @@ import {
   introStartSizes,
   markSplitIntro,
   takeSplitIntro,
+  splitSashStyle,
+  SPLIT_SASH_HIT_PX,
   wheelAxisDelta,
   wheelDeltaToRatio,
   unsplitPane,
@@ -721,6 +723,16 @@ runTest('introStartSizes parks the incoming leaf at zero', () => {
   assert.deepEqual(introStartSizes(1), [1, 0]);
   assert.equal(incomingIndexForInsert('before'), 0);
   assert.equal(incomingIndexForInsert('after'), 1);
+});
+
+runTest('splitSashStyle overlays a hit target on the seam', () => {
+  const side = splitSashStyle(false, 0.5);
+  assert.equal(side.left, '50%');
+  assert.equal(side.width, SPLIT_SASH_HIT_PX);
+  assert.equal(side.marginLeft, -(SPLIT_SASH_HIT_PX / 2));
+  const stacked = splitSashStyle(true, 0);
+  assert.equal(stacked.top, '0%');
+  assert.equal(stacked.height, SPLIT_SASH_HIT_PX);
 });
 
 runTest('splitPane marks a one-shot intro on the new split', () => {

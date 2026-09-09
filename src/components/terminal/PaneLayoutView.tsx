@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { FolderOpen, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import {
@@ -10,15 +10,18 @@ import {
     isPaneSplit,
     isTermContent,
     markSplitIntro,
+    normalizeSizes,
+    prefersSplitIntroMotion,
     takeSplitIntro,
     SPLIT_INTRO_MS,
+    SPLIT_SETTLE_MS,
     type PaneLayout,
     type PaneNode,
     type SplitDirection,
     type SplitFeatureId,
     type SplitIntro,
 } from '../../lib/paneLayout';
-import { beginPaneSplitIntro, endPaneSplitIntro } from '../../lib/terminal';
+import { beginPaneSplitIntro, endPaneSplitIntro, type PaneTransientHold } from '../../lib/terminal';
 import { FEATURE_META } from '../layout/featureMeta';
 import { useAppStore } from '../../store/useAppStore';
 import { TerminalComponent } from './Terminal';
@@ -36,16 +39,25 @@ function SplitBranch({
     grow,
     intro,
     incoming,
+    dragging,
+    settle,
     children,
 }: {
     grow: number;
     intro: boolean;
     incoming: boolean;
+    dragging: boolean;
+    settle: boolean;
     children: ReactNode;
 }) {
     return (
         <div
-            className={cn('pane-split-branch relative', intro && 'is-intro')}
+            className={cn(
+                'pane-split-branch relative',
+                intro && 'is-intro',
+                dragging && 'is-dragging',
+                settle && !intro && !dragging && 'is-settle',
+            )}
             style={{ flexGrow: grow, flexShrink: 1, flexBasis: 0 }}
         >
             {children}
@@ -86,8 +98,13 @@ function SplitFrame({
 }) {
     const [intro, setIntro] = useState<SplitIntro | null>(null);
     const [grow, setGrow] = useState<[number, number]>(sizes);
+    const [dragRatio, setDragRatio] = useState<number | null>(null);
+    const [settle, setSettle] = useState(false);
     const sizesRef = useRef(sizes);
+    const dragRatioRef = useRef<number | null>(null);
+    const dragRafRef = useRef(0);
     const cancelIntroRef = useRef<(() => void) | null>(null);
+    const introHoldRef = useRef<PaneTransientHold | null>(null);
 
     useLayoutEffect(() => {
         sizesRef.current = sizes;
@@ -100,14 +117,15 @@ function SplitFrame({
         let finished = false;
         setIntro(taken);
         setGrow(introStartSizes(taken.incomingIndex));
-        beginPaneSplitIntro();
+        introHoldRef.current = beginPaneSplitIntro();
 
         const finish = (announce: boolean) => {
             if (finished) return;
             finished = true;
             cancelIntroRef.current = null;
             setIntro(null);
-            const settled = endPaneSplitIntro();
+            const settled = endPaneSplitIntro(introHoldRef.current);
+            introHoldRef.current = null;
             if (announce && settled) {
                 window.dispatchEvent(new Event('zync:pane-resize-end'));
             }
@@ -132,7 +150,8 @@ function SplitFrame({
             window.clearTimeout(done);
             cancelIntroRef.current = null;
             if (!finished) {
-                endPaneSplitIntro();
+                endPaneSplitIntro(introHoldRef.current);
+                introHoldRef.current = null;
                 if (layoutHasSplitNode(connectionId, splitId)) {
                     markSplitIntro(splitId, taken.incomingIndex);
                 }
@@ -144,30 +163,109 @@ function SplitFrame({
         cancelIntroRef.current?.();
     }, []);
 
-    const liveGrow = intro ? grow : sizes;
+    const flushDragRatio = useCallback((ratio: number) => {
+        const next = normalizeSizes([ratio, 1 - ratio])[0];
+        dragRatioRef.current = next;
+        if (dragRafRef.current) return;
+        dragRafRef.current = window.requestAnimationFrame(() => {
+            dragRafRef.current = 0;
+            if (dragRatioRef.current != null) {
+                setDragRatio(dragRatioRef.current);
+            }
+        });
+    }, []);
+
+    const commitDrag = useCallback(() => {
+        if (dragRafRef.current) {
+            window.cancelAnimationFrame(dragRafRef.current);
+            dragRafRef.current = 0;
+        }
+        const ratio = dragRatioRef.current;
+        dragRatioRef.current = null;
+        setDragRatio(null);
+        if (ratio != null) {
+            onDrag(ratio);
+        }
+        onDragEnd();
+    }, [onDrag, onDragEnd]);
+
+    const commitKeyResize = useCallback(() => {
+        if (dragRafRef.current) {
+            window.cancelAnimationFrame(dragRafRef.current);
+            dragRafRef.current = 0;
+        }
+        const ratio = dragRatioRef.current;
+        dragRatioRef.current = null;
+        setDragRatio(null);
+        if (prefersSplitIntroMotion()) setSettle(true);
+        if (ratio != null) {
+            onDrag(ratio);
+        }
+        onDragEnd();
+    }, [onDrag, onDragEnd]);
+
+    useEffect(() => () => {
+        if (dragRafRef.current) {
+            window.cancelAnimationFrame(dragRafRef.current);
+            dragRafRef.current = 0;
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!settle) return undefined;
+        const timer = window.setTimeout(() => setSettle(false), SPLIT_SETTLE_MS);
+        return () => window.clearTimeout(timer);
+    }, [settle]);
+
+    const liveGrow: [number, number] = dragRatio != null
+        ? [dragRatio, 1 - dragRatio]
+        : intro
+            ? grow
+            : sizes;
     const stacked = direction === 'vertical';
+    const dragging = dragRatio != null;
 
     return (
-        <div className={cn('relative flex h-full w-full min-h-0 min-w-0', stacked ? 'flex-col' : 'flex-row')}>
-            <SplitBranch grow={liveGrow[0]} intro={Boolean(intro)} incoming={intro?.incomingIndex === 0}>
+        <div
+            data-pane-split=""
+            className={cn('relative isolate flex h-full w-full min-h-0 min-w-0', stacked ? 'flex-col' : 'flex-row')}
+        >
+            <SplitBranch
+                grow={liveGrow[0]}
+                intro={Boolean(intro)}
+                incoming={intro?.incomingIndex === 0}
+                dragging={dragging}
+                settle={settle}
+            >
                 {first}
+            </SplitBranch>
+            <SplitBranch
+                grow={liveGrow[1]}
+                intro={Boolean(intro)}
+                incoming={intro?.incomingIndex === 1}
+                dragging={dragging}
+                settle={settle}
+            >
+                {second}
             </SplitBranch>
             <PaneDivider
                 direction={direction}
-                firstRatio={liveGrow[0]}
+                firstRatio={liveGrow[0] / ((liveGrow[0] + liveGrow[1]) || 1)}
+                onDragStart={stopIntro}
                 onDrag={(ratio) => {
                     stopIntro();
-                    onDrag(ratio);
+                    flushDragRatio(ratio);
                 }}
-                onDragEnd={onDragEnd}
+                onDragEnd={commitDrag}
+                onKeyCommit={commitKeyResize}
                 onEqualize={() => {
                     stopIntro();
+                    dragRatioRef.current = null;
+                    setDragRatio(null);
+                    if (prefersSplitIntroMotion()) setSettle(true);
                     onEqualize();
                 }}
             />
-            <SplitBranch grow={liveGrow[1]} intro={Boolean(intro)} incoming={intro?.incomingIndex === 1}>
-                {second}
-            </SplitBranch>
         </div>
     );
 }
