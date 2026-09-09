@@ -1,5 +1,6 @@
 import type { Channel } from '@tauri-apps/api/core';
 import { terminalCache } from './terminalCache.js';
+import { clearAllTerminalIoDebug } from './terminalIoDebug.js';
 
 function isTauriRuntime(): boolean {
   return typeof window !== 'undefined'
@@ -48,6 +49,7 @@ export function teardownTerminalsBeforeWebviewReload(): void {
     revokeTerminalOutputChannel(cached.outputChannel);
     cached.outputChannel = undefined;
   }
+  clearAllTerminalIoDebug();
 }
 
 /** Wire dev HMR and page-unload teardown once at app startup. */

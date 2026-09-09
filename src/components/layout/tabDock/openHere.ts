@@ -11,6 +11,7 @@ import { directoryFromFileLocation, pickFilesOpenPath, type OpenHereFile } from 
 
 export {
     directoryFromFileLocation,
+    isUnresolvedFilesPath,
     parentDirectory,
     pickFilesOpenPath,
     type OpenHereFile,

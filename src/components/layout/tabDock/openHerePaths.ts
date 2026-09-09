@@ -9,6 +9,26 @@ function trimmed(value: string | null | undefined): string {
 }
 
 /**
+ * Empty or `/` — connect/SFTP placeholder, not a resolved Files home.
+ * A user who actually listed `/` (hash button) has entries loaded; callers
+ * should only treat `/` as unresolved when the listing is still empty.
+ */
+export function isUnresolvedFilesPath(path: string | null | undefined): boolean {
+    const value = trimmed(path);
+    return value.length === 0 || value === '/' || value === '~';
+}
+
+/** SFTP cannot list `~`; expand with a real home (`/home/user`). */
+export function expandTildeWithHome(path: string, home: string): string {
+    const value = trimmed(path);
+    const homePath = trimmed(home).replace(/\/+$/, '');
+    if (!homePath || homePath === '/' || homePath === '~') return value;
+    if (value === '~') return homePath;
+    if (value.startsWith('~/')) return `${homePath}/${value.slice(2)}`;
+    return value;
+}
+
+/**
  * Prefer a live shell cwd. Skip connection.homePath `/` — connect() stores that
  * before SFTP cwd returns, so it is not a real home.
  */
@@ -18,7 +38,7 @@ export function pickFilesOpenPath(input: {
     homePath?: string | null;
 }): string {
     const cwd = trimmed(input.lastKnownCwd);
-    if (cwd) return cwd;
+    if (cwd && cwd !== '~') return cwd;
     const initial = trimmed(input.initialPath);
     if (initial) return initial;
     const home = trimmed(input.homePath);

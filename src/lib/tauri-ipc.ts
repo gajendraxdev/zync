@@ -151,6 +151,7 @@ const ipcRenderer = {
       'terminal:create': 'terminal_create',
       'terminal:close': 'terminal_close',
       'terminal:has-active-processes': 'terminal_has_active_processes',
+      'terminal:flush-stats': 'terminal_flush_stats',
       'connections:get': 'connections_get',
       'connections:save': 'connections_save',
       'connections:exportToFile': 'connections_export_to_file',

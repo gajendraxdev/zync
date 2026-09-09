@@ -3058,6 +3058,13 @@ pub async fn terminal_has_active_processes(
     Ok(state.pty_manager.has_active_child_processes(&term_id).await)
 }
 
+/// Process-wide PTY flush-reason totals. Not per-session. Does not change the
+/// output Channel frame layout.
+#[tauri::command]
+pub fn terminal_flush_stats() -> crate::pty_output_flush::FlushReasonCounts {
+    crate::pty_output_flush::flush_reason_snapshot()
+}
+
 // Helper to get SFTP session - reconnects automatically if session is dead.
 // Zero overhead for healthy connections; only re-establishes when needed.
 async fn get_sftp_or_reconnect(

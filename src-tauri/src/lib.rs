@@ -7,6 +7,7 @@ mod ghost;
 mod identity_migration;
 pub mod plugins;
 mod pty;
+mod pty_output_flush;
 mod session;
 mod shell_icons;
 mod snippets;
@@ -154,6 +155,7 @@ pub fn run() {
             commands::terminal_create,
             commands::terminal_close,
             commands::terminal_has_active_processes,
+            commands::terminal_flush_stats,
             commands::connections_get,
             commands::connections_save,
             commands::connections_export_to_file,

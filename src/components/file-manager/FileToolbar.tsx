@@ -127,7 +127,7 @@ export function FileToolbar({
 
   return (
     <div className={cn(
-      "border-b border-app-border/20 bg-app-panel/95 backdrop-blur-xl flex items-center justify-between px-3 md:px-5 shrink-0 gap-3 z-20 relative transition-all",
+      "border-b border-app-border/20 bg-app-panel/95 backdrop-blur-xl flex items-center justify-between px-3 md:px-5 shrink-0 gap-3 z-20 relative min-w-0 transition-all",
       compactMode ? "h-10 custom-drag-region pt-[2px]" : "h-14"
     )}>
       {/* Minimalist Address Bar */}

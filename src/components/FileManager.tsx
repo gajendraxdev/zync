@@ -23,6 +23,7 @@ import { isMatch } from '../lib/keyboard';
 import { FileEditor } from './FileEditor';
 import { CopyToServerModal } from './file-manager/CopyToServerModal';
 import { FileGrid } from './file-manager/FileGrid';
+import { sortFileEntries, type FileSortColumn, type FileSortDirection } from './file-manager/fileGridLayout';
 import { getCurrentDragSource } from '../lib/dragDrop';
 import { FileToolbar } from './file-manager/FileToolbar';
 import type { FileEntry } from './file-manager/types';
@@ -40,9 +41,11 @@ import { clearEditorOverlayOpen, markEditorOverlayOpen } from './editor/overlayS
 import { TerminalDisconnectedView } from './terminal/TerminalDisconnectedView';
 import { isFeaturePaneFocused, layoutForTerm } from '../lib/paneLayout';
 import type { AppStore } from '../store/useAppStore';
-import { canSplitBesideFiles, openHerePlacementItems, openTerminalHere, pickFilesOpenPath } from './layout/tabDock';
+import { canSplitBesideFiles, isUnresolvedFilesPath, openHerePlacementItems, openTerminalHere, pickFilesOpenPath } from './layout/tabDock';
 
 export type FileManagerSurface = 'overlay' | 'pane';
+
+const EMPTY_FILES: FileEntry[] = [];
 
 function isFileManagerActive(
   state: AppStore,
@@ -142,11 +145,17 @@ export const FileManager = memo(function FileManager({
   });
   const isFilesSurfaceActive = useAppStore((state) => isFileManagerActive(state, connectionId, surface));
 
-  // Zustand Store Hooks
-  const filesMap = useAppStore(state => state.files);
-  const currentPathMap = useAppStore(state => state.currentPath);
-  const loadingMap = useAppStore(state => state.isLoading);
-  const errorMap = useAppStore(state => state.error);
+  // Zustand Store Hooks — subscribe to this connection only so other hosts do not re-paint Files.
+  const files = useAppStore(state => (
+    activeConnectionId ? (state.files[activeConnectionId] ?? EMPTY_FILES) : EMPTY_FILES
+  ));
+  const currentPath = useAppStore(state => (
+    activeConnectionId ? (state.currentPath[activeConnectionId] ?? '') : ''
+  ));
+  const loading = useAppStore(state => Boolean(activeConnectionId && state.isLoading[activeConnectionId]));
+  const currentError = useAppStore(state => (
+    activeConnectionId ? (state.error[activeConnectionId] ?? null) : null
+  ));
   const loadFiles = useAppStore(state => state.loadFiles);
   const refreshFiles = useAppStore(state => state.refreshFiles);
   const createFolder = useAppStore(state => state.createFolder);
@@ -163,21 +172,37 @@ export const FileManager = memo(function FileManager({
   const updateFileManagerSettings = useAppStore(state => state.updateFileManagerSettings);
   // const downloadAction = useAppStore(state => state.downloadFiles); // Not implemented fully yet
 
-  // Derived State
-  const files = activeConnectionId ? (filesMap[activeConnectionId] || []) : [];
-  const currentPath = activeConnectionId ? (currentPathMap[activeConnectionId] || '') : '';
-  const loading = activeConnectionId ? (loadingMap[activeConnectionId] || false) : false;
-  const currentError = activeConnectionId ? (errorMap[activeConnectionId] || null) : null;
   const activeHistoryIndex = useAppStore(state => (
     activeConnectionId ? (state.historyIndex[activeConnectionId] || 0) : 0
   ));
   const activeHistoryLength = useAppStore(state => (
     activeConnectionId ? (state.history[activeConnectionId]?.length || 0) : 0
   ));
+  const filesOpenHint = useAppStore((state) => {
+    if (!activeConnectionId) return '';
+    const path = state.currentPath[activeConnectionId] ?? '';
+    const listing = state.files[activeConnectionId];
+    const waiting = (!path || path === '/' || path === '~') && (!listing || listing.length === 0);
+    if (!waiting) return '';
+    const activeId = state.activeTerminalIds[activeConnectionId];
+    const tabs = state.terminals[activeConnectionId] || [];
+    const term = tabs.find((tab) => tab.id === activeId) ?? tabs.find((tab) => tab.tabVisible !== false);
+    const home = state.connections.find((item) => item.id === activeConnectionId)?.homePath;
+    return `${term?.lastKnownCwd || ''}|${term?.initialPath || ''}|${home || ''}`;
+  });
 
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [focusedFile, setFocusedFile] = useState<string | null>(null);
+  const [sortColumn, setSortColumn] = useState<FileSortColumn>('name');
+  const [sortDirection, setSortDirection] = useState<FileSortDirection>('asc');
+  const [gridColumnCount, setGridColumnCount] = useState(1);
+  const [selectionPath, setSelectionPath] = useState(currentPath);
+  if (selectionPath !== currentPath) {
+    setSelectionPath(currentPath);
+    setSelectedFiles([]);
+    setFocusedFile(null);
+  }
   const [searchTerm, setSearchTerm] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isEditingPath, setIsEditingPath] = useState(false);
@@ -186,6 +211,15 @@ export const FileManager = memo(function FileManager({
   const [editingFile, setEditingFile] = useState<FileEntry | null>(null);
   const [editorContent, setEditorContent] = useState('');
   const [editorProviderOverride, setEditorProviderOverride] = useState<string | null>(null);
+  const [boundConnectionId, setBoundConnectionId] = useState(activeConnectionId);
+  if (boundConnectionId !== activeConnectionId) {
+    setBoundConnectionId(activeConnectionId);
+    setSelectedFiles([]);
+    setFocusedFile(null);
+    setEditingFile(null);
+    setEditorContent('');
+    setEditorProviderOverride(null);
+  }
 
   // Modal States
   const [isNewFolderModalOpen, setIsNewFolderModalOpen] = useState(false);
@@ -434,7 +468,7 @@ export const FileManager = memo(function FileManager({
     await executeFileOperations(ops);
   }, [activeConnectionId, clipboard, currentPath, executeFileOperations]);
 
-  const handleMoveFiles = async (moves: { source: string; target: string; sourceConnectionId?: string }[]) => {
+  const handleMoveFiles = useCallback(async (moves: { source: string; target: string; sourceConnectionId?: string }[]) => {
     if (!activeConnectionId || moves.length === 0) return;
 
     const ops = moves.map(m => ({
@@ -449,7 +483,7 @@ export const FileManager = memo(function FileManager({
     const targetDir = firstTarget ? firstTarget.substring(0, firstTarget.lastIndexOf('/')) || '/' : undefined;
 
     await executeFileOperations(ops, targetDir);
-  };
+  }, [activeConnectionId, executeFileOperations]);
 
   const resolveConflict = async (action: ConflictAction, applyToAll = false) => {
     if (!currentConflict || !activeConnectionId || isProcessing) return;
@@ -685,14 +719,18 @@ export const FileManager = memo(function FileManager({
       initialPath: term?.initialPath,
       homePath: connection?.homePath,
     });
+    // `/` from lastKnownCwd / homePath is the connect placeholder, not home.
+    const fromPick = isUnresolvedFilesPath(picked) ? '' : picked;
+    const listingIsPlaceholder = isUnresolvedFilesPath(currentPath) && files.length === 0;
 
-    if (!currentPath) {
+    if (listingIsPlaceholder) {
       try {
-        const cwd = picked || await window.ipcRenderer.invoke('fs_cwd', {
+        const cwd = fromPick || await window.ipcRenderer.invoke('fs_cwd', {
           connectionId: activeConnectionId,
         });
         const path = typeof cwd === 'string' ? cwd.trim() : '';
-        if (!path) return;
+        // Do not paint `/` as home. Retry when lastKnownCwd/homePath updates.
+        if (!path || isUnresolvedFilesPath(path)) return;
         loadFiles(activeConnectionId, path);
 
         const termId = ensureTerminal(activeConnectionId, path);
@@ -708,12 +746,12 @@ export const FileManager = memo(function FileManager({
           return;
         }
         console.error('Failed to get home dir:', error);
-        if (picked) loadFiles(activeConnectionId, picked);
+        if (fromPick) loadFiles(activeConnectionId, fromPick);
       }
     } else if (files.length === 0) {
       loadFiles(activeConnectionId, currentPath);
     }
-  }, [activeConnectionId, isConnected, currentPath, files.length, loadFiles, ensureTerminal]);
+  }, [activeConnectionId, isConnected, currentPath, files.length, filesOpenHint, loadFiles, ensureTerminal]);
 
   const handleReconnect = useCallback(async () => {
     if (!activeConnectionId || isLocal) return;
@@ -721,11 +759,14 @@ export const FileManager = memo(function FileManager({
       await connect(activeConnectionId);
       const reconnected = useAppStore.getState().connections.find((c) => c.id === activeConnectionId) as (Connection & { error?: string }) | undefined;
       if (reconnected?.status === 'connected') {
-        let nextPath = currentPath;
+        const listingIsPlaceholder = isUnresolvedFilesPath(currentPath) && files.length === 0;
+        let nextPath = listingIsPlaceholder ? '' : currentPath;
         if (!nextPath) {
           try {
             const cwd = await window.ipcRenderer.invoke('fs_cwd', { connectionId: activeConnectionId });
-            if (typeof cwd === 'string' && cwd.trim()) nextPath = cwd.trim();
+            if (typeof cwd === 'string' && cwd.trim() && !isUnresolvedFilesPath(cwd)) {
+              nextPath = cwd.trim();
+            }
           } catch {
             // Keep empty; listing `/` as a silent fallback hides the real home.
           }
@@ -738,7 +779,7 @@ export const FileManager = memo(function FileManager({
       const message = error instanceof Error ? error.message : String(error);
       showToast('error', `Failed to reconnect: ${message}`);
     }
-  }, [activeConnectionId, connect, currentPath, isLocal, loadFiles, showToast]);
+  }, [activeConnectionId, connect, currentPath, files.length, isLocal, loadFiles, showToast]);
 
   useEffect(() => {
     if (activeConnectionId && isConnected) {
@@ -831,7 +872,7 @@ export const FileManager = memo(function FileManager({
     }
   }, [activeConnectionId, editingFile, currentPath, handleConnectionError, showToast]);
 
-  const handleSelect = (filename: string, multi: boolean) => {
+  const handleSelect = useCallback((filename: string, multi: boolean) => {
     if (!filename) {
       setSelectedFiles([]);
       return;
@@ -843,28 +884,38 @@ export const FileManager = memo(function FileManager({
       setSelectedFiles([filename]);
       setFocusedFile(filename);
     }
-  };
+  }, []);
 
-  const handleContextMenu = (e: React.MouseEvent, file?: FileEntry) => {
+  const handleContextMenu = useCallback((e: React.MouseEvent, file?: FileEntry) => {
     e.preventDefault();
-    e.stopPropagation(); // Just in case
+    e.stopPropagation();
     setContextMenu({ x: e.clientX, y: e.clientY, file: file || null });
 
-    // Only select if it's a file context menu
     if (file) {
-      if (!selectedFiles.includes(file.name)) {
-        setSelectedFiles([file.name]);
-      }
-    } else {
-      // Background context menu - maybe clear selection?
-      // setSelectedFiles([]); // Optional: clear selection on background right-click
+      setSelectedFiles((prev) => (prev.includes(file.name) ? prev : [file.name]));
     }
-  };
+  }, []);
 
-  const filteredFiles = files.filter((f) => {
-    if (!settings.fileManager.showHiddenFiles && f.name.startsWith('.')) return false;
-    return f.name.toLowerCase().includes(searchTerm.toLowerCase());
-  });
+  const showHiddenFiles = settings.fileManager.showHiddenFiles;
+  const filteredFiles = useMemo(
+    () => files.filter((f) => {
+      if (!showHiddenFiles && f.name.startsWith('.')) return false;
+      return f.name.toLowerCase().includes(searchTerm.toLowerCase());
+    }),
+    [files, showHiddenFiles, searchTerm],
+  );
+  const paintedFiles = useMemo(
+    () => sortFileEntries(filteredFiles, sortColumn, sortDirection),
+    [filteredFiles, sortColumn, sortDirection],
+  );
+  const handleSort = useCallback((column: FileSortColumn) => {
+    if (column === sortColumn) {
+      setSortDirection((dir) => (dir === 'asc' ? 'desc' : 'asc'));
+      return;
+    }
+    setSortColumn(column);
+    setSortDirection('asc');
+  }, [sortColumn]);
 
   // --- Action Handlers (Create, Rename, Upload, Delete, Download) ---
 
@@ -1371,16 +1422,12 @@ export const FileManager = memo(function FileManager({
         }
       }
 
-      const filteredFiles = files.filter((f) =>
-        f.name.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-
       const bindings = settings.keybindings || {};
 
       // Select All
       if (isMatch(e, bindings.fmSelectAll || 'Mod+A')) {
         e.preventDefault();
-        setSelectedFiles(filteredFiles.map((f) => f.name));
+        setSelectedFiles(paintedFiles.map((f) => f.name));
         return;
       }
 
@@ -1509,9 +1556,9 @@ export const FileManager = memo(function FileManager({
         return;
       }
 
-      if (filteredFiles.length === 0) return;
+      if (paintedFiles.length === 0) return;
 
-      const currentIndex = focusedFile ? filteredFiles.findIndex((f) => f.name === focusedFile) : -1;
+      const currentIndex = focusedFile ? paintedFiles.findIndex((f) => f.name === focusedFile) : -1;
 
       // Arrow Keys: Navigate
       // Note: These are standard navigation keys, not strictly "commands"
@@ -1521,42 +1568,20 @@ export const FileManager = memo(function FileManager({
         let newIndex = currentIndex;
 
         if (viewMode === 'grid') {
-          // Dynamic Grid Column Calculation
-          // We measure the DOM to find how many items fit in one row
-          let gridCols = settings.compactMode ? 12 : 6; // Default fallback
+          const gridCols = Math.max(1, gridColumnCount);
 
-          if (filteredFiles.length > 0) {
-            const firstItem = document.getElementById(`file-item-${filteredFiles[0].name}`);
-            if (firstItem && firstItem.parentElement) {
-              const baseTop = firstItem.offsetTop;
-              let count = 0;
-              // distinct scan to find row break
-              for (let i = 0; i < filteredFiles.length; i++) {
-                const el = document.getElementById(`file-item-${filteredFiles[i].name}`);
-                if (el && Math.abs(el.offsetTop - baseTop) < 10) {
-                  count++;
-                } else {
-                  break; // Found the break
-                }
-                // Safety break for huge lists if layout is weird (e.g. all horizontal)
-                if (count > 50) break;
-              }
-              if (count > 0) gridCols = count;
-            }
-          }
-
-          if (e.key === 'ArrowDown') newIndex = Math.min(currentIndex + gridCols, filteredFiles.length - 1);
+          if (e.key === 'ArrowDown') newIndex = Math.min(currentIndex + gridCols, paintedFiles.length - 1);
           else if (e.key === 'ArrowUp') newIndex = Math.max(currentIndex - gridCols, 0);
-          else if (e.key === 'ArrowRight') newIndex = Math.min(currentIndex + 1, filteredFiles.length - 1);
+          else if (e.key === 'ArrowRight') newIndex = Math.min(currentIndex + 1, paintedFiles.length - 1);
           else if (e.key === 'ArrowLeft') newIndex = Math.max(currentIndex - 1, 0);
         } else {
           // List view: only up/down
-          if (e.key === 'ArrowDown') newIndex = Math.min(currentIndex + 1, filteredFiles.length - 1);
+          if (e.key === 'ArrowDown') newIndex = Math.min(currentIndex + 1, paintedFiles.length - 1);
           else if (e.key === 'ArrowUp') newIndex = Math.max(currentIndex - 1, 0);
         }
 
         if (newIndex === -1) newIndex = 0;
-        const newFocused = filteredFiles[newIndex]?.name;
+        const newFocused = paintedFiles[newIndex]?.name;
         setFocusedFile(newFocused);
 
         // Update selection if Shift is held
@@ -1580,14 +1605,14 @@ export const FileManager = memo(function FileManager({
       // Home
       if (e.key === 'Home') {
         e.preventDefault();
-        if (filteredFiles.length > 0) setFocusedFile(filteredFiles[0].name);
+        if (paintedFiles.length > 0) setFocusedFile(paintedFiles[0].name);
         return;
       }
 
       // End
       if (e.key === 'End') {
         e.preventDefault();
-        if (filteredFiles.length > 0) setFocusedFile(filteredFiles[filteredFiles.length - 1].name);
+        if (paintedFiles.length > 0) setFocusedFile(paintedFiles[paintedFiles.length - 1].name);
         return;
       }
     };
@@ -1595,8 +1620,8 @@ export const FileManager = memo(function FileManager({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
-    activeConnectionId, searchTerm, isSearchOpen, files, settings, isNewFolderModalOpen, isNewFileModalOpen, isRenameModalOpen,
-    editingFile, selectedFiles, focusedFile, handleNavigate, handleCopy, handlePaste,
+    activeConnectionId, searchTerm, isSearchOpen, files, paintedFiles, settings, isNewFolderModalOpen, isNewFileModalOpen, isRenameModalOpen,
+    editingFile, selectedFiles, focusedFile, handleNavigate, handleCopy, handlePaste, gridColumnCount,
     handleDelete, navigateBack, navigateForward, isCopyModalOpen, isPropertiesOpen, viewMode, isConnected, isFilesSurfaceActive,
   ]);
 
@@ -1629,7 +1654,7 @@ export const FileManager = memo(function FileManager({
     <div
       ref={containerRef}
       tabIndex={0}
-      className={`flex-1 flex flex-col h-full bg-app-bg relative outline-none focus-within:ring-0 transition-all duration-150 ${isTauriDraggingOver ? 'ring-2 ring-app-accent ring-inset' : ''}`}
+      className={`flex-1 min-w-0 flex flex-col h-full bg-app-bg relative outline-none focus-within:ring-0 transition-all duration-150 ${isTauriDraggingOver ? 'ring-2 ring-app-accent ring-inset' : ''}`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -1689,7 +1714,7 @@ export const FileManager = memo(function FileManager({
       />
 
       {/* biome-ignore lint/a11y/noStaticElementInteractions: interactive div */}
-      <div className="flex-1 overflow-hidden relative flex flex-col" onClick={() => setContextMenu(null)}>
+      <div className="flex-1 min-h-0 min-w-0 overflow-hidden relative flex flex-col" onClick={() => setContextMenu(null)}>
         {(isReconnectPending || currentError === 'DISCONNECTED' || (!isConnected && !isLocal)) ? (
           <TerminalDisconnectedView
             connection={connection}
@@ -1716,7 +1741,7 @@ export const FileManager = memo(function FileManager({
           />
         ) : (
           <FileGrid
-            files={filteredFiles}
+            files={paintedFiles}
             selectedFiles={selectedFiles}
             focusedFile={focusedFile || undefined}
             onSelect={handleSelect}
@@ -1727,6 +1752,10 @@ export const FileManager = memo(function FileManager({
             connectionId={activeConnectionId || undefined}
             currentPath={currentPath}
             onMove={handleMoveFiles}
+            sortColumn={sortColumn}
+            sortDirection={sortDirection}
+            onSort={handleSort}
+            onGridColumnCount={setGridColumnCount}
           />
         )}
       </div>

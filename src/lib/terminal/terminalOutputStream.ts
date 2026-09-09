@@ -6,8 +6,19 @@ import { useAppStore } from '../../store/useAppStore.js';
 import { terminalCache } from './terminalCache.js';
 import { touchTerminalActivity } from './terminalActivity.js';
 import { silenceTerminalOutputChannel } from './terminalReloadTeardown.js';
+import { recordChannelFrame, recordTermWrite } from './terminalIoDebug.js';
+import { selectSnifferBytes, SNIFF_FULL_MAX_BYTES } from './terminalSnifferBytes.js';
+import {
+  decodeTerminalOutputChannelFrame,
+  GENERATION_HEADER_BYTES,
+  terminalOutputMessageToArrayBuffer,
+} from './terminalOutputFrame.js';
 
-const GENERATION_HEADER_BYTES = 4;
+export { selectSnifferBytes, SNIFF_FULL_MAX_BYTES, SNIFF_TAIL_BYTES } from './terminalSnifferBytes.js';
+export {
+  decodeTerminalOutputChannelFrame,
+  type TerminalOutputChannelFrame,
+} from './terminalOutputFrame.js';
 
 /** Cheap pre-filter before UTF-8 decode + prompt regex work on PTY output. */
 function outputMayContainPrompt(data: Uint8Array): boolean {
@@ -33,31 +44,7 @@ function createStubOutputChannel(): Channel {
   } as unknown as Channel;
 }
 
-export interface TerminalOutputChannelFrame {
-  generation: number;
-  data: Uint8Array;
-}
 
-/** Decodes a raw IPC channel frame: u32 LE generation + PTY bytes. */
-export function decodeTerminalOutputChannelFrame(buffer: ArrayBuffer): TerminalOutputChannelFrame {
-  if (buffer.byteLength < GENERATION_HEADER_BYTES) {
-    throw new RangeError('PTY output channel frame too short');
-  }
-  const view = new DataView(buffer);
-  const generation = view.getUint32(0, true);
-  const data = new Uint8Array(buffer, GENERATION_HEADER_BYTES);
-  return { generation, data };
-}
-
-function toArrayBuffer(message: unknown): ArrayBuffer | null {
-  if (message instanceof ArrayBuffer) {
-    return message;
-  }
-  if (message instanceof Uint8Array) {
-    return message.buffer.slice(message.byteOffset, message.byteOffset + message.byteLength);
-  }
-  return null;
-}
 
 /**
  * Registers a Tauri output channel for the next terminal:create invoke.
@@ -85,7 +72,7 @@ export function attachTerminalOutputChannel(termId: string, term: XTerm): Channe
       return;
     }
 
-    const payload = toArrayBuffer(message);
+    const payload = terminalOutputMessageToArrayBuffer(message);
     if (!payload || payload.byteLength < GENERATION_HEADER_BYTES) {
       return;
     }
@@ -96,21 +83,26 @@ export function attachTerminalOutputChannel(termId: string, term: XTerm): Channe
     }
 
     touchTerminalActivity(termId);
+    recordChannelFrame(termId, data.byteLength);
     if (entry.connectionId) {
       const connectionId = entry.connectionId;
-      // Always run the bounded secret sniffer; chunk-boundary prefilters can miss prompts.
-      feedSecretInputSniffer(termId, data, () => {
+      const large = data.length > SNIFF_FULL_MAX_BYTES;
+      const sniff = selectSnifferBytes(data);
+      feedSecretInputSniffer(termId, sniff, () => {
         const live = terminalCache.get(termId);
         live?.ghostTracker?.enterSecretInputMode();
-      });
-      if (outputMayContainPrompt(data)) {
-        feedPromptCwdSniffer(termId, data, (path) => {
+      }, { resetDecoder: large, resetBuffer: large });
+      if (outputMayContainPrompt(sniff)) {
+        feedPromptCwdSniffer(termId, sniff, (path) => {
           entry.ghostTracker?.exitSecretInputMode();
           useAppStore.getState().setTerminalCwd(connectionId, termId, path);
-        });
+        }, { resetDecoder: large, resetBuffer: large });
       }
     }
-    term.write(data);
+    const writeStarted = performance.now();
+    term.write(data, () => {
+      recordTermWrite(termId, performance.now() - writeStarted);
+    });
   });
 
   cached.outputChannel = channel;

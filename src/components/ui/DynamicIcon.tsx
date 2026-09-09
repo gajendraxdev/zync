@@ -163,7 +163,7 @@ export const DynamicIcon = memo(function DynamicIcon({
                     alt={type}
                     style={{ width: size, height: size }}
                     className={cn(
-                        "shrink-0 select-none transition-opacity duration-200", 
+                        "shrink-0 select-none",
                         isLoaded ? "opacity-100" : "opacity-0"
                     )}
                     draggable={false}

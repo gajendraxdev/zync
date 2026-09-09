@@ -1,6 +1,6 @@
 [package]
 name = "zync"
-version = "2.29.0"
+version = "2.30.0"
 description = "A modern SSH client"
 authors = ["Gajendra"]
 edition = "2021"
@@ -63,3 +63,9 @@ tauri-plugin-single-instance = { version = "2", default-features = false }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winreg = "0.56"
+
+# Thin LTO for the PTY/SSH path without fat-LTO link times. codegen-units 8 is
+# tighter than Cargo's default 16 and cheaper than 1 on Windows/macOS release CI.
+[profile.release]
+lto = "thin"
+codegen-units = 8
