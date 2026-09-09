@@ -59,6 +59,7 @@ const tests = [
   'tests/ghostSuggestionsHelpers.test.mjs',
   'tests/terminalOutputStream.test.mjs',
   'tests/fileGridLayout.test.mjs',
+  'tests/errorBoundary.test.mjs',
   'tests/releaseNotesMarkdown.test.mjs',
   'tests/providerCatalog.test.mjs',
   'tests/quickConnectParsing.test.mjs',

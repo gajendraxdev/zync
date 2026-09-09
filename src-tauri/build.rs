@@ -108,19 +108,38 @@ fn conpty_arch_name() -> &'static str {
     }
 }
 
+const CONPTY_NUPKG_VERSION: &str = "1.24.260710001";
+const CONPTY_NUPKG_SHA256: &str = "175640566a3b59c4b132070ee96c2c77e5ab7edd2e92732a5eb3610bbf63d90e";
+const CONPTY_PROVENANCE_FILE: &str = ".nupkg-sha256";
+
+fn conpty_pair_matches_pin(dir: &Path) -> bool {
+    let dll = dir.join("conpty.dll");
+    let exe = dir.join("OpenConsole.exe");
+    let pin = dir.join(CONPTY_PROVENANCE_FILE);
+    if !dll.is_file() || !exe.is_file() || !pin.is_file() {
+        return false;
+    }
+    fs::read_to_string(&pin)
+        .map(|s| s.trim().eq_ignore_ascii_case(CONPTY_NUPKG_SHA256))
+        .unwrap_or(false)
+}
+
+fn write_conpty_provenance(dir: &Path) -> Result<(), String> {
+    fs::write(dir.join(CONPTY_PROVENANCE_FILE), CONPTY_NUPKG_SHA256)
+        .map_err(|e| format!("write ConPTY provenance: {e}"))
+}
+
 fn ensure_conpty_pair(vendor_root: &Path) -> Result<(), String> {
     for arch in ["x64", "arm64"] {
         let dir = vendor_root.join(arch);
-        if dir.join("conpty.dll").is_file() && dir.join("OpenConsole.exe").is_file() {
+        if conpty_pair_matches_pin(&dir) {
             continue;
         }
         extract_conpty_arch(vendor_root, arch)?;
+        write_conpty_provenance(&dir)?;
     }
     Ok(())
 }
-
-const CONPTY_NUPKG_VERSION: &str = "1.24.260710001";
-const CONPTY_NUPKG_SHA256: &str = "175640566a3b59c4b132070ee96c2c77e5ab7edd2e92732a5eb3610bbf63d90e";
 
 fn extract_conpty_arch(vendor_root: &Path, arch: &str) -> Result<(), String> {
     let nupkg = fetch_conpty_nupkg(vendor_root)?;

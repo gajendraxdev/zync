@@ -115,6 +115,7 @@
         "src/lib/paneLayout/index.ts",
         "src/components/file-manager/types.ts",
         "src/components/file-manager/fileGridLayout.ts",
+        "src/components/errorBoundaryRetry.ts",
         "src/lib/releaseNotes/mediaUrls.ts",
         "src/lib/releaseNotes/alerts.ts",
         "src/lib/releaseNotes/headings.ts",

@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { isFailedLazyImport } from './errorBoundaryRetry';
 
 interface Props {
   children: ReactNode;
@@ -46,11 +47,14 @@ export class ErrorBoundary extends Component<Props, State> {
           <button
             className="mt-4 px-4 py-2 bg-red-600 hover:bg-red-700 rounded text-white"
             onClick={() => {
-              if (this.props.isolate) this.reset();
-              else window.location.reload();
+              if (this.props.isolate && !isFailedLazyImport(this.state.error)) {
+                this.reset();
+                return;
+              }
+              window.location.reload();
             }}
           >
-            {this.props.isolate ? 'Try again' : 'Reload App'}
+            {this.props.isolate && !isFailedLazyImport(this.state.error) ? 'Try again' : 'Reload App'}
           </button>
         </div>
       );

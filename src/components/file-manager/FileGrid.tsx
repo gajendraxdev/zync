@@ -710,6 +710,7 @@ export const FileGrid = memo(function FileGrid({
                 el.scrollLeft = 0;
                 if (!focusedFile) el.scrollTop = 0;
               }
+              scrollFocusedGridCell(next.columnCount);
             }}
           />
         </div>

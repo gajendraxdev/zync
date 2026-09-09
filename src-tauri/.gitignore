@@ -17,4 +17,5 @@ target-agent-check/
 # Microsoft ConPTY redistributable (fetched by build.rs)
 /vendor/conpty/**/*.dll
 /vendor/conpty/**/*.exe
+/vendor/conpty/**/.nupkg-sha256
 /vendor/conpty/*.nupkg
