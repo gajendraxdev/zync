@@ -112,6 +112,25 @@ export function PropertiesPanel({ file, isOpen, onClose, className }: Properties
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <div className="flex items-center text-app-muted text-xs uppercase font-bold tracking-wider mb-1 gap-1">
+                                <span>Owner</span>
+                            </div>
+                            <p className="text-sm text-app-text/90 font-medium truncate" title={file.owner || undefined}>
+                                {file.owner || '—'}
+                            </p>
+                        </div>
+                        <div>
+                            <div className="flex items-center text-app-muted text-xs uppercase font-bold tracking-wider mb-1 gap-1">
+                                <span>Group</span>
+                            </div>
+                            <p className="text-sm text-app-text/90 font-medium truncate" title={file.group || undefined}>
+                                {file.group || '—'}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
                         {/* Size */}
                         <div>
                             <div className="flex items-center text-app-muted text-xs uppercase font-bold tracking-wider mb-1 gap-1">

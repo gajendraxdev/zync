@@ -3673,6 +3673,8 @@ fn parse_wsl_ls_listing(stdout: &str) -> Vec<FileEntry> {
             size: 0,
             last_modified: 0,
             permissions: String::new(),
+            owner: String::new(),
+            group: String::new(),
         });
     }
 

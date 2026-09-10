@@ -149,6 +149,8 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
                 lastModified: e.lastModified,
                 permissions: e.permissions,
                 path: e.path,
+                owner: typeof e.owner === 'string' ? e.owner : '',
+                group: typeof e.group === 'string' ? e.group : '',
             }));
 
             set(state => ({
@@ -425,6 +427,8 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
                     size: entrySize,
                     lastModified: Date.now() / 1000,
                     permissions: 'rwxr-xr-x', // Dummy permissions
+                    owner: '',
+                    group: '',
                 };
 
                 newEntries.push(newEntry);
