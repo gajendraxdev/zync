@@ -206,7 +206,11 @@ export const FileManager = memo(function FileManager({
     return `${term?.lastKnownCwd || ''}|${term?.initialPath || ''}|${home || ''}`;
   });
 
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>(settings.fileManager.defaultView || 'grid');
+  const viewMode: 'grid' | 'list' = settings.fileManager.defaultView === 'list' ? 'list' : 'grid';
+  const setViewMode = useCallback((mode: 'grid' | 'list') => {
+    if (mode === viewMode) return;
+    void updateFileManagerSettings({ defaultView: mode });
+  }, [updateFileManagerSettings, viewMode]);
   const [typeFilter, setTypeFilter] = useState<FileSearchTypeFilter>('all');
   const [placesCollapsed, setPlacesCollapsed] = useState(
     () => window.innerWidth < FILE_CHROME_NARROW_MAX || surface === 'pane',
@@ -1972,7 +1976,7 @@ export const FileManager = memo(function FileManager({
             }}
           />
         )}
-        <FileSideDrawer open={!placesCollapsed} width={FILE_PLACES_WIDTH_PX} side="left">
+        <FileSideDrawer open={!placesCollapsed} width={FILE_PLACES_WIDTH_PX} side="left" overlay={isNarrow}>
           <FilePlacesSidebar
             homePath={homePath || currentPath}
             currentPath={currentPath}
@@ -2034,7 +2038,7 @@ export const FileManager = memo(function FileManager({
         )}
         <FileFloatingBar loading={isLoading} selectedCount={selectedFiles.length} totalCount={paintedFiles.length} />
       </div>
-        <FileSideDrawer open={isPropertiesOpen} width={FILE_PROPERTIES_WIDTH_PX} side="right">
+        <FileSideDrawer open={isPropertiesOpen} width={FILE_PROPERTIES_WIDTH_PX} side="right" overlay>
           <PropertiesPanel
             files={inspectorFiles}
             onClose={() => setIsPropertiesOpen(false)}

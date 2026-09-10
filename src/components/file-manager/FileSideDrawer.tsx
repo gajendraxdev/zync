@@ -5,11 +5,13 @@ export function FileSideDrawer({
   open,
   width,
   side,
+  overlay = false,
   children,
 }: {
   open: boolean;
   width: number;
   side: 'left' | 'right';
+  overlay?: boolean;
   children: ReactNode;
 }) {
   const isLeft = side === 'left';
@@ -31,14 +33,20 @@ export function FileSideDrawer({
   return (
     <div
       className={cn(
-        'absolute inset-y-0 z-40 flex flex-col overflow-hidden',
-        'bg-app-panel/90 backdrop-blur-xl',
-        'transition-[width,opacity] duration-300 ease-in-out',
-        isLeft ? 'left-0 border-r border-app-border/40' : 'right-0 left-auto border-l border-app-border/40',
+        'flex flex-col overflow-hidden bg-app-panel',
+        'transition-[width,opacity,box-shadow] duration-300 ease-in-out',
+        overlay
+          ? cn(
+              'absolute inset-y-0 z-40 bg-app-panel/90 backdrop-blur-xl',
+              isLeft ? 'left-0' : 'right-0 left-auto',
+            )
+          : 'relative z-10 shrink-0',
+        isLeft ? 'border-r border-app-border/40' : 'border-l border-app-border/40',
+        !open && 'border-transparent',
         open
           ? cn(
               'opacity-100 pointer-events-auto',
-              isLeft ? 'shadow-[16px_0_32px_-8px_rgba(0,0,0,0.3)]' : 'shadow-[-16px_0_32px_-8px_rgba(0,0,0,0.3)]',
+              overlay && (isLeft ? 'shadow-[16px_0_32px_-8px_rgba(0,0,0,0.3)]' : 'shadow-[-16px_0_32px_-8px_rgba(0,0,0,0.3)]'),
             )
           : 'opacity-0 pointer-events-none',
       )}

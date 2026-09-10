@@ -572,18 +572,23 @@ export const FileGrid = memo(function FileGrid({
   }, [viewMode, focusedFile, files, listRef]);
 
   const scrollFocusedGridCell = useCallback((columnCount: number) => {
-    if (viewMode !== 'grid' || !focusedFile || columnCount < 1) return;
+    if (viewMode !== 'grid' || !focusedFile || columnCount < 1 || files.length === 0) return;
     const index = files.findIndex((f) => f.name === focusedFile);
     const rowCount = Math.max(1, Math.ceil(files.length / columnCount));
     const target = fileGridScrollTarget(index, columnCount, rowCount);
     if (!target) return;
-    gridRef.current?.scrollToCell({
-      rowIndex: target.rowIndex,
-      columnIndex: target.columnIndex,
-      rowAlign: 'smart',
-      columnAlign: 'smart',
-      behavior: 'auto',
-    });
+    if (target.columnIndex >= columnCount || target.rowIndex >= rowCount) return;
+    try {
+      gridRef.current?.scrollToCell({
+        rowIndex: target.rowIndex,
+        columnIndex: target.columnIndex,
+        rowAlign: 'smart',
+        columnAlign: 'smart',
+        behavior: 'auto',
+      });
+    } catch {
+      // react-window throws if this column count is not committed on the Grid yet.
+    }
   }, [viewMode, focusedFile, files, gridRef]);
 
   useLayoutEffect(() => {
@@ -826,7 +831,6 @@ export const FileGrid = memo(function FileGrid({
                 el.scrollLeft = 0;
                 if (!focusedFile) el.scrollTop = 0;
               }
-              scrollFocusedGridCell(next.columnCount);
             }}
           />
         </div>
