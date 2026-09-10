@@ -2,7 +2,7 @@ import { Clock, Home, Plus, Star, X } from 'lucide-react';
 import { memo, type ReactNode } from 'react';
 import { cn } from '../../lib/utils';
 import { FILE_RECENT_LIMIT } from './fileChrome';
-import { filePathLeafLabel } from './filePathNav';
+import { filePathLeafLabel, isFilePathEqual, normalizeFilePath } from './filePathNav';
 
 export const FilePlacesSidebar = memo(function FilePlacesSidebar({
   homePath,
@@ -21,16 +21,20 @@ export const FilePlacesSidebar = memo(function FilePlacesSidebar({
   onAddBookmark: () => void;
   onRemoveBookmark: (path: string) => void;
 }) {
-  const home = homePath || '/';
-  const recentRows = recents.filter((path) => path && path !== home).slice(0, FILE_RECENT_LIMIT);
-  const bookmarked = bookmarks.includes(currentPath);
+  const home = normalizeFilePath(homePath || '/');
+  const current = normalizeFilePath(currentPath);
+  const recentRows = recents
+    .map(normalizeFilePath)
+    .filter((path) => path && !isFilePathEqual(path, home))
+    .slice(0, FILE_RECENT_LIMIT);
+  const bookmarked = bookmarks.some((path) => isFilePathEqual(path, current));
 
   return (
     <aside className="flex h-full w-full min-w-0 flex-col">
       <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto p-2">
         <PlaceButton
           label="Home"
-          active={currentPath === home}
+          active={isFilePathEqual(current, home)}
           icon={<Home size={14} />}
           onClick={() => onNavigate(home)}
         />
@@ -41,7 +45,7 @@ export const FilePlacesSidebar = memo(function FilePlacesSidebar({
               <PlaceButton
                 key={path}
                 label={filePathLeafLabel(path, { homePath: home })}
-                active={path === currentPath}
+                active={isFilePathEqual(path, current)}
                 icon={<Clock size={14} />}
                 onClick={() => onNavigate(path)}
               />
@@ -53,9 +57,9 @@ export const FilePlacesSidebar = memo(function FilePlacesSidebar({
           <PlaceButton
             key={path}
             label={filePathLeafLabel(path, { homePath: home })}
-            active={path === currentPath}
+            active={isFilePathEqual(normalizeFilePath(path), current)}
             icon={<Star size={14} />}
-            onClick={() => onNavigate(path)}
+            onClick={() => onNavigate(normalizeFilePath(path))}
             onRemove={() => onRemoveBookmark(path)}
           />
         ))}
@@ -63,7 +67,7 @@ export const FilePlacesSidebar = memo(function FilePlacesSidebar({
           type="button"
           className="flex w-full items-center rounded-lg border border-transparent px-3 py-1.5 text-left text-app-muted hover:border-app-border/20 hover:bg-app-surface/40 hover:text-app-text"
           onClick={() => {
-            if (bookmarked) onRemoveBookmark(currentPath);
+            if (bookmarked) onRemoveBookmark(current);
             else onAddBookmark();
           }}
         >

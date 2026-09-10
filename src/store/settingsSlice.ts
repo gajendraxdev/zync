@@ -146,7 +146,6 @@ export interface AppSettings {
         fmBack: string;
         fmForward: string;
         fmSearch: string;
-        fmSearchEverywhere: string;
         fmGridView: string;
         fmListView: string;
         fmHidden: string;
@@ -290,7 +289,6 @@ export const defaultSettings: AppSettings = {
         fmBack: 'Alt+Left',
         fmForward: 'Alt+Right',
         fmSearch: 'Mod+F',
-        fmSearchEverywhere: 'Mod+Shift+F',
         fmGridView: 'Mod+2',
         fmListView: 'Mod+1',
         fmHidden: 'Mod+H',

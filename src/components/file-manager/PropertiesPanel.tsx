@@ -7,6 +7,7 @@ import type { FileEntry } from './types';
 interface PropertiesPanelProps {
   files: FileEntry[];
   onClose: () => void;
+  dateTimeFormat?: 'simple' | 'detailed';
 }
 
 function fileKindLabel(file: FileEntry): string {
@@ -22,9 +23,21 @@ function fileKindLabel(file: FileEntry): string {
 function unixModeString(octal: string): string {
   const digits = octal.trim();
   if (!/^[0-7]{3,4}$/.test(digits)) return digits || '—';
-  const three = digits.slice(-3);
-  const bit = (n: number) => `${n & 4 ? 'r' : '-'}${n & 2 ? 'w' : '-'}${n & 1 ? 'x' : '-'}`;
-  return three.split('').map((d) => bit(parseInt(d, 8))).join('');
+  const padded = digits.padStart(4, '0');
+  const special = parseInt(padded[0], 8);
+  const three = padded.slice(-3);
+  const execChar = (hasExec: boolean, specialBit: number, marked: 's' | 't') => {
+    if (special & specialBit) return hasExec ? marked : marked.toUpperCase();
+    return hasExec ? 'x' : '-';
+  };
+  const bit = (n: number, specialBit: number, marked: 's' | 't') => (
+    `${n & 4 ? 'r' : '-'}${n & 2 ? 'w' : '-'}${execChar(Boolean(n & 1), specialBit, marked)}`
+  );
+  return [
+    bit(parseInt(three[0], 8), 4, 's'),
+    bit(parseInt(three[1], 8), 2, 's'),
+    bit(parseInt(three[2], 8), 1, 't'),
+  ].join('');
 }
 
 function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
@@ -40,7 +53,7 @@ function Row({ label, value, mono }: { label: string; value: string; mono?: bool
   );
 }
 
-export function PropertiesPanel({ files, onClose }: PropertiesPanelProps) {
+export function PropertiesPanel({ files, onClose, dateTimeFormat = 'simple' }: PropertiesPanelProps) {
   const single = files.length === 1 ? files[0] : null;
   const folderCount = files.filter((file) => file.type === 'd').length;
   const otherCount = files.length - folderCount;
@@ -97,7 +110,7 @@ export function PropertiesPanel({ files, onClose }: PropertiesPanelProps) {
                 <Row label="Type" value={fileKindLabel(single)} />
                 <Row label="Owner" value={(single.owner || '').trim() || '—'} />
                 <Row label="Group" value={(single.group || '').trim() || '—'} />
-                <Row label="Modified" value={formatFileListDate(single.lastModified) || '—'} />
+                <Row label="Modified" value={formatFileListDate(single.lastModified, Date.now(), dateTimeFormat) || '—'} />
                 <Row label="Mode" value={unixModeString(single.permissions || '')} mono />
                 <Row label="Octal" value={single.permissions?.trim() || '—'} mono />
               </>

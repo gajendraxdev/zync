@@ -23,14 +23,12 @@ export function FileQueryEditor({
   onClose,
   typeFilter,
   onTypeFilter,
-  everywhere,
 }: {
   value: string;
   onChange: (value: string) => void;
   onClose: () => void;
   typeFilter: FileSearchTypeFilter;
   onTypeFilter: (value: FileSearchTypeFilter) => void;
-  everywhere?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const filterRef = useRef<HTMLDivElement>(null);
@@ -47,9 +45,9 @@ export function FileQueryEditor({
       <Search size={13} className="shrink-0 text-app-muted" />
       <input
         ref={inputRef}
-        aria-label={everywhere ? 'Search everywhere' : 'Search this folder'}
+        aria-label="Search this folder"
         className="h-full min-w-0 flex-1 bg-transparent text-[12px] text-app-text outline-none placeholder:text-app-muted/50"
-        placeholder={everywhere ? 'Search everywhere…' : 'Search this folder…'}
+        placeholder="Search this folder…"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
@@ -76,6 +74,7 @@ export function FileQueryEditor({
                 <button
                   key={chip.id}
                   type="button"
+                  aria-pressed={typeFilter === chip.id}
                   className={cn(
                     'rounded-md px-2.5 py-1 text-[11px] font-medium',
                     typeFilter === chip.id

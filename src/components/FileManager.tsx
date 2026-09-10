@@ -33,7 +33,7 @@ import { FilePlacesSidebar } from './file-manager/FilePlacesSidebar';
 import { FileSideDrawer } from './file-manager/FileSideDrawer';
 import { FileFloatingBar } from './file-manager/FileFloatingBar';
 import { FILE_CHROME_NARROW_MAX, FILE_GRID_ZOOM, FILE_LIST_ZOOM, FILE_PLACES_WIDTH_PX, FILE_PROPERTIES_WIDTH_PX, clampFileGridZoom, clampFileListZoom } from './file-manager/fileChrome';
-import { filePathLeafLabel, inferHomePath } from './file-manager/filePathNav';
+import { filePathLeafLabel, inferHomePath, isFilePathEqual, normalizeFilePath } from './file-manager/filePathNav';
 import { fileMatchesQuery, fileMatchesSearchType } from './file-manager/fileSearchFilter';
 import type { FileSearchTypeFilter } from './file-manager/FileQueryEditor';
 import type { FileEntry } from './file-manager/types';
@@ -207,7 +207,6 @@ export const FileManager = memo(function FileManager({
   });
 
   const [viewMode, setViewMode] = useState<'grid' | 'list'>(settings.fileManager.defaultView || 'grid');
-  const [searchEverywhere, setSearchEverywhere] = useState(false);
   const [typeFilter, setTypeFilter] = useState<FileSearchTypeFilter>('all');
   const [placesCollapsed, setPlacesCollapsed] = useState(
     () => window.innerWidth < FILE_CHROME_NARROW_MAX || surface === 'pane',
@@ -932,8 +931,8 @@ export const FileManager = memo(function FileManager({
     [files, showHiddenFiles, searchTerm, typeFilter],
   );
   const paintedFiles = useMemo(
-    () => sortFileEntries(filteredFiles, sortColumn, sortDirection),
-    [filteredFiles, sortColumn, sortDirection],
+    () => sortFileEntries(filteredFiles, sortColumn, sortDirection, settings.fileManager.sortFoldersFirst !== false),
+    [filteredFiles, sortColumn, sortDirection, settings.fileManager.sortFoldersFirst],
   );
   const handleSort = useCallback((column: FileSortColumn) => {
     if (column === sortColumn) {
@@ -1036,7 +1035,7 @@ export const FileManager = memo(function FileManager({
     ? (typeof navigator !== 'undefined' && /win/i.test(navigator.platform) ? 'Windows' : 'Operating System')
     : 'Operating System';
   const bookmarks = settings.fileManager.bookmarksByConnection?.[activeConnectionId || ''] ?? EMPTY_PATHS;
-  const isBookmarked = Boolean(currentPath && bookmarks.includes(currentPath));
+  const isBookmarked = Boolean(currentPath && bookmarks.some((path) => isFilePathEqual(path, currentPath)));
   const gridZoom = clampFileGridZoom(settings.fileManager.gridZoom ?? 1);
   const listZoom = clampFileListZoom(settings.fileManager.listZoom ?? 0);
   const canZoomIn = viewMode === 'grid' ? gridZoom < FILE_GRID_ZOOM.length - 1 : listZoom < FILE_LIST_ZOOM.length - 1;
@@ -1059,10 +1058,11 @@ export const FileManager = memo(function FileManager({
 
   const toggleBookmark = useCallback(() => {
     if (!activeConnectionId || !currentPath) return;
-    const current = settings.fileManager.bookmarksByConnection?.[activeConnectionId] ?? [];
-    const next = current.includes(currentPath)
-      ? current.filter((path) => path !== currentPath)
-      : [...current, currentPath];
+    const path = normalizeFilePath(currentPath);
+    const current = (settings.fileManager.bookmarksByConnection?.[activeConnectionId] ?? []).map(normalizeFilePath);
+    const next = current.some((item) => isFilePathEqual(item, path))
+      ? current.filter((item) => !isFilePathEqual(item, path))
+      : [...current, path];
     void updateFileManagerSettings({
       bookmarksByConnection: {
         ...(settings.fileManager.bookmarksByConnection || {}),
@@ -1102,7 +1102,6 @@ export const FileManager = memo(function FileManager({
 
   const handleToggleSearch = useCallback((open: boolean) => {
     setIsSearchOpen(open);
-    if (!open) setSearchEverywhere(false);
   }, []);
 
   const handleTogglePlaces = useCallback(() => {
@@ -1157,11 +1156,12 @@ export const FileManager = memo(function FileManager({
 
   const handleRemoveBookmark = useCallback((path: string) => {
     if (!activeConnectionId) return;
+    const target = normalizeFilePath(path);
     const current = useAppStore.getState().settings.fileManager.bookmarksByConnection?.[activeConnectionId] ?? [];
     void updateFileManagerSettings({
       bookmarksByConnection: {
         ...(useAppStore.getState().settings.fileManager.bookmarksByConnection || {}),
-        [activeConnectionId]: current.filter((item) => item !== path),
+        [activeConnectionId]: current.filter((item) => !isFilePathEqual(item, target)).map(normalizeFilePath),
       },
     });
   }, [activeConnectionId, updateFileManagerSettings]);
@@ -1617,14 +1617,6 @@ export const FileManager = memo(function FileManager({
       // Search (Mod+F)
       if (isMatch(e, bindings.fmSearch || 'Mod+F')) {
         e.preventDefault();
-        setSearchEverywhere(false);
-        setIsSearchOpen(true);
-        return;
-      }
-
-      if (isMatch(e, bindings.fmSearchEverywhere || 'Mod+Shift+F')) {
-        e.preventDefault();
-        setSearchEverywhere(true);
         setIsSearchOpen(true);
         return;
       }
@@ -1929,7 +1921,6 @@ export const FileManager = memo(function FileManager({
         onSearch={setSearchTerm}
         isSearchOpen={isSearchOpen}
         onToggleSearch={handleToggleSearch}
-        searchEverywhere={searchEverywhere}
         isEditingPath={isEditingPath}
         onTogglePathEdit={setIsEditingPath}
         isNarrow={isNarrow}
@@ -1961,6 +1952,7 @@ export const FileManager = memo(function FileManager({
         onOpenTerminal={activeConnectionId ? handleOpenTerminalChrome : undefined}
         typeFilter={typeFilter}
         onTypeFilter={setTypeFilter}
+        connectionId={activeConnectionId}
       />
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -2037,10 +2029,18 @@ export const FileManager = memo(function FileManager({
             gridZoom={gridZoom}
             listZoom={listZoom}
             clickPolicy={settings.fileManager.clickPolicy || 'double'}
+            dateTimeFormat={settings.fileManager.dateTimeFormat || 'simple'}
           />
         )}
         <FileFloatingBar loading={isLoading} selectedCount={selectedFiles.length} totalCount={paintedFiles.length} />
       </div>
+        <FileSideDrawer open={isPropertiesOpen} width={FILE_PROPERTIES_WIDTH_PX} side="right">
+          <PropertiesPanel
+            files={inspectorFiles}
+            onClose={() => setIsPropertiesOpen(false)}
+            dateTimeFormat={settings.fileManager.dateTimeFormat || 'simple'}
+          />
+        </FileSideDrawer>
       </div>
       {isNarrow && (
         <FileBottomActionBar>
@@ -2071,12 +2071,6 @@ export const FileManager = memo(function FileManager({
         </FileBottomActionBar>
       )}
       </div>
-      <FileSideDrawer open={isPropertiesOpen} width={FILE_PROPERTIES_WIDTH_PX} side="right">
-        <PropertiesPanel
-          files={inspectorFiles}
-          onClose={() => setIsPropertiesOpen(false)}
-        />
-      </FileSideDrawer>
 
       {/* Context Menu */}
       {contextMenu && (

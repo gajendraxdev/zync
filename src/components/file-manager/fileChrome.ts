@@ -14,8 +14,8 @@ export const FILE_GRID_ZOOM = [
   { minTrack: 86, gap: 6, rowHeight: 96, icon: 48 },
   { minTrack: 96, gap: 6, rowHeight: 112, icon: 64 },
   { minTrack: 108, gap: 8, rowHeight: 136, icon: 96 },
-  { minTrack: 160, gap: 8, rowHeight: 200, icon: 168 },
-  { minTrack: 210, gap: 10, rowHeight: 268, icon: 256 },
+  { minTrack: 168, gap: 8, rowHeight: 200, icon: 168 },
+  { minTrack: 256, gap: 10, rowHeight: 268, icon: 256 },
 ] as const;
 
 export const FILE_LIST_ZOOM = [

@@ -23,7 +23,7 @@ const FILE_MANAGER: ShortcutCommand[] = [
     { id: 'fmUp', label: 'Go Up', section: 'files', defaultKeys: 'Alt+Up', when: 'files', settingsKey: 'fmUp', configurable: true },
     { id: 'fmBack', label: 'Go Back', section: 'files', defaultKeys: 'Alt+Left', when: 'files', settingsKey: 'fmBack', configurable: true },
     { id: 'fmForward', label: 'Go Forward', section: 'files', defaultKeys: 'Alt+Right', when: 'files', settingsKey: 'fmForward', configurable: true },
-    { id: 'fmSearchEverywhere', label: 'Search Everywhere', section: 'files', defaultKeys: 'Mod+Shift+F', when: 'files', settingsKey: 'fmSearchEverywhere', configurable: true },
+
     { id: 'fmListView', label: 'List View', section: 'files', defaultKeys: 'Mod+1', when: 'files', settingsKey: 'fmListView', configurable: true },
     { id: 'fmGridView', label: 'Grid View', section: 'files', defaultKeys: 'Mod+2', when: 'files', settingsKey: 'fmGridView', configurable: true },
     { id: 'fmHidden', label: 'Show/Hide Hidden Files', section: 'files', defaultKeys: 'Mod+H', when: 'files', settingsKey: 'fmHidden', configurable: true },

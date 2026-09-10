@@ -226,6 +226,8 @@ const FileListItem = memo(forwardRef<HTMLDivElement, {
   onContextMenu: (e: React.MouseEvent, file?: FileEntry) => void;
   onMove?: (moves: { source: string; target: string; sourceConnectionId?: string }[]) => void;
   clickPolicy?: 'single' | 'double';
+  iconSize?: number;
+  dateTimeFormat?: 'simple' | 'detailed';
 }>(({
   file,
   isSelected,
@@ -238,6 +240,8 @@ const FileListItem = memo(forwardRef<HTMLDivElement, {
   onContextMenu,
   onMove,
   clickPolicy = 'double',
+  iconSize = 18,
+  dateTimeFormat = 'simple',
 }, ref) => {
   const isFolder = file.type === 'd';
 
@@ -320,7 +324,7 @@ const FileListItem = memo(forwardRef<HTMLDivElement, {
       <div className="py-2 px-4 min-w-0 overflow-hidden">
         <div className="flex items-center gap-2.5 min-w-0">
           <span className="shrink-0">
-            <FileIcon file={file} size={18} />
+            <FileIcon file={file} size={iconSize} />
           </span>
           <span
             title={file.name}
@@ -346,7 +350,7 @@ const FileListItem = memo(forwardRef<HTMLDivElement, {
         </Tooltip>
       </div>
       <div className="py-2 px-3 min-w-0 overflow-hidden text-[12px] text-app-muted tabular-nums truncate text-right">
-        {formatFileListDate(file.lastModified) || '—'}
+        {formatFileListDate(file.lastModified, Date.now(), dateTimeFormat) || '—'}
       </div>
     </div>
   );
@@ -374,6 +378,7 @@ interface FileGridProps {
   gridZoom?: number;
   listZoom?: number;
   clickPolicy?: 'single' | 'double';
+  dateTimeFormat?: 'simple' | 'detailed';
 }
 
 type FileListRowExtra = {
@@ -388,6 +393,8 @@ type FileListRowExtra = {
   onContextMenu: (e: React.MouseEvent, file?: FileEntry) => void;
   onMove?: (moves: { source: string; target: string; sourceConnectionId?: string }[]) => void;
   clickPolicy: 'single' | 'double';
+  iconSize: number;
+  dateTimeFormat: 'simple' | 'detailed';
 };
 
 function FileListRow({
@@ -405,6 +412,8 @@ function FileListRow({
   onContextMenu,
   onMove,
   clickPolicy,
+  iconSize,
+  dateTimeFormat,
 }: {
   index: number;
   style: CSSProperties;
@@ -426,6 +435,8 @@ function FileListRow({
         onContextMenu={onContextMenu}
         onMove={onMove}
         clickPolicy={clickPolicy}
+        iconSize={iconSize}
+        dateTimeFormat={dateTimeFormat}
       />
     </div>
   );
@@ -515,11 +526,13 @@ export const FileGrid = memo(function FileGrid({
   gridZoom,
   listZoom,
   clickPolicy = 'double',
+  dateTimeFormat = 'simple',
 }: FileGridProps) {
   const compactMode = useAppStore(state => state.settings.compactMode);
   const gridZoomLevel = gridZoom === undefined ? (compactMode ? 0 : 2) : clampFileGridZoom(gridZoom);
   const listZoomLevel = listZoom === undefined ? (compactMode ? 0 : 1) : clampFileListZoom(listZoom);
   const gridIcon = FILE_GRID_ZOOM[gridZoomLevel].icon;
+  const listIcon = FILE_LIST_ZOOM[listZoomLevel].icon;
   const listRowHeight = FILE_LIST_ZOOM[listZoomLevel].rowHeight;
   const listRef = useListRef(null);
   const gridRef = useGridRef(null);
@@ -532,7 +545,7 @@ export const FileGrid = memo(function FileGrid({
     selectedFilesRef.current = selectedFiles;
   }, [selectedFiles]);
   const selectedSet = useMemo(() => new Set(selectedFiles), [selectedFiles]);
-  const { tip: hoverTip, show: showHoverTip, hide: hideHoverTip } = useFileHoverTip();
+  const { tip: hoverTip, show: showHoverTip, hide: hideHoverTip } = useFileHoverTip(undefined, dateTimeFormat);
   useEffect(() => {
     hideHoverTip();
   }, [currentPath, viewMode, hideHoverTip]);
@@ -596,6 +609,8 @@ export const FileGrid = memo(function FileGrid({
       onContextMenu,
       onMove,
       clickPolicy,
+      iconSize: listIcon,
+      dateTimeFormat,
     }),
     [
       files,
@@ -609,6 +624,8 @@ export const FileGrid = memo(function FileGrid({
       onContextMenu,
       onMove,
       clickPolicy,
+      listIcon,
+      dateTimeFormat,
     ],
   );
 

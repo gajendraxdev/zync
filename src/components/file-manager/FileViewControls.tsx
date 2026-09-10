@@ -58,6 +58,7 @@ function MenuRow({
     <button
       type="button"
       disabled={disabled}
+      aria-pressed={checked}
       onClick={onClick}
       className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-app-text hover:bg-app-surface disabled:opacity-35"
     >

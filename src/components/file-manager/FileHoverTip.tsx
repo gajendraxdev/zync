@@ -9,7 +9,10 @@ const VIEWPORT_PAD = 8;
 export type FileHoverShow = (file: FileEntry, el: HTMLElement) => void;
 export type FileHoverHide = () => void;
 
-export function useFileHoverTip(delayMs: number = HOVER_DELAY_MS): {
+export function useFileHoverTip(
+  delayMs: number = HOVER_DELAY_MS,
+  dateTimeFormat: 'simple' | 'detailed' = 'simple',
+): {
   tip: { text: string; x: number; y: number } | null;
   show: FileHoverShow;
   hide: FileHoverHide;
@@ -35,12 +38,12 @@ export function useFileHoverTip(delayMs: number = HOVER_DELAY_MS): {
       if (!el.isConnected) return;
       const rect = el.getBoundingClientRect();
       setTip({
-        text: fileHoverHint(file),
+        text: fileHoverHint(file, dateTimeFormat),
         x: rect.left + rect.width / 2,
         y: rect.bottom,
       });
     }, delayMs);
-  }, [clearTimer, delayMs]);
+  }, [clearTimer, delayMs, dateTimeFormat]);
 
   useEffect(() => () => clearTimer(), [clearTimer]);
 

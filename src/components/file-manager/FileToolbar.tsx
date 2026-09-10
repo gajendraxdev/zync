@@ -75,7 +75,6 @@ interface FileToolbarProps {
   onSearch: (term: string) => void;
   isSearchOpen: boolean;
   onToggleSearch: (open: boolean) => void;
-  searchEverywhere?: boolean;
   isEditingPath: boolean;
   onTogglePathEdit: (editing: boolean) => void;
   isNarrow?: boolean;
@@ -107,6 +106,7 @@ interface FileToolbarProps {
   onOpenTerminal?: () => void;
   typeFilter: FileSearchTypeFilter;
   onTypeFilter: (value: FileSearchTypeFilter) => void;
+  connectionId?: string | null;
 }
 
 function FileToolbarInner({
@@ -125,7 +125,6 @@ function FileToolbarInner({
   onSearch,
   isSearchOpen,
   onToggleSearch,
-  searchEverywhere = false,
   isEditingPath,
   onTogglePathEdit,
   isNarrow = false,
@@ -157,19 +156,27 @@ function FileToolbarInner({
   onOpenTerminal,
   typeFilter,
   onTypeFilter,
+  connectionId,
 }: FileToolbarProps) {
   const [pathInput, setPathInput] = useState(currentPath);
   const compactMode = useAppStore((state) => state.settings.compactMode);
   const checkPathExists = useAppStore((state) => state.checkPathExists);
-  const activeConnectionId = useAppStore((state) => state.activeConnectionId);
   const [isInvalid, setIsInvalid] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const pathInputRef = useRef(pathInput);
+  const connectionIdRef = useRef(connectionId);
   const validationGenRef = useRef(0);
-  pathInputRef.current = pathInput;
+
+  useEffect(() => {
+    pathInputRef.current = pathInput;
+  }, [pathInput]);
+
+  useEffect(() => {
+    connectionIdRef.current = connectionId;
+  }, [connectionId]);
 
   useEffect(() => {
     if (isEditingPath) setPathInput(currentPath);
@@ -189,9 +196,11 @@ function FileToolbarInner({
     setIsInvalid(false);
   };
 
+  const committedPath = () => (inputRef.current?.value ?? pathInputRef.current).trim();
+
   const handlePathSubmit = async (source: 'enter' | 'blur' = 'enter') => {
-    const submittedPath = pathInputRef.current.trim();
-    const submittedConnectionId = activeConnectionId;
+    const submittedPath = committedPath();
+    const submittedConnectionId = connectionIdRef.current;
     const gen = ++validationGenRef.current;
     if (!submittedPath) {
       onTogglePathEdit(false);
@@ -202,8 +211,8 @@ function FileToolbarInner({
       const exists = await checkPathExists(submittedConnectionId, submittedPath);
       if (
         gen !== validationGenRef.current
-        || submittedPath !== pathInputRef.current.trim()
-        || submittedConnectionId !== useAppStore.getState().activeConnectionId
+        || submittedPath !== committedPath()
+        || submittedConnectionId !== connectionIdRef.current
       ) {
         return;
       }
@@ -316,7 +325,6 @@ function FileToolbarInner({
             }}
             typeFilter={typeFilter}
             onTypeFilter={onTypeFilter}
-            everywhere={searchEverywhere}
           />
         ) : (
           <FilePathBar

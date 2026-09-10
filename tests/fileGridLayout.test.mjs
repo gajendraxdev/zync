@@ -71,6 +71,10 @@ runTest('formatFileListDate uses time today and short date otherwise', () => {
   assert.equal(thisYear.includes('2026'), false);
   assert.equal(formatFileListDate(Date.parse('2025-11-20T12:00:00'), now).includes('2025'), true);
   assert.equal(formatFileListDate(0, now), '');
+  const y2kMs = Date.parse('2000-06-15T12:00:00Z');
+  assert.equal(formatFileListDate(y2kMs, now).includes('2000'), true);
+  const y2kSeconds = Math.floor(y2kMs / 1000);
+  assert.equal(formatFileListDate(y2kSeconds, now).includes('2000'), true);
 });
 
 runTest('formatFileIdentity joins owner:group', () => {

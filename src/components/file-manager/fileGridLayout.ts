@@ -66,9 +66,9 @@ export const FILE_LIST_ROW_HEIGHT = 40;
 export const FILE_LIST_COLUMNS = 'minmax(0, 1fr) minmax(0, 5.25rem) minmax(0, 9.5rem) minmax(0, 7.5rem)';
 
 /** Grid hover card: name, Folder/size, owner:group, date. */
-export function fileHoverHint(file: FileEntry): string {
+export function fileHoverHint(file: FileEntry, dateTimeFormat: 'simple' | 'detailed' = 'simple'): string {
   const identity = formatFileIdentity(file.owner || '', file.group || '');
-  const modified = formatFileListDate(file.lastModified);
+  const modified = formatFileListDate(file.lastModified, Date.now(), dateTimeFormat);
   const kind = file.type === 'd' ? 'Folder' : formatBytesForHint(file.size);
   return [file.name, kind, identity, modified].filter(Boolean).join('\n');
 }
@@ -97,10 +97,17 @@ export function formatFileIdentity(owner: string, group: string): string {
 }
 
 /** Compact list/grid dates: time today, `Sep 2` this year, else `Nov 20, 2025`. */
-export function formatFileListDate(timestamp: number, nowMs: number = Date.now()): string {
-  const ms = timestamp > 0 && timestamp < 1e12 ? timestamp * 1000 : timestamp;
+export function formatFileListDate(
+  timestamp: number,
+  nowMs: number = Date.now(),
+  format: 'simple' | 'detailed' = 'simple',
+): string {
+  const ms = timestamp > 0 && timestamp < 1e10 ? timestamp * 1000 : timestamp;
   const date = new Date(ms);
   if (Number.isNaN(date.getTime()) || timestamp === 0) return '';
+  if (format === 'detailed') {
+    return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  }
   const now = new Date(nowMs);
   if (date.toDateString() === now.toDateString()) {
     return date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
@@ -122,10 +129,13 @@ export function sortFileEntries(
   files: FileEntry[],
   column: FileSortColumn,
   direction: FileSortDirection,
+  foldersFirst = true,
 ): FileEntry[] {
   return [...files].sort((a, b) => {
-    if (a.type === 'd' && b.type !== 'd') return -1;
-    if (a.type !== 'd' && b.type === 'd') return 1;
+    if (foldersFirst) {
+      if (a.type === 'd' && b.type !== 'd') return -1;
+      if (a.type !== 'd' && b.type === 'd') return 1;
+    }
 
     let comparison = 0;
     switch (column) {
