@@ -23,7 +23,7 @@ import { isMatch } from '../lib/keyboard';
 import { FileEditor } from './FileEditor';
 import { CopyToServerModal } from './file-manager/CopyToServerModal';
 import { FileGrid } from './file-manager/FileGrid';
-import { sortFileEntries, type FileSortColumn, type FileSortDirection } from './file-manager/fileGridLayout';
+import { FILE_LIST_SORT_INITIAL, sortFileEntries, type FileSortColumn, type FileSortDirection } from './file-manager/fileGridLayout';
 import { getCurrentDragSource } from '../lib/dragDrop';
 import { FileToolbar } from './file-manager/FileToolbar';
 import type { FileEntry } from './file-manager/types';
@@ -914,7 +914,7 @@ export const FileManager = memo(function FileManager({
       return;
     }
     setSortColumn(column);
-    setSortDirection('asc');
+    setSortDirection(FILE_LIST_SORT_INITIAL[column]);
   }, [sortColumn]);
 
   // --- Action Handlers (Create, Rename, Upload, Delete, Download) ---

@@ -3,7 +3,8 @@ import {
 } from 'lucide-react';
 import { DynamicIcon } from '../ui/DynamicIcon';
 import type React from 'react';
-import { cn, formatBytes, formatDate } from '../../lib/utils';
+import { cn, formatBytes } from '../../lib/utils';
+import { Tooltip } from '../ui/Tooltip';
 import type { FileEntry } from './types';
 import { useAppStore } from '../../store/useAppStore';
 import { useMemo, useState, useEffect, useLayoutEffect, useCallback, useRef, memo, type CSSProperties } from 'react';
@@ -16,6 +17,12 @@ import { getScrollbarSize, Grid, List, useGridRef, useListRef } from 'react-wind
 import {
   computeFileGridMetrics,
   fileGridScrollTarget,
+  formatFileIdentity,
+  formatFileListDate,
+  fileListSortTooltip,
+  FILE_LIST_COLUMN_ALIGN,
+  FILE_LIST_COLUMN_IDS,
+  FILE_LIST_COLUMN_LABELS,
   FILE_LIST_COLUMNS,
   FILE_LIST_ROW_HEIGHT,
   type FileSortColumn,
@@ -31,7 +38,7 @@ const FileIcon = memo(function FileIcon({ file, size }: { file: FileEntry; size:
         <Folder
           size={size}
           fill="currentColor"
-          className="text-app-accent"
+          className="text-app-accent drop-shadow-sm"
           strokeWidth={0.5}
         />
       </div>
@@ -76,8 +83,18 @@ const FileGridItem = memo(forwardRef<HTMLDivElement, {
   onMove
 }, ref) => {
   const isFolder = file.type === 'd';
+  const identity = formatFileIdentity(file.owner || '', file.group || '');
+  const modified = formatFileListDate(file.lastModified);
+  const kind = isFolder ? 'Folder' : formatBytes(file.size);
+  const hint = [file.name, kind, identity, modified].filter(Boolean).join('\n');
 
   return (
+    <Tooltip
+      content={hint}
+      position="bottom"
+      className="min-w-0 w-full items-start justify-center"
+      contentClassName="max-w-[16rem] whitespace-pre-line text-left leading-snug font-normal"
+    >
     <div
       ref={ref}
       id={`file-item-${file.name}`}
@@ -144,55 +161,56 @@ const FileGridItem = memo(forwardRef<HTMLDivElement, {
         onContextMenu(e, file);
       }}
       className={cn(
-        'group relative cursor-pointer select-none overflow-hidden',
+        'group relative cursor-pointer select-none',
         viewMode === 'grid'
           ? cn(
-            "flex flex-col items-center justify-start rounded-xl border border-transparent w-full h-full min-w-0 min-h-0",
-            "hover:bg-app-surface/50",
-            compactMode ? "p-2 gap-1" : "p-3 gap-2"
+            'flex flex-col items-center w-full min-w-0 rounded-md transition-colors duration-75',
+            compactMode ? 'px-1 py-1 gap-0.5' : 'px-1.5 py-1.5 gap-1',
+            isSelected
+              ? 'bg-app-accent/20'
+              : 'bg-transparent hover:bg-app-surface/55',
           )
           : cn(
-            "flex items-center rounded-lg border border-transparent hover:bg-app-surface/50",
-            compactMode ? "p-1.5" : "p-2"
+            'flex items-center rounded-lg border border-transparent hover:bg-app-surface/50',
+            compactMode ? 'p-1.5' : 'p-2',
           ),
-        isSelected && (
-          'bg-app-accent/20 text-app-accent shadow-sm'
-        ),
-        isFocused && !isSelected && 'ring-1 ring-app-accent/40',
-        isFocused && isSelected && 'ring-1 ring-app-accent/60',
-        !isSelected && viewMode === 'grid' && "hover:bg-app-surface/60"
+        isFocused && !isSelected && (viewMode === 'grid' ? 'bg-app-surface/70' : 'ring-1 ring-app-accent/35'),
       )}
     >
       <div className={cn(
         'flex items-center justify-center shrink-0',
-        viewMode === 'grid' ? (compactMode ? 'w-full h-12' : 'w-full h-16') : 'w-10 mr-4',
-        isFolder ? 'drop-shadow-sm' : 'text-app-muted/80 group-hover:text-app-text',
-        isSelected && !isFolder && 'text-app-accent',
+        viewMode === 'grid' ? 'w-full' : 'w-10 mr-4',
+        isFolder ? 'drop-shadow-sm' : 'text-app-muted/80',
       )}>
-        <FileIcon file={file} size={viewMode === 'grid' ? (compactMode ? 48 : 64) : (compactMode ? 16 : 22)} />
+        <FileIcon file={file} size={viewMode === 'grid' ? (compactMode ? 40 : 56) : (compactMode ? 16 : 22)} />
       </div>
 
-      <div className="w-full text-center px-1 z-10 min-w-0">
+      <div className="w-full text-center px-1 min-w-0">
         <div
-          title={file.name}
           className={cn(
-            'truncate font-medium leading-tight select-text',
-            viewMode === 'grid' ? (compactMode ? 'text-[11px]' : 'text-xs') : 'text-sm',
-            isSelected ? 'text-app-accent font-semibold' : 'text-app-text/90 group-hover:text-app-text',
+            'select-text',
+            viewMode === 'grid'
+              ? cn(
+                'line-clamp-2 break-words [overflow-wrap:anywhere] leading-[1.25]',
+                compactMode ? 'text-[11px]' : 'text-[12px]',
+              )
+              : 'truncate text-sm leading-snug',
+            isSelected ? 'text-app-text' : 'text-app-text/85',
           )}
         >
           {file.name}
         </div>
-
-        {viewMode === 'grid' && !compactMode && (
-          <div className="text-[10px] text-app-muted/50 truncate opacity-0 group-hover:opacity-100">
-            {formatBytes(file.size)}
-          </div>
-        )}
       </div>
     </div>
+    </Tooltip>
   );
 }));
+
+function FileIdentityText({ owner, group }: { owner: string; group: string }) {
+  const label = formatFileIdentity(owner, group);
+  if (!label) return <span>—</span>;
+  return <span className="block truncate font-mono text-[12px] tracking-tight">{label}</span>;
+}
 
 // Memoized File List Item Component — plain div (windowed rows must not replay motion enter).
 const FileListItem = memo(forwardRef<HTMLDivElement, {
@@ -286,34 +304,45 @@ const FileListItem = memo(forwardRef<HTMLDivElement, {
         onContextMenu(e, file);
       }}
       className={cn(
-        'h-full border-b border-app-border/20 cursor-pointer transition-colors outline-none',
-        'grid items-center',
+        'h-full w-full min-w-0 border-b border-app-border/15 cursor-pointer transition-colors outline-none',
+        'grid items-center overflow-hidden',
         'hover:bg-app-surface/40',
-        isSelected && 'bg-app-accent/10 hover:bg-app-accent/15',
-        isFocused && !isSelected && 'ring-1 ring-inset ring-app-accent/50 bg-app-surface/60',
-        isFocused && isSelected && 'ring-1 ring-inset ring-app-accent',
+        isSelected && 'bg-app-accent/10 hover:bg-app-accent/14',
+        isFocused && !isSelected && 'bg-app-surface/55',
+        isFocused && isSelected && 'bg-app-accent/14',
       )}
       style={{ gridTemplateColumns: FILE_LIST_COLUMNS }}
     >
-      <div className="py-2 px-4 min-w-0">
-        <div className="flex items-center gap-3 min-w-0">
-          <FileIcon file={file} size={20} />
+      <div className="py-2 px-4 min-w-0 overflow-hidden">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span className="shrink-0">
+            <FileIcon file={file} size={18} />
+          </span>
           <span
             title={file.name}
-            className={cn('font-medium truncate', isSelected ? 'text-app-accent' : 'text-app-text')}
+            className={cn('truncate text-[13px]', isSelected ? 'text-app-accent font-medium' : 'text-app-text')}
           >
             {file.name}
           </span>
         </div>
       </div>
-      <div className="py-2 px-4 text-sm text-app-muted font-mono">
+      <div className="py-2 px-3 min-w-0 overflow-hidden text-[12px] text-app-muted font-mono tabular-nums truncate text-right">
         {isFolder ? '—' : formatBytes(file.size)}
       </div>
-      <div className="py-2 px-4 text-sm text-app-muted">
-        {isFolder ? 'Folder' : (file.name.split('.').pop()?.toUpperCase() || '—')}
+      <div className="py-2 px-3 min-w-0 overflow-hidden text-app-muted">
+        <Tooltip
+          content={`Owner ${file.owner || '—'} · Group ${file.group || '—'}`}
+          position="top"
+          disabled={!file.owner && !file.group}
+          className="min-w-0 w-full justify-start"
+        >
+          <div className="min-w-0 w-full">
+            <FileIdentityText owner={file.owner} group={file.group} />
+          </div>
+        </Tooltip>
       </div>
-      <div className="py-2 px-4 text-sm text-app-muted">
-        {formatDate(file.lastModified)}
+      <div className="py-2 px-3 min-w-0 overflow-hidden text-[12px] text-app-muted tabular-nums truncate text-right">
+        {formatFileListDate(file.lastModified) || '—'}
       </div>
     </div>
   );
@@ -375,7 +404,7 @@ function FileListRow({
   const file = files[index];
   if (!file) return null;
   return (
-    <div style={style} {...ariaAttributes}>
+    <div style={style} {...ariaAttributes} className="min-w-0 overflow-hidden">
       <FileListItem
         file={file}
         isSelected={selectedSet.has(file.name)}
@@ -426,7 +455,7 @@ function FileGridCell({
     return <div style={style} />;
   }
   return (
-    <div style={{ ...style, contain: 'layout paint' }} {...ariaAttributes} className="min-w-0 p-1">
+    <div style={{ ...style, contain: 'layout paint' }} {...ariaAttributes} className="min-w-0 flex items-start justify-center p-1">
       <FileGridItem
         file={file}
         viewMode="grid"
@@ -653,22 +682,46 @@ export const FileGrid = memo(function FileGrid({
         ) : viewMode === 'list' ? (
         <div className="flex flex-col h-full min-h-0">
           <div
-            className="shrink-0 grid items-center min-w-0 text-left text-xs text-app-muted uppercase tracking-wider bg-app-panel/95 backdrop-blur-sm z-10 border-b border-app-border/40"
+            className="shrink-0 grid items-center w-full min-w-0 overflow-hidden text-[11px] font-medium text-app-muted/80 bg-app-panel/95 backdrop-blur-sm z-10 border-b border-app-border/30"
             style={{ gridTemplateColumns: FILE_LIST_COLUMNS, paddingRight: getScrollbarSize() }}
           >
-            {(['name', 'size', 'type', 'modified'] as const).map((column) => (
-              <button
+            {FILE_LIST_COLUMN_IDS.map((column) => (
+              <Tooltip
                 key={column}
-                type="button"
-                className="py-3 px-4 text-left cursor-pointer hover:bg-app-surface/30 transition-colors group"
-                onClick={() => onSort(column)}
+                content={fileListSortTooltip(column, sortColumn, sortDirection)}
+                position="bottom"
+                className={cn(
+                  'min-w-0 w-full',
+                  FILE_LIST_COLUMN_ALIGN[column] === 'right' ? 'justify-end' : 'justify-start',
+                )}
               >
-                <span className="flex items-center gap-2">
-                  {column === 'name' ? 'Name' : column === 'size' ? 'Size' : column === 'type' ? 'Type' : 'Modified'}
-                  {sortColumn === column && (sortDirection === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />)}
-                  {sortColumn !== column && <ArrowUpDown size={14} className="opacity-0 group-hover:opacity-40" />}
-                </span>
-              </button>
+                <button
+                  type="button"
+                  aria-sort={
+                    sortColumn === column
+                      ? (sortDirection === 'asc' ? 'ascending' : 'descending')
+                      : 'none'
+                  }
+                  className={cn(
+                    'min-w-0 w-full overflow-hidden py-2 cursor-pointer hover:text-app-text hover:bg-app-surface/25 transition-colors group',
+                    column === 'name' ? 'px-4' : 'px-3',
+                    FILE_LIST_COLUMN_ALIGN[column] === 'right' ? 'text-right' : 'text-left',
+                    sortColumn === column && 'text-app-text',
+                  )}
+                  onClick={() => onSort(column)}
+                >
+                  <span
+                    className={cn(
+                      'flex items-center gap-1 min-w-0',
+                      FILE_LIST_COLUMN_ALIGN[column] === 'right' && 'justify-end',
+                    )}
+                  >
+                    <span className="truncate">{FILE_LIST_COLUMN_LABELS[column]}</span>
+                    {sortColumn === column && (sortDirection === 'asc' ? <ArrowUp size={12} className="shrink-0 text-app-accent" /> : <ArrowDown size={12} className="shrink-0 text-app-accent" />)}
+                    {sortColumn !== column && <ArrowUpDown size={12} className="shrink-0 opacity-25 group-hover:opacity-70" />}
+                  </span>
+                </button>
+              </Tooltip>
             ))}
           </div>
           <div className="flex-1 min-h-0 min-w-0">

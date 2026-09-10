@@ -6,6 +6,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Added
 - **Terminal inline images:** Sixel and iTerm inline images render in the shell (`fastfetch` logos, `chafa`, `imgcat`). The terminal advertises cell/window size so those tools pick bitmap output instead of mosaic ASCII. On Windows, local shells sideload Windows Terminal’s ConPTY pair so Sixel is not stripped by in-box conhost. Local PTYs no longer inherit `TERM_PROGRAM=vscode` / `WT_SESSION` when Zync was started from an IDE. Kitty graphics are not supported yet. ([0a2a077])
+- **Files owner/group:** List view has one Owner:Group column as `user:group` (Unix names when `/etc/passwd` and `/etc/group` resolve; otherwise uid/gid). Icon grid is icon + two-line name with an Explorer/GNOME highlight; size, owner, and date are in the tooltip. Windows local Files and WSL listings show —. ([#105])
 
 ### Fixed
 - **Sixel in a split:** Inline images no longer cover the rest of the pane with a black rectangle. The overlay stays transparent; the original shell recreates its image canvas after the split instead of keeping a black backing store.

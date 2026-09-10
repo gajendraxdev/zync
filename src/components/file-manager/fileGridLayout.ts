@@ -1,25 +1,98 @@
 import type { FileEntry } from './types';
 
-export type FileSortColumn = 'name' | 'size' | 'type' | 'modified';
+export type FileSortColumn = 'name' | 'size' | 'owner' | 'modified';
 export type FileSortDirection = 'asc' | 'desc';
+
+export const FILE_LIST_COLUMN_IDS: readonly FileSortColumn[] = [
+  'name',
+  'size',
+  'owner',
+  'modified',
+];
+
+export const FILE_LIST_COLUMN_LABELS: Record<FileSortColumn, string> = {
+  name: 'Name',
+  size: 'Size',
+  owner: 'Owner:Group',
+  modified: 'Modified',
+};
+
+export const FILE_LIST_COLUMN_ALIGN: Record<FileSortColumn, 'left' | 'right'> = {
+  name: 'left',
+  size: 'right',
+  owner: 'left',
+  modified: 'right',
+};
+
+/** First click on a column uses this direction (size/date: newest/largest first). */
+export const FILE_LIST_SORT_INITIAL: Record<FileSortColumn, FileSortDirection> = {
+  name: 'asc',
+  owner: 'asc',
+  size: 'desc',
+  modified: 'desc',
+};
+
+export function fileListSortSense(column: FileSortColumn, direction: FileSortDirection): string {
+  switch (column) {
+    case 'name':
+    case 'owner':
+      return direction === 'asc' ? 'A to Z' : 'Z to A';
+    case 'size':
+      return direction === 'asc' ? 'smallest first' : 'largest first';
+    case 'modified':
+      return direction === 'asc' ? 'oldest first' : 'newest first';
+  }
+}
+
+export function fileListSortTooltip(
+  column: FileSortColumn,
+  activeColumn: FileSortColumn,
+  direction: FileSortDirection,
+): string {
+  const label = FILE_LIST_COLUMN_LABELS[column];
+  if (column === activeColumn) {
+    const next = direction === 'asc' ? 'desc' : 'asc';
+    return `${label} · ${fileListSortSense(column, direction)}. Click for ${fileListSortSense(column, next)}.`;
+  }
+  const initial = FILE_LIST_SORT_INITIAL[column];
+  return `Sort by ${label}, ${fileListSortSense(column, initial)}`;
+}
 
 /** List-row height from FileListItem (`py-2` + 20px icon + border). Compact does not change list rows. */
 export const FILE_LIST_ROW_HEIGHT = 40;
 
-/** Shared header/row tracks: Name | Size (w-24) | Type (w-32) | Modified (w-40). */
-export const FILE_LIST_COLUMNS = 'minmax(0, 1fr) 6rem 8rem 10rem';
+/** Name flexes. Size / owner:group / modified stay capped and can shrink. */
+export const FILE_LIST_COLUMNS = 'minmax(0, 1fr) minmax(0, 5.25rem) minmax(0, 9.5rem) minmax(0, 7.5rem)';
+
+/** `admin:staff`, or empty when both are missing. */
+export function formatFileIdentity(owner: string, group: string): string {
+  const user = (owner || '').trim();
+  const grp = (group || '').trim();
+  if (!user && !grp) return '';
+  if (user && grp) return `${user}:${grp}`;
+  return user || grp;
+}
+
+/** Compact list/grid dates: time today, `Sep 2` this year, else `Nov 20, 2025`. */
+export function formatFileListDate(timestamp: number, nowMs: number = Date.now()): string {
+  const ms = timestamp > 0 && timestamp < 1e12 ? timestamp * 1000 : timestamp;
+  const date = new Date(ms);
+  if (Number.isNaN(date.getTime()) || timestamp === 0) return '';
+  const now = new Date(nowMs);
+  if (date.toDateString() === now.toDateString()) {
+    return date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  }
+  if (date.getFullYear() === now.getFullYear()) {
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
 
 export interface FileGridMetrics {
   columnCount: number;
   columnWidth: number;
   rowHeight: number;
   gap: number;
-}
-
-function fileExtension(name: string): string {
-  const dot = name.lastIndexOf('.');
-  if (dot <= 0 || dot === name.length - 1) return '';
-  return name.slice(dot + 1).toLowerCase();
 }
 
 export function sortFileEntries(
@@ -39,9 +112,12 @@ export function sortFileEntries(
       case 'size':
         comparison = a.size - b.size;
         break;
-      case 'type':
-        comparison = fileExtension(a.name).localeCompare(fileExtension(b.name));
+      case 'owner': {
+        const left = formatFileIdentity(a.owner || '', a.group || '');
+        const right = formatFileIdentity(b.owner || '', b.group || '');
+        comparison = left.localeCompare(right);
         break;
+      }
       case 'modified':
         comparison = a.lastModified - b.lastModified;
         break;
@@ -67,9 +143,9 @@ export function fileGridScrollTarget(
 }
 
 export function computeFileGridMetrics(containerWidth: number, compactMode: boolean): FileGridMetrics {
-  const minTrack = compactMode ? 100 : 120;
-  const gap = compactMode ? 8 : 16;
-  const rowHeight = compactMode ? 120 : 140;
+  const minTrack = compactMode ? 90 : 104;
+  const gap = compactMode ? 6 : 8;
+  const rowHeight = compactMode ? 100 : 120;
   const width = Math.max(0, containerWidth);
   const columnCount = Math.max(1, Math.floor((width + gap) / (minTrack + gap)));
   const columnWidth = width / columnCount;
