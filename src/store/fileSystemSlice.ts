@@ -3,9 +3,12 @@ import type { AppStore } from './useAppStore';
 import { notify } from '../features/notifications';
 import type { FileEntry } from '../components/file-manager/types';
 import { expandTildeWithHome } from '../components/layout/tabDock/openHerePaths';
+import { parentFilePath } from '../components/file-manager/filePathNav';
+import { FILE_RECENT_LIMIT } from '../components/file-manager/fileChrome';
 
 // @ts-ignore
 const ipc = window.ipcRenderer;
+const filesLoadGeneration = new Map<string, number>();
 
 /**
  * Splits a filename into base and extension, handling dotfiles correctly.
@@ -33,6 +36,7 @@ export interface FileSystemState {
     currentPath: Record<string, string>; // keyed by connectionId
     history: Record<string, string[]>; // keyed by connectionId
     historyIndex: Record<string, number>; // keyed by connectionId
+    recentPaths: Record<string, string[]>;
     isLoading: Record<string, boolean>; // keyed by connectionId
     error: Record<string, string | null>; // keyed by connectionId
     clipboard: {
@@ -55,6 +59,7 @@ export interface FileSystemActions {
     navigateUp: (connectionId: string) => void;
     navigateBack: (connectionId: string) => void;
     navigateForward: (connectionId: string) => void;
+    navigateHistoryTo: (connectionId: string, index: number) => void;
     setClipboard: (files: FileEntry[], sourceConnectionId: string, sourcePath: string, op: 'copy' | 'cut') => void;
     clearClipboard: () => void;
     pasteEntries: (connectionId: string, sources: string[], op: 'copy' | 'cut', destinationDirectory?: string) => Promise<void>;
@@ -68,6 +73,7 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
     currentPath: {},
     history: {},
     historyIndex: {},
+    recentPaths: {},
     isLoading: {},
     error: {},
     clipboard: null,
@@ -105,6 +111,9 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
             if (!expanded || expanded === '~' || expanded.startsWith('~/')) return;
             targetPath = expanded;
         }
+
+        const loadGen = (filesLoadGeneration.get(connectionId) || 0) + 1;
+        filesLoadGeneration.set(connectionId, loadGen);
 
         // History Logic
         if (!skipHistory && targetPath !== state.currentPath[connectionId]) {
@@ -153,22 +162,33 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
                 group: typeof e.group === 'string' ? e.group : '',
             }));
 
-            set(state => ({
-                files: { ...state.files, [connectionId]: mappedEntries },
-                currentPath: { ...state.currentPath, [connectionId]: targetPath },
-                isLoading: { ...state.isLoading, [connectionId]: false }
-            }));
-
-            // Initialize history if empty
-            const currentHist = get().history[connectionId];
-            if (!currentHist || currentHist.length === 0) {
-                set(state => ({
-                    history: { ...state.history, [connectionId]: [targetPath] },
-                    historyIndex: { ...state.historyIndex, [connectionId]: 0 }
-                }));
-            }
+            if (filesLoadGeneration.get(connectionId) !== loadGen) return;
+            set(state => {
+                const prevRecent = state.recentPaths[connectionId] || [];
+                const recentUnchanged = prevRecent[0] === targetPath;
+                const nextRecent = recentUnchanged
+                    ? prevRecent
+                    : [targetPath, ...prevRecent.filter((p) => p !== targetPath)].slice(0, FILE_RECENT_LIMIT);
+                const currentHist = state.history[connectionId];
+                const historyPatch = (!currentHist || currentHist.length === 0)
+                    ? {
+                        history: { ...state.history, [connectionId]: [targetPath] },
+                        historyIndex: { ...state.historyIndex, [connectionId]: 0 },
+                    }
+                    : {};
+                return {
+                    files: { ...state.files, [connectionId]: mappedEntries },
+                    currentPath: { ...state.currentPath, [connectionId]: targetPath },
+                    isLoading: { ...state.isLoading, [connectionId]: false },
+                    recentPaths: recentUnchanged
+                        ? state.recentPaths
+                        : { ...state.recentPaths, [connectionId]: nextRecent },
+                    ...historyPatch,
+                };
+            });
 
         } catch (error: any) {
+            if (filesLoadGeneration.get(connectionId) !== loadGen) return;
             console.error('Failed to load files:', error);
             const osError = error.message || String(error);
 
@@ -507,10 +527,10 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
 
     navigateUp: (connectionId) => {
         const path = get().currentPath[connectionId];
-        if (!path || path === '/') return;
-
-        const parentPath = path.substring(0, path.lastIndexOf('/')) || '/';
-        get().loadFiles(connectionId, parentPath); // History will be updated automatically
+        if (!path) return;
+        const parentPath = parentFilePath(path);
+        if (!parentPath) return;
+        get().loadFiles(connectionId, parentPath);
     },
 
     navigateBack: (connectionId) => {
@@ -545,6 +565,15 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
 
             get().loadFiles(connectionId, nextPath, true); // Skip history update
         }
+    },
+
+    navigateHistoryTo: (connectionId, index) => {
+        const history = get().history[connectionId] || [];
+        if (index < 0 || index >= history.length) return;
+        set((state) => ({
+            historyIndex: { ...state.historyIndex, [connectionId]: index },
+        }));
+        get().loadFiles(connectionId, history[index], true);
     },
 
     checkPathExists: async (connectionId, path) => {
