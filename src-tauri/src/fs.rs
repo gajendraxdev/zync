@@ -72,6 +72,22 @@ async fn load_sftp_name_map(
     }
 }
 
+pub type SftpIdentityMaps = (HashMap<u32, String>, HashMap<u32, String>);
+
+pub async fn cached_sftp_identity_maps<'a>(
+    sftp: &russh_sftp::client::SftpSession,
+    cache: &'a tokio::sync::OnceCell<SftpIdentityMaps>,
+) -> &'a SftpIdentityMaps {
+    cache
+        .get_or_init(|| async {
+            (
+                load_sftp_name_map(sftp, "/etc/passwd").await,
+                load_sftp_name_map(sftp, "/etc/group").await,
+            )
+        })
+        .await
+}
+
 fn env_nonempty(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|value| !value.is_empty())
 }
@@ -191,6 +207,7 @@ impl FileSystem {
         &self,
         sftp: &russh_sftp::client::SftpSession,
         path: &str,
+        identity_cache: &tokio::sync::OnceCell<SftpIdentityMaps>,
     ) -> Result<Vec<FileEntry>> {
         let path = if path.is_empty() { "." } else { path }; // Default to current dir if empty, usually Home
 
@@ -200,8 +217,7 @@ impl FileSystem {
             .map_err(|e| anyhow!("SFTP read_dir failed: {}", e))?;
         let entries: Vec<_> = entries_iter.collect();
         let mut result = Vec::new();
-        let user_map = load_sftp_name_map(sftp, "/etc/passwd").await;
-        let group_map = load_sftp_name_map(sftp, "/etc/group").await;
+        let identity_maps = cached_sftp_identity_maps(sftp, identity_cache).await;
 
         for entry in entries {
             let name = entry.file_name();
@@ -242,8 +258,8 @@ impl FileSystem {
                 size,
                 last_modified: mtime,
                 permissions: format!("{:o}", perms & 0o777),
-                owner: identity_label(attrs.user.as_deref(), attrs.uid, &user_map),
-                group: identity_label(attrs.group.as_deref(), attrs.gid, &group_map),
+                owner: identity_label(attrs.user.as_deref(), attrs.uid, &identity_maps.0),
+                group: identity_label(attrs.group.as_deref(), attrs.gid, &identity_maps.1),
             });
         }
 

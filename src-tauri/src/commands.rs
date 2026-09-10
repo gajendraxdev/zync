@@ -1,4 +1,4 @@
-use crate::fs::{FileEntry, FileSystem};
+use crate::fs::{FileEntry, FileSystem, SftpIdentityMaps};
 use crate::pty::PtyManager;
 use crate::ssh::{Client, SshManager};
 use crate::types::*;
@@ -641,6 +641,7 @@ pub struct ConnectionHandle {
     pub config: ConnectionConfig,
     pub session: Option<Arc<Mutex<Handle<Client>>>>,
     pub sftp_session: Option<Arc<russh_sftp::client::SftpSession>>,
+    pub sftp_identity_maps: Arc<tokio::sync::OnceCell<SftpIdentityMaps>>,
     pub detected_os: Option<String>,
     pub detected_shell: Option<String>,
     pub uses_vault_auth: bool,
@@ -793,6 +794,7 @@ async fn reconnect_connection(
         config: config.clone(),
         session: Some(Arc::new(Mutex::new(session))),
         sftp_session,
+        sftp_identity_maps: Arc::new(tokio::sync::OnceCell::new()),
         detected_os,
         detected_shell,
         uses_vault_auth: config_uses_vault_auth(config),
@@ -3116,6 +3118,21 @@ async fn get_sftp_or_reconnect(
     Ok(sftp)
 }
 
+async fn sftp_list_ctx(
+    state: &AppState,
+    id: &str,
+) -> Result<(Arc<russh_sftp::client::SftpSession>, Arc<tokio::sync::OnceCell<SftpIdentityMaps>>), String> {
+    let sftp = get_sftp_or_reconnect(state, id).await?;
+    let cache = {
+        let connections = state.connections.lock().await;
+        connections
+            .get(id)
+            .map(|c| c.sftp_identity_maps.clone())
+            .ok_or_else(|| "Connection not found".to_string())?
+    };
+    Ok((sftp, cache))
+}
+
 #[tauri::command]
 pub async fn fs_list(
     connection_id: String,
@@ -3128,12 +3145,12 @@ pub async fn fs_list(
             .list_local(&path)
             .map_err(|e| e.to_string())
     } else {
-        let sftp = get_sftp_or_reconnect(&state, &connection_id).await?;
+        let (sftp, identity_cache) = sftp_list_ctx(&state, &connection_id).await?;
 
         let timeout_duration = std::time::Duration::from_secs(10);
         match tokio::time::timeout(
             timeout_duration,
-            state.file_system.list_remote(&sftp, &path),
+            state.file_system.list_remote(&sftp, &path, &identity_cache),
         )
         .await
         {
@@ -3146,10 +3163,10 @@ pub async fn fs_list(
                         c.sftp_session = None;
                     }
                 }
-                let sftp = get_sftp_or_reconnect(&state, &connection_id).await?;
+                let (sftp, identity_cache) = sftp_list_ctx(&state, &connection_id).await?;
                 match tokio::time::timeout(
                     timeout_duration,
-                    state.file_system.list_remote(&sftp, &path),
+                    state.file_system.list_remote(&sftp, &path, &identity_cache),
                 )
                 .await
                 {
@@ -3576,9 +3593,9 @@ pub(crate) async fn ghost_fs_list(
             .list_local(path)
             .map_err(|e| e.to_string())
     } else {
-        let sftp = get_sftp_or_reconnect(state, connection_id).await?;
+        let (sftp, identity_cache) = sftp_list_ctx(state, connection_id).await?;
         let timeout_duration = std::time::Duration::from_secs(10);
-        match tokio::time::timeout(timeout_duration, state.file_system.list_remote(&sftp, path))
+        match tokio::time::timeout(timeout_duration, state.file_system.list_remote(&sftp, path, &identity_cache))
             .await
         {
             Ok(Ok(res)) => Ok(res),
@@ -3590,10 +3607,10 @@ pub(crate) async fn ghost_fs_list(
                         c.sftp_session = None;
                     }
                 }
-                let sftp = get_sftp_or_reconnect(state, connection_id).await?;
+                let (sftp, identity_cache) = sftp_list_ctx(state, connection_id).await?;
                 match tokio::time::timeout(
                     timeout_duration,
-                    state.file_system.list_remote(&sftp, path),
+                    state.file_system.list_remote(&sftp, path, &identity_cache),
                 )
                 .await
                 {
