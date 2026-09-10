@@ -19,7 +19,7 @@ import {
 import { ConfirmModal } from './ui/ConfirmModal';
 import { memo, useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { useAppStore, Connection } from '../store/useAppStore';
-import { isMatch } from '../lib/keyboard';
+
 import { cn } from '../lib/utils';
 import { FileEditor } from './FileEditor';
 import { CopyToServerModal } from './file-manager/CopyToServerModal';
@@ -38,12 +38,16 @@ import { fileMatchesQuery, fileMatchesSearchType } from './file-manager/fileSear
 import type { FileSearchTypeFilter } from './file-manager/FileQueryEditor';
 import type { FileEntry } from './file-manager/types';
 import { PropertiesPanel } from './file-manager/PropertiesPanel';
+import { useFileClipboard } from './file-manager/useFileClipboard';
+import { isFileManagerPanelShown, useFileKeyboard } from './file-manager/useFileKeyboard';
+import { useFileSelection } from './file-manager/useFileSelection';
+import { useFileUploads } from './file-manager/useFileUploads';
 import { ConflictModal, type ConflictAction } from './file-manager/ConflictModal';
 import { Button } from './ui/Button';
 import { ContextMenu, type ContextMenuItem } from './ui/ContextMenu';
 import { Input } from './ui/Input';
 import { Modal } from './ui/Modal';
-import { useTauriFileDrop } from '../hooks/useTauriFileDrop';
+
 import { usePlugins } from '../context/PluginContext';
 import { buildEditorProviderOptions, CODEMIRROR_EDITOR_ID } from './editor/providers';
 import { clearEditorOverlayOpen, markEditorOverlayOpen } from './editor/overlayState';
@@ -114,11 +118,6 @@ function terminalHereMenuItems(
   ];
 }
 
-function isFileManagerPanelShown(container: HTMLDivElement | null): boolean {
-  if (!container) return false;
-  return container.offsetParent !== null;
-}
-
 export const FileManager = memo(function FileManager({
   connectionId,
   surface = 'overlay',
@@ -171,13 +170,11 @@ export const FileManager = memo(function FileManager({
   const createFolder = useAppStore(state => state.createFolder);
   const renameEntry = useAppStore(state => state.renameEntry);
   const deleteEntries = useAppStore(state => state.deleteEntries);
-  const uploadAction = useAppStore(state => state.uploadFiles);
   const navigateBack = useAppStore(state => state.navigateBack);
   const navigateForward = useAppStore(state => state.navigateForward);
   const navigateHistoryTo = useAppStore(state => state.navigateHistoryTo);
   const pasteEntries = useAppStore(state => state.pasteEntries);
   const clipboard = useAppStore(state => state.clipboard);
-  const setClipboard = useAppStore(state => state.setClipboard);
   const clearClipboard = useAppStore(state => state.clearClipboard);
   const updateSettings = useAppStore(state => state.updateSettings);
   const updateFileManagerSettings = useAppStore(state => state.updateFileManagerSettings);
@@ -212,20 +209,25 @@ export const FileManager = memo(function FileManager({
     void updateFileManagerSettings({ defaultView: mode });
   }, [updateFileManagerSettings, viewMode]);
   const [typeFilter, setTypeFilter] = useState<FileSearchTypeFilter>('all');
-  const [placesCollapsed, setPlacesCollapsed] = useState(
-    () => window.innerWidth < FILE_CHROME_NARROW_MAX || surface === 'pane',
-  );
-  const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
-  const [focusedFile, setFocusedFile] = useState<string | null>(null);
+  const placesCollapsed = settings.fileManager.placesCollapsed ?? surface === 'pane';
+  const {
+    selectedFiles,
+    setSelectedFiles,
+    focusedFile,
+    setFocusedFile,
+    handleSelect,
+    handleSelectAll,
+    selectContextFile,
+  } = useFileSelection(currentPath, activeConnectionId ?? undefined);
+  const { handleCopy } = useFileClipboard({
+    connectionId: activeConnectionId ?? undefined,
+    currentPath,
+    files,
+    selectedFiles,
+  });
   const [sortColumn, setSortColumn] = useState<FileSortColumn>('name');
   const [sortDirection, setSortDirection] = useState<FileSortDirection>('asc');
   const [gridColumnCount, setGridColumnCount] = useState(1);
-  const [selectionPath, setSelectionPath] = useState(currentPath);
-  if (selectionPath !== currentPath) {
-    setSelectionPath(currentPath);
-    setSelectedFiles([]);
-    setFocusedFile(null);
-  }
   const [searchTerm, setSearchTerm] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isEditingPath, setIsEditingPath] = useState(false);
@@ -234,15 +236,11 @@ export const FileManager = memo(function FileManager({
   const [editingFile, setEditingFile] = useState<FileEntry | null>(null);
   const [editorContent, setEditorContent] = useState('');
   const [editorProviderOverride, setEditorProviderOverride] = useState<string | null>(null);
-  const [boundConnectionId, setBoundConnectionId] = useState(activeConnectionId);
-  if (boundConnectionId !== activeConnectionId) {
-    setBoundConnectionId(activeConnectionId);
-    setSelectedFiles([]);
-    setFocusedFile(null);
+  useEffect(() => {
     setEditingFile(null);
     setEditorContent('');
     setEditorProviderOverride(null);
-  }
+  }, [activeConnectionId]);
 
   // Modal States
   const [isNewFolderModalOpen, setIsNewFolderModalOpen] = useState(false);
@@ -318,10 +316,16 @@ export const FileManager = memo(function FileManager({
   const canGoBack = Boolean(activeConnectionId) && activeHistoryIndex > 0;
   const canGoForward = Boolean(activeConnectionId) && activeHistoryIndex < activeHistoryLength - 1;
 
-  const performUpload = useCallback(async (filePaths: string[]) => {
-    if (!activeConnectionId) return;
-    await uploadAction(activeConnectionId, filePaths);
-  }, [activeConnectionId, uploadAction]);
+  const clearDragVisual = useCallback(() => {
+    setIsInternalDraggingOver(false);
+    setDragType(null);
+    setDragSourceConnectionId(null);
+  }, []);
+  const { handleUpload, handleUploadFolder, isTauriDraggingOver } = useFileUploads({
+    connectionId: activeConnectionId ?? undefined,
+    isConnected,
+    onDragVisualClear: clearDragVisual,
+  });
 
   const handleConnectionError = useCallback((connectionId: string, err: any) => {
     const msg = err.message || String(err);
@@ -342,28 +346,6 @@ export const FileManager = memo(function FileManager({
     }
     return false;
   }, []);
-
-  const { isDraggingOver: isTauriDraggingOver } = useTauriFileDrop(useCallback((paths) => {
-    // Clear any leftover HTML5 drag state (HTML5 drop won't fire when Tauri intercepts)
-    setIsInternalDraggingOver(false);
-    setDragType(null);
-    setDragSourceConnectionId(null);
-    if (activeConnectionId) {
-      performUpload(paths);
-    }
-  }, [activeConnectionId, performUpload]));
-
-  // --- Copy / Paste Logic ---
-  const handleCopy = useCallback((cut = false) => {
-    if (!activeConnectionId || selectedFiles.length === 0) return;
-
-    // Create list of file entries from selection
-    const selectedEntries = files.filter(f => selectedFiles.includes(f.name));
-
-    setClipboard(selectedEntries, activeConnectionId, currentPath, cut ? 'cut' : 'copy');
-
-    showToast('info', `${cut ? 'Cut' : 'Copied'} ${selectedEntries.length} item(s)`);
-  }, [activeConnectionId, currentPath, files, selectedFiles, setClipboard, showToast]);
 
   const executeFileOperations = useCallback(async (ops: {
     source: string;
@@ -900,29 +882,12 @@ export const FileManager = memo(function FileManager({
     }
   }, [activeConnectionId, editingFile, currentPath, handleConnectionError, showToast]);
 
-  const handleSelect = useCallback((filename: string, multi: boolean) => {
-    if (!filename) {
-      setSelectedFiles([]);
-      return;
-    }
-
-    if (multi) {
-      setSelectedFiles((prev) => (prev.includes(filename) ? prev.filter((f) => f !== filename) : [...prev, filename]));
-    } else {
-      setSelectedFiles([filename]);
-      setFocusedFile(filename);
-    }
-  }, []);
-
   const handleContextMenu = useCallback((e: React.MouseEvent, file?: FileEntry) => {
     e.preventDefault();
     e.stopPropagation();
     setContextMenu({ x: e.clientX, y: e.clientY, file: file || null });
-
-    if (file) {
-      setSelectedFiles((prev) => (prev.includes(file.name) ? prev : [file.name]));
-    }
-  }, []);
+    selectContextFile(file);
+  }, [selectContextFile]);
 
   const showHiddenFiles = settings.fileManager.showHiddenFiles;
   const filteredFiles = useMemo(
@@ -1024,16 +989,6 @@ export const FileManager = memo(function FileManager({
   // Move performUpload up to be stable and reusable
   // (Done above)
 
-  const handleUpload = useCallback(async () => {
-    try {
-      const { filePaths, canceled } = await window.ipcRenderer.invoke('dialog:openFile');
-      if (canceled || filePaths.length === 0) return;
-      performUpload(filePaths);
-    } catch (error: any) {
-      showToast('error', `Upload failed: ${error.message || String(error)}`);
-    }
-  }, [performUpload, showToast]);
-
   const homePath = inferHomePath(connection?.homePath, currentPath);
   const osName = isLocal
     ? (typeof navigator !== 'undefined' && /win/i.test(navigator.platform) ? 'Windows' : 'Operating System')
@@ -1093,24 +1048,13 @@ export const FileManager = memo(function FileManager({
     void refreshFiles(activeConnectionId);
   }, [activeConnectionId, refreshFiles]);
 
-  const handleUploadFolder = useCallback(async () => {
-    if (!activeConnectionId || !isConnected) return;
-    try {
-      const { filePaths, canceled } = await window.ipcRenderer.invoke('dialog:openDirectory');
-      if (canceled || filePaths.length === 0) return;
-      performUpload(filePaths);
-    } catch (err) {
-      console.error('Failed to open directory dialog:', err);
-    }
-  }, [activeConnectionId, isConnected, performUpload]);
-
   const handleToggleSearch = useCallback((open: boolean) => {
     setIsSearchOpen(open);
   }, []);
 
   const handleTogglePlaces = useCallback(() => {
-    setPlacesCollapsed((value) => !value);
-  }, []);
+    void updateFileManagerSettings({ placesCollapsed: !placesCollapsed });
+  }, [placesCollapsed, updateFileManagerSettings]);
 
   const handleBack = useCallback(() => {
     if (activeConnectionId) navigateBack(activeConnectionId);
@@ -1141,9 +1085,9 @@ export const FileManager = memo(function FileManager({
     else void updateFileManagerSettings({ listZoom: clampFileListZoom((fm.listZoom ?? 0) - 1) });
   }, [viewMode, updateFileManagerSettings]);
 
-  const handleSelectAll = useCallback(() => {
-    setSelectedFiles(paintedFiles.map((f) => f.name));
-  }, [paintedFiles]);
+  const handleSelectAllFiles = useCallback(() => {
+    handleSelectAll(paintedFiles.map((f) => f.name));
+  }, [handleSelectAll, paintedFiles]);
 
   const handleOpenProperties = useCallback(() => {
     if (selectedFiles.length === 0 && focusedFile) setSelectedFiles([focusedFile]);
@@ -1573,266 +1517,46 @@ export const FileManager = memo(function FileManager({
 
 
 
-  // Keyboard Navigation Handler
-  useEffect(() => {
-    if (!isConnected) return;
+  useFileKeyboard({
+    containerRef,
+    isConnected,
+    isFilesSurfaceActive,
+    settings,
+    paintedFiles,
+    selectedFiles,
+    focusedFile,
+    setSelectedFiles,
+    setFocusedFile,
+    viewMode,
+    gridColumnCount,
+    isSearchOpen,
+    searchTerm,
+    setIsSearchOpen,
+    setSearchTerm,
+    isPropertiesOpen,
+    setIsPropertiesOpen,
+    isNewFolderModalOpen,
+    isNewFileModalOpen,
+    isRenameModalOpen,
+    isCopyModalOpen,
+    editingFile,
+    activeConnectionId: activeConnectionId ?? undefined,
+    handleNavigate,
+    handleCopy,
+    handlePaste,
+    handleDelete,
+    toggleBookmark,
+    refreshFiles,
+    navigateBack,
+    navigateForward,
+    setViewMode,
+    updateFileManagerSettings,
+    setIsEditingPath,
+    setRenameOldName,
+    setRenameNewName,
+    setIsRenameModalOpen,
+  });
 
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't interfere with background tabs, modals, inputs, or when strict focus is needed
-      if (!isFilesSurfaceActive || !isFileManagerPanelShown(containerRef.current) || isNewFolderModalOpen || isNewFileModalOpen || isRenameModalOpen || editingFile || isCopyModalOpen) return;
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        // Special case: Allow arrow keys and Enter to pass through if we are in the search input
-        // so that users can navigate results while typing.
-        const isSearchInput = e.target.placeholder?.includes('Search');
-        const isNavigationKey = ['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Enter'].includes(e.key);
-        if (isSearchInput && isNavigationKey) {
-          // Continue to global handler
-        } else {
-          return;
-        }
-      }
-
-      const bindings = settings.keybindings || {};
-
-      // Select All
-      if (isMatch(e, bindings.fmSelectAll || 'Mod+A')) {
-        e.preventDefault();
-        setSelectedFiles(paintedFiles.map((f) => f.name));
-        return;
-      }
-
-      // Clear Selection / Search
-      if (isMatch(e, 'Escape')) {
-        if (isPropertiesOpen) {
-          e.preventDefault();
-          setIsPropertiesOpen(false);
-          return;
-        }
-        if (isSearchOpen || searchTerm) {
-          setIsSearchOpen(false);
-          setSearchTerm('');
-        } else {
-          setSelectedFiles([]);
-          setFocusedFile(null);
-        }
-        return;
-      }
-
-      // Search (Mod+F)
-      if (isMatch(e, bindings.fmSearch || 'Mod+F')) {
-        e.preventDefault();
-        setIsSearchOpen(true);
-        return;
-      }
-
-      if (isMatch(e, bindings.fmListView || 'Mod+1')) {
-        e.preventDefault();
-        setViewMode('list');
-        return;
-      }
-      if (isMatch(e, bindings.fmGridView || 'Mod+2')) {
-        e.preventDefault();
-        setViewMode('grid');
-        return;
-      }
-      if (isMatch(e, bindings.fmHidden || 'Mod+H')) {
-        e.preventDefault();
-        void updateFileManagerSettings({ showHiddenFiles: !settings.fileManager.showHiddenFiles });
-        return;
-      }
-      if (isMatch(e, bindings.fmBookmark || 'Mod+D')) {
-        e.preventDefault();
-        toggleBookmark();
-        return;
-      }
-      if (isMatch(e, bindings.fmRefresh || 'F5') || isMatch(e, 'Mod+R')) {
-        e.preventDefault();
-        if (activeConnectionId) void refreshFiles(activeConnectionId);
-        return;
-      }
-      if (!e.ctrlKey && !e.altKey && !e.metaKey && (e.key === '/' || e.key === '~')) {
-        e.preventDefault();
-        setIsEditingPath(true);
-        return;
-      }
-
-      // Type-to-search logic: A-Z / 0-9 starts searching
-      if (!e.ctrlKey && !e.altKey && !e.metaKey && e.key.length === 1 && /^[a-zA-Z0-9_\-]$/.test(e.key)) {
-        // If not already focused on search, open it and let it handle further input
-        if (!isSearchOpen) {
-          e.preventDefault(); // Prevent browser from typing the char into the newly focused input
-          setIsSearchOpen(true);
-          // We can't easily "forward" the key to the input immediately after state change in the same tick 
-          // but if we set the searchTerm here, it will appear in the input when it renders.
-          setSearchTerm(e.key);
-          return;
-        }
-      }
-
-      // Go Back
-      if (isMatch(e, bindings.fmBack || 'Alt+Left')) {
-        e.preventDefault();
-        if (activeConnectionId) navigateBack(activeConnectionId);
-        return;
-      }
-
-      // Go Forward
-      if (isMatch(e, bindings.fmForward || 'Alt+Right')) {
-        e.preventDefault();
-        if (activeConnectionId) navigateForward(activeConnectionId);
-        return;
-      }
-
-      // Go Up
-      if (isMatch(e, bindings.fmUp || 'Backspace')) {
-        e.preventDefault();
-        handleNavigate('..');
-        return;
-      }
-
-      // Delete
-      if (isMatch(e, bindings.fmDelete || 'Delete') && selectedFiles.length > 0) {
-        e.preventDefault();
-        handleDelete();
-        return;
-      }
-
-      // Rename
-      if (isMatch(e, bindings.fmRename || 'F2') && (focusedFile || selectedFiles.length === 1)) {
-        e.preventDefault();
-        const fileToRename = focusedFile || selectedFiles[0];
-        setRenameOldName(fileToRename);
-        setRenameNewName(fileToRename);
-        setIsRenameModalOpen(true);
-        return;
-      }
-
-      // Edit Path
-      if (isMatch(e, bindings.fmEditPath || 'Mod+L')) {
-        e.preventDefault();
-        setIsEditingPath(true);
-        return;
-      }
-
-      // Properties Panel (Alt+Enter)
-      if (isMatch(e, 'Alt+Enter') && (focusedFile || selectedFiles.length > 0)) {
-        e.preventDefault();
-        if (!isPropertiesOpen && selectedFiles.length === 0 && focusedFile) {
-          setSelectedFiles([focusedFile]);
-        }
-        setIsPropertiesOpen((prev) => !prev);
-        return;
-      }
-
-      // Open Selection (Enter)
-      if (isMatch(e, bindings.fmOpen || 'Enter') && focusedFile) {
-        e.preventDefault();
-        handleNavigate(focusedFile);
-        return;
-      }
-
-      // Space: Toggle selection
-      if (e.key === ' ' && focusedFile) {
-        e.preventDefault();
-        setSelectedFiles(prev => {
-          const set = new Set(prev);
-          if (set.has(focusedFile)) {
-            set.delete(focusedFile);
-          } else {
-            set.add(focusedFile);
-          }
-          return Array.from(set);
-        });
-        return;
-      }
-
-      // Clipboard Shortcuts
-      if (isMatch(e, bindings.fmCopy || 'Mod+C')) {
-        e.preventDefault();
-        handleCopy(false);
-        return;
-      }
-
-      if (isMatch(e, bindings.fmCut || 'Mod+X')) {
-        e.preventDefault();
-        handleCopy(true);
-        return;
-      }
-
-      if (isMatch(e, bindings.fmPaste || 'Mod+V')) {
-        e.preventDefault();
-        handlePaste();
-        return;
-      }
-
-      if (paintedFiles.length === 0) return;
-
-      const currentIndex = focusedFile ? paintedFiles.findIndex((f) => f.name === focusedFile) : -1;
-
-      // Arrow Keys: Navigate
-      // Note: These are standard navigation keys, not strictly "commands"
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-        e.preventDefault();
-
-        let newIndex = currentIndex;
-
-        if (viewMode === 'grid') {
-          const gridCols = Math.max(1, gridColumnCount);
-
-          if (e.key === 'ArrowDown') newIndex = Math.min(currentIndex + gridCols, paintedFiles.length - 1);
-          else if (e.key === 'ArrowUp') newIndex = Math.max(currentIndex - gridCols, 0);
-          else if (e.key === 'ArrowRight') newIndex = Math.min(currentIndex + 1, paintedFiles.length - 1);
-          else if (e.key === 'ArrowLeft') newIndex = Math.max(currentIndex - 1, 0);
-        } else {
-          // List view: only up/down
-          if (e.key === 'ArrowDown') newIndex = Math.min(currentIndex + 1, paintedFiles.length - 1);
-          else if (e.key === 'ArrowUp') newIndex = Math.max(currentIndex - 1, 0);
-        }
-
-        if (newIndex === -1) newIndex = 0;
-        const newFocused = paintedFiles[newIndex]?.name;
-        setFocusedFile(newFocused);
-
-        // Update selection if Shift is held
-        if (e.shiftKey && newFocused) {
-          setSelectedFiles(prev => {
-            const set = new Set(prev);
-            if (set.has(newFocused)) {
-              // Already selected
-            } else {
-              set.add(newFocused);
-            }
-            return Array.from(set);
-          });
-        } else if (!e.ctrlKey && !e.metaKey) {
-          // Single selection
-          setSelectedFiles([newFocused]);
-        }
-        return;
-      }
-
-      // Home
-      if (e.key === 'Home') {
-        e.preventDefault();
-        if (paintedFiles.length > 0) setFocusedFile(paintedFiles[0].name);
-        return;
-      }
-
-      // End
-      if (e.key === 'End') {
-        e.preventDefault();
-        if (paintedFiles.length > 0) setFocusedFile(paintedFiles[paintedFiles.length - 1].name);
-        return;
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [
-    activeConnectionId, searchTerm, isSearchOpen, files, paintedFiles, settings, isNewFolderModalOpen, isNewFileModalOpen, isRenameModalOpen,
-    editingFile, selectedFiles, focusedFile, handleNavigate, handleCopy, handlePaste, gridColumnCount,
-    handleDelete, navigateBack, navigateForward, isCopyModalOpen, isPropertiesOpen, viewMode, isConnected, isFilesSurfaceActive,
-  ]);
 
   // Focus when the files panel is shown (dispatched from TabContent — avoids isVisible prop churn).
   useEffect(() => {
@@ -1866,11 +1590,10 @@ export const FileManager = memo(function FileManager({
       .filter((file): file is FileEntry => Boolean(file));
   }, [files, focusedFile, selectedFiles]);
   const [heldPropertiesFiles, setHeldPropertiesFiles] = useState<FileEntry[]>([]);
-  const propertiesKey = propertiesEntries.map((file) => file.path || file.name).join('\0');
-  const heldPropertiesKey = heldPropertiesFiles.map((file) => file.path || file.name).join('\0');
-  if (isPropertiesOpen && propertiesKey !== heldPropertiesKey) {
+  useEffect(() => {
+    if (!isPropertiesOpen) return;
     setHeldPropertiesFiles(propertiesEntries);
-  }
+  }, [isPropertiesOpen, propertiesEntries]);
   const inspectorFiles = isPropertiesOpen ? propertiesEntries : heldPropertiesFiles;
 
   return (
@@ -1951,7 +1674,7 @@ export const FileManager = memo(function FileManager({
         isBookmarked={isBookmarked}
         onPaste={handlePaste}
         canPaste={Boolean(clipboard)}
-        onSelectAll={handleSelectAll}
+        onSelectAll={handleSelectAllFiles}
         onProperties={handleOpenProperties}
         onOpenTerminal={activeConnectionId ? handleOpenTerminalChrome : undefined}
         typeFilter={typeFilter}
@@ -1971,7 +1694,7 @@ export const FileManager = memo(function FileManager({
             aria-label={isPropertiesOpen && placesCollapsed ? 'Close properties' : 'Close places'}
             tabIndex={placesCollapsed && !isPropertiesOpen ? -1 : 0}
             onClick={() => {
-              if (!placesCollapsed) setPlacesCollapsed(true);
+              if (!placesCollapsed) void updateFileManagerSettings({ placesCollapsed: true });
               if (isPropertiesOpen) setIsPropertiesOpen(false);
             }}
           />

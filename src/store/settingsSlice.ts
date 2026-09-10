@@ -85,6 +85,8 @@ export interface AppSettings {
         listZoom: number;
         sortFoldersFirst: boolean;
         dateTimeFormat: 'simple' | 'detailed';
+        /** Last Places toggle. Unset uses overlay-open / pane-collapsed defaults. */
+        placesCollapsed?: boolean;
     };
     localTerm: {
         windowsShell: string;
@@ -231,6 +233,7 @@ export const defaultSettings: AppSettings = {
         listZoom: 0,
         sortFoldersFirst: true,
         dateTimeFormat: 'simple',
+        placesCollapsed: undefined,
     },
     localTerm: {
         windowsShell: 'default'
