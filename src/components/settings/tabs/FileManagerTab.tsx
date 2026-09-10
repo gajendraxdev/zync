@@ -49,6 +49,20 @@ export function FileManagerTab({
                         disabled={isUpdating}
                         onChange={(v) => { void runUpdate(() => updateFileManagerSettings({ confirmDelete: v })); }}
                     />
+                    <Toggle
+                        label="Sort Folders Before Files"
+                        description="Keep directories at the top of grid and list views"
+                        checked={settings.fileManager.sortFoldersFirst !== false}
+                        disabled={isUpdating}
+                        onChange={(v) => { void runUpdate(() => updateFileManagerSettings({ sortFoldersFirst: v })); }}
+                    />
+                    <Toggle
+                        label="Single-click to Open"
+                        description="Open files and folders with one click instead of two"
+                        checked={settings.fileManager.clickPolicy === 'single'}
+                        disabled={isUpdating}
+                        onChange={(v) => { void runUpdate(() => updateFileManagerSettings({ clickPolicy: v ? 'single' : 'double' })); }}
+                    />
                     <div className="p-4 bg-[var(--color-app-surface)]/50 rounded-lg border border-[var(--color-app-border)]/50">
                         <div className="flex items-center justify-between gap-3">
                             <div className="min-w-0">

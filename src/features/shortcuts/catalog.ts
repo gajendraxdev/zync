@@ -20,9 +20,15 @@ const FILE_MANAGER: ShortcutCommand[] = [
     { id: 'fmEditPath', label: 'Edit Path', section: 'files', defaultKeys: 'Mod+L', when: 'files', settingsKey: 'fmEditPath', configurable: true },
     { id: 'fmSearch', label: 'Search', section: 'files', defaultKeys: 'Mod+F', when: 'files', settingsKey: 'fmSearch', configurable: true },
     { id: 'fmOpen', label: 'Open Selection', section: 'files', defaultKeys: 'Enter', when: 'files', settingsKey: 'fmOpen', configurable: true },
-    { id: 'fmUp', label: 'Go Up', section: 'files', defaultKeys: 'Backspace', when: 'files', settingsKey: 'fmUp', configurable: true },
+    { id: 'fmUp', label: 'Go Up', section: 'files', defaultKeys: 'Alt+Up', when: 'files', settingsKey: 'fmUp', configurable: true },
     { id: 'fmBack', label: 'Go Back', section: 'files', defaultKeys: 'Alt+Left', when: 'files', settingsKey: 'fmBack', configurable: true },
     { id: 'fmForward', label: 'Go Forward', section: 'files', defaultKeys: 'Alt+Right', when: 'files', settingsKey: 'fmForward', configurable: true },
+    { id: 'fmSearchEverywhere', label: 'Search Everywhere', section: 'files', defaultKeys: 'Mod+Shift+F', when: 'files', settingsKey: 'fmSearchEverywhere', configurable: true },
+    { id: 'fmListView', label: 'List View', section: 'files', defaultKeys: 'Mod+1', when: 'files', settingsKey: 'fmListView', configurable: true },
+    { id: 'fmGridView', label: 'Grid View', section: 'files', defaultKeys: 'Mod+2', when: 'files', settingsKey: 'fmGridView', configurable: true },
+    { id: 'fmHidden', label: 'Show/Hide Hidden Files', section: 'files', defaultKeys: 'Mod+H', when: 'files', settingsKey: 'fmHidden', configurable: true },
+    { id: 'fmBookmark', label: 'Bookmark Current Location', section: 'files', defaultKeys: 'Mod+D', when: 'files', settingsKey: 'fmBookmark', configurable: true },
+    { id: 'fmRefresh', label: 'Refresh View', section: 'files', defaultKeys: 'F5', when: 'files', settingsKey: 'fmRefresh', configurable: true },
 ];
 
 /**

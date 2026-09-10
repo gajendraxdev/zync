@@ -1,205 +1,117 @@
-import {
-    Calendar,
-    File,
-    FileCode,
-    FileImage,
-    FileText,
-    Folder,
-    HardDrive,
-    Info,
-    Shield,
-    Tag,
-    X,
-    MapPin
-} from 'lucide-react';
-import { useMemo } from 'react';
-import { cn } from '../../lib/utils';
-import { formatBytes, formatDate } from '../../lib/utils'; // Assuming these exist, otherwise I'll use inline or standard Date
+import { Folder, Info, X } from 'lucide-react';
+import { DynamicIcon } from '../ui/DynamicIcon';
+import { cn, formatBytes } from '../../lib/utils';
+import { formatFileListDate } from './fileGridLayout';
 import type { FileEntry } from './types';
-import { Button } from '../ui/Button';
 
 interface PropertiesPanelProps {
-    file: FileEntry | null;
-    isOpen: boolean;
-    onClose: () => void;
-    className?: string;
+  files: FileEntry[];
+  onClose: () => void;
 }
 
-export function PropertiesPanel({ file, isOpen, onClose, className }: PropertiesPanelProps) {
-    if (!isOpen || !file) return null;
+function fileKindLabel(file: FileEntry): string {
+  if (file.type === 'd') return 'Folder';
+  if (file.type === 'l') return 'Link';
+  const name = file.name;
+  if (name.startsWith('.') && name.indexOf('.', 1) === -1) return 'File';
+  const ext = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1) : '';
+  if (!ext || ext === name) return 'File';
+  return `${ext.toUpperCase()} file`;
+}
 
-    const FileIcon = useMemo(() => {
-        if (file.type === 'd') return Folder;
-        const ext = file.name.split('.').pop()?.toLowerCase();
-        if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(ext || '')) return FileImage;
-        if (['ts', 'tsx', 'js', 'jsx', 'rs', 'py', 'css', 'html', 'json'].includes(ext || '')) return FileCode;
-        if (['txt', 'md', 'log'].includes(ext || '')) return FileText;
-        return File;
-    }, [file]);
+function unixModeString(octal: string): string {
+  const digits = octal.trim();
+  if (!/^[0-7]{3,4}$/.test(digits)) return digits || '—';
+  const three = digits.slice(-3);
+  const bit = (n: number) => `${n & 4 ? 'r' : '-'}${n & 2 ? 'w' : '-'}${n & 1 ? 'x' : '-'}`;
+  return three.split('').map((d) => bit(parseInt(d, 8))).join('');
+}
 
-    const permissions = useMemo(() => {
-        if (!file.permissions) return 'Unknown';
+function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="flex items-start gap-2 px-3 py-1.5">
+      <dt className="w-[4.75rem] shrink-0 text-[10px] font-medium uppercase tracking-wider text-app-muted/70">
+        {label}
+      </dt>
+      <dd className={cn('min-w-0 flex-1 break-all text-[12px] font-medium text-app-text select-text', mono && 'font-mono tracking-wide')}>
+        {value}
+      </dd>
+    </div>
+  );
+}
 
-        // Parse Octal string to rwx
-        // e.g. "755" -> "rwxr-xr-x"
-        const getPerms = (n: string) => {
-            const val = parseInt(n, 10);
-            return [
-                (val & 4) ? 'r' : '-',
-                (val & 2) ? 'w' : '-',
-                (val & 1) ? 'x' : '-'
-            ].join('');
-        };
+export function PropertiesPanel({ files, onClose }: PropertiesPanelProps) {
+  const single = files.length === 1 ? files[0] : null;
+  const folderCount = files.filter((file) => file.type === 'd').length;
+  const otherCount = files.length - folderCount;
+  const totalSize = files.reduce((sum, file) => sum + (file.type === 'd' ? 0 : file.size), 0);
 
-        const p = file.permissions;
-        if (p.length === 3) {
-            return `${getPerms(p[0])} ${getPerms(p[1])} ${getPerms(p[2])}`;
-        }
-        return file.permissions;
-    }, [file]);
-
-    const octalPermissions = useMemo(() => {
-        // file.permissions is already the octal string from backend (e.g. "755")
-        return file.permissions || '000';
-    }, [file]);
-
-    return (
-        <div
-            className={cn(
-                "fixed right-0 top-16 bottom-0 w-80 bg-app-panel/95 backdrop-blur-xl border-l border-app-border/50 shadow-2xl z-40 transition-transform duration-300 ease-in-out transform",
-                isOpen ? "translate-x-0" : "translate-x-full",
-                className
-            )}
+  return (
+    <aside className="flex h-full w-full min-w-0 flex-col">
+      <header className="flex shrink-0 items-center justify-between gap-1 border-b border-app-border/30 px-2 py-1.5">
+        <h2 className="truncate px-1 text-[11px] font-medium text-app-text">
+          {files.length > 1 ? `${files.length} items` : 'Properties'}
+        </h2>
+        <button
+          type="button"
+          aria-label="Close properties"
+          className="shrink-0 rounded-md p-1 text-app-muted transition-all hover:bg-app-surface/50 hover:text-app-text"
+          onClick={onClose}
         >
-            {/* Header */}
-            <div className="flex items-center justify-between p-4 border-b border-app-border/30">
-                <h2 className="text-lg font-semibold flex items-center gap-2 text-app-text">
-                    <Info size={18} className="text-app-accent" />
-                    Properties
-                </h2>
-                <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8 text-app-muted hover:text-app-text">
-                    <X size={18} />
-                </Button>
-            </div>
+          <X size={12} />
+        </button>
+      </header>
 
-            {/* Content */}
-            <div className="p-6 overflow-y-auto h-[calc(100%-60px)] space-y-8">
-
-                {/* Main Icon & Name */}
-                <div className="flex flex-col items-center text-center">
-                    <div className={cn(
-                        "h-24 w-24 rounded-2xl flex items-center justify-center mb-4 shadow-inner",
-                        file.type === 'd' ? "bg-blue-500/10 text-blue-500" : "bg-app-surface text-app-accent"
-                    )}>
-                        <FileIcon size={48} strokeWidth={1.5} />
-                    </div>
-                    <h3 className="text-lg font-bold text-app-text break-all px-2 select-text">{file.name}</h3>
-                    <p className="text-xs text-app-muted mt-1 font-mono">{file.type === 'd' ? 'Directory' : 'File'}</p>
-                </div>
-
-                {/* Info Grid */}
-                <div className="space-y-4">
-
-                    {/* Location */}
-                    <div className="group">
-                        <div className="flex items-center text-app-muted text-xs uppercase font-bold tracking-wider mb-1 gap-1">
-                            <MapPin size={12} />
-                            <span>Location</span>
-                        </div>
-                        <p className="text-sm text-app-text/90 break-all select-text font-medium bg-app-surface/50 p-2 rounded-lg border border-transparent group-hover:border-app-border/50 transition-colors">
-                            {file.path || 'Unknown'}
-                        </p>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <div className="flex items-center text-app-muted text-xs uppercase font-bold tracking-wider mb-1 gap-1">
-                                <span>Owner</span>
-                            </div>
-                            <p className="text-sm text-app-text/90 font-medium truncate" title={file.owner || undefined}>
-                                {file.owner || '—'}
-                            </p>
-                        </div>
-                        <div>
-                            <div className="flex items-center text-app-muted text-xs uppercase font-bold tracking-wider mb-1 gap-1">
-                                <span>Group</span>
-                            </div>
-                            <p className="text-sm text-app-text/90 font-medium truncate" title={file.group || undefined}>
-                                {file.group || '—'}
-                            </p>
-                        </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                        {/* Size */}
-                        <div>
-                            <div className="flex items-center text-app-muted text-xs uppercase font-bold tracking-wider mb-1 gap-1">
-                                <HardDrive size={12} />
-                                <span>Size</span>
-                            </div>
-                            <p className="text-sm text-app-text/90 font-medium">
-                                {file.type === 'd' ? '-' : formatBytes(file.size)}
-                            </p>
-                        </div>
-
-                        {/* Type */}
-                        <div>
-                            <div className="flex items-center text-app-muted text-xs uppercase font-bold tracking-wider mb-1 gap-1">
-                                <Tag size={12} />
-                                <span>Type</span>
-                            </div>
-                            <p className="text-sm text-app-text/90 font-medium capitalize">
-                                {file.type === 'd' ? 'Folder' : file.name.split('.').pop()?.toUpperCase() || 'File'}
-                            </p>
-                        </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 gap-4">
-                        {/* Modified */}
-                        <div>
-                            <div className="flex items-center text-app-muted text-xs uppercase font-bold tracking-wider mb-1 gap-1">
-                                <Calendar size={12} />
-                                <span>Modified</span>
-                            </div>
-                            <p className="text-sm text-app-text/90 font-medium">
-                                {formatDate(file.lastModified)}
-                            </p>
-                        </div>
-
-                        {/* Accessed - Not available in new type yet, use lastModified for now or hide */}
-                        <div>
-                            <div className="flex items-center text-app-muted text-xs uppercase font-bold tracking-wider mb-1 gap-1">
-                                <Calendar size={12} />
-                                <span>Accessed</span>
-                            </div>
-                            <p className="text-sm text-app-text/90 font-medium">
-                                -
-                            </p>
-                        </div>
-                    </div>
-
-                    {/* Permissions */}
-                    <div className="pt-4 border-t border-app-border/30">
-                        <div className="flex items-center text-app-muted text-xs uppercase font-bold tracking-wider mb-2 gap-1">
-                            <Shield size={12} />
-                            <span>Permissions</span>
-                        </div>
-
-                        <div className="bg-app-surface/50 rounded-lg p-3 flex items-center justify-between border border-app-border/20">
-                            <div>
-                                <span className="text-xs text-app-muted block mb-0.5">Owner / Group / Other</span>
-                                <span className="text-sm font-mono text-app-text tracking-widest">{permissions}</span>
-                            </div>
-                            <div className="text-right">
-                                <span className="text-xs text-app-muted block mb-0.5">Octal</span>
-                                <span className="text-lg font-bold text-app-accent font-mono">{octalPermissions}</span>
-                            </div>
-                        </div>
-
-                    </div>
-
-                </div>
-            </div>
+      {files.length === 0 ? (
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-4 py-10 text-center opacity-60">
+          <Info size={20} className="mb-2 text-app-muted" />
+          <span className="text-[10px] font-medium text-app-muted">Select a file or folder</span>
         </div>
-    );
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+          <div className="mb-1 flex flex-col items-center px-1 py-3 text-center">
+            <div className="mb-2 flex h-10 w-10 items-center justify-center">
+              {single && single.type !== 'd' ? (
+                <DynamicIcon type={single.name} size={32} />
+              ) : (
+                <Folder size={32} fill="currentColor" className="text-app-accent" strokeWidth={0.5} />
+              )}
+            </div>
+            <div className="w-full break-all text-[12px] font-medium text-app-text select-text">
+              {single ? single.name : `${files.length} items`}
+            </div>
+            <div className="mt-0.5 text-[10px] uppercase tracking-wider text-app-muted/70">
+              {single
+                ? fileKindLabel(single)
+                : [folderCount ? `${folderCount} folder${folderCount === 1 ? '' : 's'}` : null, otherCount ? `${otherCount} file${otherCount === 1 ? '' : 's'}` : null]
+                    .filter(Boolean)
+                    .join(' · ')}
+            </div>
+          </div>
+
+          <dl>
+            {single ? (
+              <>
+                <Row label="Location" value={single.path || '—'} />
+                <Row label="Size" value={single.type === 'd' ? '—' : formatBytes(single.size)} />
+                <Row label="Type" value={fileKindLabel(single)} />
+                <Row label="Owner" value={(single.owner || '').trim() || '—'} />
+                <Row label="Group" value={(single.group || '').trim() || '—'} />
+                <Row label="Modified" value={formatFileListDate(single.lastModified) || '—'} />
+                <Row label="Mode" value={unixModeString(single.permissions || '')} mono />
+                <Row label="Octal" value={single.permissions?.trim() || '—'} mono />
+              </>
+            ) : (
+              <>
+                <Row label="Items" value={String(files.length)} />
+                <Row label="Size" value={formatBytes(totalSize)} />
+                <Row label="Folders" value={String(folderCount)} />
+                <Row label="Files" value={String(otherCount)} />
+              </>
+            )}
+          </dl>
+        </div>
+      )}
+    </aside>
+  );
 }

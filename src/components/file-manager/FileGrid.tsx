@@ -5,6 +5,7 @@ import { DynamicIcon } from '../ui/DynamicIcon';
 import type React from 'react';
 import { cn, formatBytes } from '../../lib/utils';
 import { Tooltip } from '../ui/Tooltip';
+import { FileHoverTip, useFileHoverTip } from './FileHoverTip';
 import type { FileEntry } from './types';
 import { useAppStore } from '../../store/useAppStore';
 import { useMemo, useState, useEffect, useLayoutEffect, useCallback, useRef, memo, type CSSProperties } from 'react';
@@ -14,6 +15,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { forwardRef } from 'react';
 import { buildDragData, startInternalDrag, validateAndBuildMoves } from './dragDropUtils';
 import { getScrollbarSize, Grid, List, useGridRef, useListRef } from 'react-window';
+import { FILE_GRID_ZOOM, FILE_LIST_ZOOM, clampFileGridZoom, clampFileListZoom } from './fileChrome';
 import {
   computeFileGridMetrics,
   fileGridScrollTarget,
@@ -24,7 +26,6 @@ import {
   FILE_LIST_COLUMN_IDS,
   FILE_LIST_COLUMN_LABELS,
   FILE_LIST_COLUMNS,
-  FILE_LIST_ROW_HEIGHT,
   type FileSortColumn,
   type FileSortDirection,
 } from './fileGridLayout';
@@ -68,6 +69,10 @@ const FileGridItem = memo(forwardRef<HTMLDivElement, {
   onNavigate: (name: string) => void;
   onContextMenu: (e: React.MouseEvent, file?: FileEntry) => void;
   onMove?: (moves: { source: string; target: string; sourceConnectionId?: string }[]) => void;
+  iconSize?: number;
+  clickPolicy?: 'single' | 'double';
+  onHoverShow?: (file: FileEntry, el: HTMLElement) => void;
+  onHoverHide?: () => void;
 }>(({
   file,
   viewMode,
@@ -80,21 +85,15 @@ const FileGridItem = memo(forwardRef<HTMLDivElement, {
   onSelect,
   onNavigate,
   onContextMenu,
-  onMove
+  onMove,
+  iconSize,
+  clickPolicy = 'double',
+  onHoverShow,
+  onHoverHide,
 }, ref) => {
   const isFolder = file.type === 'd';
-  const identity = formatFileIdentity(file.owner || '', file.group || '');
-  const modified = formatFileListDate(file.lastModified);
-  const kind = isFolder ? 'Folder' : formatBytes(file.size);
-  const hint = [file.name, kind, identity, modified].filter(Boolean).join('\n');
 
   return (
-    <Tooltip
-      content={hint}
-      position="bottom"
-      className="min-w-0 w-full items-start justify-center"
-      contentClassName="max-w-[16rem] whitespace-pre-line text-left leading-snug font-normal"
-    >
     <div
       ref={ref}
       id={`file-item-${file.name}`}
@@ -150,22 +149,25 @@ const FileGridItem = memo(forwardRef<HTMLDivElement, {
         e.stopPropagation();
         const isMulti = e.ctrlKey || e.metaKey || e.shiftKey;
         onSelect(file.name, isMulti);
+        if (clickPolicy === 'single' && !isMulti) onNavigate(file.name);
       }}
       onDoubleClick={(e) => {
         e.stopPropagation();
-        onNavigate(file.name);
+        if (clickPolicy === 'double') onNavigate(file.name);
       }}
       onContextMenu={(e) => {
         e.stopPropagation();
         if (!isSelected) onSelect(file.name, false);
         onContextMenu(e, file);
       }}
+      onPointerEnter={(e) => onHoverShow?.(file, e.currentTarget)}
+      onPointerLeave={() => onHoverHide?.()}
       className={cn(
         'group relative cursor-pointer select-none',
         viewMode === 'grid'
           ? cn(
-            'flex flex-col items-center w-full min-w-0 rounded-md transition-colors duration-75',
-            compactMode ? 'px-1 py-1 gap-0.5' : 'px-1.5 py-1.5 gap-1',
+            'flex flex-col items-center w-full min-w-0 rounded-xl transition-colors duration-75',
+            'px-1 py-1 gap-0.5',
             isSelected
               ? 'bg-app-accent/20'
               : 'bg-transparent hover:bg-app-surface/55',
@@ -182,7 +184,7 @@ const FileGridItem = memo(forwardRef<HTMLDivElement, {
         viewMode === 'grid' ? 'w-full' : 'w-10 mr-4',
         isFolder ? 'drop-shadow-sm' : 'text-app-muted/80',
       )}>
-        <FileIcon file={file} size={viewMode === 'grid' ? (compactMode ? 40 : 56) : (compactMode ? 16 : 22)} />
+        <FileIcon file={file} size={iconSize ?? (viewMode === 'grid' ? (compactMode ? 40 : 56) : (compactMode ? 16 : 22))} />
       </div>
 
       <div className="w-full text-center px-1 min-w-0">
@@ -191,8 +193,8 @@ const FileGridItem = memo(forwardRef<HTMLDivElement, {
             'select-text',
             viewMode === 'grid'
               ? cn(
-                'line-clamp-2 break-words [overflow-wrap:anywhere] leading-[1.25]',
-                compactMode ? 'text-[11px]' : 'text-[12px]',
+                (iconSize ?? 0) >= 168 ? 'line-clamp-3' : 'line-clamp-2',
+                'break-words [overflow-wrap:anywhere] leading-[1.25] text-[12px]',
               )
               : 'truncate text-sm leading-snug',
             isSelected ? 'text-app-text' : 'text-app-text/85',
@@ -202,7 +204,6 @@ const FileGridItem = memo(forwardRef<HTMLDivElement, {
         </div>
       </div>
     </div>
-    </Tooltip>
   );
 }));
 
@@ -224,6 +225,7 @@ const FileListItem = memo(forwardRef<HTMLDivElement, {
   onNavigate: (name: string) => void;
   onContextMenu: (e: React.MouseEvent, file?: FileEntry) => void;
   onMove?: (moves: { source: string; target: string; sourceConnectionId?: string }[]) => void;
+  clickPolicy?: 'single' | 'double';
 }>(({
   file,
   isSelected,
@@ -234,7 +236,8 @@ const FileListItem = memo(forwardRef<HTMLDivElement, {
   onSelect,
   onNavigate,
   onContextMenu,
-  onMove
+  onMove,
+  clickPolicy = 'double',
 }, ref) => {
   const isFolder = file.type === 'd';
 
@@ -293,10 +296,11 @@ const FileListItem = memo(forwardRef<HTMLDivElement, {
         e.stopPropagation();
         const isMulti = e.ctrlKey || e.metaKey || e.shiftKey;
         onSelect(file.name, isMulti);
+        if (clickPolicy === 'single' && !isMulti) onNavigate(file.name);
       }}
       onDoubleClick={(e) => {
         e.stopPropagation();
-        onNavigate(file.name);
+        if (clickPolicy === 'double') onNavigate(file.name);
       }}
       onContextMenu={(e) => {
         e.stopPropagation();
@@ -367,6 +371,9 @@ interface FileGridProps {
   sortDirection: FileSortDirection;
   onSort: (column: FileSortColumn) => void;
   onGridColumnCount?: (columnCount: number) => void;
+  gridZoom?: number;
+  listZoom?: number;
+  clickPolicy?: 'single' | 'double';
 }
 
 type FileListRowExtra = {
@@ -380,6 +387,7 @@ type FileListRowExtra = {
   onNavigate: (name: string) => void;
   onContextMenu: (e: React.MouseEvent, file?: FileEntry) => void;
   onMove?: (moves: { source: string; target: string; sourceConnectionId?: string }[]) => void;
+  clickPolicy: 'single' | 'double';
 };
 
 function FileListRow({
@@ -396,6 +404,7 @@ function FileListRow({
   onNavigate,
   onContextMenu,
   onMove,
+  clickPolicy,
 }: {
   index: number;
   style: CSSProperties;
@@ -416,6 +425,7 @@ function FileListRow({
         onNavigate={onNavigate}
         onContextMenu={onContextMenu}
         onMove={onMove}
+        clickPolicy={clickPolicy}
       />
     </div>
   );
@@ -424,6 +434,10 @@ function FileListRow({
 type FileGridCellExtra = FileListRowExtra & {
   columnCount: number;
   compactMode: boolean;
+  iconSize: number;
+  clickPolicy: 'single' | 'double';
+  onHoverShow: (file: FileEntry, el: HTMLElement) => void;
+  onHoverHide: () => void;
 };
 
 function FileGridCell({
@@ -443,6 +457,10 @@ function FileGridCell({
   onNavigate,
   onContextMenu,
   onMove,
+  iconSize,
+  clickPolicy,
+  onHoverShow,
+  onHoverHide,
 }: {
   columnIndex: number;
   rowIndex: number;
@@ -469,6 +487,10 @@ function FileGridCell({
         onNavigate={onNavigate}
         onContextMenu={onContextMenu}
         onMove={onMove}
+        iconSize={iconSize}
+        clickPolicy={clickPolicy}
+        onHoverShow={onHoverShow}
+        onHoverHide={onHoverHide}
       />
     </div>
   );
@@ -490,8 +512,15 @@ export const FileGrid = memo(function FileGrid({
   sortDirection,
   onSort,
   onGridColumnCount,
+  gridZoom,
+  listZoom,
+  clickPolicy = 'double',
 }: FileGridProps) {
   const compactMode = useAppStore(state => state.settings.compactMode);
+  const gridZoomLevel = gridZoom === undefined ? (compactMode ? 0 : 2) : clampFileGridZoom(gridZoom);
+  const listZoomLevel = listZoom === undefined ? (compactMode ? 0 : 1) : clampFileListZoom(listZoom);
+  const gridIcon = FILE_GRID_ZOOM[gridZoomLevel].icon;
+  const listRowHeight = FILE_LIST_ZOOM[listZoomLevel].rowHeight;
   const listRef = useListRef(null);
   const gridRef = useGridRef(null);
   const gridColumnCountRef = useRef(1);
@@ -503,6 +532,17 @@ export const FileGrid = memo(function FileGrid({
     selectedFilesRef.current = selectedFiles;
   }, [selectedFiles]);
   const selectedSet = useMemo(() => new Set(selectedFiles), [selectedFiles]);
+  const { tip: hoverTip, show: showHoverTip, hide: hideHoverTip } = useFileHoverTip();
+  useEffect(() => {
+    hideHoverTip();
+  }, [currentPath, viewMode, hideHoverTip]);
+  useEffect(() => {
+    const el = viewMode === 'list' ? listRef.current?.element : gridRef.current?.element;
+    if (!el) return;
+    const onScroll = () => hideHoverTip();
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, [hideHoverTip, viewMode, files.length, listRef, gridRef]);
 
   const reportColumnCount = useCallback((count: number) => {
     gridColumnCountRef.current = count;
@@ -555,6 +595,7 @@ export const FileGrid = memo(function FileGrid({
       onNavigate,
       onContextMenu,
       onMove,
+      clickPolicy,
     }),
     [
       files,
@@ -567,12 +608,13 @@ export const FileGrid = memo(function FileGrid({
       onNavigate,
       onContextMenu,
       onMove,
+      clickPolicy,
     ],
   );
 
   const gridMetrics = useMemo(
-    () => computeFileGridMetrics(gridViewportWidth, compactMode),
-    [gridViewportWidth, compactMode],
+    () => computeFileGridMetrics(gridViewportWidth, compactMode, gridZoomLevel),
+    [gridViewportWidth, compactMode, gridZoomLevel],
   );
   const gridColumnWidth = Math.max(
     1,
@@ -728,7 +770,7 @@ export const FileGrid = memo(function FileGrid({
             <List
               listRef={listRef}
               rowCount={files.length}
-              rowHeight={FILE_LIST_ROW_HEIGHT}
+              rowHeight={listRowHeight}
               rowComponent={FileListRow}
               rowProps={listRowProps}
               overscanCount={4}
@@ -746,6 +788,10 @@ export const FileGrid = memo(function FileGrid({
               ...listRowProps,
               columnCount: gridMetrics.columnCount,
               compactMode,
+              iconSize: gridIcon,
+              clickPolicy,
+              onHoverShow: showHoverTip,
+              onHoverHide: hideHoverTip,
             }}
             columnCount={gridMetrics.columnCount}
             columnWidth={gridColumnWidth}
@@ -755,7 +801,7 @@ export const FileGrid = memo(function FileGrid({
             style={{ height: '100%', width: '100%', overflowX: 'hidden' }}
             onResize={({ width }) => {
               setGridViewportWidth(width);
-              const next = computeFileGridMetrics(width, compactMode);
+              const next = computeFileGridMetrics(width, compactMode, gridZoomLevel);
               gridColumnCountRef.current = next.columnCount;
               reportColumnCount(next.columnCount);
               const el = gridRef.current?.element;
@@ -768,6 +814,7 @@ export const FileGrid = memo(function FileGrid({
           />
         </div>
       )}
+      {hoverTip && <FileHoverTip text={hoverTip.text} x={hoverTip.x} y={hoverTip.y} />}
       </div>
     </div>
   );

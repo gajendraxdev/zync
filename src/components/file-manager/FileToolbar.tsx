@@ -1,428 +1,403 @@
-import { ChevronRight, Home, LayoutGrid, LayoutList, Plus, RefreshCw, Search, Upload, FolderInput, Hash, X, PanelLeft, FileArchive, FilePlus } from 'lucide-react';
-import { useState, useEffect, useRef } from 'react';
+import {
+  Clipboard,
+  Copy,
+  FilePlus,
+  FolderInput,
+  FolderPlus,
+  Info,
+  PanelLeft,
+  Plus,
+  RefreshCw,
+  Search,
+  Star,
+  Terminal,
+  Upload,
+  X,
+} from 'lucide-react';
+import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { cn } from '../../lib/utils';
-import { Button } from '../ui/Button';
+import { Tooltip } from '../ui/Tooltip';
 import { TopbarDropdown } from '../ui/TopbarDropdown';
-import { useAppStore } from '../../store/useAppStore'; // Updated Import
+import { useAppStore } from '../../store/useAppStore';
+import { FileHistoryControls, type FileHistoryEntry } from './FileHistoryControls';
+import { FilePathBar } from './FilePathBar';
+import { FileQueryEditor, type FileSearchTypeFilter } from './FileQueryEditor';
+import { FileViewControls } from './FileViewControls';
+import { useDismiss } from './useDismiss';
+import type { FileSortColumn, FileSortDirection } from './fileGridLayout';
+
+function IconBtn({
+  label,
+  active,
+  disabled,
+  onClick,
+  children,
+}: {
+  label: string;
+  active?: boolean;
+  disabled?: boolean;
+  onClick?: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip content={label} position="bottom">
+      <button
+        type="button"
+        aria-label={label}
+        disabled={disabled}
+        onClick={onClick}
+        className={cn(
+          'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-transparent transition-colors',
+          'text-app-muted hover:border-app-border/40 hover:bg-app-surface hover:text-app-text',
+          'disabled:pointer-events-none disabled:opacity-30',
+          active && 'text-app-text bg-app-surface/70',
+        )}
+      >
+        {children}
+      </button>
+    </Tooltip>
+  );
+}
 
 interface FileToolbarProps {
   currentPath: string;
+  homePath?: string;
+  osName?: string;
   onNavigate: (path: string) => void;
   onRefresh: () => void;
   onUpload: () => void;
   onUploadFolder: () => void;
   onNewFolder: () => void;
   onNewFile: () => void;
-  onDownloadAsZip?: () => void;
-  selectedCount?: number;
   viewMode: 'grid' | 'list';
   onToggleView: (mode: 'grid' | 'list') => void;
   searchTerm: string;
   onSearch: (term: string) => void;
   isSearchOpen: boolean;
   onToggleSearch: (open: boolean) => void;
+  searchEverywhere?: boolean;
   isEditingPath: boolean;
   onTogglePathEdit: (editing: boolean) => void;
-  isSmallScreen?: boolean;
-  onToggleSidebar?: () => void;
+  isNarrow?: boolean;
+  placesCollapsed?: boolean;
+  onTogglePlaces?: () => void;
+  onBack: () => void;
+  onForward: () => void;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  backEntries: FileHistoryEntry[];
+  forwardEntries: FileHistoryEntry[];
+  onHistoryJump: (index: number) => void;
+  showHidden: boolean;
+  onToggleHidden: () => void;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  canZoomIn: boolean;
+  canZoomOut: boolean;
+  sortColumn: FileSortColumn;
+  sortDirection: FileSortDirection;
+  onSort: (column: FileSortColumn, direction: FileSortDirection) => void;
+  onCopyLocation: () => void;
+  onBookmark: () => void;
+  isBookmarked: boolean;
+  onPaste?: () => void;
+  canPaste?: boolean;
+  onSelectAll?: () => void;
+  onProperties?: () => void;
+  onOpenTerminal?: () => void;
+  typeFilter: FileSearchTypeFilter;
+  onTypeFilter: (value: FileSearchTypeFilter) => void;
 }
 
-export function FileToolbar({
+function FileToolbarInner({
   currentPath,
+  homePath,
+  osName,
   onNavigate,
   onRefresh,
   onUpload,
   onUploadFolder,
   onNewFolder,
   onNewFile,
-  onDownloadAsZip,
-  selectedCount = 0,
   viewMode,
   onToggleView,
   searchTerm,
   onSearch,
   isSearchOpen,
   onToggleSearch,
+  searchEverywhere = false,
   isEditingPath,
   onTogglePathEdit,
-  isSmallScreen = false,
-  onToggleSidebar,
+  isNarrow = false,
+  placesCollapsed = false,
+  onTogglePlaces,
+  onBack,
+  onForward,
+  canGoBack,
+  canGoForward,
+  backEntries,
+  forwardEntries,
+  onHistoryJump,
+  showHidden,
+  onToggleHidden,
+  onZoomIn,
+  onZoomOut,
+  canZoomIn,
+  canZoomOut,
+  sortColumn,
+  sortDirection,
+  onSort,
+  onCopyLocation,
+  onBookmark,
+  isBookmarked,
+  onPaste,
+  canPaste,
+  onSelectAll,
+  onProperties,
+  onOpenTerminal,
+  typeFilter,
+  onTypeFilter,
 }: FileToolbarProps) {
   const [pathInput, setPathInput] = useState(currentPath);
-  const settings = useAppStore(state => state.settings);
-  const compactMode = settings.compactMode;
-  const checkPathExists = useAppStore(state => state.checkPathExists);
-  const activeConnectionId = useAppStore(state => state.activeConnectionId);
+  const compactMode = useAppStore((state) => state.settings.compactMode);
+  const checkPathExists = useAppStore((state) => state.checkPathExists);
+  const activeConnectionId = useAppStore((state) => state.activeConnectionId);
   const [isInvalid, setIsInvalid] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const wrapperRef = useRef<HTMLDivElement>(null);
-  const searchInputRef = useRef<HTMLInputElement>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const pathInputRef = useRef(pathInput);
+  const validationGenRef = useRef(0);
+  pathInputRef.current = pathInput;
 
   useEffect(() => {
-    if (isSearchOpen && searchInputRef.current) {
-      searchInputRef.current.focus();
-    }
-  }, [isSearchOpen]);
-
-  useEffect(() => {
-    if (isEditingPath) {
-      setPathInput(currentPath);
-    }
+    if (isEditingPath) setPathInput(currentPath);
   }, [isEditingPath, currentPath]);
 
-  // Clear search when path changes
   useEffect(() => {
-    if (searchTerm) {
-      onSearch('');
-      onToggleSearch(false);
-    }
-  }, [currentPath, onSearch, onToggleSearch]);
+    onSearch('');
+    onToggleSearch(false);
+  }, [currentPath]);
 
-  const handlePathSubmit = async () => {
-    if (!pathInput.trim()) return;
+  const closeMenu = useCallback(() => setIsMenuOpen(false), []);
+  useDismiss(isMenuOpen, closeMenu, menuRef);
 
-    if (pathInput !== currentPath) {
-      // Validate path if it's different
-      // Assuming activeConnectionId is available (if valid session)
-      // If we are checking "local" or a connected ID
-      if (activeConnectionId) {
-        const exists = await checkPathExists(activeConnectionId, pathInput);
-        if (!exists) {
-          setIsInvalid(true);
-          // Optional: Shake animation or toast?
-          return;
-        }
-      }
-    }
-
-    onNavigate(pathInput);
+  const cancelPathEdit = () => {
+    validationGenRef.current += 1;
     onTogglePathEdit(false);
     setIsInvalid(false);
   };
 
-  // New Menu Click-away & Escape dismiss
-  useEffect(() => {
-    if (!isMenuOpen) return;
-
-    const handleClickOutside = (event: MouseEvent) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
-        setIsMenuOpen(false);
+  const handlePathSubmit = async (source: 'enter' | 'blur' = 'enter') => {
+    const submittedPath = pathInputRef.current.trim();
+    const submittedConnectionId = activeConnectionId;
+    const gen = ++validationGenRef.current;
+    if (!submittedPath) {
+      onTogglePathEdit(false);
+      setIsInvalid(false);
+      return;
+    }
+    if (submittedPath !== currentPath && submittedConnectionId) {
+      const exists = await checkPathExists(submittedConnectionId, submittedPath);
+      if (
+        gen !== validationGenRef.current
+        || submittedPath !== pathInputRef.current.trim()
+        || submittedConnectionId !== useAppStore.getState().activeConnectionId
+      ) {
+        return;
       }
-    };
-
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setIsMenuOpen(false);
+      if (!exists) {
+        setIsInvalid(true);
+        if (source !== 'blur') inputRef.current?.focus();
+        return;
       }
-    };
+    } else if (gen !== validationGenRef.current) {
+      return;
+    }
+    onNavigate(submittedPath);
+    onTogglePathEdit(false);
+    setIsInvalid(false);
+  };
 
-    document.addEventListener('mousedown', handleClickOutside);
-    document.addEventListener('keydown', handleEscape);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-      document.removeEventListener('keydown', handleEscape);
-    };
-  }, [isMenuOpen]);
+  const menuItem = (label: string, icon: ReactNode | undefined, action?: () => void, disabled?: boolean) => (
+    <button
+      type="button"
+      disabled={disabled}
+      className="flex w-full items-center gap-2.5 rounded-lg px-3 py-1.5 text-left text-sm text-app-text hover:bg-app-surface/60 disabled:opacity-40"
+      onClick={() => {
+        action?.();
+        setIsMenuOpen(false);
+      }}
+    >
+      <span className="w-4 shrink-0 text-app-muted">{icon}</span>
+      {label}
+    </button>
+  );
 
   return (
-    <div className={cn(
-      "border-b border-app-border/20 bg-app-panel/95 backdrop-blur-xl flex items-center justify-between px-3 md:px-5 shrink-0 gap-3 z-20 relative min-w-0 transition-all",
-      compactMode ? "h-10 custom-drag-region pt-[2px]" : "h-14"
-    )}>
-      {/* Minimalist Address Bar */}
-      <div className={cn(
-        "flex-1 flex items-center bg-transparent rounded-lg min-w-0 mr-auto transition-all no-drag hover:bg-app-surface/30",
-        compactMode ? "h-8" : "h-10"
-      )}>
-        {/* Root Button (Hash Icon) */}
-        <button
-          onClick={() => onNavigate('/')}
-          className={cn(
-            'h-8 w-8 flex items-center justify-center rounded-md transition-colors shrink-0 mr-1',
-            currentPath === '/'
-              ? 'text-app-accent'
-              : 'text-app-muted hover:text-app-text hover:bg-app-surface/50',
-          )}
-          title="Root (/)"
-        >
-          <Hash size={16} />
-        </button>
+    <div
+      ref={barRef}
+      className={cn(
+        'relative z-30 flex min-w-0 shrink-0 items-center gap-1 border-b border-app-border/20 bg-app-bg px-1.5',
+        compactMode ? 'h-10' : 'h-11',
+      )}
+    >
+      <IconBtn
+        label={placesCollapsed ? 'Show places' : 'Hide places'}
+        active={!placesCollapsed}
+        disabled={!onTogglePlaces}
+        onClick={onTogglePlaces}
+      >
+        <PanelLeft size={14} />
+      </IconBtn>
 
-        {isSmallScreen && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className={cn(
-              "h-8 w-8 flex items-center justify-center rounded-md text-app-muted hover:text-app-text hover:bg-app-surface/50 shrink-0 mx-0.5",
-            )}
-            onClick={onToggleSidebar}
-            title="Toggle Sidebar"
-          >
-            <PanelLeft size={16} />
-          </Button>
-        )}
+      {!isNarrow && (
+        <FileHistoryControls
+          canGoBack={canGoBack}
+          canGoForward={canGoForward}
+          onBack={onBack}
+          onForward={onForward}
+          backEntries={backEntries}
+          forwardEntries={forwardEntries}
+          onJump={onHistoryJump}
+        />
+      )}
 
-        <div className="h-4 w-px bg-app-border/30 mx-1 shrink-0" />
-
-        {/* Path Display: Search OR Breadcrumbs OR Input */}
-        {isSearchOpen ? (
-          <div className="flex-1 flex items-center h-full px-2 gap-2 animate-in slide-in-from-left-2 duration-200">
-            <Search size={16} className="text-app-accent shrink-0" />
+      <div className="flex h-8 min-w-0 flex-1 items-center overflow-hidden">
+        {isEditingPath ? (
+          <div className="flex h-full min-w-0 flex-1 items-center rounded-md bg-app-bg/45 animate-in fade-in duration-150">
             <input
-              ref={searchInputRef}
+              ref={inputRef}
               autoFocus
-              className="flex-1 bg-transparent border-0 text-sm focus:outline-none font-medium h-full w-full text-app-text placeholder:text-app-muted/50"
-              placeholder="Search in current folder..."
-              value={searchTerm}
-              onChange={(e) => onSearch(e.target.value)}
+              aria-label="Path"
+              className={cn(
+                'h-full min-w-0 flex-1 bg-transparent px-2.5 text-[12px] outline-none',
+                isInvalid ? 'text-app-danger' : 'text-app-text',
+              )}
+              value={pathInput}
+              onChange={(e) => {
+                setPathInput(e.target.value);
+                if (isInvalid) setIsInvalid(false);
+              }}
               onKeyDown={(e) => {
+                if (e.key === 'Enter') void handlePathSubmit('enter');
                 if (e.key === 'Escape') {
-                  onToggleSearch(false);
-                  onSearch('');
+                  cancelPathEdit();
                 }
+              }}
+              onBlur={(e) => {
+                const next = e.relatedTarget as Node | null;
+                if (next && barRef.current?.contains(next)) {
+                  cancelPathEdit();
+                  return;
+                }
+                void handlePathSubmit('blur');
               }}
             />
             <button
+              type="button"
+              aria-label="Cancel"
+              className="mr-1 flex h-6 w-6 items-center justify-center rounded-md text-app-muted hover:text-app-text"
               onClick={() => {
-                onToggleSearch(false);
-                onSearch('');
+                cancelPathEdit();
               }}
-              className="p-1.5 rounded-md hover:bg-app-surface/50 text-app-muted hover:text-app-text transition-colors shrink-0"
-              title="Close search"
             >
-              <X size={16} />
+              <X size={13} />
             </button>
           </div>
-        ) : isEditingPath ? (
-          <input
-            ref={inputRef}
-            autoFocus
-            className={cn(
-              "flex-1 bg-transparent border-0 text-sm focus:outline-none font-medium h-full px-2 w-full transition-colors",
-              isInvalid ? "text-app-danger" : "text-app-text"
-            )}
-            value={pathInput}
-            onChange={(e) => {
-              setPathInput(e.target.value);
-              if (isInvalid) setIsInvalid(false);
-            }} onKeyDown={(e) => {
-              if (e.key === 'Enter') handlePathSubmit();
-              if (e.key === 'Escape') onTogglePathEdit(false);
+        ) : isSearchOpen ? (
+          <FileQueryEditor
+            value={searchTerm}
+            onChange={onSearch}
+            onClose={() => {
+              onToggleSearch(false);
+              onSearch('');
             }}
-            onBlur={() => onTogglePathEdit(false)}
+            typeFilter={typeFilter}
+            onTypeFilter={onTypeFilter}
+            everywhere={searchEverywhere}
           />
         ) : (
-          /* Minimal Breadcrumbs */
-          <div
-            className="flex items-center gap-0.5 overflow-x-auto overflow-y-hidden flex-1 min-w-0 no-scrollbar h-full mr-2 cursor-text"
-            onClick={() => onTogglePathEdit(true)}
-            title="Click to edit path (Ctrl+L)"
-          >
-            {(() => {
-              // Cross-platform split: handle both / and \
-              const separator = currentPath.includes('\\') ? '\\' : '/';
-              const parts = currentPath.split(/[/\\]/).filter((p) => p);
-
-              return parts.map((part, index) => {
-                // Reconstruct path using the detected separator
-                const fullPath = parts.slice(0, index + 1).join(separator);
-                // Ensure root leading slash if it was there (checking original string or just adding / for linux)
-                // Actually safer to prepend separator if the original path started with it, but simple join often works if absolute.
-                // For Linux/Mac: /foo/bar -> split -> [foo, bar] -> join -> foo/bar. Need leading /.
-                // For Windows: C:\foo -> split -> [C:, foo] -> join -> C:\foo. No leading separator needed usually.
-
-                const finalPath = (separator === '/' && !fullPath.startsWith('/') && currentPath.startsWith('/'))
-                  ? `/${fullPath}`
-                  : fullPath;
-
-                const isLast = index === parts.length - 1;
-
-                return (
-                  <div key={finalPath} className="flex items-center shrink-0">
-                    <ChevronRight size={14} className="text-app-muted/30 shrink-0 mx-1" />
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onNavigate(finalPath);
-                      }}
-                      className={cn(
-                        'px-2 py-1 rounded-md transition-all whitespace-nowrap text-sm max-w-[180px] truncate flex items-center gap-1',
-                        isLast
-                          ? 'text-app-text font-bold'
-                          : 'text-app-muted hover:text-app-text hover:bg-app-surface/50 font-medium',
-                      )}
-                      title={part}
-                    >
-                      {part.toLowerCase() === 'home' ? <Home size={14} /> : part}
-                    </button>
-                  </div>
-                );
-              });
-            })()}
-          </div>
+          <FilePathBar
+            currentPath={currentPath}
+            homePath={homePath}
+            osName={osName}
+            onNavigate={onNavigate}
+            onEditLocation={() => onTogglePathEdit(true)}
+          />
         )}
       </div>
 
-      {/* Right Actions - Minimalist & Grouped */}
-      <div className="flex items-center gap-1 shrink-0 ml-2">
-        {!isSmallScreen && (
-          <>
-            <Button
-              variant="ghost"
-              size="icon"
-              className={cn(
-                "rounded-lg text-app-muted hover:text-app-text hover:bg-app-surface/50 transition-all mr-1",
-                isSearchOpen && "bg-app-surface/50 text-app-accent",
-                compactMode ? "h-8 w-8" : "h-9 w-9"
-              )}
-              onClick={() => onToggleSearch(!isSearchOpen)}
-              title="Search (Mod+F)"
-            >
-              <Search size={compactMode ? 14 : 18} />
-            </Button>
+      <IconBtn
+        label="Search this folder"
+        active={isSearchOpen}
+        onClick={() => {
+          if (isSearchOpen) {
+            onToggleSearch(false);
+            onSearch('');
+            return;
+          }
+          onTogglePathEdit(false);
+          onToggleSearch(true);
+        }}
+      >
+        <Search size={14} />
+      </IconBtn>
 
-            <div className="h-6 w-px bg-app-border/30 mx-2 shrink-0 hidden md:block" />
+      {!isNarrow && (
+        <FileViewControls
+          viewMode={viewMode}
+          onToggleView={onToggleView}
+          showHidden={showHidden}
+          onToggleHidden={onToggleHidden}
+          onZoomIn={onZoomIn}
+          onZoomOut={onZoomOut}
+          canZoomIn={canZoomIn}
+          canZoomOut={canZoomOut}
+          sortColumn={sortColumn}
+          sortDirection={sortDirection}
+          onSort={onSort}
+        />
+      )}
 
-            <Button
-              variant="ghost"
-              size="icon"
-              className={cn(
-                "rounded-lg text-app-muted hover:text-app-text hover:bg-app-surface/50 transition-all",
-                viewMode === 'grid' && "bg-app-surface/50 text-app-accent",
-                compactMode ? "h-8 w-8" : "h-9 w-9"
-              )}
-              onClick={() => onToggleView('grid')}
-              title="Grid View"
-            >
-              <LayoutGrid size={compactMode ? 14 : 18} />
-            </Button>
-
-            <Button
-              variant="ghost"
-              size="icon"
-              className={cn(
-                "rounded-lg text-app-muted hover:text-app-text hover:bg-app-surface/50 transition-all",
-                viewMode === 'list' && "bg-app-surface/50 text-app-accent",
-                compactMode ? "h-8 w-8" : "h-9 w-9"
-              )}
-              onClick={() => onToggleView('list')}
-              title="List View"
-            >
-              <LayoutList size={compactMode ? 14 : 18} />
-            </Button>
-
-            <Button
-              variant="ghost"
-              size="icon"
-              className={cn(
-                "rounded-lg text-app-muted hover:text-app-text hover:bg-app-surface/50 transition-all ml-1",
-                compactMode ? "h-8 w-8" : "h-9 w-9"
-              )}
-              onClick={onRefresh}
-              title="Refresh"
-            >
-              <RefreshCw size={compactMode ? 14 : 18} />
-            </Button>
-          </>
+      <div className="relative" ref={menuRef}>
+        <IconBtn label="New" active={isMenuOpen} onClick={() => setIsMenuOpen((open) => !open)}>
+          <Plus size={15} />
+        </IconBtn>
+        {isMenuOpen && (
+          <TopbarDropdown align="right" widthClass="w-52" className="z-50">
+            {menuItem('New file', <FilePlus size={14} />, onNewFile)}
+            {menuItem('New folder', <FolderPlus size={14} />, onNewFolder)}
+            <div className="mx-2 my-1 h-px bg-app-border/20" />
+            {menuItem('Upload files', <Upload size={14} />, onUpload)}
+            {menuItem('Upload folder', <FolderInput size={14} />, onUploadFolder)}
+            <div className="mx-2 my-1 h-px bg-app-border/20" />
+            {menuItem('Open terminal here', <Terminal size={14} />, onOpenTerminal, !onOpenTerminal)}
+            {menuItem('Reload', <RefreshCw size={14} />, onRefresh)}
+            {menuItem(isBookmarked ? 'Remove bookmark' : 'Bookmark folder', <Star size={14} />, onBookmark)}
+            {menuItem('Copy path', <Copy size={14} />, onCopyLocation)}
+            <div className="mx-2 my-1 h-px bg-app-border/20" />
+            {menuItem('Paste', <Clipboard size={14} />, onPaste, !onPaste || !canPaste)}
+            {menuItem('Select all', undefined, onSelectAll, !onSelectAll)}
+            {menuItem('Properties', <Info size={14} />, onProperties, !onProperties)}
+          </TopbarDropdown>
         )}
-
-        {isSmallScreen && !isSearchOpen && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className={cn(
-              "rounded-lg text-app-muted hover:text-app-text hover:bg-app-surface/50 transition-all mr-1",
-              compactMode ? "h-8 w-8" : "h-9 w-9"
-            )}
-            onClick={() => onToggleSearch(true)}
-          >
-            <Search size={compactMode ? 14 : 18} />
-          </Button>
-        )}
-
-        {selectedCount >= 1 && onDownloadAsZip && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className={cn(
-              "rounded-lg text-app-muted hover:text-app-accent hover:bg-app-surface/50 transition-all",
-              compactMode ? "h-8 w-8" : "h-9 w-9"
-            )}
-            onClick={onDownloadAsZip}
-            title={`Download ${selectedCount} item${selectedCount > 1 ? 's' : ''} as .tar.gz archive`}
-          >
-            <FileArchive size={compactMode ? 14 : 18} />
-          </Button>
-        )}
-
-        <div className="relative ml-2" ref={wrapperRef}>
-          <Button
-            variant="primary"
-            size="sm"
-            className={cn(
-              "rounded-full font-medium shadow-sm active:scale-95 transition-all bg-app-accent hover:bg-app-accent/90 text-white",
-              isSmallScreen ? "h-8 w-8 p-0" : compactMode ? "h-8 px-3 text-xs" : "h-9 px-4"
-            )}
-            onClick={() => setIsMenuOpen(!isMenuOpen)}
-            title="Create New..."
-          >
-            <Plus size={compactMode ? 14 : 16} className={cn(!isSmallScreen && "md:mr-1.5")} />
-            {!isSmallScreen && <span className="hidden md:inline">New</span>}
-          </Button>
-
-          {isMenuOpen && (
-            <TopbarDropdown
-              align="right"
-              widthClass="w-48"
-              className="bg-app-panel/95 backdrop-blur-xl border-app-border/40 flex flex-col p-1 zoom-in-95 duration-200"
-            >
-                <button
-                  onClick={() => {
-                    onNewFile();
-                    setIsMenuOpen(false);
-                  }}
-                  className="w-full flex items-center gap-3 px-3 py-2 text-left text-sm text-app-text hover:bg-app-accent/10 hover:text-app-accent rounded-lg transition-colors"
-                >
-                  <FilePlus size={16} />
-                  <span>New File</span>
-                </button>
-                <div className="h-px bg-app-border/10 my-0.5 mx-2" />
-                <button
-                  onClick={() => {
-                    onNewFolder();
-                    setIsMenuOpen(false);
-                  }}
-                  className="w-full flex items-center gap-3 px-3 py-2 text-left text-sm text-app-text hover:bg-app-accent/10 hover:text-app-accent rounded-lg transition-colors"
-                >
-                  <FolderInput size={16} />
-                  <span>New Folder</span>
-                </button>
-                <div className="h-px bg-app-border/20 my-1 mx-2" />
-                <button
-                  onClick={() => {
-                    onUpload();
-                    setIsMenuOpen(false);
-                  }}
-                  className="w-full flex items-center gap-3 px-3 py-2 text-left text-sm text-app-text hover:bg-app-accent/10 hover:text-app-accent rounded-lg transition-colors"
-                >
-                  <Upload size={16} />
-                  <span>Upload Files</span>
-                </button>
-                <button
-                  onClick={() => {
-                    onUploadFolder();
-                    setIsMenuOpen(false);
-                  }}
-                  className="w-full flex items-center gap-3 px-3 py-2 text-left text-sm text-app-text hover:bg-app-accent/10 hover:text-app-accent rounded-lg transition-colors"
-                >
-                  <FolderInput size={16} />
-                  <span>Upload Folder</span>
-                </button>
-              </TopbarDropdown>
-          )}
-        </div>
       </div>
+    </div>
+  );
+}
+
+export const FileToolbar = memo(FileToolbarInner);
+
+export function FileBottomActionBar({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  return (
+    <div className="relative z-30 flex h-10 w-full shrink-0 items-center justify-between border-t border-app-border/20 bg-app-bg px-1.5">
+      {children}
     </div>
   );
 }

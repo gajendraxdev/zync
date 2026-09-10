@@ -1,4 +1,5 @@
 import type { FileEntry } from './types';
+import { FILE_GRID_ZOOM, clampFileGridZoom } from './fileChrome.js';
 
 export type FileSortColumn = 'name' | 'size' | 'owner' | 'modified';
 export type FileSortDirection = 'asc' | 'desc';
@@ -63,6 +64,28 @@ export const FILE_LIST_ROW_HEIGHT = 40;
 
 /** Name flexes. Size / owner:group / modified stay capped and can shrink. */
 export const FILE_LIST_COLUMNS = 'minmax(0, 1fr) minmax(0, 5.25rem) minmax(0, 9.5rem) minmax(0, 7.5rem)';
+
+/** Grid hover card: name, Folder/size, owner:group, date. */
+export function fileHoverHint(file: FileEntry): string {
+  const identity = formatFileIdentity(file.owner || '', file.group || '');
+  const modified = formatFileListDate(file.lastModified);
+  const kind = file.type === 'd' ? 'Folder' : formatBytesForHint(file.size);
+  return [file.name, kind, identity, modified].filter(Boolean).join('\n');
+}
+
+function formatBytesForHint(size: number): string {
+  if (!Number.isFinite(size) || size < 0) return '';
+  if (size < 1024) return `${size} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = size / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  const digits = value >= 10 || unit === 0 ? 0 : 1;
+  return `${value.toFixed(digits)} ${units[unit]}`;
+}
 
 /** `admin:staff`, or empty when both are missing. */
 export function formatFileIdentity(owner: string, group: string): string {
@@ -142,10 +165,24 @@ export function fileGridScrollTarget(
   return { rowIndex, columnIndex };
 }
 
-export function computeFileGridMetrics(containerWidth: number, compactMode: boolean): FileGridMetrics {
-  const minTrack = compactMode ? 90 : 104;
-  const gap = compactMode ? 6 : 8;
-  const rowHeight = compactMode ? 100 : 120;
+export function computeFileGridMetrics(
+  containerWidth: number,
+  compactMode: boolean,
+  zoomLevel?: number,
+): FileGridMetrics {
+  if (zoomLevel === undefined) {
+    const minTrack = compactMode ? 90 : 104;
+    const gap = compactMode ? 6 : 8;
+    const rowHeight = compactMode ? 100 : 120;
+    const width = Math.max(0, containerWidth);
+    const columnCount = Math.max(1, Math.floor((width + gap) / (minTrack + gap)));
+    const columnWidth = width / columnCount;
+    return { columnCount, columnWidth, rowHeight, gap };
+  }
+  const zoom = FILE_GRID_ZOOM[clampFileGridZoom(zoomLevel)];
+  const minTrack = zoom.minTrack;
+  const gap = zoom.gap;
+  const rowHeight = zoom.rowHeight;
   const width = Math.max(0, containerWidth);
   const columnCount = Math.max(1, Math.floor((width + gap) / (minTrack + gap)));
   const columnWidth = width / columnCount;

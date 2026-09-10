@@ -78,6 +78,13 @@ export interface AppSettings {
         showHiddenFiles: boolean;
         confirmDelete: boolean;
         defaultDownloadPath: string;
+        bookmarksByConnection: Record<string, string[]>;
+        defaultView: 'grid' | 'list';
+        clickPolicy: 'single' | 'double';
+        gridZoom: number;
+        listZoom: number;
+        sortFoldersFirst: boolean;
+        dateTimeFormat: 'simple' | 'detailed';
     };
     localTerm: {
         windowsShell: string;
@@ -139,6 +146,12 @@ export interface AppSettings {
         fmBack: string;
         fmForward: string;
         fmSearch: string;
+        fmSearchEverywhere: string;
+        fmGridView: string;
+        fmListView: string;
+        fmHidden: string;
+        fmBookmark: string;
+        fmRefresh: string;
         aiCommandBar: string;
     };
     /** Shortcut routing policy (not individual chords). See docs/SHORTCUTS.md. */
@@ -211,7 +224,14 @@ export const defaultSettings: AppSettings = {
     fileManager: {
         showHiddenFiles: true,
         confirmDelete: true,
-        defaultDownloadPath: ''
+        defaultDownloadPath: '',
+        bookmarksByConnection: {},
+        defaultView: 'grid',
+        clickPolicy: 'double',
+        gridZoom: 1,
+        listZoom: 0,
+        sortFoldersFirst: true,
+        dateTimeFormat: 'simple',
     },
     localTerm: {
         windowsShell: 'default'
@@ -266,10 +286,16 @@ export const defaultSettings: AppSettings = {
         fmDelete: 'Delete',
         fmEditPath: 'Mod+L',
         fmOpen: 'Enter',
-        fmUp: 'Backspace',
+        fmUp: 'Alt+Up',
         fmBack: 'Alt+Left',
         fmForward: 'Alt+Right',
         fmSearch: 'Mod+F',
+        fmSearchEverywhere: 'Mod+Shift+F',
+        fmGridView: 'Mod+2',
+        fmListView: 'Mod+1',
+        fmHidden: 'Mod+H',
+        fmBookmark: 'Mod+D',
+        fmRefresh: 'F5',
         aiCommandBar: 'Mod+I',
     },
     keyboard: { ...DEFAULT_KEYBOARD_SETTINGS },

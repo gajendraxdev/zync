@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   computeFileGridMetrics,
   fileGridScrollTarget,
+  fileHoverHint,
   formatFileIdentity,
   formatFileListDate,
   fileListSortTooltip,
@@ -94,6 +95,12 @@ runTest('sortFileEntries compares combined owner:group', () => {
     'asc',
   );
   assert.deepEqual(byOwner.map((f) => f.name), ['a.txt', 'b.txt']);
+});
+
+runTest('fileHoverHint lists name and folder', () => {
+  const text = fileHoverHint(entry('docs', 'd'));
+  assert.ok(text.includes('docs'));
+  assert.ok(text.includes('Folder'));
 });
 
 console.log('fileGridLayout tests passed.');
