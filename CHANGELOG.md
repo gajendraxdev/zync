@@ -8,6 +8,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Terminal inline images:** Sixel and iTerm inline images render in the shell (`fastfetch` logos, `chafa`, `imgcat`). The terminal advertises cell/window size so those tools pick bitmap output instead of mosaic ASCII. On Windows, local shells sideload Windows Terminal’s ConPTY pair so Sixel is not stripped by in-box conhost. Local PTYs no longer inherit `TERM_PROGRAM=vscode` / `WT_SESSION` when Zync was started from an IDE. Kitty graphics are not supported yet. ([0a2a077])
 - **Files owner/group:** List view has one Owner:Group column as `user:group` (Unix names when `/etc/passwd` and `/etc/group` resolve; otherwise uid/gid). Icon grid is icon + two-line name with an Explorer/GNOME highlight; size, owner, and date are in the tooltip. Windows local Files and WSL listings show —. ([#105], [a677afe], [b205754])
 
+### Changed
+- **Files chrome:** Compact toolbar with Back/Forward, crumb path (click or Ctrl+L to type a location), search, grid/list plus view options, and a New menu. Places (Home, last 5 Recent, Bookmarks) and Properties overlay the listing like Snippets, so the grid does not shrink. Narrow panes move history and view to a bottom bar. Grid zoom and single-click open live in File Manager settings. ([61e0bcf], [5a0bed1])
+- **Remote listings:** `/etc/passwd` and `/etc/group` are read once per SSH connection and reused for owner/group names, instead of on every folder list. ([5670eb0])
+
 ### Fixed
 - **Sixel in a split:** Inline images no longer cover the rest of the pane with a black rectangle. The overlay stays transparent; the original shell recreates its image canvas after the split instead of keeping a black backing store. ([fb671e7])
 - **Split divider after a new pane:** The seam is an overlay above WebGL so it can be grabbed. Drag follows the pointer locally (no store write per pixel); the split is saved on release. Double-click / arrows ease to the new size. ([df639a8])
