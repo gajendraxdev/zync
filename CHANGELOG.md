@@ -9,13 +9,14 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Files owner/group:** List view has one Owner:Group column as `user:group` (Unix names when `/etc/passwd` and `/etc/group` resolve; otherwise uid/gid). Icon grid is icon + two-line name with an Explorer/GNOME highlight; size, owner, and date are in the tooltip. Windows local Files and WSL listings show —. ([#105], [a677afe], [b205754])
 
 ### Changed
-- **Files chrome:** Compact toolbar with Back/Forward, crumb path (click or Ctrl+L to type a location), search, grid/list plus view options, and a New menu. Places (Home, last 5 Recent, Bookmarks) and Properties overlay the listing like Snippets, so the grid does not shrink. Narrow panes move history and view to a bottom bar. Grid zoom and single-click open live in File Manager settings. ([61e0bcf], [5a0bed1])
+- **Files chrome:** Compact toolbar with Back/Forward, crumb path (click or Ctrl+L to type a location), search, grid/list plus view options, and a New menu. Places (Home, last 5 Recent, Bookmarks) takes a column on a wide pane and overlays only when the pane is narrow. Properties still overlays. Narrow panes move history and view to a bottom bar. List vs grid and Places open/closed are remembered. Grid zoom and single-click open live in File Manager settings. ([61e0bcf], [5a0bed1], [76d8dc1], [acdfc3d])
 - **Remote listings:** `/etc/passwd` and `/etc/group` are read once per SSH connection and reused for owner/group names, instead of on every folder list. ([5670eb0])
+- **Files search:** Search still filters the current folder only. The unimplemented Search Everywhere shortcut (`Mod+Shift+F`) is removed so it no longer collides with Files. ([2d9b98b])
 
 ### Fixed
 - **Sixel in a split:** Inline images no longer cover the rest of the pane with a black rectangle. The overlay stays transparent; the original shell recreates its image canvas after the split instead of keeping a black backing store. ([fb671e7])
 - **Split divider after a new pane:** The seam is an overlay above WebGL so it can be grabbed. Drag follows the pointer locally (no store write per pixel); the split is saved on release. Double-click / arrows ease to the new size. ([df639a8])
-- **Files grid crash on resize:** Switching away from Files after an upload could call `scrollToCell` with a column index the virtual grid had not adopted yet (`RangeError: Invalid index`). That took down the whole window. Scroll waits for the live column count; empty grids are skipped; a Files error no longer blanks the shell. ([2fb21e6])
+- **Files grid crash on resize:** Switching away from Files after an upload, or toggling Places, could call `scrollToCell` with a column index the virtual grid had not adopted yet (`RangeError: Invalid index`). That took down the whole window. Scroll waits for the live column count; empty grids are skipped; a Files error no longer blanks the shell. ([2fb21e6], [76d8dc1])
 
 ## [2.30.0] - 2026-09-08
 
