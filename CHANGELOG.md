@@ -12,13 +12,13 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Changed
 - **Files listing scroll:** Icon view virtualizes after 96 items, skips painting off-screen tiles, and does not re-render on every scroll just to hide an unused hover tip. File icons decode lazily; Places volume lists are cached for 30s. ([bbcced4])
-- **File icons:** Themed icons resolve once per type (e.g. all `.ts` files share one URL) instead of running the theme loader on every tile.
+- **File icons:** Themed icons resolve once per type (e.g. all `.ts` files share one URL) instead of running the theme loader on every tile. ([b820ecd])
 - **Files chrome:** Compact toolbar with Back/Forward, crumb path (click or Ctrl+L to type a location), search, grid/list plus view options, and a New menu. Places (Home, last 5 Recent, Bookmarks) takes a column on a wide pane and overlays only when the pane is narrow. Properties still overlays. Narrow panes move history and view to a bottom bar. List vs grid and Places open/closed are remembered. Grid zoom and single-click open live in File Manager settings. ([61e0bcf], [5a0bed1], [76d8dc1], [acdfc3d])
 - **Remote listings:** `/etc/passwd` and `/etc/group` are read once per SSH connection and reused for owner/group names, instead of on every folder list. ([5670eb0])
 - **Files search:** Search still filters the current folder only. The unimplemented Search Everywhere shortcut (`Mod+Shift+F`) is removed so it no longer collides with Files. ([2d9b98b])
 
 ### Fixed
-- **Linux volume names:** Places mount paths with spaces or non-ASCII (octal escapes in `/proc/mounts`) decode as UTF-8 instead of Latin-1.
+- **Linux volume names:** Places mount paths with spaces or non-ASCII (octal escapes in `/proc/mounts`) decode as UTF-8 instead of Latin-1. ([b820ecd])
 - **Files Home from C:** Opening Local Disk (C:) no longer replaces Home with `C:\`. Home stays the user folder and remains clickable from the drive root. ([fb3861f])
 - **Files list/grid shortcuts:** Ctrl+Shift+1 / Ctrl+Shift+2 (Cmd+Shift on macOS) switch list and grid view again. Shift+digit sends `!` / `@` on a US layout; those chords now match. ([65c8f28])
 - **Shell-tab file drops:** Only an in-app Files drag can drop a path onto a Shell tab. Plain text from other apps is ignored. ([65c8f28])
