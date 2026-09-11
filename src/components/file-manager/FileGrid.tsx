@@ -540,7 +540,6 @@ export const FileGrid = memo(function FileGrid({
   const gridColumnCountRef = useRef(1);
   const lastReportedColumnCountRef = useRef<number | null>(null);
   const [gridViewportWidth, setGridViewportWidth] = useState(0);
-  const [cssColumnCount, setCssColumnCount] = useState(1);
   const pendingWidthRef = useRef<number | null>(null);
   const resizeRafRef = useRef<number | null>(null);
   const reportIdleRef = useRef<number | null>(null);
@@ -670,8 +669,6 @@ export const FileGrid = memo(function FileGrid({
   );
   const gridRowCount = Math.max(1, Math.ceil(files.length / gridColumnCount));
   const gridRowHeight = zoomTrack.rowHeight;
-  const cssCols = Math.max(1, cssColumnCount);
-  const cssRowCount = Math.max(1, Math.ceil(files.length / cssCols));
   const cssGridStyle = useMemo<CSSProperties>(() => ({
     display: 'grid',
     gridTemplateColumns: fileIconGridTemplateColumns(zoomTrack.minTrack),
@@ -704,9 +701,7 @@ export const FileGrid = memo(function FileGrid({
     const el = cssGridRef.current;
     if (!el) return;
     const apply = () => {
-      const next = computeFileGridMetrics(el.clientWidth, compactMode, gridZoomLevel).columnCount;
-      setCssColumnCount((prev) => (prev === next ? prev : next));
-      reportColumnCount(next);
+      reportColumnCount(computeFileGridMetrics(el.clientWidth, compactMode, gridZoomLevel).columnCount);
     };
     apply();
     const observer = new ResizeObserver(apply);
@@ -911,18 +906,14 @@ export const FileGrid = memo(function FileGrid({
           ) : (
           <div
             ref={cssGridRef}
-            role="grid"
-            aria-colcount={cssCols}
-            aria-rowcount={cssRowCount}
+            role="list"
             className="h-full w-full min-h-0 min-w-0 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]"
             style={cssGridStyle}
           >
-            {files.map((file, index) => (
+            {files.map((file) => (
               <div
                 key={file.path || file.name}
-                role="gridcell"
-                aria-colindex={(index % cssCols) + 1}
-                aria-rowindex={Math.floor(index / cssCols) + 1}
+                role="listitem"
                 className="min-w-0 w-full flex items-start justify-center p-1"
               >
                 <FileGridItem

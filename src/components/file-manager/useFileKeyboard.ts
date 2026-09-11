@@ -126,12 +126,12 @@ export function useFileKeyboard({
         return;
       }
 
-      if (isMatch(e, bindings.fmListView || 'Mod+1')) {
+      if (isMatch(e, bindings.fmListView || 'Mod+Shift+1')) {
         e.preventDefault();
         setViewMode('list');
         return;
       }
-      if (isMatch(e, bindings.fmGridView || 'Mod+2')) {
+      if (isMatch(e, bindings.fmGridView || 'Mod+Shift+2')) {
         e.preventDefault();
         setViewMode('grid');
         return;

@@ -292,8 +292,8 @@ export const defaultSettings: AppSettings = {
         fmBack: 'Alt+Left',
         fmForward: 'Alt+Right',
         fmSearch: 'Mod+F',
-        fmGridView: 'Mod+2',
-        fmListView: 'Mod+1',
+        fmGridView: 'Mod+Shift+2',
+        fmListView: 'Mod+Shift+1',
         fmHidden: 'Mod+H',
         fmBookmark: 'Mod+D',
         fmRefresh: 'F5',
@@ -369,6 +369,20 @@ function migrateSplitPaneKeybinding(
         return { ...keybindings, splitPanes: defaultSettings.keybindings.splitPanes };
     }
     return keybindings;
+}
+
+/** Old Files view chords collided with global tab switch (Mod+1 / Mod+2). */
+function migrateFileViewKeybindings(
+    keybindings: AppSettings['keybindings'],
+): AppSettings['keybindings'] {
+    let next = keybindings;
+    if (next.fmListView === 'Mod+1') {
+        next = { ...next, fmListView: defaultSettings.keybindings.fmListView };
+    }
+    if (next.fmGridView === 'Mod+2') {
+        next = { ...next, fmGridView: defaultSettings.keybindings.fmGridView };
+    }
+    return next;
 }
 
 function normalizeTerminalFontFamily(fontFamily: string | undefined): string | undefined {
@@ -497,10 +511,10 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
                         ...(loaded?.ghostSuggestions?.providers || {}),
                     },
                 },
-                keybindings: migrateSplitPaneKeybinding({
+                keybindings: migrateFileViewKeybindings(migrateSplitPaneKeybinding({
                     ...defaultSettings.keybindings,
                     ...(loaded?.keybindings || {}),
-                }),
+                })),
                 keyboard: normalizeKeyboardSettings(loaded?.keyboard),
                 ai: { ...defaultSettings.ai, ...(loaded?.ai || {}) },
                 privacy: { ...defaultSettings.privacy, ...(loaded?.privacy || {}) },

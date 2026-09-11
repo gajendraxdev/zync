@@ -15,11 +15,12 @@ export function useFileUploads({
   const showToast = useAppStore((state) => state.showToast);
 
   const performUpload = useCallback(async (filePaths: string[]) => {
-    if (!connectionId) return;
+    if (!connectionId || !isConnected) return;
     await uploadAction(connectionId, filePaths);
-  }, [connectionId, uploadAction]);
+  }, [connectionId, isConnected, uploadAction]);
 
   const handleUpload = useCallback(async () => {
+    if (!connectionId || !isConnected) return;
     try {
       const { filePaths, canceled } = await window.ipcRenderer.invoke('dialog:openFile');
       if (canceled || filePaths.length === 0) return;
@@ -28,7 +29,7 @@ export function useFileUploads({
       const message = error instanceof Error ? error.message : String(error);
       showToast('error', `Upload failed: ${message}`);
     }
-  }, [performUpload, showToast]);
+  }, [connectionId, isConnected, performUpload, showToast]);
 
   const handleUploadFolder = useCallback(async () => {
     if (!connectionId || !isConnected) return;
@@ -36,10 +37,11 @@ export function useFileUploads({
       const { filePaths, canceled } = await window.ipcRenderer.invoke('dialog:openDirectory');
       if (canceled || filePaths.length === 0) return;
       await performUpload(filePaths);
-    } catch (error) {
-      console.error('Failed to open directory dialog:', error);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      showToast('error', `Upload failed: ${message}`);
     }
-  }, [connectionId, isConnected, performUpload]);
+  }, [connectionId, isConnected, performUpload, showToast]);
 
   const { isDraggingOver: isTauriDraggingOver } = useTauriFileDrop(useCallback((paths: string[]) => {
     onDragVisualClear();

@@ -24,8 +24,8 @@ const FILE_MANAGER: ShortcutCommand[] = [
     { id: 'fmBack', label: 'Go Back', section: 'files', defaultKeys: 'Alt+Left', when: 'files', settingsKey: 'fmBack', configurable: true },
     { id: 'fmForward', label: 'Go Forward', section: 'files', defaultKeys: 'Alt+Right', when: 'files', settingsKey: 'fmForward', configurable: true },
 
-    { id: 'fmListView', label: 'List View', section: 'files', defaultKeys: 'Mod+1', when: 'files', settingsKey: 'fmListView', configurable: true },
-    { id: 'fmGridView', label: 'Grid View', section: 'files', defaultKeys: 'Mod+2', when: 'files', settingsKey: 'fmGridView', configurable: true },
+    { id: 'fmListView', label: 'List View', section: 'files', defaultKeys: 'Mod+Shift+1', when: 'files', settingsKey: 'fmListView', configurable: true },
+    { id: 'fmGridView', label: 'Grid View', section: 'files', defaultKeys: 'Mod+Shift+2', when: 'files', settingsKey: 'fmGridView', configurable: true },
     { id: 'fmHidden', label: 'Show/Hide Hidden Files', section: 'files', defaultKeys: 'Mod+H', when: 'files', settingsKey: 'fmHidden', configurable: true },
     { id: 'fmBookmark', label: 'Bookmark Current Location', section: 'files', defaultKeys: 'Mod+D', when: 'files', settingsKey: 'fmBookmark', configurable: true },
     { id: 'fmRefresh', label: 'Refresh View', section: 'files', defaultKeys: 'F5', when: 'files', settingsKey: 'fmRefresh', configurable: true },
