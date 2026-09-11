@@ -5,11 +5,21 @@ import {
     type DockEdge,
 } from '../../../lib/paneLayout';
 
+/** Full-view Files overlay; drop a shell here to split beside Files. */
+export const FILES_OVERLAY_PANE_ID = 'overlay:files';
+
 export type DockTarget = {
     paneId: string | null;
     edge: DockEdge;
     preview: { left: number; top: number; width: number; height: number };
 };
+
+function isDockPaneHitTestable(node: HTMLElement): boolean {
+    if (node.closest('[hidden], [inert]')) return false;
+    const style = getComputedStyle(node);
+    if (style.display === 'none' || style.visibility === 'hidden') return false;
+    return true;
+}
 
 function collectPaneBoxes(surface: HTMLElement, originLeft: number, originTop: number) {
     const boxes: Array<{ id: string; x: number; y: number; w: number; h: number }> = [];
@@ -17,6 +27,7 @@ function collectPaneBoxes(surface: HTMLElement, originLeft: number, originTop: n
         if (!(node instanceof HTMLElement)) continue;
         const id = node.dataset.paneId;
         if (!id) continue;
+        if (!isDockPaneHitTestable(node)) continue;
         const rect = node.getBoundingClientRect();
         if (rect.width <= 0 || rect.height <= 0) continue;
         boxes.push({

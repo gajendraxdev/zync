@@ -10,7 +10,7 @@ import { TabBar } from './TabBar';
 import { ShortcutManager } from '../managers/ShortcutManager';
 import { CommandPalette } from './CommandPalette';
 import { WorkspaceTabBar } from './WorkspaceTabBar';
-import { TabDockOverlay, type DockTabPointerHandlers } from './tabDock';
+import { FILES_OVERLAY_PANE_ID, TabDockOverlay, type DockTabPointerHandlers } from './tabDock';
 import type { ShellEntry } from '../../lib/shells/types';
 import { GLOBAL_SNIPPETS_CONNECTION_ID, LOCAL_TERMINAL_CONNECTION_ID } from '../../features/connections/application/tabService';
 import { listen } from '@tauri-apps/api/event';
@@ -278,6 +278,7 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
     const dockSurfaceRef = useRef<HTMLDivElement>(null);
     const viewBeforeDockRef = useRef<string | null>(null);
     const dockInSplit = useAppStore((state) => state.dockInSplit);
+    const splitTermBesideFiles = useAppStore((state) => state.splitTermBesideFiles);
     const showToast = useAppStore((state) => state.showToast);
 
     // Effect hooks must be unconditional
@@ -501,9 +502,11 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
 
     const dockPointer = useMemo<DockTabPointerHandlers>(() => ({
         getSurface: () => dockSurfaceRef.current,
-        onDragStart: () => {
+        onDragStart: (payload) => {
             if (tab.view !== 'terminal') {
                 viewBeforeDockRef.current = tab.view;
+                // Keep Files visible so a shell tab can drop onto the overlay.
+                if (payload.kind === 'term') return;
                 setTabView(tab.id, 'terminal');
             } else {
                 viewBeforeDockRef.current = null;
@@ -514,7 +517,11 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
                 restoreViewBeforeDock();
                 return;
             }
-            const result = dockInSplit(tab.connectionId, payload, edge, paneId);
+            const ontoFilesOverlay = payload.kind === 'term'
+                && (paneId === FILES_OVERLAY_PANE_ID || viewBeforeDockRef.current === 'files');
+            const result = ontoFilesOverlay
+                ? splitTermBesideFiles(tab.connectionId, payload.termId, edge)
+                : dockInSplit(tab.connectionId, payload, edge, paneId);
             if (result === 'refused-cap') {
                 showToast('info', 'This tab already has 4 panes.');
                 restoreViewBeforeDock();
@@ -525,15 +532,17 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
                 return;
             }
             viewBeforeDockRef.current = null;
-            if (payload.kind === 'feature') {
-                setOpenFeatures((open) => open.filter((id) => id !== payload.featureId));
+            if (payload.kind === 'feature' || ontoFilesOverlay) {
+                if (payload.kind === 'feature') {
+                    setOpenFeatures((open) => open.filter((id) => id !== payload.featureId));
+                }
                 setTabView(tab.id, 'terminal');
             }
         },
         onDragCancel: () => {
             restoreViewBeforeDock();
         },
-    }), [dockInSplit, restoreViewBeforeDock, setTabView, showToast, tab.connectionId, tab.id, tab.view]);
+    }), [dockInSplit, restoreViewBeforeDock, setTabView, showToast, splitTermBesideFiles, tab.connectionId, tab.id, tab.view]);
 
     const handleTogglePin = useCallback((feature: string) => {
         if (tab.connectionId) {
@@ -615,6 +624,7 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
                         <Suspense fallback={<TabLoading />}>
                             {filesPanelMounted && (
                                 <div
+                                    data-pane-id={FILES_OVERLAY_PANE_ID}
                                     className={cn(
                                         "absolute inset-0 z-30 bg-app-bg",
                                         tab.view !== 'files' && "hidden",
