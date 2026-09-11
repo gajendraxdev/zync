@@ -1,3 +1,33 @@
+/** US Shift+digit `KeyboardEvent.key` values (`Mod+Shift+1` → `!`). */
+const US_SHIFT_DIGIT_KEY: Record<string, string> = {
+    '1': '!',
+    '2': '@',
+    '3': '#',
+    '4': '$',
+    '5': '%',
+    '6': '^',
+    '7': '&',
+    '8': '*',
+    '9': '(',
+    '0': ')',
+};
+
+/** True when the event's key/code matches the binding token (Shift+digit uses `!` / `@` or `DigitN`). */
+export function shortcutMainKeyMatches(
+    event: Pick<KeyboardEvent, 'key' | 'code' | 'shiftKey'>,
+    token: string,
+    shiftRequired: boolean,
+): boolean {
+    const want = token.toLowerCase();
+    if (event.key.toLowerCase() === want) return true;
+    if (want === 'tab' && event.key === 'Tab') return true;
+    if (shiftRequired && /^[0-9]$/.test(want)) {
+        if (event.key === US_SHIFT_DIGIT_KEY[want]) return true;
+        if (event.code === `Digit${want}`) return true;
+    }
+    return false;
+}
+
 /**
  * Helper to check if a KeyboardEvent matches a shortcut string like "Mod+Shift+T" or "Ctrl+B".
  * "Mod" translates to Command on macOS and Ctrl on Windows/Linux.
@@ -24,11 +54,7 @@ export function matchShortcut(e: KeyboardEvent, shortcut: string): boolean {
     if (e.altKey !== hasAlt) return false;
     if (e.shiftKey !== hasShift) return false;
 
-    // Check key
-    if (e.key.toLowerCase() === key) return true;
-    if (key === 'tab' && e.key === 'Tab') return true;
-
-    return false;
+    return shortcutMainKeyMatches(e, key, hasShift);
 }
 
 /** True when key events target xterm's focused helper textarea (or an element inside `.xterm`). */

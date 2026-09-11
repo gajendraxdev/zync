@@ -211,16 +211,16 @@ export const CombinedTabBar = memo(function CombinedTabBar({
     const fileDragActive = useInternalFileDrag();
     const [fileDropTermId, setFileDropTermId] = useState<string | null>(null);
     const handleTermFileDragOver = useCallback((event: DragEvent<HTMLDivElement>, termId: string) => {
-        if (!acceptFilePathDrag(event)) return;
+        if (!fileDragActive || !acceptFilePathDrag(event)) return;
         setFileDropTermId(termId);
-    }, []);
+    }, [fileDragActive]);
     const handleTermFileDrop = useCallback((event: DragEvent<HTMLDivElement>, termId: string) => {
         setFileDropTermId(null);
-        if (!acceptFilePathDrag(event)) return;
+        if (!fileDragActive || !acceptFilePathDrag(event)) return;
         event.stopPropagation();
         onTabSelect('terminal', termId);
         pasteFilePathsIntoTerminal(termId, event.dataTransfer, connectionId);
-    }, [connectionId, onTabSelect]);
+    }, [connectionId, fileDragActive, onTabSelect]);
     const terminals = useAppStore(useShallow(state =>
         (state.terminals[connectionId] || []).filter(term => term.tabVisible !== false),
     ));

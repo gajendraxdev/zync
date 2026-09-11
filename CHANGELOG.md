@@ -15,6 +15,8 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Files search:** Search still filters the current folder only. The unimplemented Search Everywhere shortcut (`Mod+Shift+F`) is removed so it no longer collides with Files. ([2d9b98b])
 
 ### Fixed
+- **Files list/grid shortcuts:** Ctrl+Shift+1 / Ctrl+Shift+2 (Cmd+Shift on macOS) switch list and grid view again. Shift+digit sends `!` / `@` on a US layout; those chords now match.
+- **Shell-tab file drops:** Only an in-app Files drag can drop a path onto a Shell tab. Plain text from other apps is ignored.
 - **Drag a shell onto Files:** Dropping a Shell tab onto the full Files view now splits that shell beside Files, instead of switching away from Files and cancelling the drop. ([c4f2f4c])
 - **Exit in a Files split:** Typing `exit` in a shell that is split with Files (or another feature) no longer closes the whole tab. That shell pane closes; the feature stays as the full view. ([9dfba1b])
 - **Sixel in a split:** Inline images no longer cover the rest of the pane with a black rectangle. The overlay stays transparent; the original shell recreates its image canvas after the split instead of keeping a black backing store. ([fb671e7])

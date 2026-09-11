@@ -53,6 +53,31 @@ runTest('matchShortcut resolves Mod to Ctrl on non-Mac platforms', () => {
   }
 });
 
+runTest('matchShortcut maps Mod+Shift+1/2 to US Shift+digit keys without matching Mod+1', () => {
+  const previous = navigator.platform;
+  Object.defineProperty(navigator, 'platform', { configurable: true, value: 'Win32' });
+  try {
+    assert.equal(
+      matchShortcut(keyEvent({ key: '!', code: 'Digit1', ctrlKey: true, shiftKey: true }), 'Mod+Shift+1'),
+      true,
+    );
+    assert.equal(
+      matchShortcut(keyEvent({ key: '@', code: 'Digit2', ctrlKey: true, shiftKey: true }), 'Mod+Shift+2'),
+      true,
+    );
+    assert.equal(
+      matchShortcut(keyEvent({ key: '1', code: 'Digit1', ctrlKey: true }), 'Mod+Shift+1'),
+      false,
+    );
+    assert.equal(
+      matchShortcut(keyEvent({ key: '!', code: 'Digit1', ctrlKey: true, shiftKey: true }), 'Mod+1'),
+      false,
+    );
+  } finally {
+    Object.defineProperty(navigator, 'platform', { configurable: true, value: previous });
+  }
+});
+
 runTest('formatShortcutLabel maps Mod to Ctrl on Windows and Command on macOS', () => {
   assert.equal(formatShortcutLabel('Mod+T', false), 'Ctrl+T');
   assert.equal(formatShortcutLabel('Mod+T', true), '⌘T');

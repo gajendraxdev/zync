@@ -49,6 +49,13 @@ runTest('quoteCmdExeArg breaks percent and delayed-expansion variables', () => {
   assert.equal(quoteCmdExeArg('a$(b)'), '"a$(b)"');
 });
 
+runTest('quoteCmdExeArg does not let text/plain break out of quotes with &', () => {
+  const payload = '^" & <command> & "';
+  const dt = dataTransfer({ 'text/plain': payload });
+  assert.deepEqual(extractFileManagerDropPaths(dt), [payload]);
+  assert.equal(formatFilePathsForTerminal([payload], 'cmd'), '"^"" & <command> & """ ');
+});
+
 runTest('fileDropShellKind maps local Windows shells', () => {
   assert.equal(fileDropShellKind({ localWindows: false, shellId: 'cmd' }), 'posix');
   assert.equal(fileDropShellKind({ localWindows: true, shellId: 'cmd' }), 'cmd');

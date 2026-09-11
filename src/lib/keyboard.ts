@@ -1,3 +1,5 @@
+import { shortcutMainKeyMatches } from './shortcuts';
+
 export function isMatch(e: KeyboardEvent, binding: string): boolean {
     if (!binding) return false;
 
@@ -34,7 +36,6 @@ export function isMatch(e: KeyboardEvent, binding: string): boolean {
     if (mainKeys.length !== 1) return false;
 
     const targetKey = mainKeys[0];
-    let pressedKey = e.key.toLowerCase();
 
     // Map common aliases to standard KeyboardEvent.key values (lowercase)
     const aliases: Record<string, string> = {
@@ -49,7 +50,5 @@ export function isMatch(e: KeyboardEvent, binding: string): boolean {
     };
 
     const normalizedTarget = aliases[targetKey] || targetKey;
-    const normalizedPressed = aliases[pressedKey] || pressedKey;
-
-    return normalizedTarget === normalizedPressed;
+    return shortcutMainKeyMatches(e, normalizedTarget, needsShift);
 }
