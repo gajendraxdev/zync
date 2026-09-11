@@ -268,8 +268,9 @@ export function useFileKeyboard({
         }
         if (newIndex === -1) newIndex = 0;
         const newFocused = paintedFiles[newIndex]?.name;
+        if (!newFocused) return;
         setFocusedFile(newFocused);
-        if (e.shiftKey && newFocused) {
+        if (e.shiftKey) {
           setSelectedFiles((prev) => {
             const next = new Set(prev);
             next.add(newFocused);

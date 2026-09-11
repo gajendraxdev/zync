@@ -15,10 +15,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { forwardRef } from 'react';
 import { buildDragData, startInternalDrag, validateAndBuildMoves } from './dragDropUtils';
 import { getScrollbarSize, Grid, List, useGridRef, useListRef } from 'react-window';
-import { FILE_GRID_ZOOM, FILE_LIST_ZOOM, clampFileGridZoom, clampFileListZoom } from './fileChrome';
+import { FILE_GRID_VIRTUALIZE_AFTER, FILE_GRID_ZOOM, FILE_LIST_ZOOM, clampFileGridZoom, clampFileListZoom } from './fileChrome';
 import {
   computeFileGridMetrics,
   fileGridScrollTarget,
+  fileIconGridTemplateColumns,
   formatFileIdentity,
   formatFileListDate,
   fileListSortTooltip,
@@ -539,6 +540,11 @@ export const FileGrid = memo(function FileGrid({
   const gridColumnCountRef = useRef(1);
   const lastReportedColumnCountRef = useRef<number | null>(null);
   const [gridViewportWidth, setGridViewportWidth] = useState(0);
+  const [cssColumnCount, setCssColumnCount] = useState(1);
+  const pendingWidthRef = useRef<number | null>(null);
+  const resizeRafRef = useRef<number | null>(null);
+  const reportIdleRef = useRef<number | null>(null);
+  const cssGridRef = useRef<HTMLDivElement>(null);
   const selectedFilesRef = useRef(selectedFiles);
   const getSelectedFiles = useCallback(() => selectedFilesRef.current, []);
   useLayoutEffect(() => {
@@ -559,9 +565,20 @@ export const FileGrid = memo(function FileGrid({
 
   const reportColumnCount = useCallback((count: number) => {
     gridColumnCountRef.current = count;
-    if (lastReportedColumnCountRef.current === count) return;
-    lastReportedColumnCountRef.current = count;
-    onGridColumnCount?.(count);
+    if (lastReportedColumnCountRef.current === count) {
+      if (reportIdleRef.current != null) {
+        window.clearTimeout(reportIdleRef.current);
+        reportIdleRef.current = null;
+      }
+      return;
+    }
+    if (reportIdleRef.current != null) window.clearTimeout(reportIdleRef.current);
+    reportIdleRef.current = window.setTimeout(() => {
+      reportIdleRef.current = null;
+      if (lastReportedColumnCountRef.current === count) return;
+      lastReportedColumnCountRef.current = count;
+      onGridColumnCount?.(count);
+    }, 120);
   }, [onGridColumnCount]);
 
   const scrollFocusedListRow = useCallback(() => {
@@ -599,6 +616,11 @@ export const FileGrid = memo(function FileGrid({
       gridEl.scrollTop = 0;
       gridEl.scrollLeft = 0;
     }
+    const cssEl = cssGridRef.current;
+    if (cssEl) {
+      cssEl.scrollTop = 0;
+      cssEl.scrollLeft = 0;
+    }
   }, [currentPath, listRef, gridRef]);
 
   const listRowProps = useMemo(
@@ -634,19 +656,77 @@ export const FileGrid = memo(function FileGrid({
     ],
   );
 
+  const zoomTrack = FILE_GRID_ZOOM[gridZoomLevel];
   const gridMetrics = useMemo(
     () => computeFileGridMetrics(gridViewportWidth, compactMode, gridZoomLevel),
     [gridViewportWidth, compactMode, gridZoomLevel],
   );
+  const gridColumnCount = gridMetrics.columnCount;
   const gridColumnWidth = Math.max(
     1,
-    gridViewportWidth > 0 ? gridViewportWidth / gridMetrics.columnCount : gridMetrics.columnWidth,
+    gridViewportWidth > 0
+      ? gridViewportWidth / Math.max(1, gridColumnCount)
+      : gridMetrics.columnWidth,
   );
-  const gridRowCount = Math.max(1, Math.ceil(files.length / gridMetrics.columnCount));
+  const gridRowCount = Math.max(1, Math.ceil(files.length / gridColumnCount));
+  const gridRowHeight = zoomTrack.rowHeight;
+  const cssCols = Math.max(1, cssColumnCount);
+  const cssRowCount = Math.max(1, Math.ceil(files.length / cssCols));
+  const cssGridStyle = useMemo<CSSProperties>(() => ({
+    display: 'grid',
+    gridTemplateColumns: fileIconGridTemplateColumns(zoomTrack.minTrack),
+    gridAutoRows: `${zoomTrack.rowHeight}px`,
+    gap: zoomTrack.gap,
+    justifyContent: 'stretch',
+    alignContent: 'start',
+  }), [zoomTrack.minTrack, zoomTrack.rowHeight, zoomTrack.gap]);
+
+  const scheduleWidth = useCallback((width: number) => {
+    pendingWidthRef.current = width;
+    if (resizeRafRef.current != null) return;
+    resizeRafRef.current = window.requestAnimationFrame(() => {
+      resizeRafRef.current = null;
+      const nextWidth = pendingWidthRef.current;
+      if (nextWidth == null) return;
+      setGridViewportWidth((prev) => (prev === nextWidth ? prev : nextWidth));
+    });
+  }, []);
+
+  useEffect(() => () => {
+    if (resizeRafRef.current != null) window.cancelAnimationFrame(resizeRafRef.current);
+    if (reportIdleRef.current != null) window.clearTimeout(reportIdleRef.current);
+  }, []);
+
+  const useVirtualIconGrid = files.length > FILE_GRID_VIRTUALIZE_AFTER;
 
   useEffect(() => {
-    reportColumnCount(gridMetrics.columnCount);
-  }, [gridMetrics.columnCount, reportColumnCount]);
+    if (viewMode !== 'grid' || useVirtualIconGrid) return;
+    const el = cssGridRef.current;
+    if (!el) return;
+    const apply = () => {
+      const next = computeFileGridMetrics(el.clientWidth, compactMode, gridZoomLevel).columnCount;
+      setCssColumnCount((prev) => (prev === next ? prev : next));
+      reportColumnCount(next);
+    };
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [viewMode, useVirtualIconGrid, compactMode, gridZoomLevel, reportColumnCount, files.length]);
+
+  useEffect(() => {
+    if (viewMode !== 'grid' || useVirtualIconGrid) return;
+    const el = cssGridRef.current;
+    if (!el) return;
+    const onScroll = () => hideHoverTip();
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, [viewMode, useVirtualIconGrid, hideHoverTip, files.length]);
+
+  useEffect(() => {
+    if (!useVirtualIconGrid) return;
+    reportColumnCount(gridColumnCount);
+  }, [useVirtualIconGrid, gridColumnCount, reportColumnCount]);
 
   useLayoutEffect(() => {
     if (!focusedFile) return;
@@ -654,19 +734,22 @@ export const FileGrid = memo(function FileGrid({
       scrollFocusedListRow();
       return;
     }
-    scrollFocusedGridCell(gridMetrics.columnCount);
+    if (!useVirtualIconGrid) {
+      const node = cssGridRef.current?.querySelector(`[id="file-item-${CSS.escape(focusedFile)}"]`);
+      if (node instanceof HTMLElement) node.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      return;
+    }
+    scrollFocusedGridCell(gridColumnCount);
   }, [
     focusedFile,
     viewMode,
-    compactMode,
-    gridMetrics.columnCount,
+    currentPath,
+    useVirtualIconGrid,
     files.length,
+    gridColumnCount,
     scrollFocusedListRow,
     scrollFocusedGridCell,
   ]);
-
-
-
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: <explanation>
@@ -797,42 +880,73 @@ export const FileGrid = memo(function FileGrid({
               rowProps={listRowProps}
               overscanCount={4}
               style={{ height: '100%', width: '100%' }}
-              onResize={() => scrollFocusedListRow()}
             />
           </div>
         </div>
       ) : (
         <div className="h-full w-full min-h-0 min-w-0">
+          {useVirtualIconGrid ? (
           <Grid
             gridRef={gridRef}
             cellComponent={FileGridCell}
             cellProps={{
               ...listRowProps,
-              columnCount: gridMetrics.columnCount,
+              columnCount: gridColumnCount,
               compactMode,
               iconSize: gridIcon,
               clickPolicy,
               onHoverShow: showHoverTip,
               onHoverHide: hideHoverTip,
             }}
-            columnCount={gridMetrics.columnCount}
+            columnCount={gridColumnCount}
             columnWidth={gridColumnWidth}
             rowCount={gridRowCount}
-            rowHeight={gridMetrics.rowHeight}
+            rowHeight={gridRowHeight}
             overscanCount={1}
             style={{ height: '100%', width: '100%', overflowX: 'hidden' }}
             onResize={({ width }) => {
-              setGridViewportWidth(width);
-              const next = computeFileGridMetrics(width, compactMode, gridZoomLevel);
-              gridColumnCountRef.current = next.columnCount;
-              reportColumnCount(next.columnCount);
-              const el = gridRef.current?.element;
-              if (el) {
-                el.scrollLeft = 0;
-                if (!focusedFile) el.scrollTop = 0;
-              }
+              scheduleWidth(width);
             }}
           />
+          ) : (
+          <div
+            ref={cssGridRef}
+            role="grid"
+            aria-colcount={cssCols}
+            aria-rowcount={cssRowCount}
+            className="h-full w-full min-h-0 min-w-0 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]"
+            style={cssGridStyle}
+          >
+            {files.map((file, index) => (
+              <div
+                key={file.path || file.name}
+                role="gridcell"
+                aria-colindex={(index % cssCols) + 1}
+                aria-rowindex={Math.floor(index / cssCols) + 1}
+                className="min-w-0 w-full flex items-start justify-center p-1"
+              >
+                <FileGridItem
+                  file={file}
+                  viewMode="grid"
+                  compactMode={compactMode}
+                  isSelected={selectedSet.has(file.name)}
+                  isFocused={focusedFile === file.name}
+                  connectionId={connectionId}
+                  currentPath={currentPath}
+                  getSelectedFiles={getSelectedFiles}
+                  onSelect={onSelect}
+                  onNavigate={onNavigate}
+                  onContextMenu={onContextMenu}
+                  onMove={onMove}
+                  iconSize={gridIcon}
+                  clickPolicy={clickPolicy}
+                  onHoverShow={showHoverTip}
+                  onHoverHide={hideHoverTip}
+                />
+              </div>
+            ))}
+          </div>
+          )}
         </div>
       )}
       {hoverTip && <FileHoverTip text={hoverTip.text} x={hoverTip.x} y={hoverTip.y} />}

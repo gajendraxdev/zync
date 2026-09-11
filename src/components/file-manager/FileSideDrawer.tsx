@@ -34,7 +34,10 @@ export function FileSideDrawer({
     <div
       className={cn(
         'flex flex-col overflow-hidden bg-app-panel',
-        'transition-[width,opacity,box-shadow] duration-300 ease-in-out',
+        // Width only changes on open/close, so this does not lag window resize.
+        overlay
+          ? 'transition-[width,opacity,box-shadow] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none'
+          : 'transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
         overlay
           ? cn(
               'absolute inset-y-0 z-40 bg-app-panel/90 backdrop-blur-xl',

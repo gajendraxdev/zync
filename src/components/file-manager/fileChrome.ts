@@ -10,6 +10,9 @@ export const FILE_PLACES_WIDTH_PX = 192;
 /** Properties overlay width (`w-64`, same as Snippets). */
 export const FILE_PROPERTIES_WIDTH_PX = 256;
 
+/** Icon view uses CSS auto-fill below this; react-window only for huge folders. */
+export const FILE_GRID_VIRTUALIZE_AFTER = 800;
+
 export const FILE_GRID_ZOOM = [
   { minTrack: 86, gap: 6, rowHeight: 96, icon: 48 },
   { minTrack: 96, gap: 6, rowHeight: 112, icon: 64 },

@@ -3,6 +3,7 @@ import {
   computeFileGridMetrics,
   fileGridScrollTarget,
   fileHoverHint,
+  fileIconGridTemplateColumns,
   formatFileIdentity,
   formatFileListDate,
   fileListSortTooltip,
@@ -46,9 +47,26 @@ runTest('sortFileEntries reverses non-dir comparison on desc', () => {
 runTest('computeFileGridMetrics compact column count', () => {
   const m = computeFileGridMetrics(332, true);
   assert.equal(m.gap, 6);
+  assert.equal(m.minTrack, 90);
   assert.equal(m.columnCount, 3);
-  assert.ok(m.columnWidth > 100);
-  assert.ok(Math.abs(m.columnWidth * m.columnCount - 332) < 0.001);
+  assert.equal(m.columnWidth, 96);
+  assert.ok(m.minTrack * m.columnCount <= 332);
+});
+
+runTest('fileIconGridTemplateColumns lets leftover space grow tiles', () => {
+  assert.equal(
+    fileIconGridTemplateColumns(108),
+    'repeat(auto-fill, minmax(min(100%, 108px), 1fr))',
+  );
+});
+
+runTest('computeFileGridMetrics zoom minTrack is independent of viewport', () => {
+  const a = computeFileGridMetrics(200, false, 2);
+  const b = computeFileGridMetrics(900, false, 2);
+  assert.equal(a.minTrack, 108);
+  assert.equal(b.minTrack, 108);
+  assert.equal(a.gap, 8);
+  assert.ok(b.columnCount > a.columnCount);
 });
 
 runTest('fileGridScrollTarget rejects a cell past the live grid', () => {

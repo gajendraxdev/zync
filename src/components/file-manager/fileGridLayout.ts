@@ -120,9 +120,18 @@ export function formatFileListDate(
 
 export interface FileGridMetrics {
   columnCount: number;
+  /** Minimum tile track (zoom). CSS icon view uses this with `1fr` leftover. */
+  minTrack: number;
+  /** react-window cell width when the viewport has not been measured yet (`minTrack + gap`). */
   columnWidth: number;
   rowHeight: number;
   gap: number;
+}
+
+/** Icon view: tiles grow with leftover space; a column is added only when `minTrack` fits. */
+export function fileIconGridTemplateColumns(minTrack: number): string {
+  const track = Math.max(1, minTrack);
+  return `repeat(auto-fill, minmax(min(100%, ${track}px), 1fr))`;
 }
 
 export function sortFileEntries(
@@ -186,8 +195,7 @@ export function computeFileGridMetrics(
     const rowHeight = compactMode ? 100 : 120;
     const width = Math.max(0, containerWidth);
     const columnCount = Math.max(1, Math.floor((width + gap) / (minTrack + gap)));
-    const columnWidth = width / columnCount;
-    return { columnCount, columnWidth, rowHeight, gap };
+    return { columnCount, minTrack, columnWidth: minTrack + gap, rowHeight, gap };
   }
   const zoom = FILE_GRID_ZOOM[clampFileGridZoom(zoomLevel)];
   const minTrack = zoom.minTrack;
@@ -195,6 +203,5 @@ export function computeFileGridMetrics(
   const rowHeight = zoom.rowHeight;
   const width = Math.max(0, containerWidth);
   const columnCount = Math.max(1, Math.floor((width + gap) / (minTrack + gap)));
-  const columnWidth = width / columnCount;
-  return { columnCount, columnWidth, rowHeight, gap };
+  return { columnCount, minTrack, columnWidth: minTrack + gap, rowHeight, gap };
 }

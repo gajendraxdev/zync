@@ -1600,7 +1600,7 @@ export const FileManager = memo(function FileManager({
     <div
       ref={containerRef}
       tabIndex={0}
-      className={`flex-1 min-w-0 flex flex-col h-full bg-app-bg relative outline-none focus-within:ring-0 transition-all duration-150 ${isTauriDraggingOver ? 'ring-2 ring-app-accent ring-inset' : ''}`}
+      className={`flex-1 min-w-0 flex flex-col h-full bg-app-bg relative outline-none focus-within:ring-0 ${isTauriDraggingOver ? 'ring-2 ring-app-accent ring-inset' : ''}`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
