@@ -3,6 +3,7 @@ mod atomic_io;
 mod commands;
 mod connection_latency;
 mod fs;
+mod fs_volumes;
 mod ghost;
 mod identity_migration;
 pub mod plugins;
@@ -167,6 +168,7 @@ pub fn run() {
             commands::connections_export_to_file,
             commands::connections_import_from_file,
             commands::fs_list,
+            commands::fs_list_volumes,
             commands::fs_read_file,
             commands::fs_write_file,
             commands::fs_cwd,

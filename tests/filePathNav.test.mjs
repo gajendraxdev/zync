@@ -5,6 +5,7 @@ import {
   filePathRoot,
   filePathSeparator,
   inferHomePath,
+  isFilePathDriveRoot,
   isFilePathUnder,
   parentFilePath,
 } from '../.tmp-agent-tests/src/components/file-manager/filePathNav.js';
@@ -86,6 +87,10 @@ runTest('inferHomePath uses Users folder on Windows', () => {
   assert.equal(inferHomePath('/home/admin', '/etc'), '/home/admin');
   assert.equal(inferHomePath('/', '/etc'), '');
   assert.equal(inferHomePath('', '/etc'), '');
+  assert.equal(isFilePathDriveRoot('C:\\'), true);
+  assert.equal(isFilePathDriveRoot('C:\\Users\\gajen'), false);
+  assert.equal(inferHomePath('C:\\', 'C:\\'), '');
+  assert.equal(inferHomePath('', 'C:\\'), '');
 });
 
 runTest('isFilePathUnder matches home prefix', () => {

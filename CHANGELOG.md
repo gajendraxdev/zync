@@ -5,6 +5,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 ## [Unreleased]
 
 ### Added
+- **This PC / Volumes in Files:** Local Places lists other disks (Windows `C:` / `D:` / USB, macOS `/Volumes`, Linux mounts). Home stays Home; click a drive to open it. On Windows, WSL distros appear under Linux, separate from Home and `C:`. Remote SSH hosts do not show this section.
 - **Drag Files into a shell:** Drop a Files item onto any visible terminal pane, or onto a Shell tab, to paste quoted path(s) at the cursor (no Enter). Works from the full Files overlay via Shell tabs, and from a Files split onto any on-screen shell. Quoting matches the target shell (POSIX, PowerShell, or cmd) so `$()` / `%VAR%` / `!VAR!` cannot expand. ([df0cc65], [9dfba1b])
 - **Terminal inline images:** Sixel and iTerm inline images render in the shell (`fastfetch` logos, `chafa`, `imgcat`). The terminal advertises cell/window size so those tools pick bitmap output instead of mosaic ASCII. On Windows, local shells sideload Windows Terminal’s ConPTY pair so Sixel is not stripped by in-box conhost. Local PTYs no longer inherit `TERM_PROGRAM=vscode` / `WT_SESSION` when Zync was started from an IDE. Kitty graphics are not supported yet. ([0a2a077])
 - **Files owner/group:** List view has one Owner:Group column as `user:group` (Unix names when `/etc/passwd` and `/etc/group` resolve; otherwise uid/gid). Icon grid is icon + two-line name with an Explorer/GNOME highlight; size, owner, and date are in the tooltip. Windows local Files and WSL listings show —. ([#105], [a677afe], [b205754])
@@ -15,6 +16,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Files search:** Search still filters the current folder only. The unimplemented Search Everywhere shortcut (`Mod+Shift+F`) is removed so it no longer collides with Files. ([2d9b98b])
 
 ### Fixed
+- **Files Home from C:** Opening Local Disk (C:) no longer replaces Home with `C:\`. Home stays the user folder and remains clickable from the drive root.
 - **Files list/grid shortcuts:** Ctrl+Shift+1 / Ctrl+Shift+2 (Cmd+Shift on macOS) switch list and grid view again. Shift+digit sends `!` / `@` on a US layout; those chords now match. ([65c8f28])
 - **Shell-tab file drops:** Only an in-app Files drag can drop a path onto a Shell tab. Plain text from other apps is ignored. ([65c8f28])
 - **Drag a shell onto Files:** Dropping a Shell tab onto the full Files view now splits that shell beside Files, instead of switching away from Files and cancelling the drop. ([c4f2f4c])

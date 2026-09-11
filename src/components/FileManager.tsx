@@ -30,6 +30,7 @@ import { FileToolbar, FileBottomActionBar } from './file-manager/FileToolbar';
 import { FileHistoryControls } from './file-manager/FileHistoryControls';
 import { FileViewControls } from './file-manager/FileViewControls';
 import { FilePlacesSidebar } from './file-manager/FilePlacesSidebar';
+import { isFileVolumeList, type FileVolume } from './file-manager/fileVolumes';
 import { FileSideDrawer } from './file-manager/FileSideDrawer';
 import { FileFloatingBar } from './file-manager/FileFloatingBar';
 import { FILE_CHROME_NARROW_MAX, FILE_GRID_ZOOM, FILE_LIST_ZOOM, FILE_PLACES_WIDTH_PX, FILE_PROPERTIES_WIDTH_PX, clampFileGridZoom, clampFileListZoom } from './file-manager/fileChrome';
@@ -210,6 +211,7 @@ export const FileManager = memo(function FileManager({
   }, [updateFileManagerSettings, viewMode]);
   const [typeFilter, setTypeFilter] = useState<FileSearchTypeFilter>('all');
   const placesCollapsed = settings.fileManager.placesCollapsed ?? surface === 'pane';
+  const [volumes, setVolumes] = useState<FileVolume[]>([]);
   const {
     selectedFiles,
     setSelectedFiles,
@@ -989,7 +991,39 @@ export const FileManager = memo(function FileManager({
   // Move performUpload up to be stable and reusable
   // (Done above)
 
-  const homePath = inferHomePath(connection?.homePath, currentPath);
+  const inferredHome = inferHomePath(connection?.homePath, currentPath);
+  const [heldHome, setHeldHome] = useState<{ connectionId: string; path: string } | null>(null);
+  const activeHomeIdRef = useRef(activeConnectionId);
+  activeHomeIdRef.current = activeConnectionId;
+  useEffect(() => {
+    if (!activeConnectionId) {
+      setHeldHome(null);
+      return;
+    }
+    if (inferredHome) {
+      setHeldHome({ connectionId: activeConnectionId, path: inferredHome });
+      return;
+    }
+    setHeldHome((prev) => (prev?.connectionId === activeConnectionId ? prev : null));
+  }, [activeConnectionId, inferredHome]);
+  useEffect(() => {
+    if (!isLocal || !activeConnectionId || inferredHome) return;
+    const connId = activeConnectionId;
+    let cancelled = false;
+    void window.ipcRenderer.invoke('fs_cwd', { connectionId: 'local' }).then((cwd: unknown) => {
+      if (cancelled || connId !== activeHomeIdRef.current) return;
+      const path = typeof cwd === 'string' ? inferHomePath(cwd, cwd) : '';
+      if (!path) return;
+      setHeldHome((prev) => (
+        prev?.connectionId === connId && prev.path ? prev : { connectionId: connId, path }
+      ));
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [activeConnectionId, inferredHome, isLocal]);
+  const homePath = inferredHome
+    || (heldHome?.connectionId === activeConnectionId ? heldHome.path : '');
   const osName = isLocal
     ? (typeof navigator !== 'undefined' && /win/i.test(navigator.platform) ? 'Windows' : 'Operating System')
     : 'Operating System';
@@ -1055,6 +1089,24 @@ export const FileManager = memo(function FileManager({
   const handleTogglePlaces = useCallback(() => {
     void updateFileManagerSettings({ placesCollapsed: !placesCollapsed });
   }, [placesCollapsed, updateFileManagerSettings]);
+
+  useEffect(() => {
+    if (!isLocal) {
+      setVolumes([]);
+      return;
+    }
+    if (placesCollapsed) return;
+    let cancelled = false;
+    window.ipcRenderer.invoke('fs_list_volumes', { connectionId: 'local' }).then((rows: unknown) => {
+      if (cancelled) return;
+      setVolumes(isFileVolumeList(rows) ? rows : []);
+    }).catch(() => {
+      if (!cancelled) setVolumes([]);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isLocal, placesCollapsed]);
 
   const handleBack = useCallback(() => {
     if (activeConnectionId) navigateBack(activeConnectionId);
@@ -1701,10 +1753,12 @@ export const FileManager = memo(function FileManager({
         )}
         <FileSideDrawer open={!placesCollapsed} width={FILE_PLACES_WIDTH_PX} side="left" overlay={isNarrow}>
           <FilePlacesSidebar
-            homePath={homePath || currentPath}
+            homePath={homePath}
             currentPath={currentPath}
             recents={recentPaths}
             bookmarks={bookmarks}
+            volumes={isLocal ? volumes : []}
+            platform={typeof window !== 'undefined' ? window.electronUtils?.platform : undefined}
             onNavigate={navigateToPath}
             onAddBookmark={toggleBookmark}
             onRemoveBookmark={handleRemoveBookmark}

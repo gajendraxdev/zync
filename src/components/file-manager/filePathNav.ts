@@ -103,9 +103,18 @@ export function filePathDisplayCrumbs(
   ));
 }
 
+/** Drive roots (`C:\`, `/`) are Places disks, not the user Home folder. */
+export function isFilePathDriveRoot(path: string): boolean {
+  const value = normalizeFilePath(path);
+  if (!value || value === '/' || value === '~') return true;
+  return /^[A-Za-z]:\\?$/.test(value);
+}
+
 export function inferHomePath(explicit: string | undefined, currentPath: string): string {
   const given = (explicit || '').trim();
-  if (given && given !== '/' && given !== '~') return normalizeFilePath(given);
+  if (given && given !== '/' && given !== '~' && !isFilePathDriveRoot(given)) {
+    return normalizeFilePath(given);
+  }
   const win = currentPath.match(/^([A-Za-z]:\\Users\\[^\\/]+)/);
   if (win) return win[1];
   const mac = currentPath.match(/^(\/Users\/[^/]+)/);

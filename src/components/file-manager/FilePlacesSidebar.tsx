@@ -1,14 +1,23 @@
-import { Clock, Home, Plus, Star, X } from 'lucide-react';
+import { Clock, Cloud, Disc, HardDrive, Home, Plus, Server, Star, Usb, X } from 'lucide-react';
 import { memo, type ReactNode } from 'react';
 import { cn } from '../../lib/utils';
 import { FILE_RECENT_LIMIT } from './fileChrome';
 import { filePathLeafLabel, isFilePathEqual, normalizeFilePath } from './filePathNav';
+import {
+  fileVolumeDisplayLabel,
+  fileVolumesSectionTitle,
+  isPathInHome,
+  matchingVolumePath,
+  type FileVolume,
+} from './fileVolumes';
 
 export const FilePlacesSidebar = memo(function FilePlacesSidebar({
   homePath,
   currentPath,
   recents,
   bookmarks,
+  volumes = [],
+  platform,
   onNavigate,
   onAddBookmark,
   onRemoveBookmark,
@@ -17,27 +26,65 @@ export const FilePlacesSidebar = memo(function FilePlacesSidebar({
   currentPath: string;
   recents: string[];
   bookmarks: string[];
+  volumes?: FileVolume[];
+  platform?: string;
   onNavigate: (path: string) => void;
   onAddBookmark: () => void;
   onRemoveBookmark: (path: string) => void;
 }) {
-  const home = normalizeFilePath(homePath || '/');
+  const home = homePath ? normalizeFilePath(homePath) : '';
   const current = normalizeFilePath(currentPath);
   const recentRows = recents
     .map(normalizeFilePath)
     .filter((path) => path && !isFilePathEqual(path, home))
     .slice(0, FILE_RECENT_LIMIT);
   const bookmarked = bookmarks.some((path) => isFilePathEqual(path, current));
+  const inHome = isPathInHome(current, home);
+  const diskVolumes = volumes.filter((volume) => volume.kind !== 'linux');
+  const linuxVolumes = volumes.filter((volume) => volume.kind === 'linux');
+  const activeVolume = matchingVolumePath(current, volumes, home);
 
   return (
     <aside className="flex h-full w-full min-w-0 flex-col">
       <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto p-2">
         <PlaceButton
           label="Home"
-          active={isFilePathEqual(current, home)}
+          active={inHome}
           icon={<Home size={14} />}
-          onClick={() => onNavigate(home)}
+          onClick={() => {
+            if (home) onNavigate(home);
+          }}
         />
+        {diskVolumes.length > 0 && (
+          <>
+            <SectionLabel>{fileVolumesSectionTitle(platform)}</SectionLabel>
+            {diskVolumes.map((volume) => (
+              <PlaceButton
+                key={volume.id || volume.path}
+                label={fileVolumeDisplayLabel(volume)}
+                title={volume.path}
+                active={!inHome && activeVolume != null && isFilePathEqual(activeVolume, volume.path)}
+                icon={volumeKindIcon(volume.kind)}
+                onClick={() => onNavigate(volume.path)}
+              />
+            ))}
+          </>
+        )}
+        {linuxVolumes.length > 0 && (
+          <>
+            <SectionLabel>Linux</SectionLabel>
+            {linuxVolumes.map((volume) => (
+              <PlaceButton
+                key={volume.id || volume.path}
+                label={fileVolumeDisplayLabel(volume)}
+                title={volume.path}
+                active={activeVolume != null && isFilePathEqual(activeVolume, volume.path)}
+                icon={volumeKindIcon(volume.kind)}
+                onClick={() => onNavigate(volume.path)}
+              />
+            ))}
+          </>
+        )}
         {recentRows.length > 0 && (
           <>
             <SectionLabel>Recent</SectionLabel>
@@ -89,18 +136,28 @@ function SectionLabel({ children }: { children: ReactNode }) {
   );
 }
 
+function volumeKindIcon(kind: FileVolume['kind']) {
+  if (kind === 'removable') return <Usb size={14} />;
+  if (kind === 'optical') return <Disc size={14} />;
+  if (kind === 'network') return <Cloud size={14} />;
+  if (kind === 'linux') return <Server size={14} />;
+  return <HardDrive size={14} />;
+}
+
 function PlaceButton({
   label,
   icon,
   active,
   onClick,
   onRemove,
+  title,
 }: {
   label: string;
   icon: ReactNode;
   active: boolean;
   onClick: () => void;
   onRemove?: () => void;
+  title?: string;
 }) {
   return (
     <div
@@ -111,6 +168,7 @@ function PlaceButton({
     >
       <button
         type="button"
+        title={title}
         className="flex min-w-0 flex-1 items-center px-3 py-1.5 text-left"
         onClick={onClick}
       >

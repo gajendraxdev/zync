@@ -1,4 +1,5 @@
 use crate::fs::{FileEntry, FileSystem, SftpIdentityMaps};
+use crate::fs_volumes::{list_local_volumes, FileVolume};
 use crate::pty::PtyManager;
 use crate::ssh::{Client, SshManager};
 use crate::types::*;
@@ -3131,6 +3132,17 @@ async fn sftp_list_ctx(
             .ok_or_else(|| "Connection not found".to_string())?
     };
     Ok((sftp, cache))
+}
+
+#[tauri::command]
+pub async fn fs_list_volumes(connection_id: String) -> Result<Vec<FileVolume>, String> {
+    if connection_id != "local" {
+        return Ok(Vec::new());
+    }
+    tokio::task::spawn_blocking(list_local_volumes)
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

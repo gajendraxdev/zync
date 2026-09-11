@@ -61,6 +61,7 @@ const tests = [
   'tests/fileDropToTerminal.test.mjs',
   'tests/fileGridLayout.test.mjs',
   'tests/filePathNav.test.mjs',
+  'tests/fileVolumes.test.mjs',
   'tests/fileSearchFilter.test.mjs',
   'tests/errorBoundary.test.mjs',
   'tests/releaseNotesMarkdown.test.mjs',
