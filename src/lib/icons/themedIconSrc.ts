@@ -10,8 +10,14 @@ const entries = new Map<string, ThemedIconEntry>();
 const inflight = new Map<string, Promise<ThemedIconEntry>>();
 const listeners = new Map<string, Set<() => void>>();
 
-export function themedIconKey(theme: string, iconID: string, pluginId = ''): string {
-  return `${theme}\0${pluginId}\0${iconID}`;
+export function themedIconKey(
+  theme: string,
+  iconID: string,
+  pluginId = '',
+  pluginPath = '',
+  pluginIconsPath = '',
+): string {
+  return `${theme}\0${pluginId}\0${pluginPath}\0${pluginIconsPath}\0${iconID}`;
 }
 
 export function getThemedIconEntry(key: string): ThemedIconEntry | undefined {

@@ -18,6 +18,10 @@ runTest('themedIconKey is unique per theme, plugin, and icon id', () => {
   assert.notEqual(a, b);
   assert.notEqual(a, c);
   assert.equal(a, themedIconKey('vscode-icons', 'file_type_typescript', ''));
+  assert.notEqual(
+    themedIconKey('pack', 'file_type_ts', 'pack', '/old', 'icons'),
+    themedIconKey('pack', 'file_type_ts', 'pack', '/new', 'icons'),
+  );
 });
 
 runTest('fileTypeIconID maps many files of the same extension to one id', () => {

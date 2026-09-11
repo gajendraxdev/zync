@@ -23,17 +23,19 @@ function lucideFallback(type: string, isFolder: boolean): ComponentType<{ size?:
     if (isFolder) return Folder;
     if (type === 'connection') return Server;
     const lower = type.toLowerCase();
-    if (lower.startsWith('.') || ['sh', 'bash', 'zsh', 'fish', 'ps1'].includes(lower)) return Terminal;
+    const base = lower.split(/[/\\]/).pop() ?? lower;
+    const ext = base.includes('.') ? base.slice(base.lastIndexOf('.') + 1) : base;
+    if (lower.startsWith('.') || ['sh', 'bash', 'zsh', 'fish', 'ps1'].includes(ext)) return Terminal;
     if (
         lower.includes('config')
-        || ['yml', 'yaml', 'toml', 'ini', 'json'].includes(lower)
-        || ['exe', 'msi', 'apk', 'appimage', 'bin', 'iso', 'img', 'dll', 'so'].includes(lower)
+        || ['yml', 'yaml', 'toml', 'ini', 'json'].includes(ext)
+        || ['exe', 'msi', 'apk', 'appimage', 'bin', 'iso', 'img', 'dll', 'so'].includes(ext)
     ) return Settings;
-    if (lower.includes('key') || lower.includes('id_') || ['pem', 'pub', 'key', 'crt'].includes(lower)) return Lock;
-    if (['zip', 'tar', 'gz', 'rar', '7z'].includes(lower)) return Archive;
-    if (['db', 'sqlite', 'sql'].includes(lower)) return Database;
-    if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'].includes(lower)) return Image;
-    if (['js', 'ts', 'py', 'go', 'rs', 'c', 'cpp'].includes(lower)) return FileCode;
+    if (lower.includes('key') || lower.includes('id_') || ['pem', 'pub', 'key', 'crt'].includes(ext)) return Lock;
+    if (['zip', 'tar', 'gz', 'rar', '7z'].includes(ext)) return Archive;
+    if (['db', 'sqlite', 'sql'].includes(ext)) return Database;
+    if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'].includes(ext)) return Image;
+    if (['js', 'ts', 'py', 'go', 'rs', 'c', 'cpp'].includes(ext)) return FileCode;
     return File;
 }
 
@@ -53,9 +55,11 @@ export const DynamicIcon = memo(function DynamicIcon({
 
     const iconID = fileTypeIconID(type, isFolder, iconTheme);
     const pluginId = activePlugin?.manifest.id ?? '';
-    const key = themedIconKey(iconTheme, iconID, pluginId);
+    const pluginPath = activePlugin?.path ?? '';
     const pluginIconsPath = activePlugin?.manifest?.iconsPath
-        ?? (activePlugin?.manifest as { icons_path?: string } | undefined)?.icons_path;
+        ?? (activePlugin?.manifest as { icons_path?: string } | undefined)?.icons_path
+        ?? '';
+    const key = themedIconKey(iconTheme, iconID, pluginId, pluginPath, pluginIconsPath);
 
     const [, setEpoch] = useState(0);
     const cached = iconTheme === 'lucide' ? { status: 'missing' as const } : getThemedIconEntry(key);
@@ -63,9 +67,10 @@ export const DynamicIcon = memo(function DynamicIcon({
     useEffect(() => {
         if (iconTheme === 'lucide') return;
         const unsub = subscribeThemedIcon(key, () => setEpoch((n) => n + 1));
-        ensureThemedIcon(key, iconID, iconTheme, activePlugin?.path, pluginIconsPath);
+        setEpoch((n) => n + 1);
+        ensureThemedIcon(key, iconID, iconTheme, pluginPath || undefined, pluginIconsPath || undefined);
         return unsub;
-    }, [activePlugin?.path, iconID, iconTheme, key, pluginIconsPath]);
+    }, [iconID, iconTheme, key, pluginIconsPath, pluginPath]);
 
     const src = cached?.status === 'ready' ? cached.src : null;
     const showFallback = iconTheme === 'lucide' || cached?.status !== 'ready';
