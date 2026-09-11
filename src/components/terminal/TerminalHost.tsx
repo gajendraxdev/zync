@@ -1,8 +1,13 @@
-import { memo, type CSSProperties, type RefObject } from 'react';
+import { memo, useCallback, useState, type CSSProperties, type DragEvent, type RefObject } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { cn } from '../../lib/utils';
+import { useInternalFileDrag } from '../../lib/dragDrop';
 import type { AppSettings } from '../../store/settingsSlice';
 import type { GhostLayoutHint } from '../../lib/ghostSuggestions/cursorPosition';
+import { LOCAL_TERMINAL_CONNECTION_ID } from '../../lib/terminal/connectionIds.js';
+import { acceptFilePathDrag } from '../../lib/terminal/fileDropToTerminal';
+import { pasteFilePathsIntoTerminal } from '../../lib/terminal/pasteFileDropToTerminal';
+import { isWin32Platform } from '../../lib/terminal/spawnContext.js';
 import { GhostSuggestionOverlay } from './GhostSuggestionOverlay';
 import { TerminalSearchBar } from './TerminalSearchBar';
 import { TerminalContextMenu } from './TerminalContextMenu';
@@ -58,12 +63,34 @@ export const TerminalHost = memo(function TerminalHost({
   truncateLabel,
   onAcceptGhostSuffix,
 }: TerminalHostProps) {
+  const fileDragActive = useInternalFileDrag();
+  const [fileDropHover, setFileDropHover] = useState(false);
+  const windowsPaths = connectionId === LOCAL_TERMINAL_CONNECTION_ID && isWin32Platform();
+
+  const handleFileDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
+    if (!acceptFilePathDrag(e)) return;
+    setFileDropHover(true);
+  }, []);
+
+  const handleFileDragLeave = useCallback((e: DragEvent<HTMLDivElement>) => {
+    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+    setFileDropHover(false);
+  }, []);
+
+  const handleFileDrop = useCallback((e: DragEvent<HTMLDivElement>) => {
+    setFileDropHover(false);
+    if (!acceptFilePathDrag(e)) return;
+    e.stopPropagation();
+    pasteFilePathsIntoTerminal(sessionId, e.dataTransfer, windowsPaths);
+  }, [sessionId, windowsPaths]);
+
   return (
     <div
       key="connected"
       className={cn(
         'h-full w-full min-h-0 min-w-0 relative group outline-none',
         terminalTransparencyEnabled ? 'terminal-transparent' : 'bg-app-bg',
+        fileDropHover && 'ring-2 ring-inset ring-app-accent/80',
       )}
       style={terminalHostStyle}
       tabIndex={-1}
@@ -122,6 +149,17 @@ export const TerminalHost = memo(function TerminalHost({
           )}
         </div>
       </div>
+      {fileDragActive && (
+        <div
+          className={cn(
+            'absolute inset-0 z-30 pointer-events-auto',
+            fileDropHover && 'bg-app-accent/10',
+          )}
+          onDragOver={handleFileDragOver}
+          onDragLeave={handleFileDragLeave}
+          onDrop={handleFileDrop}
+        />
+      )}
     </div>
   );
 });

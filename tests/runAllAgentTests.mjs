@@ -58,6 +58,7 @@ const tests = [
   'tests/connectionTabService.test.mjs',
   'tests/ghostSuggestionsHelpers.test.mjs',
   'tests/terminalOutputStream.test.mjs',
+  'tests/fileDropToTerminal.test.mjs',
   'tests/fileGridLayout.test.mjs',
   'tests/filePathNav.test.mjs',
   'tests/fileSearchFilter.test.mjs',

@@ -145,6 +145,7 @@
         "src/lib/terminal/xtermOptions.ts",
         "src/lib/terminal/rendererSetup.ts",
         "src/lib/terminal/instanceApi.ts",
+        "src/lib/terminal/fileDropToTerminal.ts",
         "src/lib/terminal/inputPipeline.ts",
         "src/lib/terminal/inputQueue.ts",
         "src/lib/terminal/connectionBackend.ts",

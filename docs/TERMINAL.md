@@ -1,6 +1,6 @@
 # Zync Terminal — Architecture & Reference
 
-**Last updated:** 2026-09-09  
+**Last updated:** 2026-09-11  
 **Applies to:** Zync v2.30.0+
 
 This document describes **how Zync’s integrated terminal works today** — local and remote shells, stack choices, architecture, IPC, renderer, lifecycle, ghost suggestions, settings, and code layout. It is the single place to learn what the terminal system is and how it behaves, not a development plan or backlog.
@@ -142,7 +142,7 @@ flowchart TB
 | `PaneLayoutView.tsx` / `PaneDivider.tsx` | Split tree renderer; term leaves and Files leaves; 1px seams; accent on the focused pane's inner edges only; drag, scroll, or arrow keys to resize; double-click a seam to even both sides. New splits grow in once (`paneLayout/intro.ts`); divider drag/scroll does not use that transition |
 | `paneLayout/nav.ts` | Spatial neighbor for Ctrl+Alt+arrows |
 | `Terminal.tsx` | Hook wiring (~270 lines): lifecycle, theme, search, ghost, keybindings, global shortcuts |
-| `TerminalHost.tsx` | Connected-state presentation: search bar, context menu, ghost overlays, xterm container |
+| `TerminalHost.tsx` | Connected-state presentation: search bar, context menu, ghost overlays, xterm container. While a Files drag is active, a pane overlay accepts the drop on **any visible shell** (not only the Files split neighbor). Drop a Files item onto a **Shell tab** to paste into that session even when Files is the full overlay. Quoted path(s) paste at the cursor (no Enter). Local Windows uses cmd/PowerShell quoting; remote and Unix local shells use POSIX quoting. |
 | `TerminalDisconnectedView.tsx` | Connecting / error / reconnect UI for remote hosts |
 | `TerminalSearchBar.tsx` | Find UI; removed from DOM when closed (a11y) |
 | `TerminalContextMenu.tsx` | Copy/paste via shared clipboard helper; **Open File Manager Here** jumps to Files at the shell cwd; **Open File Manager in split** docks Left / Right / Bottom |
@@ -305,7 +305,7 @@ xterm.onData
 
 **Ready gating:** Input buffers while `starting` or `!spawned` until `terminal-ready` with matching generation.
 
-**External writes:** Snippets, plugins, command palette route through `queueTerminalInput` (not raw `terminal:write`).
+**External writes:** Snippets, plugins, command palette, and Files → terminal drag route through `queueTerminalInput` (not raw `terminal:write`).
 
 **Ghost IPC:** Skipped when shell tab is hidden (`isVisibleRef`).
 
@@ -537,7 +537,8 @@ src/components/terminal/
 
 src/lib/paneLayout/        # Split tree, cap, persist, dock geometry, split intro; term + feature leaves
 src/components/layout/tabDock/  # Drag a tab to an edge to dock it as a pane
-src/lib/terminal/          # See §5 — 39 modules, index.ts public API
+src/components/layout/CombinedTabBar.tsx  # Shell-tab drop target for Files → terminal (with TerminalHost.tsx)
+src/lib/terminal/          # See §5 — modules, index.ts public API (`fileDropToTerminal.ts` / `pasteFileDropToTerminal.ts` for Files → shell)
 src/lib/ghostSuggestions/  # See §15
 
 src/store/terminalSlice.ts
@@ -562,6 +563,7 @@ src-tauri/src/ghost/
 
 ```
 tests/terminal*.test.mjs
+tests/fileDropToTerminal.test.mjs
 tests/paneLayout.test.mjs
 tests/ghostSuggestionsHelpers.test.mjs
 tests/runTerminalRendererTests.mjs
