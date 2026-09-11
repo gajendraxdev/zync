@@ -4,10 +4,8 @@ import { cn } from '../../lib/utils';
 import { useInternalFileDrag } from '../../lib/dragDrop';
 import type { AppSettings } from '../../store/settingsSlice';
 import type { GhostLayoutHint } from '../../lib/ghostSuggestions/cursorPosition';
-import { LOCAL_TERMINAL_CONNECTION_ID } from '../../lib/terminal/connectionIds.js';
 import { acceptFilePathDrag } from '../../lib/terminal/fileDropToTerminal';
 import { pasteFilePathsIntoTerminal } from '../../lib/terminal/pasteFileDropToTerminal';
-import { isWin32Platform } from '../../lib/terminal/spawnContext.js';
 import { GhostSuggestionOverlay } from './GhostSuggestionOverlay';
 import { TerminalSearchBar } from './TerminalSearchBar';
 import { TerminalContextMenu } from './TerminalContextMenu';
@@ -65,7 +63,6 @@ export const TerminalHost = memo(function TerminalHost({
 }: TerminalHostProps) {
   const fileDragActive = useInternalFileDrag();
   const [fileDropHover, setFileDropHover] = useState(false);
-  const windowsPaths = connectionId === LOCAL_TERMINAL_CONNECTION_ID && isWin32Platform();
 
   const handleFileDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
     if (!acceptFilePathDrag(e)) return;
@@ -81,8 +78,8 @@ export const TerminalHost = memo(function TerminalHost({
     setFileDropHover(false);
     if (!acceptFilePathDrag(e)) return;
     e.stopPropagation();
-    pasteFilePathsIntoTerminal(sessionId, e.dataTransfer, windowsPaths);
-  }, [sessionId, windowsPaths]);
+    pasteFilePathsIntoTerminal(sessionId, e.dataTransfer, connectionId);
+  }, [sessionId, connectionId]);
 
   return (
     <div

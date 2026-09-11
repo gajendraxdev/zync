@@ -249,7 +249,7 @@ Each spawn/suspend bumps `generation` on the cache entry. Output channel frames 
 
 | Path | `terminal-exit` emitted? | Frontend behavior |
 |------|--------------------------|-----------------|
-| User types `exit` / Ctrl+D / shell ends | Yes | Close that pane (or the tab if it is the last pane) via `closePaneOnShellExit` |
+| User types `exit` / Ctrl+D / shell ends | Yes | Close that pane via `closePaneOnShellExit`. If it was the last shell beside Files (or another feature), the tab stays and that feature fills the view. |
 | Idle suspend kill | No | Write suspend notice; `suspendedByIdle` flag |
 | Panel overlay suspend | No | `suspendedByPanel`; respawn on return |
 | Programmatic close | No | Tear down handles only |

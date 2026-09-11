@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import {
   extractFileManagerDropPaths,
+  fileDropShellKind,
   formatFilePathsForTerminal,
   isFileManagerPathDrag,
+  quoteCmdExeArg,
   quotePosixShellArg,
-  quoteWindowsShellArg,
+  quotePowerShellArg,
 } from '../.tmp-agent-tests/src/lib/terminal/fileDropToTerminal.js';
 
 function runTest(name, fn) {
@@ -32,16 +34,37 @@ runTest('quotePosixShellArg leaves plain tokens unquoted', () => {
   assert.equal(quotePosixShellArg(''), "''");
 });
 
-runTest('quoteWindowsShellArg doubles inner quotes', () => {
-  assert.equal(quoteWindowsShellArg('C:\\Users\\a.txt'), 'C:\\Users\\a.txt');
-  assert.equal(quoteWindowsShellArg('C:\\My Docs\\a.txt'), '"C:\\My Docs\\a.txt"');
-  assert.equal(quoteWindowsShellArg('say "hi"'), '"say ""hi"""');
+runTest('quotePowerShellArg single-quotes and doubles apostrophes', () => {
+  assert.equal(quotePowerShellArg('C:\\Users\\a.txt'), `'C:\\Users\\a.txt'`);
+  assert.equal(quotePowerShellArg("it's"), `'it''s'`);
+  assert.equal(quotePowerShellArg('$(calc)'), `'$(calc)'`);
+  assert.equal(quotePowerShellArg('$env:SECRET'), `'$env:SECRET'`);
+});
+
+runTest('quoteCmdExeArg breaks percent and delayed-expansion variables', () => {
+  assert.equal(quoteCmdExeArg('C:\\Users\\a.txt'), '"C:\\Users\\a.txt"');
+  assert.equal(quoteCmdExeArg('%PATH%'), '"%^PATH%^"');
+  assert.equal(quoteCmdExeArg('!VAR!'), '"!^VAR!^"');
+  assert.equal(quoteCmdExeArg('say "hi"'), '"say ""hi"""');
+  assert.equal(quoteCmdExeArg('a$(b)'), '"a$(b)"');
+});
+
+runTest('fileDropShellKind maps local Windows shells', () => {
+  assert.equal(fileDropShellKind({ localWindows: false, shellId: 'cmd' }), 'posix');
+  assert.equal(fileDropShellKind({ localWindows: true, shellId: 'cmd' }), 'cmd');
+  assert.equal(fileDropShellKind({ localWindows: true, shellId: 'C:\\Windows\\System32\\cmd.exe' }), 'cmd');
+  assert.equal(fileDropShellKind({ localWindows: true, shellId: 'powershell' }), 'powershell');
+  assert.equal(fileDropShellKind({ localWindows: true, shellId: 'pwsh' }), 'powershell');
+  assert.equal(fileDropShellKind({ localWindows: true, shellId: 'default' }), 'powershell');
+  assert.equal(fileDropShellKind({ localWindows: true, shellId: 'wsl' }), 'posix');
+  assert.equal(fileDropShellKind({ localWindows: true, shellId: 'bash' }), 'posix');
 });
 
 runTest('formatFilePathsForTerminal joins quoted paths with a trailing space', () => {
-  assert.equal(formatFilePathsForTerminal(['/tmp/a', '/tmp/b c'], false), `/tmp/a '/tmp/b c' `);
-  assert.equal(formatFilePathsForTerminal(['C:\\a b'], true), '"C:\\a b" ');
-  assert.equal(formatFilePathsForTerminal([], false), '');
+  assert.equal(formatFilePathsForTerminal(['/tmp/a', '/tmp/b c'], 'posix'), `/tmp/a '/tmp/b c' `);
+  assert.equal(formatFilePathsForTerminal(['C:\\a b'], 'powershell'), `'C:\\a b' `);
+  assert.equal(formatFilePathsForTerminal(['%PATH%'], 'cmd'), '"%^PATH%^" ');
+  assert.equal(formatFilePathsForTerminal([], 'posix'), '');
 });
 
 runTest('extractFileManagerDropPaths reads server-file JSON first', () => {
@@ -56,9 +79,9 @@ runTest('extractFileManagerDropPaths reads server-file JSON first', () => {
   assert.deepEqual(extractFileManagerDropPaths(dt), ['/one', '/two']);
 });
 
-runTest('extractFileManagerDropPaths falls back to text/plain lines', () => {
+runTest('extractFileManagerDropPaths preserves whitespace in text/plain lines', () => {
   const dt = dataTransfer({ 'text/plain': '/a\n /b \n' });
-  assert.deepEqual(extractFileManagerDropPaths(dt), ['/a', '/b']);
+  assert.deepEqual(extractFileManagerDropPaths(dt), ['/a', ' /b ']);
 });
 
 runTest('extractFileManagerDropPaths uses fallback only when DataTransfer is empty', () => {

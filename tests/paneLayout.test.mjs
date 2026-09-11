@@ -8,12 +8,14 @@ import {
   dropFeature,
   dropSplitIntro,
   dropTerm,
+  featureToPromoteOnLastShellExit,
   focusPane,
   neighborPaneId,
   oppositeDockEdge,
   paneBoxAtPoint,
   paneNavDirectionFromKey,
   isFeaturePaneFocused,
+  layoutFeatureIds,
   isSplitFeatureId,
   isSplitLayout,
   layoutHasFeature,
@@ -480,6 +482,21 @@ runTest('openFeatureInLayout refuses to replace a shell when the pane cap is ful
   assert.equal(refused.ok, false);
   if (!refused.ok) assert.equal(refused.reason, 'cap');
   assert.equal(layoutHasFeature(layout, 'files'), false);
+});
+
+runTest('featureToPromoteOnLastShellExit keeps Files when the last shell exits', () => {
+  const opened = openFeatureInLayout(singlePane('term-a', 'pane-a'), 'files');
+  assert.equal(opened.ok, true);
+  if (!opened.ok) return;
+  assert.deepEqual(layoutFeatureIds(opened.layout), ['files']);
+  assert.equal(featureToPromoteOnLastShellExit(opened.layout, 'term-a'), 'files');
+  const twoShells = splitPane(opened.layout, opened.layout.activePaneId, 'vertical', {
+    kind: 'term',
+    termId: 'term-b',
+  });
+  assert.equal(twoShells.ok, true);
+  if (!twoShells.ok) return;
+  assert.equal(featureToPromoteOnLastShellExit(twoShells.layout, 'term-b'), null);
 });
 
 runTest('dropFeature unsplits Files and keeps the shell; last-term drop with Files remaining is null', () => {

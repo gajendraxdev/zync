@@ -9,6 +9,7 @@ import {
     oppositeDockEdge,
     dropFeature,
     dropTerm,
+    featureToPromoteOnLastShellExit,
     findLeafByFeature,
     findNode,
     firstLeaf,
@@ -425,7 +426,14 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
     },
 
     closePaneOnShellExit: (connectionId, termId) => {
+        const owner = findLayoutOwner(get().paneLayouts[connectionId], termId);
+        const layout = owner ? get().paneLayouts[connectionId]?.[owner] : undefined;
+        const promote = featureToPromoteOnLastShellExit(layout, termId);
         get().closeTerminal(connectionId, termId);
+        if (!promote) return;
+        const tab = get().tabs.find((item) => item.connectionId === connectionId && item.id === get().activeTabId)
+            ?? get().tabs.find((item) => item.connectionId === connectionId);
+        if (tab) get().setTabView(tab.id, promote);
     },
 
     /** @inheritdoc */

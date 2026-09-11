@@ -95,6 +95,29 @@ export function layoutHasFeature(
     return Boolean(layout && findLeafByFeature(layout.root, featureId));
 }
 
+export function layoutFeatureIds(layout: PaneLayout | null | undefined): SplitFeatureId[] {
+    if (!layout) return [];
+    const ids: SplitFeatureId[] = [];
+    for (const leaf of collectLeaves(layout.root)) {
+        if (!isFeatureContent(leaf.content)) continue;
+        if (!ids.includes(leaf.content.featureId)) ids.push(leaf.content.featureId);
+    }
+    return ids;
+}
+
+/** When `exit` kills the last shell beside Files/etc, promote that feature instead of closing the tab. */
+export function featureToPromoteOnLastShellExit(
+    layout: PaneLayout | null | undefined,
+    dyingTermId: string,
+): SplitFeatureId | null {
+    if (!layout) return null;
+    if (visibleTermIds(layout).some((id) => id !== dyingTermId)) return null;
+    const features = layoutFeatureIds(layout);
+    if (features.length === 0) return null;
+    if (features.includes('files')) return 'files';
+    return features[0] ?? null;
+}
+
 export function findParentSplit(node: PaneNode, childId: string): PaneSplit | null {
     if (isPaneLeaf(node)) return null;
     if (node.children[0].id === childId || node.children[1].id === childId) return node;

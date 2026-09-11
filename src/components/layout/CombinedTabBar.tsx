@@ -29,7 +29,6 @@ import { splitOpenMenuItems, useDockTabPointer, type DockTabPointerHandlers } fr
 import { useInternalFileDrag } from '../../lib/dragDrop';
 import { acceptFilePathDrag } from '../../lib/terminal/fileDropToTerminal';
 import { pasteFilePathsIntoTerminal } from '../../lib/terminal/pasteFileDropToTerminal';
-import { isWin32Platform } from '../../lib/terminal/spawnContext';
 
 
 interface CombinedTabBarProps {
@@ -211,7 +210,6 @@ export const CombinedTabBar = memo(function CombinedTabBar({
     const { begin: beginDockPointer, consumeClickIfDragged } = useDockTabPointer(dockPointer);
     const fileDragActive = useInternalFileDrag();
     const [fileDropTermId, setFileDropTermId] = useState<string | null>(null);
-    const windowsFileDrop = connectionId === 'local' && isWin32Platform();
     const handleTermFileDragOver = useCallback((event: DragEvent<HTMLDivElement>, termId: string) => {
         if (!acceptFilePathDrag(event)) return;
         setFileDropTermId(termId);
@@ -221,8 +219,8 @@ export const CombinedTabBar = memo(function CombinedTabBar({
         if (!acceptFilePathDrag(event)) return;
         event.stopPropagation();
         onTabSelect('terminal', termId);
-        pasteFilePathsIntoTerminal(termId, event.dataTransfer, windowsFileDrop);
-    }, [onTabSelect, windowsFileDrop]);
+        pasteFilePathsIntoTerminal(termId, event.dataTransfer, connectionId);
+    }, [connectionId, onTabSelect]);
     const terminals = useAppStore(useShallow(state =>
         (state.terminals[connectionId] || []).filter(term => term.tabVisible !== false),
     ));

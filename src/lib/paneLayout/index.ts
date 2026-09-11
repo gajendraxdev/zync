@@ -72,6 +72,8 @@ export {
     isSplitLayout,
     isTermContent,
     layoutHasFeature,
+    layoutFeatureIds,
+    featureToPromoteOnLastShellExit,
     leafCount,
     termLeafCount,
     treeDepth,

@@ -1,7 +1,23 @@
 import { getCurrentDragPaths } from '../dragDrop.js';
+import { useAppStore } from '../../store/useAppStore';
+import { LOCAL_TERMINAL_CONNECTION_ID } from './connectionIds.js';
+import { extractFileManagerDropPaths, fileDropShellKind, formatFilePathsForTerminal, type FileDropShellKind } from './fileDropToTerminal.js';
 import { queueTerminalInput } from './inputPipeline.js';
+import { isWin32Platform, resolveTerminalSpawnParams } from './spawnContext.js';
 import { terminalCache } from './terminalCache.js';
-import { extractFileManagerDropPaths, formatFilePathsForTerminal } from './fileDropToTerminal.js';
+
+export function resolveFileDropShellKind(connectionId: string, termId: string): FileDropShellKind {
+  const localWindows = connectionId === LOCAL_TERMINAL_CONNECTION_ID && isWin32Platform();
+  if (!localWindows) return 'posix';
+  const state = useAppStore.getState();
+  const { shell } = resolveTerminalSpawnParams(
+    connectionId,
+    termId,
+    state.terminals,
+    state.settings.localTerm?.windowsShell,
+  );
+  return fileDropShellKind({ localWindows: true, shellId: shell });
+}
 
 function sendPaths(termId: string, text: string): boolean {
   const cached = terminalCache.get(termId);
@@ -15,11 +31,11 @@ function sendPaths(termId: string, text: string): boolean {
 export function pasteFilePathsIntoTerminal(
   termId: string,
   dataTransfer: DataTransfer,
-  windows: boolean,
+  connectionId: string,
 ): boolean {
   const text = formatFilePathsForTerminal(
     extractFileManagerDropPaths(dataTransfer, getCurrentDragPaths()),
-    windows,
+    resolveFileDropShellKind(connectionId, termId),
   );
   if (!text) return false;
   if (sendPaths(termId, text)) return true;
