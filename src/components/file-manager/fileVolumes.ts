@@ -83,6 +83,28 @@ export function matchingVolumePath(
   return best;
 }
 
+const VOLUME_TTL_MS = 30_000;
+let volumeCache: { at: number; rows: FileVolume[] } | null = null;
+let volumeInflight: Promise<FileVolume[]> | null = null;
+
+export function loadLocalFileVolumes(): Promise<FileVolume[]> {
+  if (volumeCache && Date.now() - volumeCache.at < VOLUME_TTL_MS) {
+    return Promise.resolve(volumeCache.rows);
+  }
+  if (volumeInflight) return volumeInflight;
+  volumeInflight = window.ipcRenderer.invoke('fs_list_volumes', { connectionId: 'local' })
+    .then((rows: unknown) => {
+      const list = isFileVolumeList(rows) ? rows : [];
+      volumeCache = { at: Date.now(), rows: list };
+      return list;
+    })
+    .catch(() => [] as FileVolume[])
+    .finally(() => {
+      volumeInflight = null;
+    });
+  return volumeInflight;
+}
+
 export function isFileVolumeList(value: unknown): value is FileVolume[] {
   if (!Array.isArray(value)) return false;
   return value.every((item) => (

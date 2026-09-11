@@ -160,13 +160,15 @@ export const DynamicIcon = memo(function DynamicIcon({
             {resolvedSrc && (
                 <img
                     src={resolvedSrc}
-                    alt={type}
+                    alt=""
                     style={{ width: size, height: size }}
                     className={cn(
                         "shrink-0 select-none",
                         isLoaded ? "opacity-100" : "opacity-0"
                     )}
                     draggable={false}
+                    loading="lazy"
+                    decoding="async"
                     onLoad={() => setIsLoaded(true)}
                     onError={() => {
                         setIsLoaded(false);

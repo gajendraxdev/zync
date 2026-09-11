@@ -30,7 +30,7 @@ import { FileToolbar, FileBottomActionBar } from './file-manager/FileToolbar';
 import { FileHistoryControls } from './file-manager/FileHistoryControls';
 import { FileViewControls } from './file-manager/FileViewControls';
 import { FilePlacesSidebar } from './file-manager/FilePlacesSidebar';
-import { isFileVolumeList, type FileVolume } from './file-manager/fileVolumes';
+import { loadLocalFileVolumes, type FileVolume } from './file-manager/fileVolumes';
 import { FileSideDrawer } from './file-manager/FileSideDrawer';
 import { FileFloatingBar } from './file-manager/FileFloatingBar';
 import { FILE_CHROME_NARROW_MAX, FILE_GRID_ZOOM, FILE_LIST_ZOOM, FILE_PLACES_WIDTH_PX, FILE_PROPERTIES_WIDTH_PX, clampFileGridZoom, clampFileListZoom } from './file-manager/fileChrome';
@@ -1097,11 +1097,8 @@ export const FileManager = memo(function FileManager({
     }
     if (placesCollapsed) return;
     let cancelled = false;
-    window.ipcRenderer.invoke('fs_list_volumes', { connectionId: 'local' }).then((rows: unknown) => {
-      if (cancelled) return;
-      setVolumes(isFileVolumeList(rows) ? rows : []);
-    }).catch(() => {
-      if (!cancelled) setVolumes([]);
+    void loadLocalFileVolumes().then((rows) => {
+      if (!cancelled) setVolumes(rows);
     });
     return () => {
       cancelled = true;

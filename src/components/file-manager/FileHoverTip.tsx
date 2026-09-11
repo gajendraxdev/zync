@@ -19,6 +19,7 @@ export function useFileHoverTip(
 } {
   const [tip, setTip] = useState<{ text: string; x: number; y: number } | null>(null);
   const timerRef = useRef<number | null>(null);
+  const tipOpenRef = useRef(false);
 
   const clearTimer = useCallback(() => {
     if (timerRef.current == null) return;
@@ -27,7 +28,10 @@ export function useFileHoverTip(
   }, []);
 
   const hide = useCallback(() => {
+    const hadTimer = timerRef.current != null;
     clearTimer();
+    if (!hadTimer && !tipOpenRef.current) return;
+    tipOpenRef.current = false;
     setTip(null);
   }, [clearTimer]);
 
@@ -37,6 +41,7 @@ export function useFileHoverTip(
       timerRef.current = null;
       if (!el.isConnected) return;
       const rect = el.getBoundingClientRect();
+      tipOpenRef.current = true;
       setTip({
         text: fileHoverHint(file, dateTimeFormat),
         x: rect.left + rect.width / 2,

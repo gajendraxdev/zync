@@ -167,7 +167,7 @@ const FileGridItem = memo(forwardRef<HTMLDivElement, {
         'group relative cursor-pointer select-none',
         viewMode === 'grid'
           ? cn(
-            'flex flex-col items-center w-full min-w-0 rounded-xl transition-colors duration-75',
+            'flex flex-col items-center w-full min-w-0 rounded-xl',
             'px-1 py-1 gap-0.5',
             isSelected
               ? 'bg-app-accent/20'
@@ -313,7 +313,7 @@ const FileListItem = memo(forwardRef<HTMLDivElement, {
         onContextMenu(e, file);
       }}
       className={cn(
-        'h-full w-full min-w-0 border-b border-app-border/15 cursor-pointer transition-colors outline-none',
+        'h-full w-full min-w-0 border-b border-app-border/15 cursor-pointer outline-none',
         'grid items-center overflow-hidden',
         'hover:bg-app-surface/40',
         isSelected && 'bg-app-accent/10 hover:bg-app-accent/14',
@@ -676,6 +676,7 @@ export const FileGrid = memo(function FileGrid({
     gap: zoomTrack.gap,
     justifyContent: 'stretch',
     alignContent: 'start',
+    ['--file-grid-row' as string]: `${zoomTrack.rowHeight}px`,
   }), [zoomTrack.minTrack, zoomTrack.rowHeight, zoomTrack.gap]);
 
   const scheduleWidth = useCallback((width: number) => {
@@ -704,9 +705,19 @@ export const FileGrid = memo(function FileGrid({
       reportColumnCount(computeFileGridMetrics(el.clientWidth, compactMode, gridZoomLevel).columnCount);
     };
     apply();
-    const observer = new ResizeObserver(apply);
+    let raf = 0;
+    const observer = new ResizeObserver(() => {
+      if (raf !== 0) return;
+      raf = window.requestAnimationFrame(() => {
+        raf = 0;
+        apply();
+      });
+    });
     observer.observe(el);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (raf !== 0) window.cancelAnimationFrame(raf);
+    };
   }, [viewMode, useVirtualIconGrid, compactMode, gridZoomLevel, reportColumnCount, files.length]);
 
   useEffect(() => {
@@ -897,7 +908,7 @@ export const FileGrid = memo(function FileGrid({
             columnWidth={gridColumnWidth}
             rowCount={gridRowCount}
             rowHeight={gridRowHeight}
-            overscanCount={1}
+            overscanCount={2}
             style={{ height: '100%', width: '100%', overflowX: 'hidden' }}
             onResize={({ width }) => {
               scheduleWidth(width);
@@ -907,14 +918,14 @@ export const FileGrid = memo(function FileGrid({
           <div
             ref={cssGridRef}
             role="list"
-            className="h-full w-full min-h-0 min-w-0 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]"
+            className="h-full w-full min-h-0 min-w-0 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable] [contain:layout_paint]"
             style={cssGridStyle}
           >
             {files.map((file) => (
               <div
                 key={file.path || file.name}
                 role="listitem"
-                className="min-w-0 w-full flex items-start justify-center p-1"
+                className="min-w-0 w-full flex items-start justify-center p-1 [content-visibility:auto] [contain:layout_paint] [contain-intrinsic-size:auto_var(--file-grid-row)]"
               >
                 <FileGridItem
                   file={file}

@@ -3,6 +3,7 @@
 
 use anyhow::Result;
 use serde::Serialize;
+#[cfg(any(target_os = "linux", test))]
 use std::collections::HashSet;
 
 const MAX_VOLUMES: usize = 64;
@@ -361,6 +362,7 @@ fn linux_volumes() -> Result<Vec<FileVolume>> {
     Ok(volumes_from_proc_mounts(&text))
 }
 
+#[cfg(any(target_os = "linux", test))]
 pub fn unescape_mount_field(raw: &str) -> String {
     let bytes = raw.as_bytes();
     let mut out = String::with_capacity(raw.len());
@@ -382,6 +384,7 @@ pub fn unescape_mount_field(raw: &str) -> String {
     out
 }
 
+#[cfg(any(target_os = "linux", test))]
 pub fn keep_linux_fstype(fstype: &str) -> bool {
     matches!(
         fstype,
@@ -415,6 +418,7 @@ pub fn keep_linux_fstype(fstype: &str) -> bool {
     )
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn linux_kind(fstype: &str, mountpoint: &str) -> FileVolumeKind {
     if matches!(fstype, "nfs" | "nfs4" | "cifs" | "smb3" | "fuse.sshfs") {
         return FileVolumeKind::Network;
@@ -431,6 +435,7 @@ fn linux_kind(fstype: &str, mountpoint: &str) -> FileVolumeKind {
     FileVolumeKind::Fixed
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn linux_label(mountpoint: &str) -> String {
     if mountpoint == "/" {
         return "Filesystem".to_string();
@@ -443,6 +448,7 @@ fn linux_label(mountpoint: &str) -> String {
 }
 
 /// Parse `/proc/self/mounts` into user-facing volumes. Used by Linux and unit tests.
+#[cfg(any(target_os = "linux", test))]
 pub fn volumes_from_proc_mounts(text: &str) -> Vec<FileVolume> {
     let mut seen = HashSet::new();
     let mut volumes = Vec::new();
