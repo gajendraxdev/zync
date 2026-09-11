@@ -365,23 +365,23 @@ fn linux_volumes() -> Result<Vec<FileVolume>> {
 #[cfg(any(target_os = "linux", test))]
 pub fn unescape_mount_field(raw: &str) -> String {
     let bytes = raw.as_bytes();
-    let mut out = String::with_capacity(raw.len());
+    let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'\\' && i + 3 < bytes.len() {
+        if bytes[i] == b'\\' && i + 4 <= bytes.len() {
             let oct = std::str::from_utf8(&bytes[i + 1..i + 4])
                 .ok()
                 .and_then(|s| u8::from_str_radix(s, 8).ok());
-            if let Some(ch) = oct {
-                out.push(char::from(ch));
+            if let Some(byte) = oct {
+                out.push(byte);
                 i += 4;
                 continue;
             }
         }
-        out.push(char::from(bytes[i]));
+        out.push(bytes[i]);
         i += 1;
     }
-    out
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 #[cfg(any(target_os = "linux", test))]
@@ -511,6 +511,9 @@ mod tests {
     #[test]
     fn unescape_octal_spaces() {
         assert_eq!(unescape_mount_field("/media/me/My\\040Disk"), "/media/me/My Disk");
+        assert_eq!(unescape_mount_field("/media/end\\040"), "/media/end ");
+        assert_eq!(unescape_mount_field("/media/Café"), "/media/Café");
+        assert_eq!(unescape_mount_field("/media/Caf\\303\\251"), "/media/Café");
     }
 
     #[test]
