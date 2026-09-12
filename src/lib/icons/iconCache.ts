@@ -57,7 +57,8 @@ async function _fetchAndCache(url: string): Promise<string> {
         BLOB_URL_MAP.set(url, blobUrl);
         return blobUrl;
     } catch (error) {
-        if (import.meta.env.DEV) {
+        const viteEnv = (import.meta as ImportMeta & { env?: { DEV?: boolean } }).env;
+        if (viteEnv?.DEV) {
             console.warn('[iconCache] fetch failed:', url, error);
         }
         return url; // Final fallback
