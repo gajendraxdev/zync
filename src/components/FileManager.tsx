@@ -219,6 +219,7 @@ export const FileManager = memo(function FileManager({
     setFocusedFile,
     handleSelect,
     handleSelectAll,
+    handleSelectMany,
     selectContextFile,
   } = useFileSelection(currentPath, activeConnectionId ?? undefined);
   const { handleCopy } = useFileClipboard({
@@ -1793,6 +1794,7 @@ export const FileManager = memo(function FileManager({
             selectedFiles={selectedFiles}
             focusedFile={focusedFile || undefined}
             onSelect={handleSelect}
+            onSelectMany={handleSelectMany}
             onNavigate={handleNavigate}
             onContextMenu={handleContextMenu}
             viewMode={viewMode}

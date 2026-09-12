@@ -5,6 +5,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 ## [Unreleased]
 
 ### Added
+- **Drag-select in Files:** Click empty space and drag to rubber-band select, like Explorer. Shift+click selects a range; Ctrl/Cmd+click still toggles. Ctrl/Cmd+drag adds to the current selection.
 - **This PC / Volumes in Files:** Local Places lists other disks (Windows `C:` / `D:` / USB, macOS `/Volumes`, Linux mounts). Home stays Home; click a drive to open it. On Windows, WSL distros appear under Linux, separate from Home and `C:`. Remote SSH hosts do not show this section. ([fb3861f])
 - **Drag Files into a shell:** Drop a Files item onto any visible terminal pane, or onto a Shell tab, to paste quoted path(s) at the cursor (no Enter). Works from the full Files overlay via Shell tabs, and from a Files split onto any on-screen shell. Quoting matches the target shell (POSIX, PowerShell, or cmd) so `$()` / `%VAR%` / `!VAR!` cannot expand. ([df0cc65], [9dfba1b])
 - **Terminal inline images:** Sixel and iTerm inline images render in the shell (`fastfetch` logos, `chafa`, `imgcat`). The terminal advertises cell/window size so those tools pick bitmap output instead of mosaic ASCII. On Windows, local shells sideload Windows Terminal’s ConPTY pair so Sixel is not stripped by in-box conhost. Local PTYs no longer inherit `TERM_PROGRAM=vscode` / `WT_SESSION` when Zync was started from an IDE. Kitty graphics are not supported yet. ([0a2a077])

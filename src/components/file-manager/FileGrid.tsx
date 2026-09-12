@@ -17,6 +17,16 @@ import { buildDragData, startInternalDrag, validateAndBuildMoves } from './dragD
 import { getScrollbarSize, Grid, List, useGridRef, useListRef } from 'react-window';
 import { FILE_GRID_VIRTUALIZE_AFTER, FILE_GRID_ZOOM, FILE_LIST_ZOOM, clampFileGridZoom, clampFileListZoom } from './fileChrome';
 import {
+  MARQUEE_DRAG_THRESHOLD_PX,
+  gridNamesInMarquee,
+  listNamesInMarquee,
+  mergeMarqueeSelection,
+  namesBetween,
+  namesInDomMarquee,
+  normalizeClientRect,
+  type MarqueeRect,
+} from './fileMarquee';
+import {
   computeFileGridMetrics,
   fileGridScrollTarget,
   fileIconGridTemplateColumns,
@@ -67,7 +77,7 @@ const FileGridItem = memo(forwardRef<HTMLDivElement, {
   connectionId?: string;
   currentPath?: string;
   getSelectedFiles: () => string[];
-  onSelect: (name: string, multi: boolean) => void;
+  onSelect: (name: string, multi: boolean, range?: boolean) => void;
   onNavigate: (name: string) => void;
   onContextMenu: (e: React.MouseEvent, file?: FileEntry) => void;
   onMove?: (moves: { source: string; target: string; sourceConnectionId?: string }[]) => void;
@@ -149,9 +159,9 @@ const FileGridItem = memo(forwardRef<HTMLDivElement, {
       }}
       onClick={(e) => {
         e.stopPropagation();
-        const isMulti = e.ctrlKey || e.metaKey || e.shiftKey;
-        onSelect(file.name, isMulti);
-        if (clickPolicy === 'single' && !isMulti) onNavigate(file.name);
+        const toggle = e.ctrlKey || e.metaKey;
+        onSelect(file.name, toggle, e.shiftKey);
+        if (clickPolicy === 'single' && !toggle && !e.shiftKey) onNavigate(file.name);
       }}
       onDoubleClick={(e) => {
         e.stopPropagation();
@@ -217,7 +227,7 @@ const FileListItem = memo(forwardRef<HTMLDivElement, {
   connectionId?: string;
   currentPath?: string;
   getSelectedFiles: () => string[];
-  onSelect: (name: string, multi: boolean) => void;
+  onSelect: (name: string, multi: boolean, range?: boolean) => void;
   onNavigate: (name: string) => void;
   onContextMenu: (e: React.MouseEvent, file?: FileEntry) => void;
   onMove?: (moves: { source: string; target: string; sourceConnectionId?: string }[]) => void;
@@ -296,9 +306,9 @@ const FileListItem = memo(forwardRef<HTMLDivElement, {
       }}
       onClick={(e) => {
         e.stopPropagation();
-        const isMulti = e.ctrlKey || e.metaKey || e.shiftKey;
-        onSelect(file.name, isMulti);
-        if (clickPolicy === 'single' && !isMulti) onNavigate(file.name);
+        const toggle = e.ctrlKey || e.metaKey;
+        onSelect(file.name, toggle, e.shiftKey);
+        if (clickPolicy === 'single' && !toggle && !e.shiftKey) onNavigate(file.name);
       }}
       onDoubleClick={(e) => {
         e.stopPropagation();
@@ -363,6 +373,7 @@ interface FileGridProps {
   files: FileEntry[];
   selectedFiles: string[];
   onSelect: (name: string, multi: boolean) => void;
+  onSelectMany?: (names: string[], focusName?: string) => void;
   onNavigate: (name: string) => void;
   onContextMenu: (e: React.MouseEvent, file?: FileEntry) => void;
   viewMode: 'grid' | 'list';
@@ -511,6 +522,7 @@ export const FileGrid = memo(function FileGrid({
   files,
   selectedFiles,
   onSelect,
+  onSelectMany,
   onNavigate,
   onContextMenu,
   viewMode,
@@ -549,6 +561,18 @@ export const FileGrid = memo(function FileGrid({
     selectedFilesRef.current = selectedFiles;
   }, [selectedFiles]);
   const selectedSet = useMemo(() => new Set(selectedFiles), [selectedFiles]);
+  const useVirtualIconGrid = files.length > FILE_GRID_VIRTUALIZE_AFTER;
+  const listingRef = useRef<HTMLDivElement>(null);
+  const marqueeOriginRef = useRef<{ x: number; y: number; additive: boolean; snapshot: string[] } | null>(null);
+  const marqueeSkipClearRef = useRef(false);
+  const [marqueeRect, setMarqueeRect] = useState<MarqueeRect | null>(null);
+  const handleItemSelect = useCallback((name: string, multi: boolean, range?: boolean) => {
+    if (range && focusedFile && onSelectMany) {
+      onSelectMany(namesBetween(files, focusedFile, name), name);
+      return;
+    }
+    onSelect(name, multi);
+  }, [files, focusedFile, onSelect, onSelectMany]);
   const { tip: hoverTip, show: showHoverTip, hide: hideHoverTip } = useFileHoverTip(undefined, dateTimeFormat);
   useEffect(() => {
     hideHoverTip();
@@ -629,7 +653,7 @@ export const FileGrid = memo(function FileGrid({
       connectionId,
       currentPath,
       getSelectedFiles,
-      onSelect,
+      onSelect: handleItemSelect,
       onNavigate,
       onContextMenu,
       onMove,
@@ -644,7 +668,7 @@ export const FileGrid = memo(function FileGrid({
       connectionId,
       currentPath,
       getSelectedFiles,
-      onSelect,
+      handleItemSelect,
       onNavigate,
       onContextMenu,
       onMove,
@@ -678,6 +702,40 @@ export const FileGrid = memo(function FileGrid({
     ['--file-grid-row' as string]: `${zoomTrack.rowHeight}px`,
   }), [zoomTrack.minTrack, zoomTrack.rowHeight, zoomTrack.gap]);
 
+  const collectMarqueeNames = useCallback((rect: MarqueeRect) => {
+    if (viewMode === 'list') {
+      const listEl = listRef.current?.element;
+      if (!listEl) return listingRef.current ? namesInDomMarquee(listingRef.current, rect) : [];
+      const box = listEl.getBoundingClientRect();
+      return listNamesInMarquee(
+        files,
+        listRowHeight,
+        box.top,
+        box.left,
+        box.width,
+        listEl.scrollTop,
+        rect,
+      );
+    }
+    if (useVirtualIconGrid) {
+      const gridEl = gridRef.current?.element;
+      if (!gridEl) return [];
+      const box = gridEl.getBoundingClientRect();
+      return gridNamesInMarquee(
+        files,
+        gridColumnCount,
+        gridColumnWidth,
+        gridRowHeight,
+        box.left,
+        box.top,
+        gridEl.scrollTop,
+        rect,
+      );
+    }
+    const root = cssGridRef.current ?? listingRef.current;
+    return root ? namesInDomMarquee(root, rect) : [];
+  }, [files, gridColumnCount, gridColumnWidth, gridRef, gridRowHeight, listRef, listRowHeight, useVirtualIconGrid, viewMode]);
+
   const scheduleWidth = useCallback((width: number) => {
     pendingWidthRef.current = width;
     if (resizeRafRef.current != null) return;
@@ -693,8 +751,6 @@ export const FileGrid = memo(function FileGrid({
     if (resizeRafRef.current != null) window.cancelAnimationFrame(resizeRafRef.current);
     if (reportIdleRef.current != null) window.clearTimeout(reportIdleRef.current);
   }, []);
-
-  const useVirtualIconGrid = files.length > FILE_GRID_VIRTUALIZE_AFTER;
 
   useEffect(() => {
     if (viewMode !== 'grid' || useVirtualIconGrid) return;
@@ -759,8 +815,54 @@ export const FileGrid = memo(function FileGrid({
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: <explanation>
     <div
-      className="flex-1 min-h-0 min-w-0 overflow-hidden p-4 relative flex flex-col"
-      onClick={() => onSelect('', false)}
+      ref={listingRef}
+      className={cn(
+        'flex-1 min-h-0 min-w-0 overflow-hidden p-4 relative flex flex-col',
+        marqueeRect && 'select-none',
+      )}
+      onClick={() => {
+        if (marqueeSkipClearRef.current) {
+          marqueeSkipClearRef.current = false;
+          return;
+        }
+        onSelect('', false);
+      }}
+      onPointerDown={(e) => {
+        if (e.button !== 0 || !onSelectMany) return;
+        const target = e.target as HTMLElement | null;
+        if (target?.closest('[id^="file-item-"]') || target?.closest('button')) return;
+        marqueeOriginRef.current = {
+          x: e.clientX,
+          y: e.clientY,
+          additive: e.ctrlKey || e.metaKey,
+          snapshot: e.ctrlKey || e.metaKey ? selectedFilesRef.current.slice() : [],
+        };
+        setMarqueeRect(null);
+        e.currentTarget.setPointerCapture(e.pointerId);
+      }}
+      onPointerMove={(e) => {
+        const origin = marqueeOriginRef.current;
+        if (!origin) return;
+        const dx = e.clientX - origin.x;
+        const dy = e.clientY - origin.y;
+        if (!marqueeRect && Math.hypot(dx, dy) < MARQUEE_DRAG_THRESHOLD_PX) return;
+        const rect = normalizeClientRect(origin.x, origin.y, e.clientX, e.clientY);
+        setMarqueeRect(rect);
+        hideHoverTip();
+        const hits = collectMarqueeNames(rect);
+        onSelectMany?.(origin.additive ? mergeMarqueeSelection(origin.snapshot, hits) : hits);
+      }}
+      onPointerUp={(e) => {
+        if (marqueeOriginRef.current && marqueeRect) marqueeSkipClearRef.current = true;
+        marqueeOriginRef.current = null;
+        setMarqueeRect(null);
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+      }}
+      onPointerCancel={(e) => {
+        marqueeOriginRef.current = null;
+        setMarqueeRect(null);
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+      }}
       onContextMenu={(e) => {
         e.preventDefault();
         onContextMenu(e);
@@ -935,7 +1037,7 @@ export const FileGrid = memo(function FileGrid({
                   connectionId={connectionId}
                   currentPath={currentPath}
                   getSelectedFiles={getSelectedFiles}
-                  onSelect={onSelect}
+                  onSelect={handleItemSelect}
                   onNavigate={onNavigate}
                   onContextMenu={onContextMenu}
                   onMove={onMove}
@@ -951,6 +1053,20 @@ export const FileGrid = memo(function FileGrid({
         </div>
       )}
       {hoverTip && <FileHoverTip text={hoverTip.text} x={hoverTip.x} y={hoverTip.y} />}
+      {marqueeRect && listingRef.current && (() => {
+        const box = listingRef.current.getBoundingClientRect();
+        return (
+          <div
+            className="pointer-events-none absolute z-30 rounded-sm border border-app-accent bg-app-accent/15"
+            style={{
+              left: marqueeRect.left - box.left,
+              top: marqueeRect.top - box.top,
+              width: marqueeRect.width,
+              height: marqueeRect.height,
+            }}
+          />
+        );
+      })()}
       </div>
     </div>
   );

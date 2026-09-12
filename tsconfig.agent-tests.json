@@ -115,6 +115,7 @@
         "src/lib/paneLayout/index.ts",
         "src/components/file-manager/types.ts",
         "src/components/file-manager/fileGridLayout.ts",
+        "src/components/file-manager/fileMarquee.ts",
         "src/components/file-manager/filePathNav.ts",
         "src/components/file-manager/fileVolumes.ts",
         "src/components/file-manager/fileChrome.ts",

@@ -29,6 +29,15 @@ export function useFileSelection(currentPath: string, connectionId: string | und
     setSelectedFiles(names);
   }, []);
 
+  const handleSelectMany = useCallback((names: string[], focusName?: string) => {
+    setSelectedFiles(names);
+    if (focusName) {
+      setFocusedFile(focusName);
+      return;
+    }
+    if (names.length > 0) setFocusedFile(names[names.length - 1]);
+  }, []);
+
   const selectContextFile = useCallback((file?: FileEntry) => {
     if (!file) return;
     setSelectedFiles((prev) => (prev.includes(file.name) ? prev : [file.name]));
@@ -41,6 +50,7 @@ export function useFileSelection(currentPath: string, connectionId: string | und
     setFocusedFile,
     handleSelect,
     handleSelectAll,
+    handleSelectMany,
     selectContextFile,
   };
 }
