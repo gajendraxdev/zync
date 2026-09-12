@@ -4,6 +4,8 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.31.0] - 2026-09-12
+
 ### Added
 - **Drag-select in Files:** Click empty space and drag to rubber-band select, like Explorer. Shift+click selects a range; Ctrl/Cmd+click still toggles. Ctrl/Cmd+drag adds to the current selection. ([ab9707d])
 - **This PC / Volumes in Files:** Local Places lists other disks (Windows `C:` / `D:` / USB, macOS `/Volumes`, Linux mounts). Home stays Home; click a drive to open it. On Windows, WSL distros appear under Linux, separate from Home and `C:`. Remote SSH hosts do not show this section. ([fb3861f])
@@ -1405,7 +1407,8 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [d3f4060]: https://github.com/zync-sh/zync/commit/d3f4060
 [840afc2]: https://github.com/zync-sh/zync/commit/840afc2
 [193f568]: https://github.com/zync-sh/zync/commit/193f568
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.30.0...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.31.0...HEAD
+[2.31.0]: https://github.com/zync-sh/zync/compare/v2.30.0...v2.31.0
 [0a2a077]: https://github.com/zync-sh/zync/commit/0a2a077
 [df639a8]: https://github.com/zync-sh/zync/commit/df639a8
 [2fb21e6]: https://github.com/zync-sh/zync/commit/2fb21e6
