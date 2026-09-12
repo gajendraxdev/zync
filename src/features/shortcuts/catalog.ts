@@ -27,7 +27,7 @@ const FILE_MANAGER: ShortcutCommand[] = [
     { id: 'fmListView', label: 'List View', section: 'files', defaultKeys: 'Mod+Shift+1', when: 'files', settingsKey: 'fmListView', configurable: true },
     { id: 'fmGridView', label: 'Grid View', section: 'files', defaultKeys: 'Mod+Shift+2', when: 'files', settingsKey: 'fmGridView', configurable: true },
     { id: 'fmHidden', label: 'Show/Hide Hidden Files', section: 'files', defaultKeys: 'Mod+H', when: 'files', settingsKey: 'fmHidden', configurable: true },
-    { id: 'fmBookmark', label: 'Bookmark Current Location', section: 'files', defaultKeys: 'Mod+D', when: 'files', settingsKey: 'fmBookmark', configurable: true },
+    { id: 'fmBookmark', label: 'Pin Current Location', section: 'files', defaultKeys: 'Mod+D', when: 'files', settingsKey: 'fmBookmark', configurable: true },
     { id: 'fmRefresh', label: 'Refresh View', section: 'files', defaultKeys: 'F5', when: 'files', settingsKey: 'fmRefresh', configurable: true },
 ];
 

@@ -4,8 +4,10 @@ import {
   fileGridScrollTarget,
   fileHoverHint,
   fileIconGridTemplateColumns,
+  formatFileExplorerDate,
   formatFileIdentity,
   formatFileListDate,
+  formatFileListType,
   fileListSortTooltip,
   FILE_LIST_COLUMNS,
   FILE_LIST_SORT_INITIAL,
@@ -77,8 +79,9 @@ runTest('fileGridScrollTarget rejects a cell past the live grid', () => {
 });
 
 runTest('FILE_LIST_COLUMNS includes name flex track and size column', () => {
-  assert.equal(FILE_LIST_COLUMNS.includes('minmax(0, 1fr)'), true);
-  assert.equal(FILE_LIST_COLUMNS.includes('minmax(0, 5.25rem)'), true);
+  assert.equal(FILE_LIST_COLUMNS.includes('minmax(12rem, 20rem)'), true);
+  assert.equal(FILE_LIST_COLUMNS.includes('5.5rem'), true);
+  assert.equal(FILE_LIST_COLUMNS.endsWith('minmax(0, 1fr)'), true);
 });
 
 runTest('formatFileListDate uses time today and short date otherwise', () => {
@@ -93,6 +96,15 @@ runTest('formatFileListDate uses time today and short date otherwise', () => {
   assert.equal(formatFileListDate(y2kMs, now).includes('2000'), true);
   const y2kSeconds = Math.floor(y2kMs / 1000);
   assert.equal(formatFileListDate(y2kSeconds, now).includes('2000'), true);
+});
+
+runTest('formatFileListType matches Explorer-style labels', () => {
+  assert.equal(formatFileListType(entry('docs', 'd')), 'File folder');
+  assert.equal(formatFileListType(entry('link', 'l')), 'Link');
+  assert.equal(formatFileListType(entry('.config')), 'CONFIG File');
+  assert.equal(formatFileListType(entry('shot.png')), 'PNG File');
+  assert.equal(formatFileListType(entry('.bash_history')), 'File');
+  assert.equal(formatFileListType(entry('README')), 'File');
 });
 
 runTest('formatFileIdentity joins owner:group', () => {

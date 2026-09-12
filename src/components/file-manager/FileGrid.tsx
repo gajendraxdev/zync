@@ -22,6 +22,7 @@ import {
   fileIconGridTemplateColumns,
   formatFileIdentity,
   formatFileListDate,
+  formatFileListType,
   fileListSortTooltip,
   FILE_LIST_COLUMN_ALIGN,
   FILE_LIST_COLUMN_IDS,
@@ -208,12 +209,6 @@ const FileGridItem = memo(forwardRef<HTMLDivElement, {
   );
 }));
 
-function FileIdentityText({ owner, group }: { owner: string; group: string }) {
-  const label = formatFileIdentity(owner, group);
-  if (!label) return <span>—</span>;
-  return <span className="block truncate font-mono text-[12px] tracking-tight">{label}</span>;
-}
-
 // Memoized File List Item Component — plain div (windowed rows must not replay motion enter).
 const FileListItem = memo(forwardRef<HTMLDivElement, {
   file: FileEntry;
@@ -245,6 +240,8 @@ const FileListItem = memo(forwardRef<HTMLDivElement, {
   dateTimeFormat = 'simple',
 }, ref) => {
   const isFolder = file.type === 'd';
+  const kindLabel = formatFileListType(file);
+  const identityLabel = formatFileIdentity(file.owner || '', file.group || '');
 
   return (
     <div
@@ -313,46 +310,48 @@ const FileListItem = memo(forwardRef<HTMLDivElement, {
         onContextMenu(e, file);
       }}
       className={cn(
-        'h-full w-full min-w-0 border-b border-app-border/15 cursor-pointer outline-none',
+        'h-full w-full min-w-0 cursor-pointer outline-none',
         'grid items-center overflow-hidden',
         'hover:bg-app-surface/40',
-        isSelected && 'bg-app-accent/10 hover:bg-app-accent/14',
+        isSelected && 'bg-app-accent/10 ring-1 ring-inset ring-app-text/30 rounded-sm',
         isFocused && !isSelected && 'bg-app-surface/55',
         isFocused && isSelected && 'bg-app-accent/14',
       )}
       style={{ gridTemplateColumns: FILE_LIST_COLUMNS }}
     >
-      <div className="py-2 px-4 min-w-0 overflow-hidden">
-        <div className="flex items-center gap-2.5 min-w-0">
+      <div className="py-1.5 px-3 min-w-0 overflow-hidden">
+        <div className="flex items-center gap-2 min-w-0">
           <span className="shrink-0">
             <FileIcon file={file} size={iconSize} />
           </span>
-          <span
-            title={file.name}
-            className={cn('truncate text-[13px]', isSelected ? 'text-app-accent font-medium' : 'text-app-text')}
-          >
-            {file.name}
-          </span>
+          <Tooltip content={file.name} position="top" className="min-w-0 w-full justify-start">
+            <span className={cn('block min-w-0 truncate text-[13px]', isSelected ? 'text-app-text font-medium' : 'text-app-text')}>
+              {file.name}
+            </span>
+          </Tooltip>
         </div>
       </div>
-      <div className="py-2 px-3 min-w-0 overflow-hidden text-[12px] text-app-muted font-mono tabular-nums truncate text-right">
-        {isFolder ? '—' : formatBytes(file.size)}
-      </div>
-      <div className="py-2 px-3 min-w-0 overflow-hidden text-app-muted">
-        <Tooltip
-          content={`Owner ${file.owner || '—'} · Group ${file.group || '—'}`}
-          position="top"
-          disabled={!file.owner && !file.group}
-          className="min-w-0 w-full justify-start"
-        >
-          <div className="min-w-0 w-full">
-            <FileIdentityText owner={file.owner} group={file.group} />
-          </div>
-        </Tooltip>
-      </div>
-      <div className="py-2 px-3 min-w-0 overflow-hidden text-[12px] text-app-muted tabular-nums truncate text-right">
+      <div className="py-1.5 px-3 min-w-0 overflow-hidden text-[12px] text-app-muted tabular-nums truncate">
         {formatFileListDate(file.lastModified, Date.now(), dateTimeFormat) || '—'}
       </div>
+      <Tooltip content={kindLabel} position="top" className="min-w-0 w-full justify-start py-1.5 px-3">
+        <span className="block min-w-0 truncate text-[12px] text-app-muted">
+          {kindLabel}
+        </span>
+      </Tooltip>
+      <div className="py-1.5 px-3 min-w-0 overflow-hidden text-[12px] text-app-muted tabular-nums truncate text-right">
+        {isFolder ? '' : formatBytes(file.size)}
+      </div>
+      <Tooltip
+        content={identityLabel || '—'}
+        position="top"
+        className="min-w-0 w-full justify-start py-1.5 px-3"
+        disabled={!identityLabel}
+      >
+        <span className="block min-w-0 truncate font-mono text-[12px] text-app-muted">
+          {identityLabel || '—'}
+        </span>
+      </Tooltip>
     </div>
   );
 }));
@@ -857,7 +856,7 @@ export const FileGrid = memo(function FileGrid({
                   }
                   className={cn(
                     'min-w-0 w-full overflow-hidden py-2 cursor-pointer hover:text-app-text hover:bg-app-surface/25 transition-colors group',
-                    column === 'name' ? 'px-4' : 'px-3',
+                    'px-3',
                     FILE_LIST_COLUMN_ALIGN[column] === 'right' ? 'text-right' : 'text-left',
                     sortColumn === column && 'text-app-text',
                   )}
@@ -871,7 +870,7 @@ export const FileGrid = memo(function FileGrid({
                   >
                     <span className="truncate">{FILE_LIST_COLUMN_LABELS[column]}</span>
                     {sortColumn === column && (sortDirection === 'asc' ? <ArrowUp size={12} className="shrink-0 text-app-accent" /> : <ArrowDown size={12} className="shrink-0 text-app-accent" />)}
-                    {sortColumn !== column && <ArrowUpDown size={12} className="shrink-0 opacity-25 group-hover:opacity-70" />}
+                    {sortColumn !== column && <ArrowUpDown size={12} className="shrink-0 opacity-0 group-hover:opacity-50" />}
                   </span>
                 </button>
               </Tooltip>

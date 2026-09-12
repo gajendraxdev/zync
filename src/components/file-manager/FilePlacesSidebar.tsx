@@ -1,4 +1,4 @@
-import { Clock, Cloud, Disc, HardDrive, Home, Plus, Server, Star, Usb, X } from 'lucide-react';
+import { Clock, Cloud, Disc, HardDrive, Home, Pin, Plus, Server, Usb, X } from 'lucide-react';
 import { memo, type ReactNode } from 'react';
 import { cn } from '../../lib/utils';
 import { FILE_RECENT_LIMIT } from './fileChrome';
@@ -99,13 +99,13 @@ export const FilePlacesSidebar = memo(function FilePlacesSidebar({
             ))}
           </>
         )}
-        <SectionLabel>Bookmarks</SectionLabel>
+        <SectionLabel>Pins</SectionLabel>
         {bookmarks.map((path) => (
           <PlaceButton
             key={path}
             label={filePathLeafLabel(path, { homePath: home })}
             active={isFilePathEqual(normalizeFilePath(path), current)}
-            icon={<Star size={14} />}
+            icon={<Pin size={14} />}
             onClick={() => onNavigate(normalizeFilePath(path))}
             onRemove={() => onRemoveBookmark(path)}
           />
@@ -118,9 +118,9 @@ export const FilePlacesSidebar = memo(function FilePlacesSidebar({
             else onAddBookmark();
           }}
         >
-          <span className="shrink-0 opacity-70">{bookmarked ? <Star size={14} /> : <Plus size={14} />}</span>
+          <span className="shrink-0 opacity-70">{bookmarked ? <Pin size={14} /> : <Plus size={14} />}</span>
           <span className="ml-3 truncate text-[10px] font-medium uppercase tracking-wider opacity-80">
-            {bookmarked ? 'Remove bookmark' : 'New bookmark'}
+            {bookmarked ? 'Unpin' : 'Pin folder'}
           </span>
         </button>
       </nav>

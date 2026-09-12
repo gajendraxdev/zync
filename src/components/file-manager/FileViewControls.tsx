@@ -9,7 +9,9 @@ import { useDismiss } from './useDismiss';
 const SORT_COLUMNS: Array<{ label: string; column: FileSortColumn }> = [
   { label: 'Name', column: 'name' },
   { label: 'Date modified', column: 'modified' },
+  { label: 'Type', column: 'type' },
   { label: 'Size', column: 'size' },
+  { label: 'Owner:Group', column: 'owner' },
 ];
 
 function SegBtn({

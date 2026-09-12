@@ -1,33 +1,37 @@
 import type { FileEntry } from './types';
 import { FILE_GRID_ZOOM, clampFileGridZoom } from './fileChrome.js';
 
-export type FileSortColumn = 'name' | 'size' | 'owner' | 'modified';
+export type FileSortColumn = 'name' | 'modified' | 'type' | 'size' | 'owner';
 export type FileSortDirection = 'asc' | 'desc';
 
 export const FILE_LIST_COLUMN_IDS: readonly FileSortColumn[] = [
   'name',
+  'modified',
+  'type',
   'size',
   'owner',
-  'modified',
 ];
 
 export const FILE_LIST_COLUMN_LABELS: Record<FileSortColumn, string> = {
   name: 'Name',
+  modified: 'Date modified',
+  type: 'Type',
   size: 'Size',
   owner: 'Owner:Group',
-  modified: 'Modified',
 };
 
 export const FILE_LIST_COLUMN_ALIGN: Record<FileSortColumn, 'left' | 'right'> = {
   name: 'left',
+  modified: 'left',
+  type: 'left',
   size: 'right',
   owner: 'left',
-  modified: 'right',
 };
 
 /** First click on a column uses this direction (size/date: newest/largest first). */
 export const FILE_LIST_SORT_INITIAL: Record<FileSortColumn, FileSortDirection> = {
   name: 'asc',
+  type: 'asc',
   owner: 'asc',
   size: 'desc',
   modified: 'desc',
@@ -36,6 +40,7 @@ export const FILE_LIST_SORT_INITIAL: Record<FileSortColumn, FileSortDirection> =
 export function fileListSortSense(column: FileSortColumn, direction: FileSortDirection): string {
   switch (column) {
     case 'name':
+    case 'type':
     case 'owner':
       return direction === 'asc' ? 'A to Z' : 'Z to A';
     case 'size':
@@ -62,8 +67,24 @@ export function fileListSortTooltip(
 /** List-row height from FileListItem (`py-2` + 20px icon + border). Compact does not change list rows. */
 export const FILE_LIST_ROW_HEIGHT = 40;
 
-/** Name flexes. Size / owner:group / modified stay capped and can shrink. */
-export const FILE_LIST_COLUMNS = 'minmax(0, 1fr) minmax(0, 5.25rem) minmax(0, 9.5rem) minmax(0, 7.5rem)';
+/** Name is readable; leftover width is the last 1fr track after Owner:Group. */
+export const FILE_LIST_COLUMNS = 'minmax(12rem, 20rem) 11.25rem 8rem 5.5rem minmax(8.5rem, 12rem) minmax(0, 1fr)';
+
+/** Explorer-style type: `File folder`, `PNG File`. Long fake extensions become `File`. */
+export function formatFileListType(file: FileEntry): string {
+  if (file.type === 'd') return 'File folder';
+  if (file.type === 'l') return 'Link';
+  const name = file.name;
+  let ext = '';
+  if (name.startsWith('.') && !name.slice(1).includes('.')) {
+    ext = name.slice(1).trim();
+  } else {
+    const dot = name.lastIndexOf('.');
+    if (dot > 0 && dot < name.length - 1) ext = name.slice(dot + 1);
+  }
+  if (!ext || ext.length > 8) return 'File';
+  return `${ext.toUpperCase()} File`;
+}
 
 /** Grid hover card: name, Folder/size, owner:group, date. */
 export function fileHoverHint(file: FileEntry, dateTimeFormat: 'simple' | 'detailed' = 'simple'): string {
@@ -118,6 +139,20 @@ export function formatFileListDate(
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+/** List-view dates: locale short date and time, like Explorer details. */
+export function formatFileExplorerDate(timestamp: number): string {
+  const ms = timestamp > 0 && timestamp < 1e10 ? timestamp * 1000 : timestamp;
+  const date = new Date(ms);
+  if (Number.isNaN(date.getTime()) || timestamp === 0) return '';
+  return date.toLocaleString(undefined, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 export interface FileGridMetrics {
   columnCount: number;
   /** Minimum tile track (zoom). CSS icon view uses this with `1fr` leftover. */
@@ -162,6 +197,9 @@ export function sortFileEntries(
       }
       case 'modified':
         comparison = a.lastModified - b.lastModified;
+        break;
+      case 'type':
+        comparison = formatFileListType(a).localeCompare(formatFileListType(b));
         break;
     }
     return direction === 'asc' ? comparison : -comparison;

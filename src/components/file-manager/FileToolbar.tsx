@@ -9,7 +9,7 @@ import {
   Plus,
   RefreshCw,
   Search,
-  Star,
+  Pin,
   Terminal,
   Upload,
   X,
@@ -383,7 +383,7 @@ function FileToolbarInner({
             <div className="mx-2 my-1 h-px bg-app-border/20" />
             {menuItem('Open terminal here', <Terminal size={14} />, onOpenTerminal, !onOpenTerminal)}
             {menuItem('Reload', <RefreshCw size={14} />, onRefresh)}
-            {menuItem(isBookmarked ? 'Remove bookmark' : 'Bookmark folder', <Star size={14} />, onBookmark)}
+            {menuItem(isBookmarked ? 'Unpin' : 'Pin folder', <Pin size={14} />, onBookmark)}
             {menuItem('Copy path', <Copy size={14} />, onCopyLocation)}
             <div className="mx-2 my-1 h-px bg-app-border/20" />
             {menuItem('Paste', <Clipboard size={14} />, onPaste, !onPaste || !canPaste)}
