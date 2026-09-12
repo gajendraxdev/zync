@@ -89,6 +89,10 @@ runTest('inferHomePath uses Users folder on Windows', () => {
   assert.equal(inferHomePath('', '/etc'), '');
   assert.equal(isFilePathDriveRoot('C:\\'), true);
   assert.equal(isFilePathDriveRoot('C:\\Users\\gajen'), false);
+  assert.equal(isFilePathDriveRoot('\\\\server\\share\\'), true);
+  assert.equal(isFilePathDriveRoot('\\\\server\\share\\docs'), false);
+  assert.equal(isFilePathDriveRoot('\\\\wsl.localhost\\Ubuntu\\'), true);
+  assert.equal(isFilePathDriveRoot('\\\\wsl.localhost\\Ubuntu\\home'), false);
   assert.equal(inferHomePath('C:\\', 'C:\\'), '');
   assert.equal(inferHomePath('', 'C:\\'), '');
 });

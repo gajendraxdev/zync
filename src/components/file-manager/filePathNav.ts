@@ -103,11 +103,11 @@ export function filePathDisplayCrumbs(
   ));
 }
 
-/** Drive roots (`C:\`, `/`) are Places disks, not the user Home folder. */
+/** Drive / share roots (`C:\`, `/`, `\\server\share\`, `\\wsl.localhost\Ubuntu\`) are not Home. */
 export function isFilePathDriveRoot(path: string): boolean {
   const value = normalizeFilePath(path);
-  if (!value || value === '/' || value === '~') return true;
-  return /^[A-Za-z]:\\?$/.test(value);
+  if (!value || value === '~') return true;
+  return isFilePathEqual(value, filePathRoot(path));
 }
 
 export function inferHomePath(explicit: string | undefined, currentPath: string): string {

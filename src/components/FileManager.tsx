@@ -995,7 +995,9 @@ export const FileManager = memo(function FileManager({
   const inferredHome = inferHomePath(connection?.homePath, currentPath);
   const [heldHome, setHeldHome] = useState<{ connectionId: string; path: string } | null>(null);
   const activeHomeIdRef = useRef(activeConnectionId);
-  activeHomeIdRef.current = activeConnectionId;
+  useEffect(() => {
+    activeHomeIdRef.current = activeConnectionId;
+  }, [activeConnectionId]);
   useEffect(() => {
     if (!activeConnectionId) {
       setHeldHome(null);

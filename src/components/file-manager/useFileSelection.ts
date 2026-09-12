@@ -31,11 +31,15 @@ export function useFileSelection(currentPath: string, connectionId: string | und
 
   const handleSelectMany = useCallback((names: string[], focusName?: string) => {
     setSelectedFiles(names);
+    if (names.length === 0) {
+      setFocusedFile(null);
+      return;
+    }
     if (focusName) {
       setFocusedFile(focusName);
       return;
     }
-    if (names.length > 0) setFocusedFile(names[names.length - 1]);
+    setFocusedFile(names[names.length - 1]);
   }, []);
 
   const selectContextFile = useCallback((file?: FileEntry) => {

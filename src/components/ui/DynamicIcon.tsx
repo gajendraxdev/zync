@@ -3,7 +3,7 @@ import {
   ensureThemedIcon,
   fileTypeIconID,
   getThemedIconEntry,
-  markThemedIconMissing,
+  reportThemedIconLoadError,
   subscribeThemedIcon,
   themedIconKey,
 } from '../../lib/icons/themedIconSrc';
@@ -90,7 +90,13 @@ export const DynamicIcon = memo(function DynamicIcon({
                     draggable={false}
                     loading="lazy"
                     decoding="async"
-                    onError={() => markThemedIconMissing(key)}
+                    onError={() => reportThemedIconLoadError(
+                      key,
+                      iconID,
+                      iconTheme,
+                      pluginPath || undefined,
+                      pluginIconsPath || undefined,
+                    )}
                 />
             )}
         </div>

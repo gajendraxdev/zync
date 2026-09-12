@@ -63,6 +63,7 @@ const tests = [
   'tests/fileMarquee.test.mjs',
   'tests/filePathNav.test.mjs',
   'tests/fileVolumes.test.mjs',
+  'tests/themedIconSrc.test.mjs',
   'tests/fileSearchFilter.test.mjs',
   'tests/errorBoundary.test.mjs',
   'tests/releaseNotesMarkdown.test.mjs',

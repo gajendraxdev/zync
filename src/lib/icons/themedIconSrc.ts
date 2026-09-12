@@ -9,6 +9,7 @@ export type ThemedIconEntry =
 const entries = new Map<string, ThemedIconEntry>();
 const inflight = new Map<string, Promise<ThemedIconEntry>>();
 const listeners = new Map<string, Set<() => void>>();
+const rejectedSrcs = new Map<string, Set<string>>();
 
 export function themedIconKey(
   theme: string,
@@ -46,21 +47,26 @@ function notify(key: string) {
 async function loadThemedIconSrc(
   iconID: string,
   theme: string,
-  pluginPath?: string,
-  pluginIconsPath?: string,
+  pluginPath: string | undefined,
+  pluginIconsPath: string | undefined,
+  skip: Set<string>,
 ): Promise<ThemedIconEntry> {
   let id = iconID;
-  for (let level = 0; level < 2; level += 1) {
+  for (let level = 0; level < 4; level += 1) {
     const resource = resolveIconResource(id, theme, pluginPath, pluginIconsPath);
-    if (resource.local) return { status: 'ready', src: resource.local };
+    if (resource.local && !skip.has(resource.local)) {
+      return { status: 'ready', src: resource.local };
+    }
     if (resource.remote) {
       const src = await getCachedIcon(resource.remote);
-      if (src) return { status: 'ready', src };
+      if (src && !skip.has(src)) return { status: 'ready', src };
     }
     const rawID = id.startsWith('file_type_') ? id.slice(10) : id;
     const category = CATEGORY_FALLBACK_MAP[rawID];
     if (!category) break;
-    id = `file_type_${category}`;
+    const nextId = `file_type_${category}`;
+    if (nextId === id) break;
+    id = nextId;
   }
   return { status: 'missing' };
 }
@@ -77,7 +83,8 @@ export function ensureThemedIcon(
   if (inflight.has(key)) return;
 
   entries.set(key, { status: 'loading' });
-  const work = loadThemedIconSrc(iconID, theme, pluginPath, pluginIconsPath)
+  const skip = rejectedSrcs.get(key) ?? new Set<string>();
+  const work = loadThemedIconSrc(iconID, theme, pluginPath, pluginIconsPath, skip)
     .catch((): ThemedIconEntry => ({ status: 'missing' }))
     .then((entry) => {
       entries.set(key, entry);
@@ -95,6 +102,24 @@ export function markThemedIconMissing(key: string): void {
   if (current?.status === 'missing') return;
   entries.set(key, { status: 'missing' });
   notify(key);
+}
+
+/** Browser failed to load `src`. Try the next candidate (remote, then CATEGORY_FALLBACK_MAP) before Lucide. */
+export function reportThemedIconLoadError(
+  key: string,
+  iconID: string,
+  theme: string,
+  pluginPath?: string,
+  pluginIconsPath?: string,
+): void {
+  const entry = entries.get(key);
+  const skip = rejectedSrcs.get(key) ?? new Set<string>();
+  if (entry?.status === 'ready') skip.add(entry.src);
+  rejectedSrcs.set(key, skip);
+  if (entry?.status === 'missing') return;
+  entries.delete(key);
+  inflight.delete(key);
+  ensureThemedIcon(key, iconID, theme, pluginPath, pluginIconsPath);
 }
 
 export function fileTypeIconID(type: string, isFolder: boolean, theme: string): string {
