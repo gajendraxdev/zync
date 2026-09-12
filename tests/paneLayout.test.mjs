@@ -8,12 +8,14 @@ import {
   dropFeature,
   dropSplitIntro,
   dropTerm,
+  featureToPromoteOnLastShellExit,
   focusPane,
   neighborPaneId,
   oppositeDockEdge,
   paneBoxAtPoint,
   paneNavDirectionFromKey,
   isFeaturePaneFocused,
+  layoutFeatureIds,
   isSplitFeatureId,
   isSplitLayout,
   layoutHasFeature,
@@ -36,6 +38,8 @@ import {
   introStartSizes,
   markSplitIntro,
   takeSplitIntro,
+  splitSashStyle,
+  SPLIT_SASH_HIT_PX,
   wheelAxisDelta,
   wheelDeltaToRatio,
   unsplitPane,
@@ -480,6 +484,21 @@ runTest('openFeatureInLayout refuses to replace a shell when the pane cap is ful
   assert.equal(layoutHasFeature(layout, 'files'), false);
 });
 
+runTest('featureToPromoteOnLastShellExit keeps Files when the last shell exits', () => {
+  const opened = openFeatureInLayout(singlePane('term-a', 'pane-a'), 'files');
+  assert.equal(opened.ok, true);
+  if (!opened.ok) return;
+  assert.deepEqual(layoutFeatureIds(opened.layout), ['files']);
+  assert.equal(featureToPromoteOnLastShellExit(opened.layout, 'term-a'), 'files');
+  const twoShells = splitPane(opened.layout, opened.layout.activePaneId, 'vertical', {
+    kind: 'term',
+    termId: 'term-b',
+  });
+  assert.equal(twoShells.ok, true);
+  if (!twoShells.ok) return;
+  assert.equal(featureToPromoteOnLastShellExit(twoShells.layout, 'term-b'), null);
+});
+
 runTest('dropFeature unsplits Files and keeps the shell; last-term drop with Files remaining is null', () => {
   const opened = openFeatureInLayout(singlePane('term-a', 'pane-a'), 'files');
   assert.equal(opened.ok, true);
@@ -721,6 +740,16 @@ runTest('introStartSizes parks the incoming leaf at zero', () => {
   assert.deepEqual(introStartSizes(1), [1, 0]);
   assert.equal(incomingIndexForInsert('before'), 0);
   assert.equal(incomingIndexForInsert('after'), 1);
+});
+
+runTest('splitSashStyle overlays a hit target on the seam', () => {
+  const side = splitSashStyle(false, 0.5);
+  assert.equal(side.left, '50%');
+  assert.equal(side.width, SPLIT_SASH_HIT_PX);
+  assert.equal(side.marginLeft, -(SPLIT_SASH_HIT_PX / 2));
+  const stacked = splitSashStyle(true, 0);
+  assert.equal(stacked.top, '0%');
+  assert.equal(stacked.height, SPLIT_SASH_HIT_PX);
 });
 
 runTest('splitPane marks a one-shot intro on the new split', () => {

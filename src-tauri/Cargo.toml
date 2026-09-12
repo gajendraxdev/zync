@@ -1,6 +1,6 @@
 [package]
 name = "zync"
-version = "2.30.0"
+version = "2.31.0"
 description = "A modern SSH client"
 authors = ["Gajendra"]
 edition = "2021"
@@ -16,6 +16,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+sha2 = "0.11"
+zip = "2.2"
 
 [dependencies]
 tauri = { version = "2.10", features = ["macos-private-api", "protocol-asset", "webview-data-url"] }

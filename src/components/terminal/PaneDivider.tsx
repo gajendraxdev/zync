@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { cn } from '../../lib/utils';
-import { MIN_PANE_RATIO, type SplitDirection, wheelAxisDelta, wheelDeltaToRatio } from '../../lib/paneLayout';
+import { MIN_PANE_RATIO, splitSashStyle, type SplitDirection, wheelAxisDelta, wheelDeltaToRatio } from '../../lib/paneLayout';
 import { beginPaneDividerDrag, endPaneDividerDrag } from '../../lib/terminal';
 
 const KEY_STEP = 0.05;
@@ -9,26 +9,35 @@ const WHEEL_SETTLE_MS = 140;
 export function PaneDivider({
     direction,
     firstRatio,
+    onDragStart,
     onDrag,
     onDragEnd,
+    onKeyCommit,
     onEqualize,
 }: {
     direction: SplitDirection;
     firstRatio: number;
+    onDragStart?: () => void;
     onDrag: (firstRatio: number) => void;
     onDragEnd: () => void;
+    /** Arrow keys: commit after onDrag without the pointer/wheel immediate-flush path. */
+    onKeyCommit?: () => void;
     onEqualize: () => void;
 }) {
     const dragging = useRef(false);
+    const dragHold = useRef<ReturnType<typeof beginPaneDividerDrag> | null>(null);
+    const wheelHold = useRef<ReturnType<typeof beginPaneDividerDrag> | null>(null);
     const wheelHeld = useRef(false);
     const wheelTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const firstRatioRef = useRef(firstRatio);
     const onDragRef = useRef(onDrag);
+    const onDragStartRef = useRef(onDragStart);
     const onDragEndRef = useRef(onDragEnd);
 
     useLayoutEffect(() => {
         firstRatioRef.current = firstRatio;
         onDragRef.current = onDrag;
+        onDragStartRef.current = onDragStart;
         onDragEndRef.current = onDragEnd;
     });
     const nodeRef = useRef<HTMLDivElement>(null);
@@ -43,17 +52,18 @@ export function PaneDivider({
         dragging.current = false;
         setHeld(false);
         if (listeners.current) {
-            window.removeEventListener('pointermove', listeners.current.move);
-            window.removeEventListener('pointerup', listeners.current.up);
-            window.removeEventListener('pointercancel', listeners.current.up);
+            window.removeEventListener('pointermove', listeners.current.move, true);
+            window.removeEventListener('pointerup', listeners.current.up, true);
+            window.removeEventListener('pointercancel', listeners.current.up, true);
             listeners.current = null;
         }
-        endPaneDividerDrag();
+        endPaneDividerDrag(dragHold.current);
+        dragHold.current = null;
         if (commit) {
-            onDragEnd();
+            onDragEndRef.current();
         }
         window.dispatchEvent(new Event('zync:pane-resize-end'));
-    }, [onDragEnd]);
+    }, []);
 
     const finishWheel = useCallback((commit: boolean) => {
         if (wheelTimer.current != null) {
@@ -63,7 +73,8 @@ export function PaneDivider({
         if (!wheelHeld.current) return;
         wheelHeld.current = false;
         setHeld(false);
-        endPaneDividerDrag();
+        endPaneDividerDrag(wheelHold.current);
+        wheelHold.current = null;
         if (commit) {
             onDragEndRef.current();
             window.dispatchEvent(new Event('zync:pane-resize-end'));
@@ -91,7 +102,8 @@ export function PaneDivider({
             if (!wheelHeld.current) {
                 wheelHeld.current = true;
                 setHeld(true);
-                beginPaneDividerDrag();
+                onDragStartRef.current?.();
+                wheelHold.current = beginPaneDividerDrag();
             }
             onDragRef.current(firstRatioRef.current + step);
             if (wheelTimer.current != null) window.clearTimeout(wheelTimer.current);
@@ -109,33 +121,34 @@ export function PaneDivider({
             onEqualize();
             return;
         }
-        const parent = event.currentTarget.parentElement;
-        if (!parent) return;
+        const frame = event.currentTarget.closest('[data-pane-split]');
+        if (!(frame instanceof HTMLElement)) return;
         finishWheel(false);
         stopDrag(false);
+        onDragStartRef.current?.();
         dragging.current = true;
         setHeld(true);
-        beginPaneDividerDrag();
-        event.currentTarget.setPointerCapture(event.pointerId);
+        dragHold.current = beginPaneDividerDrag();
         const vertical = direction === 'vertical';
-        const startSize = vertical ? parent.clientHeight : parent.clientWidth;
-        const startRect = parent.getBoundingClientRect();
+        const startSize = vertical ? frame.clientHeight : frame.clientWidth;
+        const startRect = frame.getBoundingClientRect();
 
         const onMove = (move: globalThis.PointerEvent) => {
             if (!dragging.current || startSize <= 0) return;
+            move.preventDefault();
             const pos = vertical ? move.clientY : move.clientX;
             const origin = vertical ? startRect.top : startRect.left;
             const ratio = (pos - origin) / startSize;
-            onDrag(ratio);
+            onDragRef.current(ratio);
         };
         const onUp = () => {
             stopDrag(true);
         };
         listeners.current = { move: onMove, up: onUp };
-        window.addEventListener('pointermove', onMove);
-        window.addEventListener('pointerup', onUp);
-        window.addEventListener('pointercancel', onUp);
-    }, [direction, finishWheel, onDrag, onEqualize, stopDrag]);
+        window.addEventListener('pointermove', onMove, { capture: true });
+        window.addEventListener('pointerup', onUp, { capture: true });
+        window.addEventListener('pointercancel', onUp, { capture: true });
+    }, [direction, finishWheel, onEqualize, stopDrag]);
 
     const onKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
         if (event.key === 'Enter' || event.key === 'Home') {
@@ -151,8 +164,8 @@ export function PaneDivider({
         if (delta === 0) return;
         event.preventDefault();
         onDrag(firstRatio + delta);
-        onDragEnd();
-    }, [direction, firstRatio, onDrag, onDragEnd, onEqualize]);
+        (onKeyCommit ?? onDragEnd)();
+    }, [direction, firstRatio, onDrag, onDragEnd, onKeyCommit, onEqualize]);
 
     const stacked = direction === 'vertical';
     const valueNow = Math.round(firstRatio * 100);
@@ -162,6 +175,7 @@ export function PaneDivider({
             ref={nodeRef}
             role="separator"
             tabIndex={0}
+            data-pane-sash=""
             aria-orientation={stacked ? 'horizontal' : 'vertical'}
             aria-valuemin={valueMin}
             aria-valuemax={100 - valueMin}
@@ -170,19 +184,20 @@ export function PaneDivider({
             title="Drag, scroll, or arrow keys to resize · double-click or Enter to even panes"
             onPointerDown={onPointerDown}
             onKeyDown={onKeyDown}
+            style={splitSashStyle(stacked, firstRatio)}
             className={cn(
-                'relative z-20 shrink-0 touch-none select-none overscroll-none transition-colors duration-150',
-                stacked ? 'h-px w-full cursor-row-resize' : 'w-px h-full cursor-col-resize',
-                'outline-none focus-visible:bg-app-accent',
-                held ? 'bg-app-accent' : 'bg-app-border/40 hover:bg-app-accent/55',
+                'group absolute z-50 touch-none select-none overscroll-none pointer-events-auto',
+                'outline-none focus-visible:ring-1 focus-visible:ring-app-accent',
+                stacked ? 'cursor-row-resize' : 'cursor-col-resize',
             )}
         >
             <div
                 className={cn(
-                    'absolute',
+                    'absolute transition-colors duration-150',
                     stacked
-                        ? '-top-2 left-0 right-0 h-4'
-                        : 'top-0 -left-2 bottom-0 w-4',
+                        ? 'left-0 right-0 top-1/2 h-px -translate-y-1/2'
+                        : 'top-0 bottom-0 left-1/2 w-px -translate-x-1/2',
+                    held ? 'bg-app-accent' : 'bg-app-border/40 group-hover:bg-app-accent/55',
                 )}
             />
         </div>

@@ -19,6 +19,7 @@ const tests = [
   'tests/terminalLifecycleListeners.test.mjs',
   'tests/terminalIdleSuspendNotice.test.mjs',
   'tests/terminalXtermOptions.test.mjs',
+  'tests/terminalImage.test.mjs',
   'tests/terminalResizeSync.test.mjs',
   'tests/terminalReconnectReset.test.mjs',
   'tests/terminalReconnectFlow.test.mjs',

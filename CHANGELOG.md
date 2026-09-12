@@ -4,6 +4,37 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.31.0] - 2026-09-12
+
+### Added
+- **Drag-select in Files:** Click empty space and drag to rubber-band select, like Explorer. Shift+click selects a range; Ctrl/Cmd+click still toggles. Ctrl/Cmd+drag adds to the current selection. ([ab9707d])
+- **This PC / Volumes in Files:** Local Places lists other disks (Windows `C:` / `D:` / USB, macOS `/Volumes`, Linux mounts). Home stays Home; click a drive to open it. On Windows, WSL distros appear under Linux, separate from Home and `C:`. Remote SSH hosts do not show this section. ([fb3861f])
+- **Drag Files into a shell:** Drop a Files item onto any visible terminal pane, or onto a Shell tab, to paste quoted path(s) at the cursor (no Enter). Works from the full Files overlay via Shell tabs, and from a Files split onto any on-screen shell. Quoting matches the target shell (POSIX, PowerShell, or cmd) so `$()` / `%VAR%` / `!VAR!` cannot expand. ([df0cc65], [9dfba1b])
+- **Terminal inline images:** Sixel and iTerm inline images render in the shell (`fastfetch` logos, `chafa`, `imgcat`). The terminal advertises cell/window size so those tools pick bitmap output instead of mosaic ASCII. On Windows, local shells sideload Windows Terminal’s ConPTY pair so Sixel is not stripped by in-box conhost. Local PTYs no longer inherit `TERM_PROGRAM=vscode` / `WT_SESSION` when Zync was started from an IDE. Kitty graphics are not supported yet. ([0a2a077])
+- **Files owner/group:** List view has one Owner:Group column as `user:group` (Unix names when `/etc/passwd` and `/etc/group` resolve; otherwise uid/gid). Icon grid is icon + two-line name with an Explorer/GNOME highlight; size, owner, and date are in the tooltip. Windows local Files and WSL listings show —. ([#105], [a677afe], [b205754])
+
+### Changed
+- **Files list view:** Details columns are Name, Date modified, Type, Size, and Owner:Group. Name stays compact so metadata sits next to the names; leftover width is after Owner:Group. Folders show as File folder; long fake types (`.bash_history`) show as File. Size is blank for folders. Places **Bookmarks** are labeled **Pins**. ([65e654e])
+- **Files listing scroll:** Icon view virtualizes after 96 items, skips painting off-screen tiles, and does not re-render on every scroll just to hide an unused hover tip. File icons decode lazily; Places volume lists are cached for 30s. ([bbcced4])
+- **File icons:** Themed icons resolve once per type (e.g. all `.ts` files share one URL) instead of running the theme loader on every tile. ([b820ecd], [ea123c2])
+- **Files chrome:** Compact toolbar with Back/Forward, crumb path (click or Ctrl+L to type a location), search, grid/list plus view options, and a New menu. Places (Home, last 5 Recent, Pins) takes a column on a wide pane and overlays only when the pane is narrow. Properties still overlays. Narrow panes move history and view to a bottom bar. List vs grid and Places open/closed are remembered. Grid zoom and single-click open live in File Manager settings. ([61e0bcf], [5a0bed1], [76d8dc1], [acdfc3d])
+- **Remote listings:** `/etc/passwd` and `/etc/group` are read once per SSH connection and reused for owner/group names, instead of on every folder list. ([5670eb0])
+- **Files search:** Search still filters the current folder only. The unimplemented Search Everywhere shortcut (`Mod+Shift+F`) is removed so it no longer collides with Files. ([2d9b98b])
+
+### Fixed
+- **Linux volume names:** Places mount paths with spaces or non-ASCII (octal escapes in `/proc/mounts`) decode as UTF-8 instead of Latin-1. ([b820ecd])
+- **Files Home from C:** Opening Local Disk (C:) no longer replaces Home with `C:\`. Home stays the user folder and remains clickable from the drive root. ([fb3861f])
+- **Files list/grid shortcuts:** Ctrl+Shift+1 / Ctrl+Shift+2 (Cmd+Shift on macOS) switch list and grid view again. Shift+digit sends `!` / `@` on a US layout; those chords now match. ([65c8f28])
+- **Shell-tab file drops:** Only an in-app Files drag can drop a path onto a Shell tab. Plain text from other apps is ignored. ([65c8f28])
+- **Drag a shell onto Files:** Dropping a Shell tab onto the full Files view now splits that shell beside Files, instead of switching away from Files and cancelling the drop. ([c4f2f4c])
+- **Exit in a Files split:** Typing `exit` in a shell that is split with Files (or another feature) no longer closes the whole tab. That shell pane closes; the feature stays as the full view. ([9dfba1b])
+- **Sixel in a split:** Inline images no longer cover the rest of the pane with a black rectangle. The overlay stays transparent; the original shell recreates its image canvas after the split instead of keeping a black backing store. ([fb671e7])
+- **Split divider after a new pane:** The seam is an overlay above WebGL so it can be grabbed. Drag follows the pointer locally (no store write per pixel); the split is saved on release. Double-click / arrows ease to the new size. ([df639a8])
+- **Files grid crash on resize:** Switching away from Files after an upload, or toggling Places, could call `scrollToCell` with a column index the virtual grid had not adopted yet (`RangeError: Invalid index`). That took down the whole window. Scroll waits for the live column count; empty grids are skipped; a Files error no longer blanks the shell. ([2fb21e6], [76d8dc1])
+- **UNC/WSL volume roots:** `\\server\share\` and `\\wsl.localhost\Ubuntu\` count as disk roots, not Home. ([80484b9])
+- **Themed icon fallback:** A missing type icon tries the category asset before Lucide. ([80484b9])
+- **Empty drag-select:** A rubber-band that hits nothing clears focus. ([80484b9])
+
 ## [2.30.0] - 2026-09-08
 
 ### Changed
@@ -1379,7 +1410,11 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [d3f4060]: https://github.com/zync-sh/zync/commit/d3f4060
 [840afc2]: https://github.com/zync-sh/zync/commit/840afc2
 [193f568]: https://github.com/zync-sh/zync/commit/193f568
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.30.0...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.31.0...HEAD
+[2.31.0]: https://github.com/zync-sh/zync/compare/v2.30.0...v2.31.0
+[0a2a077]: https://github.com/zync-sh/zync/commit/0a2a077
+[df639a8]: https://github.com/zync-sh/zync/commit/df639a8
+[2fb21e6]: https://github.com/zync-sh/zync/commit/2fb21e6
 [2.30.0]: https://github.com/zync-sh/zync/compare/v2.29.0...v2.30.0
 [2424743]: https://github.com/zync-sh/zync/commit/2424743
 [1ed79d8]: https://github.com/zync-sh/zync/commit/1ed79d8

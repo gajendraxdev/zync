@@ -78,6 +78,15 @@ export interface AppSettings {
         showHiddenFiles: boolean;
         confirmDelete: boolean;
         defaultDownloadPath: string;
+        bookmarksByConnection: Record<string, string[]>;
+        defaultView: 'grid' | 'list';
+        clickPolicy: 'single' | 'double';
+        gridZoom: number;
+        listZoom: number;
+        sortFoldersFirst: boolean;
+        dateTimeFormat: 'simple' | 'detailed';
+        /** Last Places toggle. Unset uses overlay-open / pane-collapsed defaults. */
+        placesCollapsed?: boolean;
     };
     localTerm: {
         windowsShell: string;
@@ -139,6 +148,11 @@ export interface AppSettings {
         fmBack: string;
         fmForward: string;
         fmSearch: string;
+        fmGridView: string;
+        fmListView: string;
+        fmHidden: string;
+        fmBookmark: string;
+        fmRefresh: string;
         aiCommandBar: string;
     };
     /** Shortcut routing policy (not individual chords). See docs/SHORTCUTS.md. */
@@ -211,7 +225,15 @@ export const defaultSettings: AppSettings = {
     fileManager: {
         showHiddenFiles: true,
         confirmDelete: true,
-        defaultDownloadPath: ''
+        defaultDownloadPath: '',
+        bookmarksByConnection: {},
+        defaultView: 'grid',
+        clickPolicy: 'double',
+        gridZoom: 1,
+        listZoom: 0,
+        sortFoldersFirst: true,
+        dateTimeFormat: 'simple',
+        placesCollapsed: undefined,
     },
     localTerm: {
         windowsShell: 'default'
@@ -266,10 +288,15 @@ export const defaultSettings: AppSettings = {
         fmDelete: 'Delete',
         fmEditPath: 'Mod+L',
         fmOpen: 'Enter',
-        fmUp: 'Backspace',
+        fmUp: 'Alt+Up',
         fmBack: 'Alt+Left',
         fmForward: 'Alt+Right',
         fmSearch: 'Mod+F',
+        fmGridView: 'Mod+Shift+2',
+        fmListView: 'Mod+Shift+1',
+        fmHidden: 'Mod+H',
+        fmBookmark: 'Mod+D',
+        fmRefresh: 'F5',
         aiCommandBar: 'Mod+I',
     },
     keyboard: { ...DEFAULT_KEYBOARD_SETTINGS },
@@ -342,6 +369,20 @@ function migrateSplitPaneKeybinding(
         return { ...keybindings, splitPanes: defaultSettings.keybindings.splitPanes };
     }
     return keybindings;
+}
+
+/** Old Files view chords collided with global tab switch (Mod+1 / Mod+2). */
+function migrateFileViewKeybindings(
+    keybindings: AppSettings['keybindings'],
+): AppSettings['keybindings'] {
+    let next = keybindings;
+    if (next.fmListView === 'Mod+1') {
+        next = { ...next, fmListView: defaultSettings.keybindings.fmListView };
+    }
+    if (next.fmGridView === 'Mod+2') {
+        next = { ...next, fmGridView: defaultSettings.keybindings.fmGridView };
+    }
+    return next;
 }
 
 function normalizeTerminalFontFamily(fontFamily: string | undefined): string | undefined {
@@ -470,10 +511,10 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
                         ...(loaded?.ghostSuggestions?.providers || {}),
                     },
                 },
-                keybindings: migrateSplitPaneKeybinding({
+                keybindings: migrateFileViewKeybindings(migrateSplitPaneKeybinding({
                     ...defaultSettings.keybindings,
                     ...(loaded?.keybindings || {}),
-                }),
+                })),
                 keyboard: normalizeKeyboardSettings(loaded?.keyboard),
                 ai: { ...defaultSettings.ai, ...(loaded?.ai || {}) },
                 privacy: { ...defaultSettings.privacy, ...(loaded?.privacy || {}) },

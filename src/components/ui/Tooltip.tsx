@@ -50,7 +50,7 @@ export function Tooltip({
     >
       <RadixTooltip.Trigger
         asChild={shouldUseAsChild}
-        className={cn("relative inline-flex items-center justify-center", className)}
+        className={shouldUseAsChild ? className : cn("relative inline-flex items-center justify-center", className)}
         onClickCapture={handleDismissCapture}
       >
         {children}

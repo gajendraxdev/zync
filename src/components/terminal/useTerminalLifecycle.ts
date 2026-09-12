@@ -27,6 +27,8 @@ import {
   tryWakeTerminalOnReconnect,
   buildXtermOptions,
   isTerminalIdleSuspended,
+  loadTerminalImageAddon,
+  rebuildTerminalImageLayer,
   shouldUseWindowsLocalPtyOptions,
   writeIdleHostSuspendNotice,
 } from '../../lib/terminal';
@@ -203,6 +205,9 @@ export function useTerminalLifecycle({
 
     try {
       refreshTerminalScreen(term);
+      if (!isPaneSizeTransient()) {
+        rebuildTerminalImageLayer(term, terminalCache.get(sessionIdRef.current)?.imageAddon);
+      }
       const shouldSyncBackend = options?.syncBackend ?? true;
       if (shouldSyncBackend) {
         if (options?.forceSync) {
@@ -479,8 +484,11 @@ export function useTerminalLifecycle({
     };
 
     const handlePaneResizeEnd = () => {
-      if (isPaneSizeTransient()) return;
-      resizeSchedulerRef.current?.schedule({ forceSync: true, immediate: true });
+      resizeSchedulerRef.current?.schedule({
+        forceSync: true,
+        immediate: true,
+        syncBackend: !isPaneSizeTransient(),
+      });
     };
 
     window.addEventListener('zync:layout-transition-start', handleStart);
@@ -591,11 +599,13 @@ export function useTerminalLifecycle({
       });
 
       term.open(containerRef.current);
+      const imageAddon = loadTerminalImageAddon(term);
 
       terminalCache.set(sessionId, {
         term,
         fitAddon,
         searchAddon,
+        imageAddon,
         generation: 0,
         spawned: false,
         starting: false,

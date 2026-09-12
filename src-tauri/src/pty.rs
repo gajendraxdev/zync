@@ -576,13 +576,7 @@ impl PtyManager {
         if !args.iter().any(|arg| arg == "-i") && is_posix_interactive_shell(&shell) {
             cmd.arg("-i");
         }
-        cmd.env("TERM", "xterm-256color");
-
-        // Clear IDE/Editor specific variables that might interfere with git/ssh prompts
-        cmd.env_remove("GIT_ASKPASS");
-        cmd.env_remove("SSH_ASKPASS");
-        cmd.env_remove("VSCODE_GIT_ASKPASS");
-        cmd.env_remove("ELECTRON_RUN_AS_NODE");
+        crate::pty_term_env::apply_local_pty_term_env(&mut cmd, env!("CARGO_PKG_VERSION"));
 
         // Fix for AppImage: Unset LD_LIBRARY_PATH and other vars to prevent
         // bundled libraries from interfering with system binaries (like git).

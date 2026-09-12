@@ -1,35 +1,185 @@
 import type { FileEntry } from './types';
+import { FILE_GRID_ZOOM, clampFileGridZoom } from './fileChrome.js';
 
-export type FileSortColumn = 'name' | 'size' | 'type' | 'modified';
+export type FileSortColumn = 'name' | 'modified' | 'type' | 'size' | 'owner';
 export type FileSortDirection = 'asc' | 'desc';
+
+export const FILE_LIST_COLUMN_IDS: readonly FileSortColumn[] = [
+  'name',
+  'modified',
+  'type',
+  'size',
+  'owner',
+];
+
+export const FILE_LIST_COLUMN_LABELS: Record<FileSortColumn, string> = {
+  name: 'Name',
+  modified: 'Date modified',
+  type: 'Type',
+  size: 'Size',
+  owner: 'Owner:Group',
+};
+
+export const FILE_LIST_COLUMN_ALIGN: Record<FileSortColumn, 'left' | 'right'> = {
+  name: 'left',
+  modified: 'left',
+  type: 'left',
+  size: 'right',
+  owner: 'left',
+};
+
+/** First click on a column uses this direction (size/date: newest/largest first). */
+export const FILE_LIST_SORT_INITIAL: Record<FileSortColumn, FileSortDirection> = {
+  name: 'asc',
+  type: 'asc',
+  owner: 'asc',
+  size: 'desc',
+  modified: 'desc',
+};
+
+export function fileListSortSense(column: FileSortColumn, direction: FileSortDirection): string {
+  switch (column) {
+    case 'name':
+    case 'type':
+    case 'owner':
+      return direction === 'asc' ? 'A to Z' : 'Z to A';
+    case 'size':
+      return direction === 'asc' ? 'smallest first' : 'largest first';
+    case 'modified':
+      return direction === 'asc' ? 'oldest first' : 'newest first';
+  }
+}
+
+export function fileListSortTooltip(
+  column: FileSortColumn,
+  activeColumn: FileSortColumn,
+  direction: FileSortDirection,
+): string {
+  const label = FILE_LIST_COLUMN_LABELS[column];
+  if (column === activeColumn) {
+    const next = direction === 'asc' ? 'desc' : 'asc';
+    return `${label} · ${fileListSortSense(column, direction)}. Click for ${fileListSortSense(column, next)}.`;
+  }
+  const initial = FILE_LIST_SORT_INITIAL[column];
+  return `Sort by ${label}, ${fileListSortSense(column, initial)}`;
+}
 
 /** List-row height from FileListItem (`py-2` + 20px icon + border). Compact does not change list rows. */
 export const FILE_LIST_ROW_HEIGHT = 40;
 
-/** Shared header/row tracks: Name | Size (w-24) | Type (w-32) | Modified (w-40). */
-export const FILE_LIST_COLUMNS = 'minmax(0, 1fr) 6rem 8rem 10rem';
+/** Name is readable; leftover width is the last 1fr track after Owner:Group. */
+export const FILE_LIST_COLUMNS = 'minmax(12rem, 20rem) 11.25rem 8rem 5.5rem minmax(8.5rem, 12rem) minmax(0, 1fr)';
+
+/** Explorer-style type: `File folder`, `PNG File`. Long fake extensions become `File`. */
+export function formatFileListType(file: FileEntry): string {
+  if (file.type === 'd') return 'File folder';
+  if (file.type === 'l') return 'Link';
+  const name = file.name;
+  let ext = '';
+  if (name.startsWith('.') && !name.slice(1).includes('.')) {
+    ext = name.slice(1).trim();
+  } else {
+    const dot = name.lastIndexOf('.');
+    if (dot > 0 && dot < name.length - 1) ext = name.slice(dot + 1);
+  }
+  if (!ext || ext.length > 8) return 'File';
+  return `${ext.toUpperCase()} File`;
+}
+
+/** Grid hover card: name, Folder/size, owner:group, date. */
+export function fileHoverHint(file: FileEntry, dateTimeFormat: 'simple' | 'detailed' = 'simple'): string {
+  const identity = formatFileIdentity(file.owner || '', file.group || '');
+  const modified = formatFileListDate(file.lastModified, Date.now(), dateTimeFormat);
+  const kind = file.type === 'd' ? 'Folder' : formatBytesForHint(file.size);
+  return [file.name, kind, identity, modified].filter(Boolean).join('\n');
+}
+
+function formatBytesForHint(size: number): string {
+  if (!Number.isFinite(size) || size < 0) return '';
+  if (size < 1024) return `${size} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = size / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  const digits = value >= 10 || unit === 0 ? 0 : 1;
+  return `${value.toFixed(digits)} ${units[unit]}`;
+}
+
+/** `admin:staff`, or empty when both are missing. */
+export function formatFileIdentity(owner: string, group: string): string {
+  const user = (owner || '').trim();
+  const grp = (group || '').trim();
+  if (!user && !grp) return '';
+  if (user && grp) return `${user}:${grp}`;
+  return user || grp;
+}
+
+/** Compact list/grid dates: time today, `Sep 2` this year, else `Nov 20, 2025`. */
+export function formatFileListDate(
+  timestamp: number,
+  nowMs: number = Date.now(),
+  format: 'simple' | 'detailed' = 'simple',
+): string {
+  const ms = timestamp > 0 && timestamp < 1e10 ? timestamp * 1000 : timestamp;
+  const date = new Date(ms);
+  if (Number.isNaN(date.getTime()) || timestamp === 0) return '';
+  if (format === 'detailed') {
+    return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  }
+  const now = new Date(nowMs);
+  if (date.toDateString() === now.toDateString()) {
+    return date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  }
+  if (date.getFullYear() === now.getFullYear()) {
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+/** List-view dates: locale short date and time, like Explorer details. */
+export function formatFileExplorerDate(timestamp: number): string {
+  const ms = timestamp > 0 && timestamp < 1e10 ? timestamp * 1000 : timestamp;
+  const date = new Date(ms);
+  if (Number.isNaN(date.getTime()) || timestamp === 0) return '';
+  return date.toLocaleString(undefined, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
 
 export interface FileGridMetrics {
   columnCount: number;
+  /** Minimum tile track (zoom). CSS icon view uses this with `1fr` leftover. */
+  minTrack: number;
+  /** react-window cell width when the viewport has not been measured yet (`minTrack + gap`). */
   columnWidth: number;
   rowHeight: number;
   gap: number;
 }
 
-function fileExtension(name: string): string {
-  const dot = name.lastIndexOf('.');
-  if (dot <= 0 || dot === name.length - 1) return '';
-  return name.slice(dot + 1).toLowerCase();
+/** Icon view: tiles grow with leftover space; a column is added only when `minTrack` fits. */
+export function fileIconGridTemplateColumns(minTrack: number): string {
+  const track = Math.max(1, minTrack);
+  return `repeat(auto-fill, minmax(min(100%, ${track}px), 1fr))`;
 }
 
 export function sortFileEntries(
   files: FileEntry[],
   column: FileSortColumn,
   direction: FileSortDirection,
+  foldersFirst = true,
 ): FileEntry[] {
   return [...files].sort((a, b) => {
-    if (a.type === 'd' && b.type !== 'd') return -1;
-    if (a.type !== 'd' && b.type === 'd') return 1;
+    if (foldersFirst) {
+      if (a.type === 'd' && b.type !== 'd') return -1;
+      if (a.type !== 'd' && b.type === 'd') return 1;
+    }
 
     let comparison = 0;
     switch (column) {
@@ -39,23 +189,57 @@ export function sortFileEntries(
       case 'size':
         comparison = a.size - b.size;
         break;
-      case 'type':
-        comparison = fileExtension(a.name).localeCompare(fileExtension(b.name));
+      case 'owner': {
+        const left = formatFileIdentity(a.owner || '', a.group || '');
+        const right = formatFileIdentity(b.owner || '', b.group || '');
+        comparison = left.localeCompare(right);
         break;
+      }
       case 'modified':
         comparison = a.lastModified - b.lastModified;
+        break;
+      case 'type':
+        comparison = formatFileListType(a).localeCompare(formatFileListType(b));
         break;
     }
     return direction === 'asc' ? comparison : -comparison;
   });
 }
 
-export function computeFileGridMetrics(containerWidth: number, compactMode: boolean): FileGridMetrics {
-  const minTrack = compactMode ? 100 : 120;
-  const gap = compactMode ? 8 : 16;
-  const rowHeight = compactMode ? 120 : 140;
+/** Cell coordinates for a file index, or null if they would miss the current grid. */
+export function fileGridScrollTarget(
+  fileIndex: number,
+  columnCount: number,
+  rowCount: number,
+): { rowIndex: number; columnIndex: number } | null {
+  if (rowCount <= 0) return null;
+  const cols = Math.max(1, columnCount);
+  const rows = rowCount;
+  if (fileIndex < 0) return null;
+  const rowIndex = Math.floor(fileIndex / cols);
+  const columnIndex = fileIndex % cols;
+  if (rowIndex >= rows || columnIndex >= cols) return null;
+  return { rowIndex, columnIndex };
+}
+
+export function computeFileGridMetrics(
+  containerWidth: number,
+  compactMode: boolean,
+  zoomLevel?: number,
+): FileGridMetrics {
+  if (zoomLevel === undefined) {
+    const minTrack = compactMode ? 90 : 104;
+    const gap = compactMode ? 6 : 8;
+    const rowHeight = compactMode ? 100 : 120;
+    const width = Math.max(0, containerWidth);
+    const columnCount = Math.max(1, Math.floor((width + gap) / (minTrack + gap)));
+    return { columnCount, minTrack, columnWidth: minTrack + gap, rowHeight, gap };
+  }
+  const zoom = FILE_GRID_ZOOM[clampFileGridZoom(zoomLevel)];
+  const minTrack = zoom.minTrack;
+  const gap = zoom.gap;
+  const rowHeight = zoom.rowHeight;
   const width = Math.max(0, containerWidth);
   const columnCount = Math.max(1, Math.floor((width + gap) / (minTrack + gap)));
-  const columnWidth = width / columnCount;
-  return { columnCount, columnWidth, rowHeight, gap };
+  return { columnCount, minTrack, columnWidth: minTrack + gap, rowHeight, gap };
 }

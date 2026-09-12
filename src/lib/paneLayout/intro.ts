@@ -1,7 +1,10 @@
+import type { CSSProperties } from 'react';
 import type { SplitInsert } from './types';
 
 /** One-shot grow-in for a newly created split. Divider drag must not use this. */
 export const SPLIT_INTRO_MS = 280;
+/** Short ease after equalize / keyboard nudge. Drag itself stays 1:1 with the pointer. */
+export const SPLIT_SETTLE_MS = 180;
 
 export type SplitIntro = {
     incomingIndex: 0 | 1;
@@ -39,4 +42,17 @@ export function takeSplitIntro(splitId: string): SplitIntro | null {
 
 export function dropSplitIntro(splitId: string): void {
     pending.delete(splitId);
+}
+
+/** Hit target for the overlay sash. WebGL canvases steal a 1px in-flow seam. */
+export const SPLIT_SASH_HIT_PX = 16;
+
+export function splitSashStyle(stacked: boolean, firstRatio: number): CSSProperties {
+    const ratio = Math.min(1, Math.max(0, firstRatio));
+    const pct = `${ratio * 100}%`;
+    const half = -(SPLIT_SASH_HIT_PX / 2);
+    if (stacked) {
+        return { top: pct, left: 0, right: 0, height: SPLIT_SASH_HIT_PX, marginTop: half };
+    }
+    return { left: pct, top: 0, bottom: 0, width: SPLIT_SASH_HIT_PX, marginLeft: half };
 }

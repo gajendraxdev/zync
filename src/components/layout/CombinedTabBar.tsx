@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback, memo, type DragEvent } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../../lib/utils';
@@ -26,6 +26,9 @@ import {
 } from '../../lib/paneLayout';
 import { WorkspaceOpenMenu } from './workspaceOpen';
 import { splitOpenMenuItems, useDockTabPointer, type DockTabPointerHandlers } from './tabDock';
+import { useInternalFileDrag } from '../../lib/dragDrop';
+import { acceptFilePathDrag } from '../../lib/terminal/fileDropToTerminal';
+import { pasteFilePathsIntoTerminal } from '../../lib/terminal/pasteFileDropToTerminal';
 
 
 interface CombinedTabBarProps {
@@ -205,6 +208,19 @@ export const CombinedTabBar = memo(function CombinedTabBar({
     dockPointer,
 }: CombinedTabBarProps) {
     const { begin: beginDockPointer, consumeClickIfDragged } = useDockTabPointer(dockPointer);
+    const fileDragActive = useInternalFileDrag();
+    const [fileDropTermId, setFileDropTermId] = useState<string | null>(null);
+    const handleTermFileDragOver = useCallback((event: DragEvent<HTMLDivElement>, termId: string) => {
+        if (!fileDragActive || !acceptFilePathDrag(event)) return;
+        setFileDropTermId(termId);
+    }, [fileDragActive]);
+    const handleTermFileDrop = useCallback((event: DragEvent<HTMLDivElement>, termId: string) => {
+        setFileDropTermId(null);
+        if (!fileDragActive || !acceptFilePathDrag(event)) return;
+        event.stopPropagation();
+        onTabSelect('terminal', termId);
+        pasteFilePathsIntoTerminal(termId, event.dataTransfer, connectionId);
+    }, [connectionId, fileDragActive, onTabSelect]);
     const terminals = useAppStore(useShallow(state =>
         (state.terminals[connectionId] || []).filter(term => term.tabVisible !== false),
     ));
@@ -337,6 +353,12 @@ export const CombinedTabBar = memo(function CombinedTabBar({
                                     if (consumeClickIfDragged()) return;
                                     onTabSelect('terminal', term.id);
                                 }}
+                                onDragOver={(event) => handleTermFileDragOver(event, term.id)}
+                                onDragLeave={(event) => {
+                                    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+                                    setFileDropTermId((current) => (current === term.id ? null : current));
+                                }}
+                                onDrop={(event) => handleTermFileDrop(event, term.id)}
                                 onContextMenu={(e) => {
                                     e.preventDefault();
                                     e.stopPropagation();
@@ -347,7 +369,8 @@ export const CombinedTabBar = memo(function CombinedTabBar({
                                     "flex items-center gap-2 px-3 py-1.5 h-7 text-xs font-medium rounded-md transition-colors duration-100 cursor-grab min-w-[100px] max-w-[200px] group border border-transparent drag-none shrink-0 active:scale-[0.98] active:cursor-grabbing",
                                     isActive
                                         ? "bg-app-surface text-app-text shadow-sm border-app-border/50"
-                                        : "text-app-muted hover:bg-app-surface/50 hover:text-app-text"
+                                        : "text-app-muted hover:bg-app-surface/50 hover:text-app-text",
+                                    fileDragActive && fileDropTermId === term.id && "border-app-accent bg-app-accent/15 text-app-text",
                                 )}
                             >
                                 {shell ? (

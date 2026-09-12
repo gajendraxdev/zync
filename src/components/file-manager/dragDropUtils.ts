@@ -129,13 +129,14 @@ export const startInternalDrag = (
   isFolder: boolean,
   count: number
 ) => {
-  setCurrentDragSource({ connectionId: dragData.connectionId, path: dragData.path });
+  setCurrentDragSource({ connectionId: dragData.connectionId, path: dragData.path }, dragData.paths);
 
   const preview = createDragPreview(count, isFolder, dragData.name);
   e.dataTransfer.setDragImage(preview, 20, 20);
   cleanupDragPreview(preview);
 
   e.dataTransfer.setData('application/json', JSON.stringify(dragData));
+  e.dataTransfer.setData('text/plain', dragData.paths.join('\n'));
   e.dataTransfer.effectAllowed = 'copyMove';
   
   if (e.currentTarget instanceof HTMLElement) {

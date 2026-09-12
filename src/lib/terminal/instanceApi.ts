@@ -2,6 +2,7 @@ import { clearPromptCwdSniffer } from '../ghostSuggestions/promptCwdSniffer.js';
 import { clearSecretInputSniffer } from '../ghostSuggestions/secretInputDetect.js';
 import { clearTerminalRendererSession } from './rendererSession.js';
 import { disposeTerminalLigatures } from './ligatures.js';
+import { disposeTerminalImageAddon } from './terminalImage.js';
 import { clearTerminalPendingInput, terminalCache } from './terminalCache.js';
 import { clearTerminalInputQueue } from './inputQueue.js';
 import { silenceTerminalOutputChannel } from './terminalReloadTeardown.js';
@@ -39,6 +40,7 @@ export function destroyTerminalInstance(termId: string): void {
   cached.ghostTracker?.destroy();
   disposeTerminalLigatures(cached);
   cached.ligaturesEnabled = false;
+  disposeTerminalImageAddon(cached);
   clearTerminalRendererSession(termId, cached.term);
 
   if (cached.unlisten && cached.unlisten.length > 0) {

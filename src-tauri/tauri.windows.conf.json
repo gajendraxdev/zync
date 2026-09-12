@@ -1,0 +1,10 @@
+{
+  "bundle": {
+    "resources": [
+      "vendor/conpty/x64/conpty.dll",
+      "vendor/conpty/x64/OpenConsole.exe",
+      "vendor/conpty/arm64/conpty.dll",
+      "vendor/conpty/arm64/OpenConsole.exe"
+    ]
+  }
+}

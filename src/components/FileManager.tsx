@@ -19,22 +19,36 @@ import {
 import { ConfirmModal } from './ui/ConfirmModal';
 import { memo, useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { useAppStore, Connection } from '../store/useAppStore';
-import { isMatch } from '../lib/keyboard';
+
+import { cn } from '../lib/utils';
 import { FileEditor } from './FileEditor';
 import { CopyToServerModal } from './file-manager/CopyToServerModal';
 import { FileGrid } from './file-manager/FileGrid';
-import { sortFileEntries, type FileSortColumn, type FileSortDirection } from './file-manager/fileGridLayout';
+import { FILE_LIST_SORT_INITIAL, sortFileEntries, type FileSortColumn, type FileSortDirection } from './file-manager/fileGridLayout';
 import { getCurrentDragSource } from '../lib/dragDrop';
-import { FileToolbar } from './file-manager/FileToolbar';
+import { FileToolbar, FileBottomActionBar } from './file-manager/FileToolbar';
+import { FileHistoryControls } from './file-manager/FileHistoryControls';
+import { FileViewControls } from './file-manager/FileViewControls';
+import { FilePlacesSidebar } from './file-manager/FilePlacesSidebar';
+import { loadLocalFileVolumes, type FileVolume } from './file-manager/fileVolumes';
+import { FileSideDrawer } from './file-manager/FileSideDrawer';
+import { FileFloatingBar } from './file-manager/FileFloatingBar';
+import { FILE_CHROME_NARROW_MAX, FILE_GRID_ZOOM, FILE_LIST_ZOOM, FILE_PLACES_WIDTH_PX, FILE_PROPERTIES_WIDTH_PX, clampFileGridZoom, clampFileListZoom } from './file-manager/fileChrome';
+import { filePathLeafLabel, inferHomePath, isFilePathEqual, normalizeFilePath } from './file-manager/filePathNav';
+import { fileMatchesQuery, fileMatchesSearchType } from './file-manager/fileSearchFilter';
+import type { FileSearchTypeFilter } from './file-manager/FileQueryEditor';
 import type { FileEntry } from './file-manager/types';
 import { PropertiesPanel } from './file-manager/PropertiesPanel';
+import { useFileClipboard } from './file-manager/useFileClipboard';
+import { isFileManagerPanelShown, useFileKeyboard } from './file-manager/useFileKeyboard';
+import { useFileSelection } from './file-manager/useFileSelection';
+import { useFileUploads } from './file-manager/useFileUploads';
 import { ConflictModal, type ConflictAction } from './file-manager/ConflictModal';
 import { Button } from './ui/Button';
 import { ContextMenu, type ContextMenuItem } from './ui/ContextMenu';
 import { Input } from './ui/Input';
 import { Modal } from './ui/Modal';
-import { useTauriFileDrop } from '../hooks/useTauriFileDrop';
-import { FileBottomToolbar } from './file-manager/FileBottomToolbar';
+
 import { usePlugins } from '../context/PluginContext';
 import { buildEditorProviderOptions, CODEMIRROR_EDITOR_ID } from './editor/providers';
 import { clearEditorOverlayOpen, markEditorOverlayOpen } from './editor/overlayState';
@@ -46,6 +60,7 @@ import { canSplitBesideFiles, isUnresolvedFilesPath, openHerePlacementItems, ope
 export type FileManagerSurface = 'overlay' | 'pane';
 
 const EMPTY_FILES: FileEntry[] = [];
+const EMPTY_PATHS: string[] = [];
 
 function isFileManagerActive(
   state: AppStore,
@@ -104,11 +119,6 @@ function terminalHereMenuItems(
   ];
 }
 
-function isFileManagerPanelShown(container: HTMLDivElement | null): boolean {
-  if (!container) return false;
-  return container.offsetParent !== null;
-}
-
 export const FileManager = memo(function FileManager({
   connectionId,
   surface = 'overlay',
@@ -161,12 +171,11 @@ export const FileManager = memo(function FileManager({
   const createFolder = useAppStore(state => state.createFolder);
   const renameEntry = useAppStore(state => state.renameEntry);
   const deleteEntries = useAppStore(state => state.deleteEntries);
-  const uploadAction = useAppStore(state => state.uploadFiles);
   const navigateBack = useAppStore(state => state.navigateBack);
   const navigateForward = useAppStore(state => state.navigateForward);
+  const navigateHistoryTo = useAppStore(state => state.navigateHistoryTo);
   const pasteEntries = useAppStore(state => state.pasteEntries);
   const clipboard = useAppStore(state => state.clipboard);
-  const setClipboard = useAppStore(state => state.setClipboard);
   const clearClipboard = useAppStore(state => state.clearClipboard);
   const updateSettings = useAppStore(state => state.updateSettings);
   const updateFileManagerSettings = useAppStore(state => state.updateFileManagerSettings);
@@ -175,8 +184,12 @@ export const FileManager = memo(function FileManager({
   const activeHistoryIndex = useAppStore(state => (
     activeConnectionId ? (state.historyIndex[activeConnectionId] || 0) : 0
   ));
-  const activeHistoryLength = useAppStore(state => (
-    activeConnectionId ? (state.history[activeConnectionId]?.length || 0) : 0
+  const activeHistory = useAppStore(state => (
+    (activeConnectionId && state.history[activeConnectionId]) || EMPTY_PATHS
+  ));
+  const activeHistoryLength = activeHistory.length;
+  const recentPaths = useAppStore(state => (
+    (activeConnectionId && state.recentPaths[activeConnectionId]) || EMPTY_PATHS
   ));
   const filesOpenHint = useAppStore((state) => {
     if (!activeConnectionId) return '';
@@ -191,18 +204,33 @@ export const FileManager = memo(function FileManager({
     return `${term?.lastKnownCwd || ''}|${term?.initialPath || ''}|${home || ''}`;
   });
 
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
-  const [focusedFile, setFocusedFile] = useState<string | null>(null);
+  const viewMode: 'grid' | 'list' = settings.fileManager.defaultView === 'list' ? 'list' : 'grid';
+  const setViewMode = useCallback((mode: 'grid' | 'list') => {
+    if (mode === viewMode) return;
+    void updateFileManagerSettings({ defaultView: mode });
+  }, [updateFileManagerSettings, viewMode]);
+  const [typeFilter, setTypeFilter] = useState<FileSearchTypeFilter>('all');
+  const placesCollapsed = settings.fileManager.placesCollapsed ?? surface === 'pane';
+  const [volumes, setVolumes] = useState<FileVolume[]>([]);
+  const {
+    selectedFiles,
+    setSelectedFiles,
+    focusedFile,
+    setFocusedFile,
+    handleSelect,
+    handleSelectAll,
+    handleSelectMany,
+    selectContextFile,
+  } = useFileSelection(currentPath, activeConnectionId ?? undefined);
+  const { handleCopy } = useFileClipboard({
+    connectionId: activeConnectionId ?? undefined,
+    currentPath,
+    files,
+    selectedFiles,
+  });
   const [sortColumn, setSortColumn] = useState<FileSortColumn>('name');
   const [sortDirection, setSortDirection] = useState<FileSortDirection>('asc');
   const [gridColumnCount, setGridColumnCount] = useState(1);
-  const [selectionPath, setSelectionPath] = useState(currentPath);
-  if (selectionPath !== currentPath) {
-    setSelectionPath(currentPath);
-    setSelectedFiles([]);
-    setFocusedFile(null);
-  }
   const [searchTerm, setSearchTerm] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isEditingPath, setIsEditingPath] = useState(false);
@@ -211,15 +239,11 @@ export const FileManager = memo(function FileManager({
   const [editingFile, setEditingFile] = useState<FileEntry | null>(null);
   const [editorContent, setEditorContent] = useState('');
   const [editorProviderOverride, setEditorProviderOverride] = useState<string | null>(null);
-  const [boundConnectionId, setBoundConnectionId] = useState(activeConnectionId);
-  if (boundConnectionId !== activeConnectionId) {
-    setBoundConnectionId(activeConnectionId);
-    setSelectedFiles([]);
-    setFocusedFile(null);
+  useEffect(() => {
     setEditingFile(null);
     setEditorContent('');
     setEditorProviderOverride(null);
-  }
+  }, [activeConnectionId]);
 
   // Modal States
   const [isNewFolderModalOpen, setIsNewFolderModalOpen] = useState(false);
@@ -264,15 +288,20 @@ export const FileManager = memo(function FileManager({
   const [isProcessing, setIsProcessing] = useState(false);
   const [isZipping, setIsZipping] = useState(false);
   const [isFileLoading, setIsFileLoading] = useState(false);
-  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
-
-  const isSmallScreen = windowWidth < 640;
+  const [isNarrow, setIsNarrow] = useState(() => window.innerWidth < FILE_CHROME_NARROW_MAX);
   const editorProviderOptions = useMemo(() => buildEditorProviderOptions(editorProviders), [editorProviders]);
 
   useEffect(() => {
-    const handleResize = () => setWindowWidth(window.innerWidth);
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    const el = containerRef.current;
+    if (!el) return;
+    const apply = () => {
+      const next = el.clientWidth < FILE_CHROME_NARROW_MAX;
+      setIsNarrow((prev) => (prev === next ? prev : next));
+    };
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(el);
+    return () => observer.disconnect();
   }, []);
 
   // Sync terminal to FM navigation if a synced terminal is active
@@ -290,10 +319,16 @@ export const FileManager = memo(function FileManager({
   const canGoBack = Boolean(activeConnectionId) && activeHistoryIndex > 0;
   const canGoForward = Boolean(activeConnectionId) && activeHistoryIndex < activeHistoryLength - 1;
 
-  const performUpload = useCallback(async (filePaths: string[]) => {
-    if (!activeConnectionId) return;
-    await uploadAction(activeConnectionId, filePaths);
-  }, [activeConnectionId, uploadAction]);
+  const clearDragVisual = useCallback(() => {
+    setIsInternalDraggingOver(false);
+    setDragType(null);
+    setDragSourceConnectionId(null);
+  }, []);
+  const { handleUpload, handleUploadFolder, isTauriDraggingOver } = useFileUploads({
+    connectionId: activeConnectionId ?? undefined,
+    isConnected,
+    onDragVisualClear: clearDragVisual,
+  });
 
   const handleConnectionError = useCallback((connectionId: string, err: any) => {
     const msg = err.message || String(err);
@@ -314,28 +349,6 @@ export const FileManager = memo(function FileManager({
     }
     return false;
   }, []);
-
-  const { isDraggingOver: isTauriDraggingOver } = useTauriFileDrop(useCallback((paths) => {
-    // Clear any leftover HTML5 drag state (HTML5 drop won't fire when Tauri intercepts)
-    setIsInternalDraggingOver(false);
-    setDragType(null);
-    setDragSourceConnectionId(null);
-    if (activeConnectionId) {
-      performUpload(paths);
-    }
-  }, [activeConnectionId, performUpload]));
-
-  // --- Copy / Paste Logic ---
-  const handleCopy = useCallback((cut = false) => {
-    if (!activeConnectionId || selectedFiles.length === 0) return;
-
-    // Create list of file entries from selection
-    const selectedEntries = files.filter(f => selectedFiles.includes(f.name));
-
-    setClipboard(selectedEntries, activeConnectionId, currentPath, cut ? 'cut' : 'copy');
-
-    showToast('info', `${cut ? 'Cut' : 'Copied'} ${selectedEntries.length} item(s)`);
-  }, [activeConnectionId, currentPath, files, selectedFiles, setClipboard, showToast]);
 
   const executeFileOperations = useCallback(async (ops: {
     source: string;
@@ -872,41 +885,26 @@ export const FileManager = memo(function FileManager({
     }
   }, [activeConnectionId, editingFile, currentPath, handleConnectionError, showToast]);
 
-  const handleSelect = useCallback((filename: string, multi: boolean) => {
-    if (!filename) {
-      setSelectedFiles([]);
-      return;
-    }
-
-    if (multi) {
-      setSelectedFiles((prev) => (prev.includes(filename) ? prev.filter((f) => f !== filename) : [...prev, filename]));
-    } else {
-      setSelectedFiles([filename]);
-      setFocusedFile(filename);
-    }
-  }, []);
-
   const handleContextMenu = useCallback((e: React.MouseEvent, file?: FileEntry) => {
     e.preventDefault();
     e.stopPropagation();
     setContextMenu({ x: e.clientX, y: e.clientY, file: file || null });
-
-    if (file) {
-      setSelectedFiles((prev) => (prev.includes(file.name) ? prev : [file.name]));
-    }
-  }, []);
+    selectContextFile(file);
+  }, [selectContextFile]);
 
   const showHiddenFiles = settings.fileManager.showHiddenFiles;
   const filteredFiles = useMemo(
     () => files.filter((f) => {
       if (!showHiddenFiles && f.name.startsWith('.')) return false;
-      return f.name.toLowerCase().includes(searchTerm.toLowerCase());
+      if (!fileMatchesQuery(f, searchTerm)) return false;
+      if (!fileMatchesSearchType(f, typeFilter)) return false;
+      return true;
     }),
-    [files, showHiddenFiles, searchTerm],
+    [files, showHiddenFiles, searchTerm, typeFilter],
   );
   const paintedFiles = useMemo(
-    () => sortFileEntries(filteredFiles, sortColumn, sortDirection),
-    [filteredFiles, sortColumn, sortDirection],
+    () => sortFileEntries(filteredFiles, sortColumn, sortDirection, settings.fileManager.sortFoldersFirst !== false),
+    [filteredFiles, sortColumn, sortDirection, settings.fileManager.sortFoldersFirst],
   );
   const handleSort = useCallback((column: FileSortColumn) => {
     if (column === sortColumn) {
@@ -914,8 +912,12 @@ export const FileManager = memo(function FileManager({
       return;
     }
     setSortColumn(column);
-    setSortDirection('asc');
+    setSortDirection(FILE_LIST_SORT_INITIAL[column]);
   }, [sortColumn]);
+  const applySort = useCallback((column: FileSortColumn, direction: FileSortDirection) => {
+    setSortColumn(column);
+    setSortDirection(direction);
+  }, []);
 
   // --- Action Handlers (Create, Rename, Upload, Delete, Download) ---
 
@@ -990,15 +992,179 @@ export const FileManager = memo(function FileManager({
   // Move performUpload up to be stable and reusable
   // (Done above)
 
-  const handleUpload = async () => {
-    try {
-      const { filePaths, canceled } = await window.ipcRenderer.invoke('dialog:openFile');
-      if (canceled || filePaths.length === 0) return;
-      performUpload(filePaths);
-    } catch (error: any) {
-      showToast('error', `Upload failed: ${error.message || String(error)}`);
+  const inferredHome = inferHomePath(connection?.homePath, currentPath);
+  const [heldHome, setHeldHome] = useState<{ connectionId: string; path: string } | null>(null);
+  const activeHomeIdRef = useRef(activeConnectionId);
+  useEffect(() => {
+    activeHomeIdRef.current = activeConnectionId;
+  }, [activeConnectionId]);
+  useEffect(() => {
+    if (!activeConnectionId) {
+      setHeldHome(null);
+      return;
     }
-  };
+    if (inferredHome) {
+      setHeldHome({ connectionId: activeConnectionId, path: inferredHome });
+      return;
+    }
+    setHeldHome((prev) => (prev?.connectionId === activeConnectionId ? prev : null));
+  }, [activeConnectionId, inferredHome]);
+  useEffect(() => {
+    if (!isLocal || !activeConnectionId || inferredHome) return;
+    const connId = activeConnectionId;
+    let cancelled = false;
+    void window.ipcRenderer.invoke('fs_cwd', { connectionId: 'local' }).then((cwd: unknown) => {
+      if (cancelled || connId !== activeHomeIdRef.current) return;
+      const path = typeof cwd === 'string' ? inferHomePath(cwd, cwd) : '';
+      if (!path) return;
+      setHeldHome((prev) => (
+        prev?.connectionId === connId && prev.path ? prev : { connectionId: connId, path }
+      ));
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [activeConnectionId, inferredHome, isLocal]);
+  const homePath = inferredHome
+    || (heldHome?.connectionId === activeConnectionId ? heldHome.path : '');
+  const osName = isLocal
+    ? (typeof navigator !== 'undefined' && /win/i.test(navigator.platform) ? 'Windows' : 'Operating System')
+    : 'Operating System';
+  const bookmarks = settings.fileManager.bookmarksByConnection?.[activeConnectionId || ''] ?? EMPTY_PATHS;
+  const isBookmarked = Boolean(currentPath && bookmarks.some((path) => isFilePathEqual(path, currentPath)));
+  const gridZoom = clampFileGridZoom(settings.fileManager.gridZoom ?? 1);
+  const listZoom = clampFileListZoom(settings.fileManager.listZoom ?? 0);
+  const canZoomIn = viewMode === 'grid' ? gridZoom < FILE_GRID_ZOOM.length - 1 : listZoom < FILE_LIST_ZOOM.length - 1;
+  const canZoomOut = viewMode === 'grid' ? gridZoom > 0 : listZoom > 0;
+  const pathLabel = (path: string) => filePathLeafLabel(path, { homePath, osName });
+  const backEntries = useMemo(() => {
+    const entries = [];
+    for (let i = activeHistoryIndex - 1; i >= 0; i--) {
+      entries.push({ label: pathLabel(activeHistory[i]), path: activeHistory[i], index: i });
+    }
+    return entries;
+  }, [activeHistory, activeHistoryIndex, homePath, osName]);
+  const forwardEntries = useMemo(() => {
+    const entries = [];
+    for (let i = activeHistoryIndex + 1; i < activeHistory.length; i++) {
+      entries.push({ label: pathLabel(activeHistory[i]), path: activeHistory[i], index: i });
+    }
+    return entries;
+  }, [activeHistory, activeHistoryIndex, homePath, osName]);
+
+  const toggleBookmark = useCallback(() => {
+    if (!activeConnectionId || !currentPath) return;
+    const path = normalizeFilePath(currentPath);
+    const current = (settings.fileManager.bookmarksByConnection?.[activeConnectionId] ?? []).map(normalizeFilePath);
+    const next = current.some((item) => isFilePathEqual(item, path))
+      ? current.filter((item) => !isFilePathEqual(item, path))
+      : [...current, path];
+    void updateFileManagerSettings({
+      bookmarksByConnection: {
+        ...(settings.fileManager.bookmarksByConnection || {}),
+        [activeConnectionId]: next,
+      },
+    });
+  }, [activeConnectionId, currentPath, settings.fileManager.bookmarksByConnection, updateFileManagerSettings]);
+
+  const handleCopyLocation = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(currentPath);
+    } catch {
+      showToast('error', 'Could not copy location');
+    }
+  }, [currentPath, showToast]);
+
+  const navigateToPath = useCallback((path: string) => {
+    if (!activeConnectionId) return;
+    void loadFiles(activeConnectionId, path);
+  }, [activeConnectionId, loadFiles]);
+
+  const handleRefresh = useCallback(() => {
+    if (!activeConnectionId) return;
+    void refreshFiles(activeConnectionId);
+  }, [activeConnectionId, refreshFiles]);
+
+  const handleToggleSearch = useCallback((open: boolean) => {
+    setIsSearchOpen(open);
+  }, []);
+
+  const handleTogglePlaces = useCallback(() => {
+    void updateFileManagerSettings({ placesCollapsed: !placesCollapsed });
+  }, [placesCollapsed, updateFileManagerSettings]);
+
+  useEffect(() => {
+    if (!isLocal) {
+      setVolumes([]);
+      return;
+    }
+    if (placesCollapsed) return;
+    let cancelled = false;
+    void loadLocalFileVolumes().then((rows) => {
+      if (!cancelled) setVolumes(rows);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isLocal, placesCollapsed]);
+
+  const handleBack = useCallback(() => {
+    if (activeConnectionId) navigateBack(activeConnectionId);
+  }, [activeConnectionId, navigateBack]);
+
+  const handleForward = useCallback(() => {
+    if (activeConnectionId) navigateForward(activeConnectionId);
+  }, [activeConnectionId, navigateForward]);
+
+  const handleHistoryJump = useCallback((index: number) => {
+    if (activeConnectionId) navigateHistoryTo(activeConnectionId, index);
+  }, [activeConnectionId, navigateHistoryTo]);
+
+  const handleToggleHidden = useCallback(() => {
+    const hidden = useAppStore.getState().settings.fileManager.showHiddenFiles;
+    void updateFileManagerSettings({ showHiddenFiles: !hidden });
+  }, [updateFileManagerSettings]);
+
+  const handleZoomIn = useCallback(() => {
+    const fm = useAppStore.getState().settings.fileManager;
+    if (viewMode === 'grid') void updateFileManagerSettings({ gridZoom: clampFileGridZoom((fm.gridZoom ?? 1) + 1) });
+    else void updateFileManagerSettings({ listZoom: clampFileListZoom((fm.listZoom ?? 0) + 1) });
+  }, [viewMode, updateFileManagerSettings]);
+
+  const handleZoomOut = useCallback(() => {
+    const fm = useAppStore.getState().settings.fileManager;
+    if (viewMode === 'grid') void updateFileManagerSettings({ gridZoom: clampFileGridZoom((fm.gridZoom ?? 1) - 1) });
+    else void updateFileManagerSettings({ listZoom: clampFileListZoom((fm.listZoom ?? 0) - 1) });
+  }, [viewMode, updateFileManagerSettings]);
+
+  const handleSelectAllFiles = useCallback(() => {
+    handleSelectAll(paintedFiles.map((f) => f.name));
+  }, [handleSelectAll, paintedFiles]);
+
+  const handleOpenProperties = useCallback(() => {
+    if (selectedFiles.length === 0 && focusedFile) setSelectedFiles([focusedFile]);
+    setIsPropertiesOpen(true);
+  }, [focusedFile, selectedFiles.length]);
+
+  const handleOpenTerminalChrome = useCallback(() => {
+    if (!activeConnectionId) return;
+    void openTerminalHere(activeConnectionId, currentPath);
+  }, [activeConnectionId, currentPath]);
+
+  const handleNewFolder = useCallback(() => setIsNewFolderModalOpen(true), []);
+  const handleNewFile = useCallback(() => setIsNewFileModalOpen(true), []);
+
+  const handleRemoveBookmark = useCallback((path: string) => {
+    if (!activeConnectionId) return;
+    const target = normalizeFilePath(path);
+    const current = useAppStore.getState().settings.fileManager.bookmarksByConnection?.[activeConnectionId] ?? [];
+    void updateFileManagerSettings({
+      bookmarksByConnection: {
+        ...(useAppStore.getState().settings.fileManager.bookmarksByConnection || {}),
+        [activeConnectionId]: current.filter((item) => !isFilePathEqual(item, target)).map(normalizeFilePath),
+      },
+    });
+  }, [activeConnectionId, updateFileManagerSettings]);
 
   const handleDownload = async () => {
     if (selectedFiles.length === 0 || !activeConnectionId) return;
@@ -1403,227 +1569,46 @@ export const FileManager = memo(function FileManager({
 
 
 
-  // Keyboard Navigation Handler
-  useEffect(() => {
-    if (!isConnected) return;
+  useFileKeyboard({
+    containerRef,
+    isConnected,
+    isFilesSurfaceActive,
+    settings,
+    paintedFiles,
+    selectedFiles,
+    focusedFile,
+    setSelectedFiles,
+    setFocusedFile,
+    viewMode,
+    gridColumnCount,
+    isSearchOpen,
+    searchTerm,
+    setIsSearchOpen,
+    setSearchTerm,
+    isPropertiesOpen,
+    setIsPropertiesOpen,
+    isNewFolderModalOpen,
+    isNewFileModalOpen,
+    isRenameModalOpen,
+    isCopyModalOpen,
+    editingFile,
+    activeConnectionId: activeConnectionId ?? undefined,
+    handleNavigate,
+    handleCopy,
+    handlePaste,
+    handleDelete,
+    toggleBookmark,
+    refreshFiles,
+    navigateBack,
+    navigateForward,
+    setViewMode,
+    updateFileManagerSettings,
+    setIsEditingPath,
+    setRenameOldName,
+    setRenameNewName,
+    setIsRenameModalOpen,
+  });
 
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't interfere with background tabs, modals, inputs, or when strict focus is needed
-      if (!isFilesSurfaceActive || !isFileManagerPanelShown(containerRef.current) || isNewFolderModalOpen || isNewFileModalOpen || isRenameModalOpen || editingFile || isCopyModalOpen || isPropertiesOpen) return;
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        // Special case: Allow arrow keys and Enter to pass through if we are in the search input
-        // so that users can navigate results while typing.
-        const isSearchInput = e.target.placeholder?.includes('Search');
-        const isNavigationKey = ['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Enter'].includes(e.key);
-        if (isSearchInput && isNavigationKey) {
-          // Continue to global handler
-        } else {
-          return;
-        }
-      }
-
-      const bindings = settings.keybindings || {};
-
-      // Select All
-      if (isMatch(e, bindings.fmSelectAll || 'Mod+A')) {
-        e.preventDefault();
-        setSelectedFiles(paintedFiles.map((f) => f.name));
-        return;
-      }
-
-      // Clear Selection / Search
-      if (isMatch(e, 'Escape')) {
-        if (isSearchOpen || searchTerm) {
-          setIsSearchOpen(false);
-          setSearchTerm('');
-        } else {
-          setSelectedFiles([]);
-          setFocusedFile(null);
-        }
-        return;
-      }
-
-      // Search (Mod+F)
-      if (isMatch(e, bindings.fmSearch || 'Mod+F')) {
-        e.preventDefault();
-        setIsSearchOpen(true);
-        return;
-      }
-
-      // Type-to-search logic: A-Z / 0-9 starts searching
-      if (!e.ctrlKey && !e.altKey && !e.metaKey && e.key.length === 1 && /^[a-zA-Z0-9_\-]$/.test(e.key)) {
-        // If not already focused on search, open it and let it handle further input
-        if (!isSearchOpen) {
-          e.preventDefault(); // Prevent browser from typing the char into the newly focused input
-          setIsSearchOpen(true);
-          // We can't easily "forward" the key to the input immediately after state change in the same tick 
-          // but if we set the searchTerm here, it will appear in the input when it renders.
-          setSearchTerm(e.key);
-          return;
-        }
-      }
-
-      // Go Back
-      if (isMatch(e, bindings.fmBack || 'Alt+Left')) {
-        e.preventDefault();
-        if (activeConnectionId) navigateBack(activeConnectionId);
-        return;
-      }
-
-      // Go Forward
-      if (isMatch(e, bindings.fmForward || 'Alt+Right')) {
-        e.preventDefault();
-        if (activeConnectionId) navigateForward(activeConnectionId);
-        return;
-      }
-
-      // Go Up
-      if (isMatch(e, bindings.fmUp || 'Backspace')) {
-        e.preventDefault();
-        handleNavigate('..');
-        return;
-      }
-
-      // Delete
-      if (isMatch(e, bindings.fmDelete || 'Delete') && selectedFiles.length > 0) {
-        e.preventDefault();
-        handleDelete();
-        return;
-      }
-
-      // Rename
-      if (isMatch(e, bindings.fmRename || 'F2') && (focusedFile || selectedFiles.length === 1)) {
-        e.preventDefault();
-        const fileToRename = focusedFile || selectedFiles[0];
-        setRenameOldName(fileToRename);
-        setRenameNewName(fileToRename);
-        setIsRenameModalOpen(true);
-        return;
-      }
-
-      // Edit Path
-      if (isMatch(e, bindings.fmEditPath || 'Mod+L')) {
-        e.preventDefault();
-        setIsEditingPath(true);
-        return;
-      }
-
-      // Properties Panel (Alt+Enter)
-      if (isMatch(e, 'Alt+Enter') && (focusedFile || selectedFiles.length > 0)) {
-        e.preventDefault();
-        setIsPropertiesOpen(prev => !prev);
-        return;
-      }
-
-      // Open Selection (Enter)
-      if (isMatch(e, bindings.fmOpen || 'Enter') && focusedFile) {
-        e.preventDefault();
-        handleNavigate(focusedFile);
-        return;
-      }
-
-      // Space: Toggle selection
-      if (e.key === ' ' && focusedFile) {
-        e.preventDefault();
-        setSelectedFiles(prev => {
-          const set = new Set(prev);
-          if (set.has(focusedFile)) {
-            set.delete(focusedFile);
-          } else {
-            set.add(focusedFile);
-          }
-          return Array.from(set);
-        });
-        return;
-      }
-
-      // Clipboard Shortcuts
-      if (isMatch(e, bindings.fmCopy || 'Mod+C')) {
-        e.preventDefault();
-        handleCopy(false);
-        return;
-      }
-
-      if (isMatch(e, bindings.fmCut || 'Mod+X')) {
-        e.preventDefault();
-        handleCopy(true);
-        return;
-      }
-
-      if (isMatch(e, bindings.fmPaste || 'Mod+V')) {
-        e.preventDefault();
-        handlePaste();
-        return;
-      }
-
-      if (paintedFiles.length === 0) return;
-
-      const currentIndex = focusedFile ? paintedFiles.findIndex((f) => f.name === focusedFile) : -1;
-
-      // Arrow Keys: Navigate
-      // Note: These are standard navigation keys, not strictly "commands"
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-        e.preventDefault();
-
-        let newIndex = currentIndex;
-
-        if (viewMode === 'grid') {
-          const gridCols = Math.max(1, gridColumnCount);
-
-          if (e.key === 'ArrowDown') newIndex = Math.min(currentIndex + gridCols, paintedFiles.length - 1);
-          else if (e.key === 'ArrowUp') newIndex = Math.max(currentIndex - gridCols, 0);
-          else if (e.key === 'ArrowRight') newIndex = Math.min(currentIndex + 1, paintedFiles.length - 1);
-          else if (e.key === 'ArrowLeft') newIndex = Math.max(currentIndex - 1, 0);
-        } else {
-          // List view: only up/down
-          if (e.key === 'ArrowDown') newIndex = Math.min(currentIndex + 1, paintedFiles.length - 1);
-          else if (e.key === 'ArrowUp') newIndex = Math.max(currentIndex - 1, 0);
-        }
-
-        if (newIndex === -1) newIndex = 0;
-        const newFocused = paintedFiles[newIndex]?.name;
-        setFocusedFile(newFocused);
-
-        // Update selection if Shift is held
-        if (e.shiftKey && newFocused) {
-          setSelectedFiles(prev => {
-            const set = new Set(prev);
-            if (set.has(newFocused)) {
-              // Already selected
-            } else {
-              set.add(newFocused);
-            }
-            return Array.from(set);
-          });
-        } else if (!e.ctrlKey && !e.metaKey) {
-          // Single selection
-          setSelectedFiles([newFocused]);
-        }
-        return;
-      }
-
-      // Home
-      if (e.key === 'Home') {
-        e.preventDefault();
-        if (paintedFiles.length > 0) setFocusedFile(paintedFiles[0].name);
-        return;
-      }
-
-      // End
-      if (e.key === 'End') {
-        e.preventDefault();
-        if (paintedFiles.length > 0) setFocusedFile(paintedFiles[paintedFiles.length - 1].name);
-        return;
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [
-    activeConnectionId, searchTerm, isSearchOpen, files, paintedFiles, settings, isNewFolderModalOpen, isNewFileModalOpen, isRenameModalOpen,
-    editingFile, selectedFiles, focusedFile, handleNavigate, handleCopy, handlePaste, gridColumnCount,
-    handleDelete, navigateBack, navigateForward, isCopyModalOpen, isPropertiesOpen, viewMode, isConnected, isFilesSurfaceActive,
-  ]);
 
   // Focus when the files panel is shown (dispatched from TabContent — avoids isVisible prop churn).
   useEffect(() => {
@@ -1650,11 +1635,24 @@ export const FileManager = memo(function FileManager({
     };
   }, [editingFile]);
 
+  const propertiesEntries = useMemo(() => {
+    const names = selectedFiles.length > 0 ? selectedFiles : (focusedFile ? [focusedFile] : []);
+    return names
+      .map((name) => files.find((file) => file.name === name))
+      .filter((file): file is FileEntry => Boolean(file));
+  }, [files, focusedFile, selectedFiles]);
+  const [heldPropertiesFiles, setHeldPropertiesFiles] = useState<FileEntry[]>([]);
+  useEffect(() => {
+    if (!isPropertiesOpen) return;
+    setHeldPropertiesFiles(propertiesEntries);
+  }, [isPropertiesOpen, propertiesEntries]);
+  const inspectorFiles = isPropertiesOpen ? propertiesEntries : heldPropertiesFiles;
+
   return (
     <div
       ref={containerRef}
       tabIndex={0}
-      className={`flex-1 min-w-0 flex flex-col h-full bg-app-bg relative outline-none focus-within:ring-0 transition-all duration-150 ${isTauriDraggingOver ? 'ring-2 ring-app-accent ring-inset' : ''}`}
+      className={`flex-1 min-w-0 flex flex-col h-full bg-app-bg relative outline-none focus-within:ring-0 ${isTauriDraggingOver ? 'ring-2 ring-app-accent ring-inset' : ''}`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -1662,6 +1660,16 @@ export const FileManager = memo(function FileManager({
         // Only focus if clicking the container or its non-input children
         if (!(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) {
           containerRef.current?.focus();
+        }
+      }}
+      onMouseDown={(e) => {
+        if (e.button === 3) {
+          e.preventDefault();
+          if (activeConnectionId) navigateBack(activeConnectionId);
+        }
+        if (e.button === 4) {
+          e.preventDefault();
+          if (activeConnectionId) navigateForward(activeConnectionId);
         }
       }}
     >
@@ -1678,41 +1686,84 @@ export const FileManager = memo(function FileManager({
 
       <FileToolbar
         currentPath={currentPath}
-        onNavigate={(path) => {
-          if (!activeConnectionId) return;
-          loadFiles(activeConnectionId, path);
-        }}
-        onRefresh={() => {
-          if (!activeConnectionId) return;
-          refreshFiles(activeConnectionId);
-        }}
+        homePath={homePath}
+        osName={osName}
+        onNavigate={navigateToPath}
+        onRefresh={handleRefresh}
         onUpload={handleUpload}
-        onUploadFolder={async () => {
-          if (!activeConnectionId || !isConnected) return;
-          try {
-            const { filePaths, canceled } = await window.ipcRenderer.invoke('dialog:openDirectory');
-            if (canceled || filePaths.length === 0) return;
-            performUpload(filePaths);
-          } catch (err) {
-            console.error('Failed to open directory dialog:', err);
-          }
-        }}
-        onNewFolder={() => setIsNewFolderModalOpen(true)}
-        onNewFile={() => setIsNewFileModalOpen(true)}
-        onDownloadAsZip={activeConnectionId && activeConnectionId !== 'local' ? handleDownloadAsZip : undefined}
-        selectedCount={selectedFiles.length}
+        onUploadFolder={handleUploadFolder}
+        onNewFolder={handleNewFolder}
+        onNewFile={handleNewFile}
         viewMode={viewMode}
         onToggleView={setViewMode}
         searchTerm={searchTerm}
         onSearch={setSearchTerm}
         isSearchOpen={isSearchOpen}
-        onToggleSearch={setIsSearchOpen}
+        onToggleSearch={handleToggleSearch}
         isEditingPath={isEditingPath}
         onTogglePathEdit={setIsEditingPath}
-        isSmallScreen={isSmallScreen}
-        onToggleSidebar={() => updateSettings({ sidebarCollapsed: !settings.sidebarCollapsed })}
+        isNarrow={isNarrow}
+        placesCollapsed={placesCollapsed}
+        onTogglePlaces={handleTogglePlaces}
+        onBack={handleBack}
+        onForward={handleForward}
+        canGoBack={canGoBack}
+        canGoForward={canGoForward}
+        backEntries={backEntries}
+        forwardEntries={forwardEntries}
+        onHistoryJump={handleHistoryJump}
+        showHidden={showHiddenFiles}
+        onToggleHidden={handleToggleHidden}
+        onZoomIn={handleZoomIn}
+        onZoomOut={handleZoomOut}
+        canZoomIn={canZoomIn}
+        canZoomOut={canZoomOut}
+        sortColumn={sortColumn}
+        sortDirection={sortDirection}
+        onSort={applySort}
+        onCopyLocation={handleCopyLocation}
+        onBookmark={toggleBookmark}
+        isBookmarked={isBookmarked}
+        onPaste={handlePaste}
+        canPaste={Boolean(clipboard)}
+        onSelectAll={handleSelectAllFiles}
+        onProperties={handleOpenProperties}
+        onOpenTerminal={activeConnectionId ? handleOpenTerminalChrome : undefined}
+        typeFilter={typeFilter}
+        onTypeFilter={setTypeFilter}
+        connectionId={activeConnectionId}
       />
 
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="relative flex min-h-0 min-w-0 flex-1">
+        {isNarrow && (
+          <button
+            type="button"
+            className={cn(
+              'absolute inset-0 z-20 bg-black/35 transition-opacity duration-200 ease-out motion-reduce:transition-none',
+              placesCollapsed && !isPropertiesOpen ? 'pointer-events-none opacity-0' : 'opacity-100',
+            )}
+            aria-label={isPropertiesOpen && placesCollapsed ? 'Close properties' : 'Close places'}
+            tabIndex={placesCollapsed && !isPropertiesOpen ? -1 : 0}
+            onClick={() => {
+              if (!placesCollapsed) void updateFileManagerSettings({ placesCollapsed: true });
+              if (isPropertiesOpen) setIsPropertiesOpen(false);
+            }}
+          />
+        )}
+        <FileSideDrawer open={!placesCollapsed} width={FILE_PLACES_WIDTH_PX} side="left" overlay={isNarrow}>
+          <FilePlacesSidebar
+            homePath={homePath}
+            currentPath={currentPath}
+            recents={recentPaths}
+            bookmarks={bookmarks}
+            volumes={isLocal ? volumes : []}
+            platform={typeof window !== 'undefined' ? window.electronUtils?.platform : undefined}
+            onNavigate={navigateToPath}
+            onAddBookmark={toggleBookmark}
+            onRemoveBookmark={handleRemoveBookmark}
+          />
+        </FileSideDrawer>
       {/* biome-ignore lint/a11y/noStaticElementInteractions: interactive div */}
       <div className="flex-1 min-h-0 min-w-0 overflow-hidden relative flex flex-col" onClick={() => setContextMenu(null)}>
         {(isReconnectPending || currentError === 'DISCONNECTED' || (!isConnected && !isLocal)) ? (
@@ -1745,6 +1796,7 @@ export const FileManager = memo(function FileManager({
             selectedFiles={selectedFiles}
             focusedFile={focusedFile || undefined}
             onSelect={handleSelect}
+            onSelectMany={handleSelectMany}
             onNavigate={handleNavigate}
             onContextMenu={handleContextMenu}
             viewMode={viewMode}
@@ -1756,20 +1808,51 @@ export const FileManager = memo(function FileManager({
             sortDirection={sortDirection}
             onSort={handleSort}
             onGridColumnCount={setGridColumnCount}
+            gridZoom={gridZoom}
+            listZoom={listZoom}
+            clickPolicy={settings.fileManager.clickPolicy || 'double'}
+            dateTimeFormat={settings.fileManager.dateTimeFormat || 'simple'}
           />
         )}
+        <FileFloatingBar loading={isLoading} selectedCount={selectedFiles.length} totalCount={paintedFiles.length} />
       </div>
-
-      {isSmallScreen && (
-        <FileBottomToolbar
-          onBack={() => activeConnectionId && navigateBack(activeConnectionId)}
-          onForward={() => activeConnectionId && navigateForward(activeConnectionId)}
-          viewMode={viewMode}
-          onToggleView={setViewMode}
-          canGoBack={canGoBack}
-          canGoForward={canGoForward}
-        />
+        <FileSideDrawer open={isPropertiesOpen} width={FILE_PROPERTIES_WIDTH_PX} side="right" overlay>
+          <PropertiesPanel
+            files={inspectorFiles}
+            onClose={() => setIsPropertiesOpen(false)}
+            dateTimeFormat={settings.fileManager.dateTimeFormat || 'simple'}
+          />
+        </FileSideDrawer>
+      </div>
+      {isNarrow && (
+        <FileBottomActionBar>
+          <FileHistoryControls
+            canGoBack={canGoBack}
+            canGoForward={canGoForward}
+            onBack={handleBack}
+            onForward={handleForward}
+            backEntries={backEntries}
+            forwardEntries={forwardEntries}
+            onJump={handleHistoryJump}
+            menuSide="top"
+          />
+          <FileViewControls
+            viewMode={viewMode}
+            onToggleView={setViewMode}
+            showHidden={showHiddenFiles}
+            onToggleHidden={handleToggleHidden}
+            onZoomIn={handleZoomIn}
+            onZoomOut={handleZoomOut}
+            canZoomIn={canZoomIn}
+            canZoomOut={canZoomOut}
+            sortColumn={sortColumn}
+            sortDirection={sortDirection}
+            onSort={applySort}
+            menuSide="top"
+          />
+        </FileBottomActionBar>
       )}
+      </div>
 
       {/* Context Menu */}
       {contextMenu && (
@@ -1887,11 +1970,6 @@ export const FileManager = memo(function FileManager({
         isLoading={isDeleting}
       />
 
-      <PropertiesPanel
-        isOpen={isPropertiesOpen}
-        onClose={() => setIsPropertiesOpen(false)}
-        file={files.find(f => f.name === (focusedFile || selectedFiles[0])) || null}
-      />
       {/* Conflict Resolution Modal */}
       <ConflictModal
         isOpen={!!currentConflict}

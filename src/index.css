@@ -361,11 +361,29 @@
 .pane-split-branch {
     min-height: 0;
     min-width: 0;
-    overflow: hidden;
+    /* Clip WebGL to the pane. Do not use transform/isolation here: Chromium then
+       composites ImageAddon's transparent .xterm-image-layer as opaque black. */
+    overflow: clip;
+    transition: none;
 }
 
 .pane-split-branch.is-intro {
     transition: flex-grow 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.pane-split-branch.is-settle {
+    transition: flex-grow 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.pane-split-branch.is-dragging {
+    transition: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .pane-split-branch.is-intro,
+    .pane-split-branch.is-settle {
+        transition: none;
+    }
 }
 
 .pane-split-intro-veil {
@@ -397,7 +415,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .pane-split-branch.is-intro,
     .tab-dock-preview {
         transition: none;
     }
@@ -424,6 +441,15 @@ body {
 .xterm .xterm-screen,
 .xterm .xterm-screen canvas {
     background-color: transparent !important;
+}
+
+/* Sixel / iTerm overlay sits above WebGL/DOM canvases. */
+.xterm .xterm-screen canvas.xterm-image-layer {
+    position: absolute;
+    left: 0;
+    top: 0;
+    pointer-events: none;
+    z-index: 4;
 }
 
 .terminal-transparent .xterm,

@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
@@ -14,6 +15,77 @@ pub struct FileEntry {
     pub size: u64,
     pub last_modified: u64,
     pub permissions: String,
+    #[serde(default)]
+    pub owner: String,
+    #[serde(default)]
+    pub group: String,
+}
+
+/// `/etc/passwd` and `/etc/group` lines: `name:*:id:...`
+fn parse_unix_name_map(contents: &str) -> HashMap<u32, String> {
+    let mut map = HashMap::new();
+    for line in contents.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let mut parts = line.split(':');
+        let name = parts.next().unwrap_or("");
+        let _ = parts.next();
+        let Some(id) = parts.next().and_then(|value| value.parse::<u32>().ok()) else {
+            continue;
+        };
+        if !name.is_empty() {
+            map.entry(id).or_insert_with(|| name.to_string());
+        }
+    }
+    map
+}
+
+fn identity_label(name: Option<&str>, id: Option<u32>, map: &HashMap<u32, String>) -> String {
+    if let Some(name) = name.map(str::trim).filter(|value| !value.is_empty()) {
+        return name.to_string();
+    }
+    if let Some(id) = id {
+        if let Some(mapped) = map.get(&id) {
+            return mapped.clone();
+        }
+        return id.to_string();
+    }
+    String::new()
+}
+
+#[cfg(unix)]
+fn load_local_name_map(path: &str) -> HashMap<u32, String> {
+    fs::read_to_string(path)
+        .map(|contents| parse_unix_name_map(&contents))
+        .unwrap_or_default()
+}
+
+async fn load_sftp_name_map(
+    sftp: &russh_sftp::client::SftpSession,
+    path: &str,
+) -> HashMap<u32, String> {
+    match sftp.read(path).await {
+        Ok(bytes) => parse_unix_name_map(&String::from_utf8_lossy(&bytes)),
+        Err(_) => HashMap::new(),
+    }
+}
+
+pub type SftpIdentityMaps = (HashMap<u32, String>, HashMap<u32, String>);
+
+pub async fn cached_sftp_identity_maps<'a>(
+    sftp: &russh_sftp::client::SftpSession,
+    cache: &'a tokio::sync::OnceCell<SftpIdentityMaps>,
+) -> &'a SftpIdentityMaps {
+    cache
+        .get_or_init(|| async {
+            (
+                load_sftp_name_map(sftp, "/etc/passwd").await,
+                load_sftp_name_map(sftp, "/etc/group").await,
+            )
+        })
+        .await
 }
 
 fn env_nonempty(key: &str) -> Option<String> {
@@ -61,6 +133,10 @@ impl FileSystem {
 
         let dir = fs::read_dir(&path).map_err(|e| anyhow!("Failed to read directory: {}", e))?;
         let mut entries = Vec::new();
+        #[cfg(unix)]
+        let user_map = load_local_name_map("/etc/passwd");
+        #[cfg(unix)]
+        let group_map = load_local_name_map("/etc/group");
 
         for entry in dir {
             let entry = entry.map_err(|e| anyhow!("Failed to read entry: {}", e))?;
@@ -90,6 +166,15 @@ impl FileSystem {
                 "666".to_string()
             };
 
+            #[cfg(unix)]
+            let owner = identity_label(None, Some(metadata.uid()), &user_map);
+            #[cfg(unix)]
+            let group = identity_label(None, Some(metadata.gid()), &group_map);
+            #[cfg(windows)]
+            let owner = String::new();
+            #[cfg(windows)]
+            let group = String::new();
+
             entries.push(FileEntry {
                 name: file_name,
                 path: entry.path().to_string_lossy().to_string(),
@@ -97,6 +182,8 @@ impl FileSystem {
                 size,
                 last_modified,
                 permissions,
+                owner,
+                group,
             });
         }
 
@@ -120,6 +207,7 @@ impl FileSystem {
         &self,
         sftp: &russh_sftp::client::SftpSession,
         path: &str,
+        identity_cache: &tokio::sync::OnceCell<SftpIdentityMaps>,
     ) -> Result<Vec<FileEntry>> {
         let path = if path.is_empty() { "." } else { path }; // Default to current dir if empty, usually Home
 
@@ -129,6 +217,7 @@ impl FileSystem {
             .map_err(|e| anyhow!("SFTP read_dir failed: {}", e))?;
         let entries: Vec<_> = entries_iter.collect();
         let mut result = Vec::new();
+        let identity_maps = cached_sftp_identity_maps(sftp, identity_cache).await;
 
         for entry in entries {
             let name = entry.file_name();
@@ -169,6 +258,8 @@ impl FileSystem {
                 size,
                 last_modified: mtime,
                 permissions: format!("{:o}", perms & 0o777),
+                owner: identity_label(attrs.user.as_deref(), attrs.uid, &identity_maps.0),
+                group: identity_label(attrs.group.as_deref(), attrs.gid, &identity_maps.1),
             });
         }
 
@@ -614,5 +705,29 @@ impl FileSystem {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_unix_name_map_reads_passwd_lines() {
+        let map = parse_unix_name_map(
+            "root:x:0:0:root:/root:/bin/bash\nnobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin\n",
+        );
+        assert_eq!(map.get(&0).map(String::as_str), Some("root"));
+        assert_eq!(map.get(&65534).map(String::as_str), Some("nobody"));
+    }
+
+    #[test]
+    fn identity_label_prefers_name_then_map_then_id() {
+        let mut map = HashMap::new();
+        map.insert(1000, "gajen".to_string());
+        assert_eq!(identity_label(Some("alice"), Some(1), &map), "alice");
+        assert_eq!(identity_label(None, Some(1000), &map), "gajen");
+        assert_eq!(identity_label(None, Some(42), &map), "42");
+        assert_eq!(identity_label(None, None, &map), "");
     }
 }

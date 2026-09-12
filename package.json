@@ -1,7 +1,7 @@
 {
   "name": "zync",
   "private": true,
-  "version": "2.30.0",
+  "version": "2.31.0",
   "type": "module",
   "repository": {
     "type": "git",
@@ -47,6 +47,7 @@
     "test:session-persistence": "npm run compile:agent-tests && node tests/sessionPersistence.test.mjs",
     "test:terminal-renderer-policy": "npm run compile:agent-tests && node tests/terminalRendererPolicy.test.mjs",
     "test:terminal-renderer": "npm run compile:agent-tests && node tests/runTerminalRendererTests.mjs",
+    "test:terminal-image": "npm run compile:agent-tests && node tests/terminalImage.test.mjs",
     "test:update-notification": "node tests/updateNotificationAutoUpdateFlow.test.mjs",
     "test:updater-flow": "node tests/updaterFlow.test.mjs",
     "test:all-agent": "npm run compile:agent-tests && node tests/runAllAgentTests.mjs",
@@ -78,6 +79,7 @@
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-updater": "^2.9.0",
     "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-image": "^0.9.0",
     "@xterm/addon-ligatures": "^0.10.0",
     "@xterm/addon-search": "^0.16.0",
     "@xterm/addon-web-links": "^0.12.0",

@@ -1,4 +1,10 @@
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
 fn main() {
+    vendor_windows_conpty();
     println!("cargo:rerun-if-changed=.env");
     // Rebuild window/taskbar icons when generated icon assets change.
     println!("cargo:rerun-if-changed=icons/icon.ico");
@@ -47,6 +53,172 @@ fn main() {
         }
     }
     tauri_build::build()
+}
+
+/// Fetch Microsoft's ConPTY redistributable so local Windows PTYs pass Sixel.
+fn vendor_windows_conpty() {
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if target_os != "windows" {
+        return;
+    }
+
+    let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let vendor_root = manifest_dir.join("vendor").join("conpty");
+    let profile = std::env::var("PROFILE").unwrap_or_default();
+    let require_pair = profile != "debug" && profile != "test";
+
+    if let Err(err) = ensure_conpty_pair(&vendor_root) {
+        if require_pair {
+            panic!("ConPTY redistributable required for Windows {profile} builds: {err}");
+        }
+        println!("cargo:warning=ConPTY sideload skipped: {err}");
+        return;
+    }
+
+    let arch = conpty_arch_name();
+    let pair_dir = vendor_root.join(arch);
+    if !pair_dir.join("conpty.dll").is_file() || !pair_dir.join("OpenConsole.exe").is_file() {
+        if require_pair {
+            panic!(
+                "ConPTY pair missing for {arch} at {} (needed by tauri.windows.conf.json)",
+                pair_dir.display()
+            );
+        }
+        println!(
+            "cargo:warning=ConPTY pair missing for {arch}; local Sixel may be stripped"
+        );
+        return;
+    }
+    println!("cargo:rustc-env=ZYNC_CONPTY_DIR={}", pair_dir.display());
+    println!("cargo:rerun-if-changed={}", pair_dir.join("conpty.dll").display());
+    println!("cargo:rerun-if-changed={}", pair_dir.join("OpenConsole.exe").display());
+
+    if let Err(err) = copy_conpty_next_to_profile_exe(&pair_dir) {
+        if require_pair {
+            panic!("Could not copy ConPTY next to {profile} exe: {err}");
+        }
+        println!("cargo:warning=Could not copy ConPTY next to debug/release exe: {err}");
+    }
+}
+
+fn conpty_arch_name() -> &'static str {
+    match std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default().as_str() {
+        "aarch64" => "arm64",
+        _ => "x64",
+    }
+}
+
+const CONPTY_NUPKG_VERSION: &str = "1.24.260710001";
+const CONPTY_NUPKG_SHA256: &str = "175640566a3b59c4b132070ee96c2c77e5ab7edd2e92732a5eb3610bbf63d90e";
+const CONPTY_PROVENANCE_FILE: &str = ".nupkg-sha256";
+
+fn conpty_pair_matches_pin(dir: &Path) -> bool {
+    let dll = dir.join("conpty.dll");
+    let exe = dir.join("OpenConsole.exe");
+    let pin = dir.join(CONPTY_PROVENANCE_FILE);
+    if !dll.is_file() || !exe.is_file() || !pin.is_file() {
+        return false;
+    }
+    fs::read_to_string(&pin)
+        .map(|s| s.trim().eq_ignore_ascii_case(CONPTY_NUPKG_SHA256))
+        .unwrap_or(false)
+}
+
+fn write_conpty_provenance(dir: &Path) -> Result<(), String> {
+    fs::write(dir.join(CONPTY_PROVENANCE_FILE), CONPTY_NUPKG_SHA256)
+        .map_err(|e| format!("write ConPTY provenance: {e}"))
+}
+
+fn ensure_conpty_pair(vendor_root: &Path) -> Result<(), String> {
+    for arch in ["x64", "arm64"] {
+        let dir = vendor_root.join(arch);
+        if conpty_pair_matches_pin(&dir) {
+            continue;
+        }
+        extract_conpty_arch(vendor_root, arch)?;
+        write_conpty_provenance(&dir)?;
+    }
+    Ok(())
+}
+
+fn extract_conpty_arch(vendor_root: &Path, arch: &str) -> Result<(), String> {
+    let nupkg = fetch_conpty_nupkg(vendor_root)?;
+    let file = fs::File::open(&nupkg).map_err(|e| format!("open nupkg: {e}"))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("zip nupkg: {e}"))?;
+    let (dll_name, exe_name) = match arch {
+        "arm64" => (
+            "runtimes/win-arm64/native/conpty.dll",
+            "build/native/runtimes/arm64/OpenConsole.exe",
+        ),
+        _ => (
+            "runtimes/win-x64/native/conpty.dll",
+            "build/native/runtimes/x64/OpenConsole.exe",
+        ),
+    };
+    let dest_dir = vendor_root.join(arch);
+    fs::create_dir_all(&dest_dir).map_err(|e| format!("mkdir {}: {e}", dest_dir.display()))?;
+    extract_zip_file(&mut archive, dll_name, &dest_dir.join("conpty.dll"))?;
+    extract_zip_file(&mut archive, exe_name, &dest_dir.join("OpenConsole.exe"))?;
+    Ok(())
+}
+
+fn fetch_conpty_nupkg(vendor_root: &Path) -> Result<PathBuf, String> {
+    fs::create_dir_all(vendor_root).map_err(|e| format!("mkdir vendor/conpty: {e}"))?;
+    let nupkg = vendor_root.join(format!("Microsoft.Windows.Console.ConPTY.{CONPTY_NUPKG_VERSION}.nupkg"));
+    if nupkg.is_file() && sha256_file(&nupkg)? == CONPTY_NUPKG_SHA256 {
+        return Ok(nupkg);
+    }
+
+    let url = format!(
+        "https://www.nuget.org/api/v2/package/Microsoft.Windows.Console.ConPTY/{CONPTY_NUPKG_VERSION}"
+    );
+    let status = Command::new("curl")
+        .args(["-L", "--fail", "--retry", "3", "-o"])
+        .arg(&nupkg)
+        .arg(&url)
+        .status()
+        .map_err(|e| format!("curl ConPTY nupkg: {e}"))?;
+    if !status.success() {
+        return Err(format!("curl ConPTY nupkg exited {status}"));
+    }
+    let hash = sha256_file(&nupkg)?;
+    if hash != CONPTY_NUPKG_SHA256 {
+        let _ = fs::remove_file(&nupkg);
+        return Err(format!("ConPTY nupkg hash mismatch: {hash}"));
+    }
+    Ok(nupkg)
+}
+
+fn extract_zip_file(
+    archive: &mut zip::ZipArchive<fs::File>,
+    name: &str,
+    dest: &Path,
+) -> Result<(), String> {
+    let mut entry = archive
+        .by_name(name)
+        .map_err(|e| format!("nupkg missing {name}: {e}"))?;
+    let mut out = fs::File::create(dest).map_err(|e| format!("create {}: {e}", dest.display()))?;
+    io::copy(&mut entry, &mut out).map_err(|e| format!("extract {name}: {e}"))?;
+    Ok(())
+}
+
+fn sha256_file(path: &Path) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    let bytes = fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    Ok(Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect())
+}
+
+fn copy_conpty_next_to_profile_exe(pair_dir: &Path) -> Result<(), String> {
+    let out_dir = PathBuf::from(std::env::var("OUT_DIR").map_err(|e| e.to_string())?);
+    let profile_dir = out_dir
+        .ancestors()
+        .nth(3)
+        .ok_or_else(|| "cannot resolve profile dir from OUT_DIR".to_string())?;
+    for name in ["conpty.dll", "OpenConsole.exe"] {
+        fs::copy(pair_dir.join(name), profile_dir.join(name))
+            .map_err(|e| format!("copy {name} to {}: {e}", profile_dir.display()))?;
+    }
+    Ok(())
 }
 
 fn should_skip_rustc_env(key: &str) -> bool {

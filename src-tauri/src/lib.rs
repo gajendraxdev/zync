@@ -3,11 +3,13 @@ mod atomic_io;
 mod commands;
 mod connection_latency;
 mod fs;
+mod fs_volumes;
 mod ghost;
 mod identity_migration;
 pub mod plugins;
 mod pty;
 mod pty_output_flush;
+mod pty_term_env;
 mod session;
 mod shell_icons;
 mod snippets;
@@ -22,12 +24,17 @@ mod types;
 mod utils;
 mod share;
 mod vault;
+#[cfg(windows)]
+mod windows_conpty;
 
 use commands::AppState;
 use tauri::{Emitter, Manager};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(windows)]
+    windows_conpty::preload_sideloaded_conpty();
+
     // Release builds only: dev (`tauri dev`) shares the same app identifier as the
     // installed app, so single-instance would focus the production window instead of
     // launching the dev instance.
@@ -161,6 +168,7 @@ pub fn run() {
             commands::connections_export_to_file,
             commands::connections_import_from_file,
             commands::fs_list,
+            commands::fs_list_volumes,
             commands::fs_read_file,
             commands::fs_write_file,
             commands::fs_cwd,

@@ -48,6 +48,16 @@ export type { TerminalCache } from './terminalCache.js';
 export { clearTerminalPendingInput, terminalCache } from './terminalCache.js';
 
 export { setTerminalLigatures, disposeTerminalLigatures } from './ligatures.js';
+export {
+  buildTerminalImageAddonOptions,
+  createTerminalImageAddon,
+  disposeTerminalImageAddon,
+  installImageLayerContextPatch,
+  loadTerminalImageAddon,
+  rebuildTerminalImageLayer,
+  TERMINAL_IMAGE_STORAGE_LIMIT_MB,
+} from './terminalImage.js';
+export type { TerminalImageAddon } from './terminalImage.js';
 
 export type {
   TerminalRendererSetupSettings,
@@ -119,7 +129,7 @@ export {
   isPaneDividerDragging,
 } from './terminalFit.js';
 export { restoreTerminalDisplay } from './terminalPanelRestore.js';
-export type { ResizeScheduler, ResizeScheduleOptions } from './terminalFit.js';
+export type { ResizeScheduler, ResizeScheduleOptions, PaneTransientHold } from './terminalFit.js';
 
 export type { TerminalSpawnTabState } from './spawnContext.js';
 export { resolveTerminalSpawnParams } from './spawnContext.js';

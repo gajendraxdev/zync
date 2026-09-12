@@ -1,4 +1,4 @@
-import type { Terminal } from '@xterm/xterm';
+import type { ITerminalAddon, Terminal } from '@xterm/xterm';
 import type { FitAddon } from '@xterm/addon-fit';
 import type { SearchAddon } from '@xterm/addon-search';
 import type { Channel } from '@tauri-apps/api/core';
@@ -10,6 +10,8 @@ export interface TerminalCache {
   term: Terminal;
   fitAddon: FitAddon;
   searchAddon: SearchAddon;
+  /** Sixel / iTerm IIP overlay; absent if ImageAddon failed to load. */
+  imageAddon?: ITerminalAddon;
   generation: number;
   spawned: boolean;
   starting: boolean;
