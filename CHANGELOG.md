@@ -5,14 +5,14 @@ All notable changes to Zync are documented in this file. The format is based on 
 ## [Unreleased]
 
 ### Added
-- **Public URLs v2 binary data frames:** After handshake, agent and relay send page bytes as WebSocket binary frames instead of JSON+base64. Hello still sends `v: 1` plus `max_v: 2` so older relays keep working.
+- **Public URLs v2 binary data frames:** After handshake, agent and relay send page bytes as WebSocket binary frames instead of JSON+base64. Hello still sends `v: 1` plus `max_v: 2` so older relays keep working. ([ad505c5])
 
 ### Fixed
-- **Public URLs IPv6 localhost**: Shares stored as `127.0.0.1` now also dial `[::1]` when the local app bound IPv6-only (common for Node/Vite on Windows). Visitors were seeing “App unreachable” even though the agent was connected.
-- **Public URLs loopback latency**: The local hop races IPv4 and IPv6 and remembers the winner, so Windows no longer waits ~2s on a refused `127.0.0.1` before using `[::1]` on every request.
-- **Public URLs dial localhost**: The share agent forwards to `http://localhost:{port}` (ngrok/cloudflared/browser), not `127.0.0.1`, so Node/Astro bound on `[::1]` is reachable.
-- **Public URLs skip Happy Eyeballs delay**: After the first local race, HTTP pins `localhost` to the winning loopback IP so Windows does not wait ~300ms on a dead `127.0.0.1` every request.
-- **Public URLs stale-family retry**: GET/HEAD/OPTIONS retry once on an unpinned `localhost` client if the pinned loopback family fails.
+- **Public URLs IPv6 localhost**: Shares stored as `127.0.0.1` now also dial `[::1]` when the local app bound IPv6-only (common for Node/Vite on Windows). Visitors were seeing “App unreachable” even though the agent was connected. ([fd36e88])
+- **Public URLs loopback latency**: The local hop races IPv4 and IPv6 and remembers the winner, so Windows no longer waits ~2s on a refused `127.0.0.1` before using `[::1]` on every request. ([fd36e88])
+- **Public URLs dial localhost**: The share agent forwards to `http://localhost:{port}` (ngrok/cloudflared/browser), not `127.0.0.1`, so Node/Astro bound on `[::1]` is reachable. ([fd36e88])
+- **Public URLs skip Happy Eyeballs delay**: After the first local race, HTTP pins `localhost` to the winning loopback IP so Windows does not wait ~300ms on a dead `127.0.0.1` every request. ([fd36e88])
+- **Public URLs stale-family retry**: GET/HEAD/OPTIONS retry once on an unpinned `localhost` client if the pinned loopback family fails. ([fd36e88])
 
 ## [2.31.0] - 2026-09-12
 
@@ -1558,3 +1558,5 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [b8241b9]: https://github.com/zync-sh/zync/commit/b8241b9
 [c54859c]: https://github.com/zync-sh/zync/commit/c54859c
 [9fc091c]: https://github.com/zync-sh/zync/commit/9fc091c
+[ad505c5]: https://github.com/zync-sh/zync/commit/ad505c5
+[fd36e88]: https://github.com/zync-sh/zync/commit/fd36e88
