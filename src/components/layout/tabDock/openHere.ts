@@ -11,8 +11,10 @@ import { directoryFromFileLocation, pickFilesOpenPath, type OpenHereFile } from 
 
 export {
     directoryFromFileLocation,
+    isUnconfirmedHomeToken,
     isUnresolvedFilesPath,
     parentDirectory,
+    pickFilesHomePath,
     pickFilesOpenPath,
     type OpenHereFile,
 } from './openHerePaths';

@@ -9,13 +9,20 @@ function trimmed(value: string | null | undefined): string {
 }
 
 /**
- * Empty or `/` — connect/SFTP placeholder, not a resolved Files home.
- * A user who actually listed `/` (hash button) has entries loaded; callers
- * should only treat `/` as unresolved when the listing is still empty.
+ * Empty or `/` — listing not resolved yet (connect placeholder or empty `/`).
+ * A user who actually listed `/` has entries loaded; callers should only treat
+ * `/` as unresolved when the listing is still empty.
+ * `~` is never a listable home (SFTP cannot list a tilde).
  */
 export function isUnresolvedFilesPath(path: string | null | undefined): boolean {
     const value = trimmed(path);
     return value.length === 0 || value === '/' || value === '~';
+}
+
+/** Unconfirmed home token. Empty and `~` are never a real home; `/` may be. */
+export function isUnconfirmedHomeToken(path: string | null | undefined): boolean {
+    const value = trimmed(path);
+    return value.length === 0 || value === '~';
 }
 
 /** SFTP cannot list `~`; expand with a real home (`/home/user`). */
@@ -26,6 +33,18 @@ export function expandTildeWithHome(path: string, home: string): string {
     if (value === '~') return homePath;
     if (value.startsWith('~/')) return `${homePath}/${value.slice(2)}`;
     return value;
+}
+
+/**
+ * Default Files tab / overlay: account home, not shell cwd.
+ * `~` is never listable. `/` is kept — some SFTP homes are root — but
+ * FileManager still waits on fs_cwd when connection.homePath is the
+ * unconfirmed connect placeholder `/`.
+ */
+export function pickFilesHomePath(input: { homePath?: string | null }): string {
+    const home = trimmed(input.homePath);
+    if (!home || home === '~') return '';
+    return home;
 }
 
 /**

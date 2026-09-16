@@ -55,7 +55,7 @@ import { clearEditorOverlayOpen, markEditorOverlayOpen } from './editor/overlayS
 import { TerminalDisconnectedView } from './terminal/TerminalDisconnectedView';
 import { isFeaturePaneFocused, layoutForTerm } from '../lib/paneLayout';
 import type { AppStore } from '../store/useAppStore';
-import { canSplitBesideFiles, isUnresolvedFilesPath, openHerePlacementItems, openTerminalHere, pickFilesOpenPath } from './layout/tabDock';
+import { canSplitBesideFiles, isUnconfirmedHomeToken, isUnresolvedFilesPath, openHerePlacementItems, openTerminalHere, pickFilesHomePath } from './layout/tabDock';
 
 export type FileManagerSurface = 'overlay' | 'pane';
 
@@ -197,11 +197,8 @@ export const FileManager = memo(function FileManager({
     const listing = state.files[activeConnectionId];
     const waiting = (!path || path === '/' || path === '~') && (!listing || listing.length === 0);
     if (!waiting) return '';
-    const activeId = state.activeTerminalIds[activeConnectionId];
-    const tabs = state.terminals[activeConnectionId] || [];
-    const term = tabs.find((tab) => tab.id === activeId) ?? tabs.find((tab) => tab.tabVisible !== false);
     const home = state.connections.find((item) => item.id === activeConnectionId)?.homePath;
-    return `${term?.lastKnownCwd || ''}|${term?.initialPath || ''}|${home || ''}`;
+    return home || '';
   });
 
   const viewMode: 'grid' | 'list' = settings.fileManager.defaultView === 'list' ? 'list' : 'grid';
@@ -723,17 +720,11 @@ export const FileManager = memo(function FileManager({
     if (!activeConnectionId || !isConnected) return;
 
     const store = useAppStore.getState();
-    const activeId = store.activeTerminalIds[activeConnectionId];
-    const tabs = store.terminals[activeConnectionId] || [];
-    const term = tabs.find((tab) => tab.id === activeId) ?? tabs.find((tab) => tab.tabVisible !== false);
     const connection = store.connections.find((item) => item.id === activeConnectionId);
-    const picked = pickFilesOpenPath({
-      lastKnownCwd: term?.lastKnownCwd,
-      initialPath: term?.initialPath,
-      homePath: connection?.homePath,
-    });
-    // `/` from lastKnownCwd / homePath is the connect placeholder, not home.
-    const fromPick = isUnresolvedFilesPath(picked) ? '' : picked;
+    const picked = pickFilesHomePath({ homePath: connection?.homePath });
+    // connect() stores `/` before SFTP cwd; wait for fs_cwd. A confirmed
+    // fs_cwd of `/` (root home) is listable.
+    const fromPick = picked && picked !== '/' ? picked : '';
     const listingIsPlaceholder = isUnresolvedFilesPath(currentPath) && files.length === 0;
 
     if (listingIsPlaceholder) {
@@ -742,8 +733,7 @@ export const FileManager = memo(function FileManager({
           connectionId: activeConnectionId,
         });
         const path = typeof cwd === 'string' ? cwd.trim() : '';
-        // Do not paint `/` as home. Retry when lastKnownCwd/homePath updates.
-        if (!path || isUnresolvedFilesPath(path)) return;
+        if (!path || isUnconfirmedHomeToken(path)) return;
         loadFiles(activeConnectionId, path);
 
         const termId = ensureTerminal(activeConnectionId, path);
@@ -777,7 +767,7 @@ export const FileManager = memo(function FileManager({
         if (!nextPath) {
           try {
             const cwd = await window.ipcRenderer.invoke('fs_cwd', { connectionId: activeConnectionId });
-            if (typeof cwd === 'string' && cwd.trim() && !isUnresolvedFilesPath(cwd)) {
+            if (typeof cwd === 'string' && cwd.trim() && !isUnconfirmedHomeToken(cwd)) {
               nextPath = cwd.trim();
             }
           } catch {

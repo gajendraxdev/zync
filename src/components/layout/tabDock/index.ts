@@ -10,8 +10,10 @@ export {
     canSplitBesideFiles,
     filesAlreadyInSplit,
     directoryFromFileLocation,
+    isUnconfirmedHomeToken,
     isUnresolvedFilesPath,
     parentDirectory,
+    pickFilesHomePath,
     pickFilesOpenPath,
     type OpenHereFile,
 } from './openHere';

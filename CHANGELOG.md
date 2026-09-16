@@ -8,6 +8,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Public URLs v2 binary data frames:** After handshake, agent and relay send page bytes as WebSocket binary frames instead of JSON+base64. Hello still sends `v: 1` plus `max_v: 2` so older relays keep working. ([ad505c5])
 
 ### Fixed
+- **Files opens at Home:** Workspace **+ → Files** (and Files in split) lists the account home, not the active shell cwd. **Open File Manager Here** still uses the terminal directory. A confirmed SFTP home of `/` is listed; `~` is still not.
 - **Public URLs IPv6 localhost**: Shares stored as `127.0.0.1` now also dial `[::1]` when the local app bound IPv6-only (common for Node/Vite on Windows). Visitors were seeing “App unreachable” even though the agent was connected. ([fd36e88])
 - **Public URLs loopback latency**: The local hop races IPv4 and IPv6 and remembers the winner, so Windows no longer waits ~2s on a refused `127.0.0.1` before using `[::1]` on every request. ([fd36e88])
 - **Public URLs dial localhost**: The share agent forwards to `http://localhost:{port}` (ngrok/cloudflared/browser), not `127.0.0.1`, so Node/Astro bound on `[::1]` is reachable. ([fd36e88])
