@@ -2,7 +2,8 @@ use super::api::{ApiClient, ShareRecord};
 use super::auth::AuthStore;
 use super::config::{to_ws_url, ShareConfig};
 use super::protocol::{
-    self, DataMsg, Envelope, ErrorMsg, Hello, OkMsg, Open, TYPE_CLOSE, TYPE_DATA, TYPE_ERROR,
+    self, decode_data_frame, encode_data_frame, AgentOut, DataMsg, Envelope, ErrorMsg, Hello,
+    OkMsg, Open, TYPE_CLOSE, TYPE_DATA, TYPE_ERROR,
     TYPE_OPEN, TYPE_PING,
 };
 use super::proxy::handle_open;
@@ -439,12 +440,17 @@ async fn run_session(
         Ok(v) => v,
         Err(e) => return SessionResult::Err(e.to_string()),
     };
+    let negotiated = if ok.v == 0 { 1 } else { ok.v };
+    if negotiated > protocol::PROTOCOL_MAX_VERSION {
+        return SessionResult::Err(format!("unsupported protocol version {negotiated}"));
+    }
     on_online();
+    let binary_data = negotiated == 2;
 
-    let (tx, mut rx) = mpsc::unbounded_channel::<serde_json::Value>();
+    let (tx, mut rx) = mpsc::unbounded_channel::<AgentOut>();
     let write = {
         let tx = tx.clone();
-        move |v: serde_json::Value| {
+        move |v: AgentOut| {
             tx.send(v).map_err(|_| "agent write closed".to_string())
         }
     };
@@ -452,12 +458,32 @@ async fn run_session(
     let target = target.to_string();
 
     let writer_task = async {
-        while let Some(value) = rx.recv().await {
-            let payload = match serde_json::to_string(&value) {
-                Ok(s) => s,
-                Err(_) => continue,
+        while let Some(out) = rx.recv().await {
+            let sent = match out {
+                AgentOut::Json(value) => {
+                    let Ok(payload) = serde_json::to_string(&value) else {
+                        continue;
+                    };
+                    sink.send(Message::Text(payload.into())).await
+                }
+                AgentOut::Data { stream_id, chunk } if binary_data => {
+                    sink.send(Message::Binary(encode_data_frame(stream_id, &chunk).into()))
+                        .await
+                }
+                AgentOut::Data { stream_id, chunk } => {
+                    use base64::Engine;
+                    let payload = serde_json::json!({
+                        "type": "data",
+                        "stream_id": stream_id,
+                        "chunk": base64::engine::general_purpose::STANDARD.encode(chunk),
+                    });
+                    let Ok(text) = serde_json::to_string(&payload) else {
+                        continue;
+                    };
+                    sink.send(Message::Text(text.into())).await
+                }
             };
-            if sink.send(Message::Text(payload.into())).await.is_err() {
+            if sent.is_err() {
                 break;
             }
         }
@@ -467,6 +493,28 @@ async fn run_session(
         while let Some(msg) = stream.next().await {
             if cancel.load(Ordering::Relaxed) {
                 break;
+            }
+            if let Ok(Message::Binary(b)) = &msg {
+                if let Some((stream_id, chunk)) = decode_data_frame(b) {
+                    let sender = {
+                        let guard = streams.lock().await;
+                        guard.get(&stream_id).map(|st| st.data_sender())
+                    };
+                    if let Some(tx) = sender {
+                        match tx.try_send(bytes::Bytes::copy_from_slice(chunk)) {
+                            Ok(()) => {}
+                            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                                if let Some(st) = streams.lock().await.remove(&stream_id) {
+                                    st.cancel();
+                                }
+                            }
+                            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                                streams.lock().await.remove(&stream_id);
+                            }
+                        }
+                    }
+                    continue;
+                }
             }
             let data = match msg {
                 Ok(Message::Text(t)) => t.to_string(),
@@ -502,7 +550,7 @@ async fn run_session(
             };
             match env.kind.as_str() {
                 TYPE_PING => {
-                    let _ = tx.send(serde_json::json!({ "type": "pong" }));
+                    let _ = tx.send(AgentOut::Json(serde_json::json!({ "type": "pong" })));
                 }
                 TYPE_OPEN => {
                     let open: Open = match serde_json::from_str(&data) {
@@ -565,6 +613,7 @@ async fn run_session(
             slug: String::new(),
             session_id: None,
             resume_token: None,
+            v: 0,
         })
     };
 

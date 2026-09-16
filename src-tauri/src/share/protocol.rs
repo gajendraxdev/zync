@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub const PROTOCOL_VERSION: i32 = 1;
+pub const PROTOCOL_MAX_VERSION: i32 = 2;
+pub const BIN_TYPE_DATA: u8 = 1;
 
 pub const TYPE_HELLO: &str = "hello";
 pub const TYPE_OK: &str = "ok";
@@ -26,6 +28,8 @@ pub struct Hello {
     pub kind: &'static str,
     pub v: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_v: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ticket: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resume_token: Option<String>,
@@ -42,6 +46,7 @@ impl Hello {
         Self {
             kind: TYPE_HELLO,
             v: PROTOCOL_VERSION,
+            max_v: Some(PROTOCOL_MAX_VERSION),
             ticket,
             resume_token,
             session_id,
@@ -56,6 +61,29 @@ pub struct OkMsg {
     pub session_id: Option<String>,
     #[serde(default)]
     pub resume_token: Option<String>,
+    #[serde(default)]
+    pub v: i32,
+}
+
+pub enum AgentOut {
+    Json(serde_json::Value),
+    Data { stream_id: i64, chunk: Vec<u8> },
+}
+
+pub fn encode_data_frame(stream_id: i64, chunk: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(9 + chunk.len());
+    out.push(BIN_TYPE_DATA);
+    out.extend_from_slice(&stream_id.to_be_bytes());
+    out.extend_from_slice(chunk);
+    out
+}
+
+pub fn decode_data_frame(buf: &[u8]) -> Option<(i64, &[u8])> {
+    if buf.len() < 9 || buf[0] != BIN_TYPE_DATA {
+        return None;
+    }
+    let id = i64::from_be_bytes(buf[1..9].try_into().ok()?);
+    Some((id, &buf[9..]))
 }
 
 #[derive(Debug, Deserialize)]
@@ -137,7 +165,17 @@ mod tests {
         let v = serde_json::to_value(&hello).unwrap();
         assert_eq!(v["type"], "hello");
         assert_eq!(v["v"], 1);
+        assert_eq!(v["max_v"], 2);
         assert_eq!(v["ticket"], "t");
         assert!(v.get("resume_token").is_none());
+    }
+
+    #[test]
+    fn data_frame_roundtrip() {
+        let raw = encode_data_frame(9, b"abc");
+        let (id, chunk) = decode_data_frame(&raw).expect("frame");
+        assert_eq!(id, 9);
+        assert_eq!(chunk, b"abc");
+        assert!(decode_data_frame(&[1, 2, 3]).is_none());
     }
 }

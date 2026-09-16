@@ -4,6 +4,9 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Added
+- **Public URLs v2 binary data frames:** After handshake, agent and relay send page bytes as WebSocket binary frames instead of JSON+base64. Hello still sends `v: 1` plus `max_v: 2` so older relays keep working.
+
 ### Fixed
 - **Public URLs IPv6 localhost**: Shares stored as `127.0.0.1` now also dial `[::1]` when the local app bound IPv6-only (common for Node/Vite on Windows). Visitors were seeing “App unreachable” even though the agent was connected.
 - **Public URLs loopback latency**: The local hop races IPv4 and IPv6 and remembers the winner, so Windows no longer waits ~2s on a refused `127.0.0.1` before using `[::1]` on every request.

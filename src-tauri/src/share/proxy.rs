@@ -1,4 +1,4 @@
-use super::protocol::{header_get, is_websocket, Open, MODE_TCP};
+use super::protocol::{header_get, is_websocket, AgentOut, Open, MODE_TCP};
 use super::stream::{is_cancelled, StreamReaders};
 use bytes::Bytes;
 use futures_util::StreamExt;
@@ -65,7 +65,7 @@ fn http_proxy_client_for(addr: SocketAddr) -> reqwest::Client {
 
 pub struct FrameWriter {
     stream_id: i64,
-    write: Box<dyn Fn(serde_json::Value) -> Result<(), String> + Send + Sync>,
+    write: Box<dyn Fn(AgentOut) -> Result<(), String> + Send + Sync>,
     sent_end: bool,
     sent_close: bool,
 }
@@ -73,7 +73,7 @@ pub struct FrameWriter {
 impl FrameWriter {
     pub fn new(
         stream_id: i64,
-        write: impl Fn(serde_json::Value) -> Result<(), String> + Send + Sync + 'static,
+        write: impl Fn(AgentOut) -> Result<(), String> + Send + Sync + 'static,
     ) -> Self {
         Self {
             stream_id,
@@ -85,25 +85,22 @@ impl FrameWriter {
 
     pub fn end(&mut self, status: u16, headers: HashMap<String, Vec<String>>) -> Result<(), String> {
         self.sent_end = true;
-        (self.write)(serde_json::json!({
+        (self.write)(AgentOut::Json(serde_json::json!({
             "type": "end",
             "stream_id": self.stream_id,
             "status": status,
             "headers": headers,
-        }))
+        })))
     }
 
     pub fn data(&self, chunk: &[u8]) -> Result<(), String> {
         if chunk.is_empty() {
             return Ok(());
         }
-        use base64::Engine;
-        let encoded = base64::engine::general_purpose::STANDARD.encode(chunk);
-        (self.write)(serde_json::json!({
-            "type": "data",
-            "stream_id": self.stream_id,
-            "chunk": encoded,
-        }))
+        (self.write)(AgentOut::Data {
+            stream_id: self.stream_id,
+            chunk: chunk.to_vec(),
+        })
     }
 
     pub fn close(&mut self) -> Result<(), String> {
@@ -111,10 +108,10 @@ impl FrameWriter {
             return Ok(());
         }
         self.sent_close = true;
-        (self.write)(serde_json::json!({
+        (self.write)(AgentOut::Json(serde_json::json!({
             "type": "close",
             "stream_id": self.stream_id,
-        }))
+        })))
     }
 
     pub fn has_sent_end(&self) -> bool {
@@ -126,7 +123,7 @@ pub async fn handle_open(
     target: &str,
     open: Open,
     readers: StreamReaders,
-    write: impl Fn(serde_json::Value) -> Result<(), String> + Send + Sync + Clone + 'static,
+    write: impl Fn(AgentOut) -> Result<(), String> + Send + Sync + Clone + 'static,
 ) {
     let mut w = FrameWriter::new(open.stream_id, write);
     let result = if open.mode == MODE_TCP {
