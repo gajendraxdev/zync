@@ -15,6 +15,7 @@ import {
   Zap,
   Settings as SettingsIcon,
   Info,
+  Pin,
 } from 'lucide-react';
 import { ConfirmModal } from './ui/ConfirmModal';
 import { memo, useCallback, useEffect, useMemo, useState, useRef } from 'react';
@@ -33,7 +34,7 @@ import { FilePlacesSidebar } from './file-manager/FilePlacesSidebar';
 import { loadLocalFileVolumes, type FileVolume } from './file-manager/fileVolumes';
 import { FileSideDrawer } from './file-manager/FileSideDrawer';
 import { FileFloatingBar } from './file-manager/FileFloatingBar';
-import { FILE_CHROME_NARROW_MAX, FILE_GRID_ZOOM, FILE_LIST_ZOOM, FILE_PLACES_WIDTH_PX, FILE_PROPERTIES_WIDTH_PX, clampFileGridZoom, clampFileListZoom } from './file-manager/fileChrome';
+import { FILE_CHROME_NARROW_MAX, FILE_GRID_ZOOM, FILE_LIST_ZOOM, FILE_PLACES_WIDTH_PX, FILE_PROPERTIES_WIDTH_PX, clampFileGridZoom, clampFileListZoom, clampFileRecentLimit } from './file-manager/fileChrome';
 import { filePathLeafLabel, inferHomePath, isFilePathEqual, normalizeFilePath } from './file-manager/filePathNav';
 import { fileMatchesQuery, fileMatchesSearchType } from './file-manager/fileSearchFilter';
 import type { FileSearchTypeFilter } from './file-manager/FileQueryEditor';
@@ -179,6 +180,7 @@ export const FileManager = memo(function FileManager({
   const clearClipboard = useAppStore(state => state.clearClipboard);
   const updateSettings = useAppStore(state => state.updateSettings);
   const updateFileManagerSettings = useAppStore(state => state.updateFileManagerSettings);
+  const clearRecentPaths = useAppStore(state => state.clearRecentPaths);
   // const downloadAction = useAppStore(state => state.downloadFiles); // Not implemented fully yet
 
   const activeHistoryIndex = useAppStore(state => (
@@ -1042,20 +1044,54 @@ export const FileManager = memo(function FileManager({
     return entries;
   }, [activeHistory, activeHistoryIndex, homePath, osName]);
 
-  const toggleBookmark = useCallback(() => {
-    if (!activeConnectionId || !currentPath) return;
-    const path = normalizeFilePath(currentPath);
-    const current = (settings.fileManager.bookmarksByConnection?.[activeConnectionId] ?? []).map(normalizeFilePath);
-    const next = current.some((item) => isFilePathEqual(item, path))
-      ? current.filter((item) => !isFilePathEqual(item, path))
-      : [...current, path];
+  const writeBookmarks = useCallback((next: string[]) => {
+    if (!activeConnectionId) return;
     void updateFileManagerSettings({
       bookmarksByConnection: {
-        ...(settings.fileManager.bookmarksByConnection || {}),
+        ...(useAppStore.getState().settings.fileManager.bookmarksByConnection || {}),
         [activeConnectionId]: next,
       },
     });
-  }, [activeConnectionId, currentPath, settings.fileManager.bookmarksByConnection, updateFileManagerSettings]);
+  }, [activeConnectionId, updateFileManagerSettings]);
+
+  const pinFolder = useCallback((path: string) => {
+    if (!activeConnectionId) return;
+    const target = normalizeFilePath(path);
+    if (!target) return;
+    const current = (useAppStore.getState().settings.fileManager.bookmarksByConnection?.[activeConnectionId] ?? [])
+      .map(normalizeFilePath);
+    if (current.some((item) => isFilePathEqual(item, target))) return;
+    writeBookmarks([...current, target]);
+  }, [activeConnectionId, writeBookmarks]);
+
+  const toggleBookmarkAt = useCallback((path: string) => {
+    if (!activeConnectionId) return;
+    const target = normalizeFilePath(path);
+    if (!target) return;
+    const current = (useAppStore.getState().settings.fileManager.bookmarksByConnection?.[activeConnectionId] ?? [])
+      .map(normalizeFilePath);
+    const next = current.some((item) => isFilePathEqual(item, target))
+      ? current.filter((item) => !isFilePathEqual(item, target))
+      : [...current, target];
+    writeBookmarks(next);
+  }, [activeConnectionId, writeBookmarks]);
+
+  const toggleBookmark = useCallback(() => {
+    if (!currentPath) return;
+    toggleBookmarkAt(currentPath);
+  }, [currentPath, toggleBookmarkAt]);
+
+  const pinDroppedFolders = useCallback((payload: { connectionId?: string; paths: string[] }) => {
+    if (payload.connectionId && activeConnectionId && payload.connectionId !== activeConnectionId) {
+      return;
+    }
+    const folders = payload.paths.filter((path) => {
+      const name = path.split(/[\\/]/).filter(Boolean).pop() || '';
+      const entry = files.find((file) => file.name === name || isFilePathEqual(file.path, path));
+      return entry?.type === 'd';
+    });
+    folders.forEach((path) => pinFolder(path));
+  }, [activeConnectionId, files, pinFolder]);
 
   const handleCopyLocation = useCallback(async () => {
     try {
@@ -1485,6 +1521,18 @@ export const FileManager = memo(function FileManager({
               () => setContextMenu(null),
             )
           : []),
+        ...(contextMenu.file.type === 'd' ? [{
+          separator: true as const,
+        }, {
+          label: bookmarks.some((path) => isFilePathEqual(path, contextMenu.file?.path || ''))
+            ? 'Unpin'
+            : 'Pin to Pins',
+          icon: <Pin size={14} />,
+          action: () => {
+            const path = contextMenu.file?.path;
+            if (path) toggleBookmarkAt(path);
+          },
+        }] : []),
         { separator: true },
         {
           label: 'Rename',
@@ -1531,6 +1579,12 @@ export const FileManager = memo(function FileManager({
         ...(activeConnectionId
           ? terminalHereMenuItems(activeConnectionId, undefined, () => setContextMenu(null))
           : []),
+        { separator: true },
+        {
+          label: isBookmarked ? 'Unpin this folder' : 'Pin this folder',
+          icon: <Pin size={14} />,
+          action: toggleBookmark,
+        },
         { separator: true },
         {
           label: 'New...',
@@ -1749,9 +1803,21 @@ export const FileManager = memo(function FileManager({
             bookmarks={bookmarks}
             volumes={isLocal ? volumes : []}
             platform={typeof window !== 'undefined' ? window.electronUtils?.platform : undefined}
+            recentEnabled={settings.fileManager.placesRecentEnabled !== false}
+            recentLimit={clampFileRecentLimit(settings.fileManager.placesRecentLimit)}
             onNavigate={navigateToPath}
             onAddBookmark={toggleBookmark}
             onRemoveBookmark={handleRemoveBookmark}
+            onPinPaths={pinDroppedFolders}
+            onRecentEnabledChange={(enabled) => {
+              void updateFileManagerSettings({ placesRecentEnabled: enabled });
+            }}
+            onRecentLimitChange={(limit) => {
+              void updateFileManagerSettings({ placesRecentLimit: clampFileRecentLimit(limit) });
+            }}
+            onClearRecent={() => {
+              if (activeConnectionId) clearRecentPaths(activeConnectionId);
+            }}
           />
         </FileSideDrawer>
       {/* biome-ignore lint/a11y/noStaticElementInteractions: interactive div */}
