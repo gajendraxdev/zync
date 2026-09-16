@@ -174,7 +174,9 @@ async fn run_agent_loop(
         .await;
         return;
     }
-    let target = format!("http://{}:{}", share.target_host, share.target_port);
+    // ngrok / cloudflared / the browser all dial `localhost`, not `127.0.0.1`.
+    // Node/Vite/Astro on Windows often bind `[::1]` only; `localhost` resolves to both.
+    let target = format!("http://localhost:{}", share.target_port);
     let mut ticket: Option<String> = None;
 
     while !cancel.load(Ordering::Relaxed) {

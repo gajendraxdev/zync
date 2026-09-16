@@ -4,6 +4,13 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Fixed
+- **Public URLs IPv6 localhost**: Shares stored as `127.0.0.1` now also dial `[::1]` when the local app bound IPv6-only (common for Node/Vite on Windows). Visitors were seeing “App unreachable” even though the agent was connected.
+- **Public URLs loopback latency**: The local hop races IPv4 and IPv6 and remembers the winner, so Windows no longer waits ~2s on a refused `127.0.0.1` before using `[::1]` on every request.
+- **Public URLs dial localhost**: The share agent forwards to `http://localhost:{port}` (ngrok/cloudflared/browser), not `127.0.0.1`, so Node/Astro bound on `[::1]` is reachable.
+- **Public URLs skip Happy Eyeballs delay**: After the first local race, HTTP pins `localhost` to the winning loopback IP so Windows does not wait ~300ms on a dead `127.0.0.1` every request.
+- **Public URLs stale-family retry**: GET/HEAD/OPTIONS retry once on an unpinned `localhost` client if the pinned loopback family fails.
+
 ## [2.31.0] - 2026-09-12
 
 ### Added
