@@ -10,7 +10,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 ### Fixed
 - **Files opens at Home:** Workspace **+ → Files** (and Files in split) lists the account home, not the active shell cwd. **Open File Manager Here** still uses the terminal directory. A confirmed SFTP home of `/` is listed; `~` is still not. ([aaa9e82])
 - **Places Recent:** Gear at the bottom of Places, or right-click the sidebar, to show/hide Recent, pick how many folders to keep, or clear the list (also in Settings → File Manager). Hiding Recent removes the whole section. ([09ea72c])
-- **Pin folders in Places:** Right-click a folder or empty listing to pin it, or drag a folder onto Pins. Drops from another host are ignored.
+- **Pin folders in Places:** Right-click a folder or empty listing to pin it, or drag a folder onto Pins. Drops from another host are ignored. ([063c515])
 - **Public URLs IPv6 localhost**: Shares stored as `127.0.0.1` now also dial `[::1]` when the local app bound IPv6-only (common for Node/Vite on Windows). Visitors were seeing “App unreachable” even though the agent was connected. ([fd36e88])
 - **Public URLs loopback latency**: The local hop races IPv4 and IPv6 and remembers the winner, so Windows no longer waits ~2s on a refused `127.0.0.1` before using `[::1]` on every request. ([fd36e88])
 - **Public URLs dial localhost**: The share agent forwards to `http://localhost:{port}` (ngrok/cloudflared/browser), not `127.0.0.1`, so Node/Astro bound on `[::1]` is reachable. ([fd36e88])
@@ -1565,3 +1565,4 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [fd36e88]: https://github.com/zync-sh/zync/commit/fd36e88
 [aaa9e82]: https://github.com/zync-sh/zync/commit/aaa9e82
 [09ea72c]: https://github.com/zync-sh/zync/commit/09ea72c
+[063c515]: https://github.com/zync-sh/zync/commit/063c515
