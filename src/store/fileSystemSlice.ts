@@ -4,11 +4,12 @@ import { notify } from '../features/notifications';
 import type { FileEntry } from '../components/file-manager/types';
 import { expandTildeWithHome } from '../components/layout/tabDock/openHerePaths';
 import { parentFilePath } from '../components/file-manager/filePathNav';
-import { FILE_RECENT_LIMIT } from '../components/file-manager/fileChrome';
+import { FILE_RECENT_LIMIT_MAX } from '../components/file-manager/fileChrome';
 
 // @ts-ignore
 const ipc = window.ipcRenderer;
 const filesLoadGeneration = new Map<string, number>();
+const recentPathsGeneration = new Map<string, number>();
 
 /**
  * Splits a filename into base and extension, handling dotfiles correctly.
@@ -62,6 +63,7 @@ export interface FileSystemActions {
     navigateHistoryTo: (connectionId: string, index: number) => void;
     setClipboard: (files: FileEntry[], sourceConnectionId: string, sourcePath: string, op: 'copy' | 'cut') => void;
     clearClipboard: () => void;
+    clearRecentPaths: (connectionId: string) => void;
     pasteEntries: (connectionId: string, sources: string[], op: 'copy' | 'cut', destinationDirectory?: string) => Promise<void>;
     checkPathExists: (connectionId: string, path: string) => Promise<boolean>;
 }
@@ -86,6 +88,13 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
         set({ clipboard: null });
     },
 
+    clearRecentPaths: (connectionId) => {
+        recentPathsGeneration.set(connectionId, (recentPathsGeneration.get(connectionId) || 0) + 1);
+        set((state) => ({
+            recentPaths: { ...state.recentPaths, [connectionId]: [] },
+        }));
+    },
+
     setPath: (connectionId, path) => {
         set(state => ({
             currentPath: { ...state.currentPath, [connectionId]: path }
@@ -96,6 +105,7 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
         const state = get();
         let targetPath = (path !== undefined ? path : state.currentPath[connectionId] || '').trim();
         if (!targetPath) return;
+        const recentGen = recentPathsGeneration.get(connectionId) || 0;
         if (targetPath === '~' || targetPath.startsWith('~/')) {
             const conn = get().connections.find((c) => c.id === connectionId);
             let home = (conn?.homePath ?? '').trim();
@@ -163,12 +173,13 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
             }));
 
             if (filesLoadGeneration.get(connectionId) !== loadGen) return;
+            const skipRecent = (recentPathsGeneration.get(connectionId) || 0) !== recentGen;
             set(state => {
                 const prevRecent = state.recentPaths[connectionId] || [];
-                const recentUnchanged = prevRecent[0] === targetPath;
+                const recentUnchanged = skipRecent || prevRecent[0] === targetPath;
                 const nextRecent = recentUnchanged
                     ? prevRecent
-                    : [targetPath, ...prevRecent.filter((p) => p !== targetPath)].slice(0, FILE_RECENT_LIMIT);
+                    : [targetPath, ...prevRecent.filter((p) => p !== targetPath)].slice(0, FILE_RECENT_LIMIT_MAX);
                 const currentHist = state.history[connectionId];
                 const historyPatch = (!currentHist || currentHist.length === 0)
                     ? {
