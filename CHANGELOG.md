@@ -10,10 +10,13 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Changed
 - **Files is a pane, not an overlay:** Opening Files fills the workspace canvas like a shell. Extra Files tabs keep independent listings (folder, selection, error) instead of sharing one host-wide view. ([1776541])
+- **+ menu:** Dropped the extra Files in split / Port Forwarding in split / Dashboard in split / Snippets in split rows. Open a tab, then split from the toolbar or by dragging onto a pane edge.
 
 ### Fixed
+- **Pane header on a full-view tab:** The inner Files (and other feature) header with the X only shows after a split. Close the tab from the tab bar.
+- **Split shell titles:** Extra shells in a split are named Shell 2, Shell 3, … instead of stacking “pane” on the source title.
 - **Last shell `exit` in a mixed split:** Typing `exit` in the only shell beside Files no longer blanks the canvas. Remaining Files panes stay as **Split N**. ([1776541])
-- **Drag a pane onto itself:** Dropping in the middle of a pane no longer counts as the left edge and spawning extra splits. Only the outer edge band splits. ([1776541])
+- **Drag a pane onto itself:** Dropping in the middle of a pane no longer counts as the left edge or spawns extra splits. Only the outer edge band splits. ([1776541])
 - **Files disconnect in a split:** The disconnect banner follows that Files pane’s listing, not a shared host key. ([1776541])
 - **Files opens at Home:** Workspace **+ → Files** (and Files in split) lists the account home, not the active shell cwd. **Open File Manager Here** still uses the terminal directory. A confirmed SFTP home of `/` is listed; `~` is still not. ([aaa9e82])
 - **Places Recent:** Gear at the bottom of Places, or right-click the sidebar, to show/hide Recent, pick how many folders to keep, or clear the list (also in Settings → File Manager). Hiding Recent removes the whole section. ([09ea72c])

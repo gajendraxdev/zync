@@ -195,6 +195,17 @@ function isTabVisible(tab: TerminalTab): boolean {
     return tab.tabVisible !== false;
 }
 
+function nextShellTitle(tabs: readonly TerminalTab[]): string {
+    const used = new Set<number>();
+    for (const tab of tabs) {
+        const match = /^(?:Shell|Terminal)\s+(\d+)\b/i.exec(tab.title.trim());
+        if (match) used.add(Number(match[1]));
+    }
+    let n = 1;
+    while (used.has(n)) n += 1;
+    return `Shell ${n}`;
+}
+
 function resolveDockOwner(
     groups: PaneLayoutGroups | undefined,
     activeId: string | null | undefined,
@@ -275,8 +286,7 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
         const newId = `term-${crypto.randomUUID()}`;
         set(state => {
             const currentTabs = state.terminals[connectionId] || [];
-            const visibleCount = currentTabs.filter(t => t.tabVisible !== false).length;
-            const defaultTitle = `Shell ${visibleCount + 1}`;
+            const defaultTitle = nextShellTitle(currentTabs);
             const newTab: TerminalTab = {
                 id: newId,
                 title: opts?.title ?? (isSynced ? `Synced Terminal` : defaultTitle),
@@ -758,7 +768,7 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                 ...tabs,
                 {
                     id: duplicateId,
-                    title: `${sourceTab.title} · pane`,
+                    title: nextShellTitle(tabs),
                     tabVisible: false,
                     shellOverride: sourceTab.shellOverride,
                     initialPath: sourceTab.lastKnownCwd ?? sourceTab.initialPath,
@@ -1202,7 +1212,7 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                 }
                 const duplicate: TerminalTab = {
                     id: duplicateId,
-                    title: `${sourceTab.title} · pane`,
+                    title: nextShellTitle(tabs),
                     tabVisible: false,
                     shellOverride: sourceTab.shellOverride,
                     initialPath: sourceTab.lastKnownCwd ?? sourceTab.initialPath,

@@ -8,6 +8,7 @@ import {
     isPaneLeaf,
     isPaneSplit,
     isPluginContent,
+    isSplitLayout,
     isTermContent,
     markSplitIntro,
     normalizeSizes,
@@ -337,6 +338,7 @@ function FeaturePaneLeaf({
     instanceId,
     focused,
     showFocus,
+    showHeader,
     panelVisible,
     edges,
     onFocus,
@@ -351,6 +353,7 @@ function FeaturePaneLeaf({
     instanceId?: string;
     focused: boolean;
     showFocus: boolean;
+    showHeader: boolean;
     panelVisible: boolean;
     edges: InternalEdges;
     onFocus: () => void;
@@ -371,13 +374,15 @@ function FeaturePaneLeaf({
                 if (!focused) onFocus();
             }}
         >
-            <PaneHeader
-                label={label}
-                Icon={Icon}
-                focused={focused}
-                onPointerDown={onHeaderPointerDown}
-                onClose={onClose}
-            />
+            {showHeader && (
+                <PaneHeader
+                    label={label}
+                    Icon={Icon}
+                    focused={focused}
+                    onPointerDown={onHeaderPointerDown}
+                    onClose={onClose}
+                />
+            )}
             <div className="flex-1 min-h-0 min-w-0">
                 <FeaturePaneBody
                     connectionId={connectionId}
@@ -438,6 +443,7 @@ export function PaneLayoutView({
         window.dispatchEvent(new Event('zync:pane-resize-end'));
     }, [connectionId, resizePanes]);
 
+    const split = isSplitLayout(layout);
     const renderNode = (node: PaneNode, edges: InternalEdges = {}): ReactNode => {
         if (isPaneLeaf(node)) {
             const focused = layout.activePaneId === node.id;
@@ -459,6 +465,7 @@ export function PaneLayoutView({
                         pluginLabel={pluginId ? pluginTitles.get(pluginId) : undefined}
                         focused={focused}
                         showFocus={showFocus}
+                        showHeader={split}
                         panelVisible={panelVisible}
                         edges={edges}
                         onFocus={() => focusPane(connectionId, node.id)}
@@ -485,13 +492,15 @@ export function PaneLayoutView({
                         if (!focused) focusPane(connectionId, node.id);
                     }}
                 >
-                    <PaneHeader
-                        label={terminalTitles.get(termId) ?? 'Shell'}
-                        Icon={TerminalIcon}
-                        focused={focused}
-                        onPointerDown={(event) => beginDockPointer(event, paneDockPayload(node))}
-                        onClose={() => closePaneInSplit(connectionId, node.id)}
-                    />
+                    {split && (
+                        <PaneHeader
+                            label={terminalTitles.get(termId) ?? 'Shell'}
+                            Icon={TerminalIcon}
+                            focused={focused}
+                            onPointerDown={(event) => beginDockPointer(event, paneDockPayload(node))}
+                            onClose={() => closePaneInSplit(connectionId, node.id)}
+                        />
+                    )}
                     <div className="flex-1 min-h-0 min-w-0">
                         <TerminalComponent
                             connectionId={connectionId}

@@ -96,55 +96,42 @@ runTest('groups drop empty sections', () => {
   assert.deepEqual(groups.map((section) => section.group), ['create']);
 });
 
-runTest('includes Files in split next to full-view Files', () => {
+runTest('does not add extra Files in split rows', () => {
   const items = buildWorkspaceOpenItems({
     shells: [],
     canOpenFeature: true,
     features: [{ id: 'files', isOpen: false, isActive: false }],
-    splitFeatures: [{ id: 'files', isOpen: false, canOpen: true }],
   });
   assert.equal(items.some((item) => item.kind === 'feature' && item.featureId === 'files'), true);
-  const split = items.find((item) => item.kind === 'split-feature' && item.featureId === 'files');
-  assert.ok(split);
-  assert.equal(split.disabled, false);
-  assert.equal(split.label, 'Files in split');
-  assert.equal(split.keywords.includes('files in split'), true);
-  const dashboardSplit = items.find((item) => item.kind === 'split-feature' && item.featureId === 'dashboard');
-  assert.ok(dashboardSplit);
-  assert.equal(dashboardSplit.keywords.includes('dashboard in split'), true);
-  assert.equal(dashboardSplit.keywords.includes('files in split'), false);
-  assert.equal(items.some((item) => item.kind === 'split-feature' && item.featureId === 'dashboard'), true);
-  assert.equal(items.some((item) => item.kind === 'split-feature' && item.featureId === 'port-forwarding'), true);
-  assert.equal(items.some((item) => item.kind === 'split-feature' && item.featureId === 'snippets'), true);
+  assert.equal(items.every((item) => item.kind !== 'split-feature'), true);
+  assert.equal(items.some((item) => item.label.endsWith(' in split')), false);
 });
 
-runTest('disables Files in split at the pane cap and marks it when already open', () => {
-  const capped = buildWorkspaceOpenItems({
-    shells: [],
-    canOpenFeature: true,
-    splitFeatures: [{ id: 'files', isOpen: false, canOpen: false }],
-  }).find((item) => item.kind === 'split-feature');
-  assert.ok(capped);
-  assert.equal(capped.disabled, true);
-  assert.equal(capped.hint, '4 pane limit');
-
-  const open = buildWorkspaceOpenItems({
-    shells: [],
-    canOpenFeature: true,
-    splitFeatures: [{ id: 'files', isOpen: true, canOpen: false }],
-  }).find((item) => item.kind === 'split-feature');
-  assert.ok(open);
-  assert.equal(open.disabled, false);
-  assert.equal(open.hint, 'In split');
-});
-
-runTest('omits Files in split when the workspace cannot open features', () => {
+runTest('omits Files when the workspace cannot open features', () => {
   const items = buildWorkspaceOpenItems({
     shells: [],
     canOpenFeature: false,
-    splitFeatures: [{ id: 'files', isOpen: false, canOpen: true }],
+    features: [{ id: 'files', isOpen: false, isActive: false }],
   });
+  assert.equal(items.some((item) => item.featureId === 'files'), false);
+  assert.equal(items.every((item) => item.kind !== 'feature' && item.kind !== 'split-feature'), true);
+});
+
+runTest('open menu stays at tab rows and never adds split-feature entries', () => {
+  const items = buildWorkspaceOpenItems({
+    shells: [],
+    canOpenFeature: true,
+    features: [
+      { id: 'files', isOpen: true, isActive: false },
+      { id: 'port-forwarding', isOpen: true, isActive: false },
+      { id: 'dashboard', isOpen: true, isActive: false },
+      { id: 'snippets', isOpen: true, isActive: false },
+    ],
+  });
+  assert.equal(items.filter((item) => item.kind === 'feature').length, 4);
+  assert.equal(items.filter((item) => item.kind === 'new-shell').length, 1);
   assert.equal(items.every((item) => item.kind !== 'split-feature'), true);
+  assert.equal(items.length, 5);
 });
 
 console.log('Workspace open item tests passed.');

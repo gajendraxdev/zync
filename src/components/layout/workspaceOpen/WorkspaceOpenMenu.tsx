@@ -66,8 +66,8 @@ export function WorkspaceOpenMenu({
     const reduceMotion = useReducedMotion();
 
     const items = useMemo(
-        () => buildWorkspaceOpenItems({ shells, canOpenFeature, features, splitFeatures }),
-        [shells, canOpenFeature, features, splitFeatures],
+        () => buildWorkspaceOpenItems({ shells, canOpenFeature, features }),
+        [shells, canOpenFeature, features],
     );
     const visible = useMemo(
         () => visibleWorkspaceOpenItems(items, query, view),
