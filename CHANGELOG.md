@@ -10,11 +10,11 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Changed
 - **Files is a pane, not an overlay:** Opening Files fills the workspace canvas like a shell. Extra Files tabs keep independent listings (folder, selection, error) instead of sharing one host-wide view. ([1776541])
-- **+ menu:** Dropped the extra Files in split / Port Forwarding in split / Dashboard in split / Snippets in split rows. Open a tab, then split from the toolbar or by dragging onto a pane edge.
+- **+ menu:** Dropped the extra Files in split / Port Forwarding in split / Dashboard in split / Snippets in split rows. Open a tab, then split from the toolbar or by dragging onto a pane edge. ([4debaba])
 
 ### Fixed
-- **Pane header on a full-view tab:** The inner Files (and other feature) header with the X only shows after a split. Close the tab from the tab bar.
-- **Split shell titles:** Extra shells in a split are named Shell 2, Shell 3, … instead of stacking “pane” on the source title.
+- **Pane header on a full-view tab:** The inner Files (and other feature) header with the X only shows after a split. Close the tab from the tab bar. ([4debaba])
+- **Split shell titles:** Extra shells in a split are named Shell 2, Shell 3, … instead of stacking “pane” on the source title. ([4debaba])
 - **Last shell `exit` in a mixed split:** Typing `exit` in the only shell beside Files no longer blanks the canvas. Remaining Files panes stay as **Split N**. ([1776541])
 - **Drag a pane onto itself:** Dropping in the middle of a pane no longer counts as the left edge or spawns extra splits. Only the outer edge band splits. ([1776541])
 - **Files disconnect in a split:** The disconnect banner follows that Files pane’s listing, not a shared host key. ([1776541])
