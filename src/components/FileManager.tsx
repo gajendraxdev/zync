@@ -421,7 +421,7 @@ export const FileManager = memo(function FileManager({
           }, {} as Record<string, string[]>);
 
           for (const [opType, sources] of Object.entries(groups)) {
-            await pasteEntries(activeConnectionId, sources, opType === 'move' ? 'cut' : 'copy', targetDirectory, instanceId);
+            await pasteEntries(activeConnectionId, sources, opType === 'move' ? 'cut' : 'copy', targetDirectory);
           }
         } else {
           // Cross connection: Loop through and start transfers
