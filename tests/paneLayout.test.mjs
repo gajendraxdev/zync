@@ -9,6 +9,7 @@ import {
   dropSplitIntro,
   dropTerm,
   featureToPromoteOnLastShellExit,
+  findLayoutOwner,
   focusPane,
   neighborPaneId,
   oppositeDockEdge,
@@ -19,8 +20,11 @@ import {
   isSplitFeatureId,
   isSplitLayout,
   layoutHasFeature,
+  layoutHasPlugin,
   leafCount,
   openFeatureInLayout,
+  singleFeaturePane,
+  singlePluginPane,
   parsePaneLayout,
   parsePaneLayoutGroups,
   focusedTermIdForRestore,
@@ -32,6 +36,7 @@ import {
   setSplitSizes,
   singlePane,
   snapshotPaneLayouts,
+  snapshotPaneLayoutGroups,
   splitFromDockEdge,
   splitPane,
   incomingIndexForInsert,
@@ -46,6 +51,7 @@ import {
   visibleTermIds,
   MAX_PANE_NESTING,
   MAX_VISIBLE_PANES,
+  WORKSPACE_PANE_OWNER,
 } from '../.tmp-agent-tests/src/lib/paneLayout/index.js';
 
 function runTest(name, fn) {
@@ -412,6 +418,35 @@ runTest('parsePaneLayoutGroups keeps disjoint owners and drops overlapping or ow
   assert.equal(ownerless['term-z'], undefined);
 });
 
+runTest('feature-owned mixed groups survive snapshot and restore', () => {
+  const mixed = splitPane(
+    singleFeaturePane('files', 'pane-files', 'files-a'),
+    'pane-files',
+    'horizontal',
+    { kind: 'term', termId: 'term-a' },
+  );
+  assert.equal(mixed.ok, true);
+  if (!mixed.ok) return;
+
+  const parsed = parsePaneLayoutGroups(
+    { 'files-a': mixed.layout },
+    new Set(['term-a']),
+  );
+  assert.ok(parsed['files-a']);
+
+  const snapped = snapshotPaneLayoutGroups(
+    { host: { 'files-a': mixed.layout } },
+    { host: [{ id: 'term-a' }] },
+  );
+  assert.ok(snapped.host?.['files-a']);
+
+  const invalidOwner = parsePaneLayoutGroups(
+    { 'files-other': mixed.layout },
+    new Set(['term-a']),
+  );
+  assert.equal(invalidOwner['files-other'], undefined);
+});
+
 runTest('detachTermFromGroups drops one pane and keeps the rest of the tab', () => {
   const first = splitPane(singlePane('term-a', 'pane-a'), 'pane-a', 'vertical', { kind: 'term', termId: 'term-b' });
   assert.equal(first.ok, true);
@@ -439,6 +474,58 @@ runTest('detachTermFromGroups drops one pane and keeps the rest of the tab', () 
   assert.equal(lastExtra.nextOwner, 'term-a');
 });
 
+runTest('detachTermFromGroups keeps Files panes when the last shell exits', () => {
+  const withFiles = dockIntoLayout(
+    singlePane('term-a', 'pane-a'),
+    { kind: 'feature', featureId: 'files', instanceId: 'files-a' },
+    'right',
+  );
+  assert.equal(withFiles.ok, true);
+  if (!withFiles.ok) return;
+  const twoFiles = dockIntoLayout(
+    withFiles.layout,
+    { kind: 'feature', featureId: 'files', instanceId: 'files-b' },
+    'bottom',
+  );
+  assert.equal(twoFiles.ok, true);
+  if (!twoFiles.ok) return;
+  const gone = detachTermFromGroups({ 'term-a': twoFiles.layout }, 'term-a');
+  const remaining = gone.next ? Object.values(gone.next)[0] : undefined;
+  assert.ok(remaining);
+  assert.equal(isSplitLayout(remaining), true);
+  assert.equal(layoutHasFeature(remaining, 'files'), true);
+  assert.deepEqual(visibleTermIds(remaining), []);
+});
+
+runTest('detachTermFromGroups rekeys a plugin-only remainder to workspace', () => {
+  const mixed = dockIntoLayout(
+    singlePane('term-a', 'pane-a'),
+    { kind: 'plugin', pluginId: 'plug-1' },
+    'right',
+  );
+  assert.equal(mixed.ok, true);
+  if (!mixed.ok) return;
+  const gone = detachTermFromGroups({ 'term-a': mixed.layout }, 'term-a');
+  assert.equal(gone.nextOwner, WORKSPACE_PANE_OWNER);
+  const remaining = gone.next?.[WORKSPACE_PANE_OWNER];
+  assert.ok(remaining);
+  assert.equal(layoutHasPlugin(remaining, 'plug-1'), true);
+  assert.deepEqual(visibleTermIds(remaining), []);
+});
+
+runTest('snapshot and parse keep a single Files pane', () => {
+  const solo = singleFeaturePane('files', 'pane-files', 'files-a');
+  const snapped = snapshotPaneLayoutGroups(
+    { host: { 'files-a': solo } },
+    { host: [] },
+  );
+  assert.ok(snapped.host?.['files-a']);
+  const parsed = parsePaneLayoutGroups(snapped.host, new Set());
+  assert.ok(parsed['files-a']);
+  assert.equal(isSplitLayout(parsed['files-a']), false);
+  assert.equal(layoutHasFeature(parsed['files-a'], 'files'), true);
+});
+
 runTest('openFeatureInLayout splits Files beside a shell and focuses the new leaf', () => {
   const opened = openFeatureInLayout(singlePane('term-a', 'pane-a'), 'files');
   assert.equal(opened.ok, true);
@@ -451,7 +538,7 @@ runTest('openFeatureInLayout splits Files beside a shell and focuses the new lea
   assert.equal(activeTermId(opened.layout), 'term-a');
 });
 
-runTest('openFeatureInLayout focuses an existing Files leaf instead of duplicating it', () => {
+runTest('openFeatureInLayout can add a second Files pane beside the first', () => {
   const first = openFeatureInLayout(singlePane('term-a', 'pane-a'), 'files');
   assert.equal(first.ok, true);
   if (!first.ok) return;
@@ -461,10 +548,8 @@ runTest('openFeatureInLayout focuses an existing Files leaf instead of duplicati
   const again = openFeatureInLayout(focusedShell, 'files');
   assert.equal(again.ok, true);
   if (!again.ok) return;
-  assert.equal(again.created, false);
-  assert.equal(leafCount(again.layout.root), 2);
-  assert.equal(again.paneId, first.paneId);
-  assert.equal(isFeaturePaneFocused(again.layout, 'files'), true);
+  assert.equal(again.created, true);
+  assert.equal(leafCount(again.layout.root), 3);
 });
 
 runTest('openFeatureInLayout refuses to replace a shell when the pane cap is full', () => {
@@ -499,7 +584,7 @@ runTest('featureToPromoteOnLastShellExit keeps Files when the last shell exits',
   assert.equal(featureToPromoteOnLastShellExit(twoShells.layout, 'term-b'), null);
 });
 
-runTest('dropFeature unsplits Files and keeps the shell; last-term drop with Files remaining is null', () => {
+runTest('dropFeature unsplits Files and keeps the shell; last-term drop keeps a Files-only layout', () => {
   const opened = openFeatureInLayout(singlePane('term-a', 'pane-a'), 'files');
   assert.equal(opened.ok, true);
   if (!opened.ok) return;
@@ -510,7 +595,9 @@ runTest('dropFeature unsplits Files and keeps the shell; last-term drop with Fil
   assert.equal(layoutHasFeature(withoutFiles, 'files'), false);
 
   const lastShellGone = dropTerm(opened.layout, 'term-a');
-  assert.equal(lastShellGone, null);
+  assert.ok(lastShellGone);
+  assert.equal(layoutHasFeature(lastShellGone, 'files'), true);
+  assert.deepEqual(visibleTermIds(lastShellGone), []);
 });
 
 runTest('selectTerm never replaces a Files leaf', () => {
@@ -523,7 +610,7 @@ runTest('selectTerm never replaces a Files leaf', () => {
   assert.equal(leafCount(replaced.root), 2);
 });
 
-runTest('sanitize and parse keep Files beside known shells and drop feature-only trees', () => {
+runTest('sanitize and parse keep Files beside known shells and keep Files-only trees', () => {
   const opened = openFeatureInLayout(singlePane('term-a', 'pane-a'), 'files');
   assert.equal(opened.ok, true);
   if (!opened.ok) return;
@@ -532,9 +619,11 @@ runTest('sanitize and parse keep Files beside known shells and drop feature-only
   assert.equal(layoutHasFeature(kept, 'files'), true);
 
   const featureOnly = dropTerm(opened.layout, 'term-a');
-  assert.equal(featureOnly, null);
+  assert.ok(featureOnly);
+  assert.equal(layoutHasFeature(featureOnly, 'files'), true);
   const pruned = sanitizePaneLayout(opened.layout, new Set());
-  assert.equal(pruned, null);
+  assert.ok(pruned);
+  assert.equal(layoutHasFeature(pruned, 'files'), true);
 
   const parsed = parsePaneLayout(opened.layout, new Set(['term-a']));
   assert.ok(parsed);
@@ -579,6 +668,8 @@ runTest('dockEdgeFromPoint picks the nearest edge inside the surface and ignores
   assert.equal(dockEdgeFromPoint(20, 50, 100, 100), 'left');
   assert.equal(dockEdgeFromPoint(-1, 50, 100, 100), null);
   assert.equal(dockEdgeFromPoint(50, 150, 100, 100), null);
+  assert.equal(dockEdgeFromPoint(50, 50, 100, 100), null);
+  assert.equal(dockEdgeFromPoint(40, 50, 100, 100), null);
 });
 
 runTest('oppositeDockEdge flips left/right and top/bottom', () => {
@@ -626,15 +717,108 @@ runTest('dockIntoLayout on the left puts the new leaf first', () => {
   assert.equal(layoutHasFeature(docked.layout, 'dashboard'), true);
 });
 
-runTest('dockIntoLayout focuses an existing feature instead of duplicating it', () => {
-  const first = dockIntoLayout(singlePane('term-a', 'pane-a'), { kind: 'feature', featureId: 'snippets' }, 'right');
-  assert.equal(first.ok, true);
-  if (!first.ok) return;
-  const again = dockIntoLayout(first.layout, { kind: 'feature', featureId: 'snippets' }, 'left');
+runTest('dockIntoLayout of an already-mounted Files instance focuses instead of splitting', () => {
+  const solo = singleFeaturePane('files', 'pane-files-a', 'files-a');
+  const again = dockIntoLayout(
+    solo,
+    { kind: 'feature', featureId: 'files', instanceId: 'files-a' },
+    'right',
+    undefined,
+    'pane-files-a',
+  );
   assert.equal(again.ok, true);
   if (!again.ok) return;
   assert.equal(again.created, false);
-  assert.equal(leafCount(again.layout.root), 2);
+  assert.equal(again.paneId, 'pane-files-a');
+  assert.equal(isSplitLayout(again.layout), false);
+});
+
+runTest('dockIntoLayout can duplicate a feature pane like a second shell', () => {
+  const first = dockIntoLayout(singlePane('term-a', 'pane-a'), { kind: 'feature', featureId: 'files' }, 'right');
+  assert.equal(first.ok, true);
+  if (!first.ok) return;
+  const again = dockIntoLayout(first.layout, { kind: 'feature', featureId: 'files' }, 'left');
+  assert.equal(again.ok, true);
+  if (!again.ok) return;
+  assert.equal(again.created, true);
+  assert.equal(leafCount(again.layout.root), 3);
+});
+
+runTest('pane content can be repeatedly docked at the hovered pane up to the shared cap', () => {
+  const solo = singleFeaturePane('files', 'pane-files-a', 'files-a');
+  const second = dockIntoLayout(
+    solo,
+    { kind: 'feature', featureId: 'files', instanceId: 'files-b' },
+    'right',
+    undefined,
+    'pane-files-a',
+  );
+  assert.equal(second.ok, true);
+  if (!second.ok) return;
+
+  const third = dockIntoLayout(
+    second.layout,
+    { kind: 'feature', featureId: 'dashboard' },
+    'bottom',
+    undefined,
+    second.paneId,
+  );
+  assert.equal(third.ok, true);
+  if (!third.ok) return;
+
+  const fourth = dockIntoLayout(
+    third.layout,
+    { kind: 'plugin', pluginId: 'clock' },
+    'left',
+    undefined,
+    third.paneId,
+  );
+  assert.equal(fourth.ok, true);
+  if (!fourth.ok) return;
+  assert.equal(leafCount(fourth.layout.root), MAX_VISIBLE_PANES);
+
+  const refused = dockIntoLayout(
+    fourth.layout,
+    { kind: 'feature', featureId: 'snippets' },
+    'top',
+    undefined,
+    fourth.paneId,
+  );
+  assert.deepEqual(refused, { ok: false, reason: 'cap' });
+});
+
+runTest('dockIntoLayout can place a plugin pane beside a shell', () => {
+  const docked = dockIntoLayout(singlePane('term-a', 'pane-a'), { kind: 'plugin', pluginId: 'clock' }, 'right');
+  assert.equal(docked.ok, true);
+  if (!docked.ok) return;
+  assert.equal(layoutHasPlugin(docked.layout, 'clock'), true);
+  const again = dockIntoLayout(docked.layout, { kind: 'plugin', pluginId: 'clock' }, 'left');
+  assert.equal(again.ok, true);
+  if (!again.ok) return;
+  assert.equal(again.created, true);
+  assert.equal(leafCount(again.layout.root), 3);
+});
+
+runTest('singleFeaturePane can split into two Files panes without a shell', () => {
+  const solo = singleFeaturePane('files', 'pane-files', 'files-a');
+  const split = dockIntoLayout(solo, { kind: 'feature', featureId: 'files', instanceId: 'files-b' }, 'right');
+  assert.equal(split.ok, true);
+  if (!split.ok) return;
+  assert.equal(isSplitLayout(split.layout), true);
+  assert.equal(leafCount(split.layout.root), 2);
+  assert.deepEqual(visibleTermIds(split.layout), []);
+});
+
+runTest('workspace feature layouts do not claim shells they do not contain', () => {
+  const solo = singleFeaturePane('files', 'pane-files-a', 'files-a');
+  const split = dockIntoLayout(solo, { kind: 'feature', featureId: 'files', instanceId: 'files-b' }, 'right');
+  assert.equal(split.ok, true);
+  if (!split.ok) return;
+  const groups = { [WORKSPACE_PANE_OWNER]: split.layout };
+  assert.equal(findLayoutOwner(groups, 'term-a'), null);
+  const detached = detachTermFromGroups(groups, 'term-a');
+  assert.equal(detached.next, groups);
+  assert.equal(detached.next?.[WORKSPACE_PANE_OWNER], split.layout);
 });
 
 runTest('sameSplitGroup treats a single tab as its own group', () => {
@@ -648,9 +832,9 @@ runTest('sameSplitGroup treats a single tab as its own group', () => {
   assert.equal(sameSplitGroup(groups, 'term-a', 'term-z'), false);
 });
 
-runTest('same-group term dock is self with no layout write (overlay and split)', () => {
-  assert.equal(sameGroupTermDock(undefined, 'term-a', 'term-a'), 'self');
-  assert.equal(sameGroupTermDock({}, 'term-a', 'term-a'), 'self');
+runTest('same-group term dock only matches shells already visible in that layout', () => {
+  assert.equal(sameGroupTermDock(undefined, 'term-a', 'term-a'), null);
+  assert.equal(sameGroupTermDock({}, 'term-a', 'term-a'), null);
   assert.equal(sameGroupTermDock({}, 'term-a', 'term-b'), null);
   const split = splitPane(singlePane('term-a', 'pane-a'), 'pane-a', 'horizontal', { kind: 'term', termId: 'term-b' });
   assert.equal(split.ok, true);
@@ -804,14 +988,14 @@ runTest('dockIntoLayout of a term already in the group only focuses', () => {
 });
 
 runTest('dockIntoLayout that only focuses does not mark a second intro', () => {
-  const first = dockIntoLayout(singlePane('term-a', 'pane-a'), { kind: 'feature', featureId: 'snippets' }, 'right');
+  const first = splitPane(singlePane('term-a', 'pane-a'), 'pane-a', 'horizontal', { kind: 'term', termId: 'term-b' });
   assert.equal(first.ok, true);
   if (!first.ok) return;
   assert.equal(first.layout.root.type, 'split');
   if (first.layout.root.type !== 'split') return;
   const splitId = first.layout.root.id;
   takeSplitIntro(splitId);
-  const again = dockIntoLayout(first.layout, { kind: 'feature', featureId: 'snippets' }, 'left');
+  const again = dockIntoLayout(first.layout, { kind: 'term', termId: 'term-b' }, 'left');
   assert.equal(again.ok, true);
   if (!again.ok) return;
   assert.equal(again.created, false);

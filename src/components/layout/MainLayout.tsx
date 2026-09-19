@@ -10,8 +10,16 @@ import { TabBar } from './TabBar';
 import { ShortcutManager } from '../managers/ShortcutManager';
 import { CommandPalette } from './CommandPalette';
 import { WorkspaceTabBar } from './WorkspaceTabBar';
-import { FILES_OVERLAY_PANE_ID, TabDockOverlay, type DockTabPointerHandlers } from './tabDock';
+import {
+    overlayPluginPaneId,
+    parseOverlayFeatureId,
+    parseOverlayPluginId,
+    TabDockOverlay,
+    type DockTabPointerHandlers,
+} from './tabDock';
+import { collectLeaves, isFeatureContent, isPluginContent, isSplitFeatureId, isSplitLayout, layoutForCanvas, layoutForFeatureInstance, layoutHasPlugin } from '../../lib/paneLayout';
 import type { ShellEntry } from '../../lib/shells/types';
+import type { FeatureId, WorkspaceFeatureTab } from './featureMeta';
 import { GLOBAL_SNIPPETS_CONNECTION_ID, LOCAL_TERMINAL_CONNECTION_ID } from '../../features/connections/application/tabService';
 import { listen } from '@tauri-apps/api/event';
 import { Modal } from '../ui/Modal';
@@ -26,7 +34,7 @@ import {
 } from '../../features/survey';
 import { getDebugSurveyPromptKind, isDebugSurveyPromptEnabled } from '../../lib/debugFlags';
 import ReleaseNotesTab from '../tabs/ReleaseNotesTab';
-import { ErrorBoundary } from '../ErrorBoundary';
+
 import { SnippetSidebar } from '../snippets/SnippetSidebar';
 import { SetupWizard } from '../onboarding/SetupWizard';
 import { useFileSystemEvents } from '../../hooks/useFileSystemEvents';
@@ -65,10 +73,6 @@ declare global {
 }
 
 // Lazy Load Heavy Components
-const FileManager = lazy(() => import('../FileManager').then(module => ({ default: module.FileManager })));
-const Dashboard = lazy(() => import('../dashboard/Dashboard').then(module => ({ default: module.Dashboard })));
-const TunnelManager = lazy(() => import('../tunnel/TunnelManager').then(module => ({ default: module.TunnelManager })));
-const SnippetsManager = lazy(() => import('../snippets/SnippetsManager').then(module => ({ default: module.SnippetsManager })));
 const TerminalManager = lazy(() => import('../terminal/TerminalManager').then(module => ({ default: module.TerminalManager })));
 const GlobalTunnelList = lazy(() => import('../tunnel/GlobalTunnelList').then(module => ({ default: module.GlobalTunnelList })));
 const PublicUrlsPanel = lazy(() => import('../share/PublicUrlsPanel').then(module => ({ default: module.PublicUrlsPanel })));
@@ -81,6 +85,10 @@ import { VaultWorkspaceLoading } from '../vault/VaultWorkspaceLoading';
 const VaultWorkspacePanel = lazy(() =>
     import('../vault/VaultWorkspacePanel').then(module => ({ default: module.default }))
 );
+
+function newWorkspaceFeatureTab(featureId: FeatureId, id = `feature-${crypto.randomUUID()}`): WorkspaceFeatureTab {
+    return { id, featureId, instanceId: id };
+}
 const SyncBackupWorkspacePanel = lazy(() =>
     import('../sync/SyncBackupWorkspacePanel').then(module => ({ default: module.default }))
 );
@@ -261,6 +269,15 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
     const createTerminal = useAppStore(state => state.createTerminal);
     const closeTerminalGroup = useAppStore(state => state.closeTerminalGroup);
     const setActiveTerminal = useAppStore(state => state.setActiveTerminal);
+    const canvasSplit = useAppStore((state) => {
+        if (!tab.connectionId) return false;
+        const layout = layoutForCanvas(
+            state.paneLayouts[tab.connectionId],
+            state.activeTerminalIds[tab.connectionId],
+            state.activePaneGroupOwner[tab.connectionId],
+        );
+        return isSplitLayout(layout);
+    });
 
     // Feature Pinning
     const toggleConnectionFeature = useAppStore(state => state.toggleConnectionFeature);
@@ -268,9 +285,20 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
 
     // Local state for open feature tabs
     const [openFeatures, setOpenFeatures] = useState<string[]>([]);
+    const initialFeatureTabRef = useRef<WorkspaceFeatureTab | null>(
+        isSplitFeatureId(tab.view) ? newWorkspaceFeatureTab(tab.view) : null,
+    );
+    const [featureTabs, setFeatureTabs] = useState<WorkspaceFeatureTab[]>(() => (
+        initialFeatureTabRef.current ? [initialFeatureTabRef.current] : []
+    ));
+    const [activeFeatureTabId, setActiveFeatureTabId] = useState<string | null>(
+        initialFeatureTabRef.current?.id ?? null,
+    );
+    const paneGroups = useAppStore(state => (
+        tab.connectionId ? state.paneLayouts[tab.connectionId] : undefined
+    ));
     /** Heavy panels stay mounted after first visit; CSS hide avoids remount + reconcile cost. */
-    const [filesPanelMounted, setFilesPanelMounted] = useState(tab.view === 'files');
-    const [dashboardPanelMounted, setDashboardPanelMounted] = useState(tab.view === 'dashboard');
+
 
     // Snippet quick access overlay state
     const [isSnippetSidebarOpen, setIsSnippetSidebarOpen] = useState(false);
@@ -278,15 +306,26 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
     const dockSurfaceRef = useRef<HTMLDivElement>(null);
     const viewBeforeDockRef = useRef<string | null>(null);
     const dockInSplit = useAppStore((state) => state.dockInSplit);
-    const splitTermBesideFiles = useAppStore((state) => state.splitTermBesideFiles);
     const showToast = useAppStore((state) => state.showToast);
 
     // Effect hooks must be unconditional
-    // Ensure active view is always in openFeatures
+    // Ensure pinned feature kinds and restored split instances have inventory tabs.
     const pinnedFeatures = tab.connectionId === LOCAL_TERMINAL_CONNECTION_ID ? (localPinnedFeatures || EMPTY_ARRAY) : (connection?.pinnedFeatures || EMPTY_ARRAY);
 
     useEffect(() => {
-        if (tab.view && tab.view !== 'terminal' && !pinnedFeatures.includes(tab.view)) {
+        if (isSplitFeatureId(tab.view)) {
+            const active = featureTabs.find(item => item.id === activeFeatureTabId && item.featureId === tab.view)
+                ?? featureTabs.find(item => item.featureId === tab.view);
+            if (active) {
+                if (activeFeatureTabId !== active.id) setActiveFeatureTabId(active.id);
+                return;
+            }
+            const created = newWorkspaceFeatureTab(tab.view);
+            setFeatureTabs(prev => [...prev, created]);
+            setActiveFeatureTabId(created.id);
+            return;
+        }
+        if (tab.view?.startsWith('plugin:') && !pinnedFeatures.includes(tab.view)) {
             setOpenFeatures(prev => {
                 if (!prev.includes(tab.view)) {
                     return [...prev, tab.view];
@@ -294,20 +333,76 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
                 return prev;
             });
         }
-    }, [tab.view, pinnedFeatures]);
+    }, [activeFeatureTabId, featureTabs, pinnedFeatures, tab.view]);
+
+    useEffect(() => {
+        const pinnedTabs = pinnedFeatures
+            .filter(isSplitFeatureId)
+            .map(featureId => newWorkspaceFeatureTab(featureId, `pinned:${featureId}`));
+        setFeatureTabs(prev => {
+            const existing = new Set(prev.map(item => item.id));
+            const additions = pinnedTabs.filter(item => !existing.has(item.id));
+            return additions.length > 0 ? [...prev, ...additions] : prev;
+        });
+    }, [pinnedFeatures]);
+
+    useEffect(() => {
+        const grouped = Object.values(paneGroups ?? {}).flatMap(layout => (
+            collectLeaves(layout.root).flatMap(leaf => {
+                if (!isFeatureContent(leaf.content) || !leaf.content.instanceId) return [];
+                return [{
+                    id: leaf.content.instanceId,
+                    featureId: leaf.content.featureId,
+                    instanceId: leaf.content.instanceId,
+                } satisfies WorkspaceFeatureTab];
+            })
+        ));
+        if (grouped.length === 0) return;
+        setFeatureTabs(prev => {
+            const existing = new Set(prev.map(item => item.id));
+            const additions = grouped.filter(item => !existing.has(item.id));
+            return additions.length > 0 ? [...prev, ...additions] : prev;
+        });
+    }, [paneGroups]);
+
+    useEffect(() => {
+        if (!tab.connectionId) return;
+        for (const featureTab of featureTabs) {
+            if (!isSplitFeatureId(featureTab.featureId) || !featureTab.instanceId) continue;
+            useAppStore.getState().ensureFeaturePane(
+                tab.connectionId,
+                featureTab.featureId,
+                featureTab.instanceId,
+            );
+        }
+    }, [featureTabs, tab.connectionId]);
 
     useEffect(() => {
         if (tab.view === 'files') {
-            setFilesPanelMounted(true);
             window.dispatchEvent(new CustomEvent('zync:files-panel-show'));
-        }
-        if (tab.view === 'dashboard') {
-            setDashboardPanelMounted(true);
         }
     }, [tab.view]);
 
     // Listen for keyboard shortcut events to open features
     const handleOpenFeature = useCallback((feature: string) => {
+        if (isSplitFeatureId(feature)) {
+            const created = newWorkspaceFeatureTab(feature);
+            if (feature === 'files' && tab.connectionId) {
+                const current = featureTabs.find(item => item.id === activeFeatureTabId && item.featureId === 'files');
+                useAppStore.getState().copyFilesListing(
+                    tab.connectionId,
+                    current?.instanceId,
+                    created.instanceId,
+                );
+            }
+            setFeatureTabs(prev => [...prev, created]);
+            setActiveFeatureTabId(created.id);
+            if (tab.connectionId) {
+                useAppStore.getState().ensureFeaturePane(tab.connectionId, feature, created.instanceId);
+            }
+            setTabView(tab.id, feature);
+            return;
+        }
         setOpenFeatures(prev => {
             if (!prev.includes(feature) && !pinnedFeatures.includes(feature)) {
                 return [...prev, feature];
@@ -315,7 +410,7 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
             return prev;
         });
         setTabView(tab.id, feature as Tab['view']);
-    }, [pinnedFeatures, setTabView, tab.id]);
+    }, [activeFeatureTabId, featureTabs, pinnedFeatures, setTabView, tab.connectionId, tab.id]);
 
     useEffect(() => {
         const handleFeatureEvent = (e: Event) => {
@@ -473,16 +568,16 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
             setActiveTerminal(tab.connectionId, termId);
             return;
         }
-        if (view === 'files') {
-            setFilesPanelMounted(true);
-        } else if (view === 'dashboard') {
-            setDashboardPanelMounted(true);
+        if (isSplitFeatureId(view)) {
+            const selected = featureTabs.find(item => item.id === activeFeatureTabId && item.featureId === view)
+                ?? featureTabs.find(item => item.featureId === view);
+            if (selected) setActiveFeatureTabId(selected.id);
         }
         setTabView(tab.id, view);
         if (view === 'terminal' && termId && tab.connectionId) {
             setActiveTerminal(tab.connectionId, termId);
         }
-    }, [pluginPanels, setTabView, tab.id, tab.connectionId, tab.view, setActiveTerminal]);
+    }, [activeFeatureTabId, featureTabs, pluginPanels, setTabView, tab.id, tab.connectionId, setActiveTerminal]);
 
     const handleFeatureClose = useCallback((feature: string) => {
         setOpenFeatures(prev => prev.filter(f => f !== feature));
@@ -491,6 +586,134 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
             setTabView(tab.id, 'terminal');
         }
     }, [setOpenFeatures, tab.view, tab.id, setTabView]);
+
+    const handleFeatureTabSelect = useCallback((featureTabId: string, featureId: FeatureId) => {
+        setActiveFeatureTabId(featureTabId);
+        const featureTab = featureTabs.find(item => item.id === featureTabId);
+        if (tab.connectionId && isSplitFeatureId(featureId) && featureTab?.instanceId) {
+            const store = useAppStore.getState();
+            store.ensureFeaturePane(tab.connectionId, featureId, featureTab.instanceId);
+            const groups = store.paneLayouts[tab.connectionId];
+            const layout = layoutForFeatureInstance(groups, featureTab.instanceId);
+            if (layout) {
+                const owner = Object.entries(groups ?? {}).find((entry) => entry[1] === layout)?.[0];
+                if (owner) store.activatePaneGroup(tab.connectionId, owner);
+            }
+        }
+        setTabView(tab.id, featureId);
+    }, [featureTabs, setTabView, tab.connectionId, tab.id]);
+
+    const handleFeatureTabClose = useCallback((featureTabId: string, featureId: FeatureId) => {
+        const closing = featureTabs.find(item => item.id === featureTabId);
+        if (tab.connectionId && closing?.instanceId) {
+            const store = useAppStore.getState();
+            const groups = store.paneLayouts[tab.connectionId];
+            const layout = layoutForFeatureInstance(groups, closing.instanceId);
+            if (layout) {
+                const owner = Object.entries(groups ?? {}).find(([, candidate]) => candidate === layout)?.[0];
+                const pane = collectLeaves(layout.root).find(leaf => (
+                    isFeatureContent(leaf.content)
+                    && leaf.content.instanceId === closing.instanceId
+                ));
+                if (owner && pane) {
+                    if (isSplitLayout(layout)) {
+                        store.closePaneInSplit(tab.connectionId, pane.id);
+                    } else {
+                        store.closePaneGroup(tab.connectionId, owner);
+                    }
+                }
+            }
+        }
+        const closingIndex = featureTabs.findIndex(item => item.id === featureTabId);
+        const next = featureTabs.filter(item => item.id !== featureTabId);
+        setFeatureTabs(next);
+        if (activeFeatureTabId === featureTabId) {
+            const fallback = next[Math.min(closingIndex, next.length - 1)]
+                ?? [...next].reverse().find(item => item.featureId === featureId);
+            if (fallback) {
+                handleFeatureTabSelect(fallback.id, fallback.featureId);
+            } else {
+                setActiveFeatureTabId(null);
+                setTabView(tab.id, 'terminal');
+            }
+        }
+    }, [activeFeatureTabId, featureTabs, handleFeatureTabSelect, setTabView, tab.connectionId, tab.id]);
+
+    const handlePaneGroupClose = useCallback((owner: string) => {
+        if (!tab.connectionId) return;
+        const store = useAppStore.getState();
+        const layout = store.paneLayouts[tab.connectionId]?.[owner];
+        if (!layout) return;
+
+        const leaves = collectLeaves(layout.root);
+        const closedFeatureInstances = new Set(leaves.flatMap(leaf => (
+            isFeatureContent(leaf.content) && leaf.content.instanceId
+                ? [leaf.content.instanceId]
+                : []
+        )));
+        const closedLegacyFeatures = new Set(leaves.flatMap(leaf => (
+            isFeatureContent(leaf.content) && !leaf.content.instanceId
+                ? [leaf.content.featureId]
+                : []
+        )));
+        const closedPlugins = new Set(leaves.flatMap(leaf => (
+            isPluginContent(leaf.content) ? [leaf.content.pluginId] : []
+        )));
+        const firstClosedFeatureIndex = featureTabs.findIndex(item => (
+            closedFeatureInstances.has(item.instanceId)
+            || closedLegacyFeatures.has(item.featureId)
+        ));
+        const remainingFeatureTabs = featureTabs.filter(item => (
+            !closedFeatureInstances.has(item.instanceId)
+            && !closedLegacyFeatures.has(item.featureId)
+        ));
+        const remainingPlugins = openFeatures.filter(featureId => (
+            !featureId.startsWith('plugin:')
+            || !closedPlugins.has(featureId.slice('plugin:'.length))
+        ));
+
+        setFeatureTabs(remainingFeatureTabs);
+        setOpenFeatures(remainingPlugins);
+        store.closePaneGroup(tab.connectionId, owner);
+        const groupsAfterClose = useAppStore.getState().paneLayouts[tab.connectionId];
+
+        const fallbackFeatureIndex = firstClosedFeatureIndex < 0
+            ? remainingFeatureTabs.length - 1
+            : Math.min(firstClosedFeatureIndex, remainingFeatureTabs.length - 1);
+        const fallbackFeature = remainingFeatureTabs[Math.max(0, fallbackFeatureIndex)];
+        if (fallbackFeature) {
+            setActiveFeatureTabId(fallbackFeature.id);
+            const fallbackLayout = layoutForFeatureInstance(
+                groupsAfterClose,
+                fallbackFeature.instanceId,
+            );
+            if (fallbackLayout && isSplitLayout(fallbackLayout)) {
+                const fallbackOwner = Object.entries(groupsAfterClose ?? {})
+                    .find(([, candidate]) => candidate === fallbackLayout)?.[0];
+                if (fallbackOwner) store.activatePaneGroup(tab.connectionId, fallbackOwner);
+                setTabView(tab.id, 'terminal');
+                return;
+            }
+            setTabView(tab.id, fallbackFeature.featureId);
+            return;
+        }
+        setActiveFeatureTabId(null);
+        const fallbackPlugin = remainingPlugins.find(featureId => featureId.startsWith('plugin:'));
+        if (fallbackPlugin) {
+            const pluginId = fallbackPlugin.slice('plugin:'.length);
+            const fallbackGroup = Object.entries(groupsAfterClose ?? {})
+                .find(([, candidate]) => isSplitLayout(candidate) && layoutHasPlugin(candidate, pluginId));
+            if (fallbackGroup) {
+                store.activatePaneGroup(tab.connectionId, fallbackGroup[0]);
+                setTabView(tab.id, 'terminal');
+                return;
+            }
+        }
+        setTabView(tab.id, (fallbackPlugin ?? 'terminal') as Tab['view']);
+    }, [featureTabs, openFeatures, setTabView, tab.connectionId, tab.id]);
+
+    const handleFeaturePaneOpened = useCallback((_feature: string) => {
+    }, []);
 
     const restoreViewBeforeDock = useCallback(() => {
         const previous = viewBeforeDockRef.current;
@@ -503,10 +726,16 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
     const dockPointer = useMemo<DockTabPointerHandlers>(() => ({
         getSurface: () => dockSurfaceRef.current,
         onDragStart: (payload) => {
+            if (canvasSplit) {
+                viewBeforeDockRef.current = null;
+                if (tab.view !== 'terminal') setTabView(tab.id, 'terminal');
+                return;
+            }
             if (tab.view !== 'terminal') {
                 viewBeforeDockRef.current = tab.view;
-                // Keep Files visible so a shell tab can drop onto the overlay.
                 if (payload.kind === 'term') return;
+                if (payload.kind === 'feature' && tab.view === payload.featureId) return;
+                if (payload.kind === 'plugin' && tab.view === `plugin:${payload.pluginId}`) return;
                 setTabView(tab.id, 'terminal');
             } else {
                 viewBeforeDockRef.current = null;
@@ -517,11 +746,17 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
                 restoreViewBeforeDock();
                 return;
             }
-            const ontoFilesOverlay = payload.kind === 'term'
-                && (paneId === FILES_OVERLAY_PANE_ID || viewBeforeDockRef.current === 'files');
-            const result = ontoFilesOverlay
-                ? splitTermBesideFiles(tab.connectionId, payload.termId, edge)
-                : dockInSplit(tab.connectionId, payload, edge, paneId);
+            const overlayFeature = parseOverlayFeatureId(paneId);
+            const overlayPlugin = parseOverlayPluginId(paneId);
+            const overlayFeatureTab = overlayFeature
+                ? featureTabs.find(item => item.id === activeFeatureTabId && item.featureId === overlayFeature)
+                : undefined;
+            const overlayTargetContent = overlayFeature
+                ? { kind: 'feature' as const, featureId: overlayFeature, instanceId: overlayFeatureTab?.instanceId }
+                : overlayPlugin
+                    ? { kind: 'plugin' as const, pluginId: overlayPlugin }
+                    : undefined;
+            const result = dockInSplit(tab.connectionId, payload, edge, paneId, undefined, overlayTargetContent);
             if (result === 'refused-cap') {
                 showToast('info', 'This tab already has 4 panes.');
                 restoreViewBeforeDock();
@@ -532,29 +767,24 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
                 return;
             }
             viewBeforeDockRef.current = null;
-            if (payload.kind === 'feature' || ontoFilesOverlay) {
-                if (payload.kind === 'feature') {
-                    setOpenFeatures((open) => open.filter((id) => id !== payload.featureId));
-                }
+            if (payload.kind === 'feature' || payload.kind === 'plugin' || overlayTargetContent) {
                 setTabView(tab.id, 'terminal');
             }
         },
         onDragCancel: () => {
             restoreViewBeforeDock();
         },
-    }), [dockInSplit, restoreViewBeforeDock, setTabView, showToast, splitTermBesideFiles, tab.connectionId, tab.id, tab.view]);
+    }), [activeFeatureTabId, canvasSplit, dockInSplit, featureTabs, restoreViewBeforeDock, setTabView, showToast, tab.connectionId, tab.id, tab.view]);
 
     const handleTogglePin = useCallback((feature: string) => {
         if (tab.connectionId) {
             toggleConnectionFeature(tab.connectionId, feature);
-            // If we are unpinning, ensure it stays open in local state
-            if (pinnedFeatures.includes(feature)) {
-                if (!openFeatures.includes(feature)) {
-                    setOpenFeatures(prev => [...prev, feature]);
+            if (!isSplitFeatureId(feature)) {
+                if (pinnedFeatures.includes(feature)) {
+                    if (!openFeatures.includes(feature)) setOpenFeatures(prev => [...prev, feature]);
+                } else {
+                    setOpenFeatures(prev => prev.filter(f => f !== feature));
                 }
-            } else {
-                // Pinning: remove from openFeatures since it's now in pinnedFeatures
-                setOpenFeatures(prev => prev.filter(f => f !== feature));
             }
         }
     }, [tab.connectionId, toggleConnectionFeature, pinnedFeatures, openFeatures, setOpenFeatures]);
@@ -605,13 +835,19 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
                             tabId={tab.id}
                             activeView={tab.view}
                             openFeatures={openFeatures}
+                            featureTabs={featureTabs}
+                            activeFeatureTabId={activeFeatureTabId}
                             pinnedFeatures={pinnedFeatures}
                             pluginPanels={workspacePluginPanels}
                             onTabSelect={handleTabSelect}
                             onFeatureClose={handleFeatureClose}
+                            onFeatureTabSelect={handleFeatureTabSelect}
+                            onFeatureTabClose={handleFeatureTabClose}
                             onTerminalClose={handleTerminalClose}
                             onNewTerminal={handleNewTerminal}
                             onOpenFeature={handleOpenFeature}
+                            onFeaturePaneOpened={handleFeaturePaneOpened}
+                            onPaneGroupClose={handlePaneGroupClose}
                             onTogglePin={handleTogglePin}
                             sessionToolsOpen={isSnippetSidebarOpen}
                             onToggleSessionTools={() => setIsSnippetSidebarOpen((open) => !open)}
@@ -622,43 +858,6 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
                     {/* Content Area */}
                     <div ref={dockSurfaceRef} className="flex-1 overflow-hidden relative flex flex-col">
                         <Suspense fallback={<TabLoading />}>
-                            {filesPanelMounted && (
-                                <div
-                                    data-pane-id={FILES_OVERLAY_PANE_ID}
-                                    className={cn(
-                                        "absolute inset-0 z-30 bg-app-bg",
-                                        tab.view !== 'files' && "hidden",
-                                    )}
-                                    inert={tab.view !== 'files' ? true : undefined}
-                                >
-                                    <ErrorBoundary isolate>
-                                        <FileManager connectionId={tab.connectionId} />
-                                    </ErrorBoundary>
-                                </div>
-                            )}
-                            {dashboardPanelMounted && (
-                                <div
-                                    className={cn(
-                                        "absolute inset-0 z-30 bg-app-bg",
-                                        tab.view !== 'dashboard' && "hidden",
-                                    )}
-                                    inert={tab.view !== 'dashboard' ? true : undefined}
-                                >
-                                    <Dashboard connectionId={tab.connectionId} isVisible={tab.view === 'dashboard' && isActive} />
-                                </div>
-                            )}
-                            {/* Tunnels & Snippets */}
-                            {tab.view === 'port-forwarding' && (
-                                <div className="absolute inset-0 z-10 bg-app-bg">
-                                    <TunnelManager connectionId={tab.connectionId} />
-                                </div>
-                            )}
-                            {tab.view === 'snippets' && (
-                                <div className="absolute inset-0 z-10 bg-app-bg">
-                                    <SnippetsManager connectionId={tab.connectionId} />
-                                </div>
-                            )}
-
                             {/* Plugin Panels */}
                             {pluginPanels.map(panel => {
                                 const viewId = `plugin:${panel.id}`;
@@ -666,13 +865,18 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
                                 // Race condition check: obtain latest ID from store to ensure we haven't switched tabs
                                 if (tab.connectionId !== useAppStore.getState().activeConnectionId) return null;
                                 return (
-                                    <PluginPanel
+                                    <div
                                         key={panel.id}
-                                        html={panel.html}
-                                        panelId={panel.id}
-                                        pluginId={panel.pluginId}
-                                        connectionId={tab.connectionId || null}
-                                    />
+                                        data-pane-id={overlayPluginPaneId(panel.id)}
+                                        className="absolute inset-0 z-10 bg-app-bg"
+                                    >
+                                        <PluginPanel
+                                            html={panel.html}
+                                            panelId={panel.id}
+                                            pluginId={panel.pluginId}
+                                            connectionId={tab.connectionId || null}
+                                        />
+                                    </div>
                                 );
                             })}
 
@@ -682,16 +886,22 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
                             */}
                             <div
                                 className={cn(
-                                    "absolute inset-0",
-                                    tab.view === 'terminal' ? "z-20" : "z-0 invisible pointer-events-none",
+                                    "absolute inset-0 z-20",
+                                    tab.view.startsWith('plugin:') && "hidden",
                                     terminalTransparencyEnabled && !forceOpaqueShell ? "bg-transparent" : "bg-app-bg"
                                 )}
                             >
                                 <TerminalManager
                                     connectionId={tab.connectionId}
                                     isWorkspaceActive={isActive}
-                                    isTerminalView={tab.view === 'terminal'}
+                                    isTerminalView
                                     hideTabs={true}
+                                    dockPointer={dockPointer}
+                                    featureInstanceId={
+                                        isSplitFeatureId(tab.view)
+                                            ? (featureTabs.find(item => item.id === activeFeatureTabId)?.instanceId)
+                                            : undefined
+                                    }
                                 />
                             </div>
 

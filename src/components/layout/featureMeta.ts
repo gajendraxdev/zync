@@ -2,6 +2,13 @@ import { Braces, FolderOpen, LayoutDashboard, Waypoints, type LucideIcon } from 
 
 export type FeatureId = 'files' | 'port-forwarding' | 'snippets' | 'dashboard';
 
+export interface WorkspaceFeatureTab {
+    id: string;
+    featureId: FeatureId;
+    /** Stable content identity; Files uses this as its independent listing key. */
+    instanceId: string;
+}
+
 export interface FeatureMeta {
     icon: LucideIcon;
     label: string;

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { AppSettings } from '../../../store/settingsSlice';
 import { useAppStore } from '../../../store/useAppStore';
+import { FILE_RECENT_LIMIT_CHOICES, clampFileRecentLimit } from '../../file-manager/fileChrome';
 import { Section } from '../common/Section';
 import { Toggle } from '../common/Toggle';
 
@@ -92,6 +93,40 @@ export function FileManagerTab({
                                     Reset
                                 </button>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            </Section>
+            <Section title="Places">
+                <div className="space-y-4">
+                    <Toggle
+                        label="Show Recent"
+                        description="List recent folders in the Places sidebar. Right-click Recent there for the same options."
+                        checked={settings.fileManager.placesRecentEnabled !== false}
+                        disabled={isUpdating}
+                        onChange={(v) => { void runUpdate(() => updateFileManagerSettings({ placesRecentEnabled: v })); }}
+                    />
+                    <div className="p-4 bg-[var(--color-app-surface)]/50 rounded-lg border border-[var(--color-app-border)]/50">
+                        <div className="text-sm font-medium text-[var(--color-app-text)]">Recent folders to keep</div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                            {FILE_RECENT_LIMIT_CHOICES.map((count) => {
+                                const active = clampFileRecentLimit(settings.fileManager.placesRecentLimit) === count;
+                                return (
+                                    <button
+                                        key={count}
+                                        type="button"
+                                        disabled={isUpdating}
+                                        onClick={() => { void runUpdate(() => updateFileManagerSettings({ placesRecentLimit: count })); }}
+                                        className={`px-3 py-1.5 rounded-md text-xs font-medium border transition-colors disabled:opacity-50 ${
+                                            active
+                                                ? 'border-[var(--color-app-accent)]/60 bg-[var(--color-app-accent)]/10 text-[var(--color-app-text)]'
+                                                : 'border-[var(--color-app-border)] bg-[var(--color-app-bg)] text-[var(--color-app-muted)] hover:text-[var(--color-app-text)]'
+                                        }`}
+                                    >
+                                        {count}
+                                    </button>
+                                );
+                            })}
                         </div>
                     </div>
                 </div>

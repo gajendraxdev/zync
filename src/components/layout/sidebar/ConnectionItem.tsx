@@ -1,7 +1,7 @@
 import { useRef, useState, memo } from 'react';
 import { useAppStore, Connection, Tab } from '../../../store/useAppStore';
 import { getCurrentDragSource } from '../../../lib/dragDrop';
-import { Settings } from 'lucide-react';
+import { Settings, Unplug } from 'lucide-react';
 import { OSIcon } from '../../icons/OSIcon';
 import { cn } from '../../../lib/utils';
 import { useConnectionDisplayLabels } from '../../../features/connections/presentation/useConnectionDisplayLabels';
@@ -27,6 +27,7 @@ export const ConnectionItem = memo(function ConnectionItem({ conn, isCollapsed, 
 
     // Actions (stable references from zustand, don't cause re-renders)
     const openTab = useAppStore(state => state.openTab);
+    const disconnect = useAppStore(state => state.disconnect);
     const showToast = useAppStore(state => state.showToast);
     const addTransfer = useAppStore(state => state.addTransfer);
     const failTransfer = useAppStore(state => state.failTransfer);
@@ -212,6 +213,20 @@ export const ConnectionItem = memo(function ConnectionItem({ conn, isCollapsed, 
                             </span>
 
                             <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                                {conn.status === 'connected' && (
+                                    <button
+                                        type="button"
+                                        className="rounded-md p-1 text-app-muted transition-colors hover:bg-app-surface hover:text-red-400"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            void disconnect(conn.id);
+                                        }}
+                                        aria-label="Disconnect"
+                                        title="Disconnect"
+                                    >
+                                        <Unplug size={12} />
+                                    </button>
+                                )}
                                 <button
                                     type="button"
                                     className="rounded-md p-1 text-app-muted transition-colors hover:bg-app-surface hover:text-app-text"

@@ -2,7 +2,6 @@ import { createPaneId } from './ids';
 import {
     activeTermId,
     collectLeaves,
-    findLeafByFeature,
     findLeafByTerm,
     findNode,
     findParentSplit,
@@ -10,10 +9,10 @@ import {
     firstTermLeaf,
     isFeatureContent,
     isPaneLeaf,
+    isPluginContent,
     isPaneSplit,
     isTermContent,
     leafCount,
-    termLeafCount,
 } from './query';
 import { splitFromDockEdge } from './dock';
 import { incomingIndexForInsert, markSplitIntro } from './intro';
@@ -21,6 +20,7 @@ import {
     MAX_VISIBLE_PANES,
     MIN_PANE_RATIO,
     PANE_LAYOUT_VERSION,
+    featurePaneContent,
     isSplitFeatureId,
     termPaneContent,
     type DockEdge,
@@ -38,6 +38,22 @@ export function singlePane(termId: string, paneId = createPaneId()): PaneLayout 
     return {
         version: PANE_LAYOUT_VERSION,
         root: { type: 'pane', id: paneId, content: termPaneContent(termId) },
+        activePaneId: paneId,
+    };
+}
+
+export function singleFeaturePane(featureId: SplitFeatureId, paneId = createPaneId(), instanceId?: string): PaneLayout {
+    return {
+        version: PANE_LAYOUT_VERSION,
+        root: { type: 'pane', id: paneId, content: featurePaneContent(featureId, instanceId) },
+        activePaneId: paneId,
+    };
+}
+
+export function singlePluginPane(pluginId: string, paneId = createPaneId()): PaneLayout {
+    return {
+        version: PANE_LAYOUT_VERSION,
+        root: { type: 'pane', id: paneId, content: { kind: 'plugin', pluginId } },
         activePaneId: paneId,
     };
 }
@@ -156,7 +172,6 @@ function dropLeaves(layout: PaneLayout, match: (leaf: PaneLeaf) => boolean): Pan
         const after = unsplitPane(next, leaf.id);
         if (after === next) return null;
         next = after;
-        if (termLeafCount(next.root) === 0) return null;
     }
     return next;
 }
@@ -175,6 +190,13 @@ export function dropFeature(layout: PaneLayout, featureId: SplitFeatureId): Pane
     );
 }
 
+export function dropPlugin(layout: PaneLayout, pluginId: string): PaneLayout | null {
+    return dropLeaves(
+        layout,
+        (leaf) => isPluginContent(leaf.content) && leaf.content.pluginId === pluginId,
+    );
+}
+
 export function dockIntoLayout(
     layout: PaneLayout,
     content: PaneContent,
@@ -182,13 +204,18 @@ export function dockIntoLayout(
     cap = MAX_VISIBLE_PANES,
     targetPaneId?: string,
 ): { ok: true; layout: PaneLayout; paneId: string; created: boolean } | { ok: false; reason: SplitFailReason } {
-    if (content.kind === 'feature') {
-        const existing = findLeafByFeature(layout.root, content.featureId);
+    if (content.kind === 'term') {
+        const existing = findLeafByTerm(layout.root, content.termId);
         if (existing) {
             return { ok: true, layout: focusPane(layout, existing.id), paneId: existing.id, created: false };
         }
-    } else {
-        const existing = findLeafByTerm(layout.root, content.termId);
+    }
+    if (content.kind === 'feature' && content.instanceId) {
+        const existing = collectLeaves(layout.root).find((leaf) => (
+            isFeatureContent(leaf.content)
+            && leaf.content.featureId === content.featureId
+            && leaf.content.instanceId === content.instanceId
+        ));
         if (existing) {
             return { ok: true, layout: focusPane(layout, existing.id), paneId: existing.id, created: false };
         }
@@ -227,6 +254,9 @@ export function sanitizePaneLayout(layout: PaneLayout, knownTermIds: ReadonlySet
             if (isFeatureContent(node.content) && isSplitFeatureId(node.content.featureId)) {
                 return node;
             }
+            if (isPluginContent(node.content) && node.content.pluginId) {
+                return node;
+            }
             return null;
         }
         const left = prune(node.children[0]);
@@ -238,7 +268,7 @@ export function sanitizePaneLayout(layout: PaneLayout, knownTermIds: ReadonlySet
     };
 
     const root = prune(layout.root);
-    if (!root || termLeafCount(root) === 0) return null;
+    if (!root) return null;
     const focused = findNode(root, layout.activePaneId);
     const active = focused && isPaneLeaf(focused) ? layout.activePaneId : firstLeaf(root).id;
     return { version: PANE_LAYOUT_VERSION, root, activePaneId: active };

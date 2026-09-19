@@ -24,7 +24,12 @@ function parseContent(raw: unknown): PaneContent | null {
     }
     if (raw.kind === 'feature') {
         if (!isSplitFeatureId(raw.featureId)) return null;
-        return featurePaneContent(raw.featureId);
+        const instanceId = typeof raw.instanceId === 'string' && raw.instanceId ? raw.instanceId : undefined;
+        return featurePaneContent(raw.featureId, instanceId);
+    }
+    if (raw.kind === 'plugin') {
+        if (typeof raw.pluginId !== 'string' || !raw.pluginId) return null;
+        return { kind: 'plugin', pluginId: raw.pluginId };
     }
     return null;
 }

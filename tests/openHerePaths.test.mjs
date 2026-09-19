@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { directoryFromFileLocation, expandTildeWithHome, isUnresolvedFilesPath, parentDirectory, pickFilesOpenPath } from '../.tmp-agent-tests/src/components/layout/tabDock/openHerePaths.js';
+import { directoryFromFileLocation, expandTildeWithHome, isUnconfirmedHomeToken, isUnresolvedFilesPath, parentDirectory, pickFilesHomePath, pickFilesOpenPath } from '../.tmp-agent-tests/src/components/layout/tabDock/openHerePaths.js';
 
 function runTest(name, fn) {
   try {
@@ -10,6 +10,22 @@ function runTest(name, fn) {
     throw error;
   }
 }
+
+runTest('pickFilesHomePath keeps a root home and drops ~', () => {
+  assert.equal(pickFilesHomePath({ homePath: '/home/appserver' }), '/home/appserver');
+  assert.equal(pickFilesHomePath({ homePath: 'C:\\Users\\gajen' }), 'C:\\Users\\gajen');
+  assert.equal(pickFilesHomePath({ homePath: '/' }), '/');
+  assert.equal(pickFilesHomePath({ homePath: '~' }), '');
+  assert.equal(pickFilesHomePath({ homePath: '' }), '');
+  assert.equal(pickFilesHomePath({}), '');
+});
+
+runTest('isUnconfirmedHomeToken treats ~ as unconfirmed but keeps /', () => {
+  assert.equal(isUnconfirmedHomeToken(''), true);
+  assert.equal(isUnconfirmedHomeToken('~'), true);
+  assert.equal(isUnconfirmedHomeToken('/'), false);
+  assert.equal(isUnconfirmedHomeToken('/home/appserver'), false);
+});
 
 runTest('pickFilesOpenPath prefers shell cwd and ignores placeholder home /', () => {
   assert.equal(pickFilesOpenPath({ lastKnownCwd: '/home/appserver' }), '/home/appserver');

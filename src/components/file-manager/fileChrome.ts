@@ -3,6 +3,16 @@ export const FILE_CHROME_NARROW_MAX = 682;
 
 /** Recent folders kept per connection and shown in Places. */
 export const FILE_RECENT_LIMIT = 5;
+export const FILE_RECENT_LIMIT_MAX = 20;
+export const FILE_RECENT_LIMIT_CHOICES = [3, 5, 10, 15] as const;
+
+export function clampFileRecentLimit(value: number | undefined): number {
+  if (!Number.isFinite(value)) return FILE_RECENT_LIMIT;
+  const n = Math.floor(value as number);
+  if (n < 1) return 1;
+  if (n > FILE_RECENT_LIMIT_MAX) return FILE_RECENT_LIMIT_MAX;
+  return n;
+}
 
 /** Places column width (`w-48`). */
 export const FILE_PLACES_WIDTH_PX = 192;

@@ -1,16 +1,18 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { FolderOpen, X } from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from 'react';
+import { FolderOpen, Plug, Terminal as TerminalIcon, X, type LucideIcon } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import {
-    findLayoutOwner,
     findNode,
     introStartSizes,
     isFeatureContent,
     isPaneLeaf,
     isPaneSplit,
+    isPluginContent,
+    isSplitLayout,
     isTermContent,
     markSplitIntro,
     normalizeSizes,
+    paneDockPayload,
     prefersSplitIntroMotion,
     takeSplitIntro,
     SPLIT_INTRO_MS,
@@ -21,12 +23,17 @@ import {
     type SplitFeatureId,
     type SplitIntro,
 } from '../../lib/paneLayout';
+import type { TerminalTab } from '../../store/terminalSlice';
 import { beginPaneSplitIntro, endPaneSplitIntro, type PaneTransientHold } from '../../lib/terminal';
 import { FEATURE_META } from '../layout/featureMeta';
 import { useAppStore } from '../../store/useAppStore';
 import { TerminalComponent } from './Terminal';
 import { PaneDivider } from './PaneDivider';
 import { FeaturePaneBody } from './FeaturePaneBody';
+import { useDockTabPointer, type DockTabPointerHandlers } from '../layout/tabDock';
+import { usePlugins } from '../../context/PluginContext';
+
+const EMPTY_TERMINAL_TABS: TerminalTab[] = [];
 
 type InternalEdges = {
     top?: boolean;
@@ -123,6 +130,7 @@ function SplitFrame({
             if (finished) return;
             finished = true;
             cancelIntroRef.current = null;
+            setGrow([sizesRef.current[0], sizesRef.current[1]]);
             setIntro(null);
             const settled = endPaneSplitIntro(introHoldRef.current);
             introHoldRef.current = null;
@@ -282,57 +290,105 @@ function FocusEdges({ edges }: { edges: InternalEdges }) {
     );
 }
 
+function PaneHeader({
+    label,
+    Icon,
+    focused,
+    onPointerDown,
+    onClose,
+}: {
+    label: string;
+    Icon: LucideIcon;
+    focused: boolean;
+    onPointerDown: (event: PointerEvent<HTMLDivElement>) => void;
+    onClose: () => void;
+}) {
+    return (
+        <div
+            className="h-7 shrink-0 flex items-center gap-1.5 px-2 border-b border-app-border/60 bg-app-panel cursor-grab active:cursor-grabbing select-none"
+            onPointerDown={onPointerDown}
+        >
+            <Icon size={12} className={cn(focused ? 'text-app-accent' : 'text-app-muted')} />
+            <span className="flex-1 truncate text-[11px] font-medium text-app-text">{label}</span>
+            <button
+                type="button"
+                onPointerDown={(event) => {
+                    event.stopPropagation();
+                }}
+                onClick={(event) => {
+                    event.stopPropagation();
+                    onClose();
+                }}
+                className="h-5 w-5 inline-flex items-center justify-center rounded text-app-muted hover:bg-app-bg hover:text-red-400"
+                aria-label={`Close ${label} pane`}
+                title={`Close ${label}`}
+            >
+                <X size={12} />
+            </button>
+        </div>
+    );
+}
+
 function FeaturePaneLeaf({
     connectionId,
     paneId,
     featureId,
+    pluginId,
+    pluginLabel,
+    instanceId,
     focused,
     showFocus,
+    showHeader,
     panelVisible,
     edges,
     onFocus,
     onClose,
+    onHeaderPointerDown,
 }: {
     connectionId: string;
     paneId: string;
-    featureId: SplitFeatureId;
+    featureId?: SplitFeatureId;
+    pluginId?: string;
+    pluginLabel?: string;
+    instanceId?: string;
     focused: boolean;
     showFocus: boolean;
+    showHeader: boolean;
     panelVisible: boolean;
     edges: InternalEdges;
     onFocus: () => void;
     onClose: () => void;
+    onHeaderPointerDown: (event: PointerEvent<HTMLDivElement>) => void;
 }) {
-    const meta = FEATURE_META[featureId];
-    const Icon = meta?.icon ?? FolderOpen;
-    const label = meta?.label ?? featureId;
+    const meta = featureId ? FEATURE_META[featureId] : undefined;
+    const Icon = meta?.icon ?? (pluginId ? Plug : FolderOpen);
+    const label = meta?.label ?? pluginLabel ?? pluginId ?? featureId ?? 'Panel';
 
     return (
         <div
             data-pane-id={paneId}
+            data-files-instance-id={featureId === 'files' ? instanceId : undefined}
             className="relative h-full w-full min-h-0 min-w-0 overflow-hidden flex flex-col bg-app-bg"
             onMouseDown={onFocus}
+            onWheelCapture={() => {
+                if (!focused) onFocus();
+            }}
         >
-            <div className="h-7 shrink-0 flex items-center gap-1.5 px-2 border-b border-app-border/60 bg-app-panel">
-                <Icon size={12} className={cn(focused ? 'text-app-accent' : 'text-app-muted')} />
-                <span className="flex-1 truncate text-[11px] font-medium text-app-text">{label}</span>
-                <button
-                    type="button"
-                    onClick={(event) => {
-                        event.stopPropagation();
-                        onClose();
-                    }}
-                    className="h-5 w-5 inline-flex items-center justify-center rounded text-app-muted hover:bg-app-bg hover:text-red-400"
-                    aria-label={`Close ${label} pane`}
-                    title={`Close ${label}`}
-                >
-                    <X size={12} />
-                </button>
-            </div>
-            <div className="flex-1 min-h-0 min-w-0" inert={!focused ? true : undefined}>
+            {showHeader && (
+                <PaneHeader
+                    label={label}
+                    Icon={Icon}
+                    focused={focused}
+                    onPointerDown={onHeaderPointerDown}
+                    onClose={onClose}
+                />
+            )}
+            <div className="flex-1 min-h-0 min-w-0">
                 <FeaturePaneBody
                     connectionId={connectionId}
                     featureId={featureId}
+                    pluginId={pluginId}
+                    instanceId={instanceId}
                     visible={focused && panelVisible}
                 />
             </div>
@@ -346,28 +402,37 @@ export function PaneLayoutView({
     layout,
     workspaceActive,
     panelVisible,
+    dockPointer,
 }: {
     connectionId: string;
     layout: PaneLayout;
     workspaceActive: boolean;
     panelVisible: boolean;
+    dockPointer?: DockTabPointerHandlers;
 }) {
     const focusPane = useAppStore(state => state.focusPane);
     const resizePanes = useAppStore(state => state.resizePanes);
-    const closeFeatureInSplit = useAppStore(state => state.closeFeatureInSplit);
+    const closePaneInSplit = useAppStore(state => state.closePaneInSplit);
+    const terminalTabs = useAppStore(state => state.terminals[connectionId] || EMPTY_TERMINAL_TABS);
+    const { panels: pluginPanels } = usePlugins();
+    const { begin: beginDockPointer } = useDockTabPointer(dockPointer);
+    const terminalTitles = useMemo(
+        () => new Map(terminalTabs.map(tab => [tab.id, tab.title] as const)),
+        [terminalTabs],
+    );
+    const pluginTitles = useMemo(
+        () => new Map(pluginPanels.map(panel => [panel.id, panel.title] as const)),
+        [pluginPanels],
+    );
 
     const onDrag = useCallback((splitId: string, firstRatio: number) => {
         resizePanes(connectionId, splitId, [firstRatio, 1 - firstRatio], false);
     }, [connectionId, resizePanes]);
 
     const onDragEnd = useCallback((splitId: string) => {
-        const store = useAppStore.getState();
-        const activeId = store.activeTerminalIds[connectionId];
-        if (!activeId) return;
-        const owner = findLayoutOwner(store.paneLayouts[connectionId], activeId);
-        const current = owner ? store.paneLayouts[connectionId]?.[owner] : undefined;
-        if (!current) return;
-        const node = findNode(current.root, splitId);
+        const groups = useAppStore.getState().paneLayouts[connectionId];
+        const current = Object.values(groups ?? {}).find((group) => findNode(group.root, splitId));
+        const node = current ? findNode(current.root, splitId) : null;
         if (node && isPaneSplit(node)) {
             resizePanes(connectionId, splitId, node.sizes, true);
         }
@@ -378,33 +443,44 @@ export function PaneLayoutView({
         window.dispatchEvent(new Event('zync:pane-resize-end'));
     }, [connectionId, resizePanes]);
 
+    const split = isSplitLayout(layout);
     const renderNode = (node: PaneNode, edges: InternalEdges = {}): ReactNode => {
         if (isPaneLeaf(node)) {
             const focused = layout.activePaneId === node.id;
             const showFocus = focused && workspaceActive && panelVisible;
-            if (isFeatureContent(node.content)) {
-                const featureId = node.content.featureId;
+            if (isFeatureContent(node.content) || isPluginContent(node.content)) {
+                const content = node.content;
+                const featureId = isFeatureContent(content) ? content.featureId : undefined;
+                const featureInstanceId = isFeatureContent(content) ? content.instanceId : undefined;
+                const pluginId = isPluginContent(content) ? content.pluginId : undefined;
+                const dockPayload = paneDockPayload(node);
                 return (
                     <FeaturePaneLeaf
                         key={node.id}
                         connectionId={connectionId}
                         paneId={node.id}
                         featureId={featureId}
+                        instanceId={featureInstanceId}
+                        pluginId={pluginId}
+                        pluginLabel={pluginId ? pluginTitles.get(pluginId) : undefined}
                         focused={focused}
                         showFocus={showFocus}
+                        showHeader={split}
                         panelVisible={panelVisible}
                         edges={edges}
                         onFocus={() => focusPane(connectionId, node.id)}
-                        onClose={() => closeFeatureInSplit(connectionId, featureId)}
+                        onClose={() => closePaneInSplit(connectionId, node.id)}
+                        onHeaderPointerDown={(event) => beginDockPointer(event, dockPayload)}
                     />
                 );
             }
             if (!isTermContent(node.content)) return null;
+            const termId = node.content.termId;
             return (
                 <div
                     key={node.id}
                     data-pane-id={node.id}
-                    className="relative h-full w-full min-h-0 min-w-0 overflow-hidden"
+                    className="relative h-full w-full min-h-0 min-w-0 overflow-hidden flex flex-col bg-app-bg"
                     onMouseDown={(event) => {
                         focusPane(connectionId, node.id);
                         if (!(event.target instanceof Element) || !event.target.closest('.xterm')) {
@@ -412,16 +488,30 @@ export function PaneLayoutView({
                             helper?.focus();
                         }
                     }}
+                    onWheelCapture={() => {
+                        if (!focused) focusPane(connectionId, node.id);
+                    }}
                 >
-                    <TerminalComponent
-                        connectionId={connectionId}
-                        termId={node.content.termId}
-                        isWorkspaceActive={workspaceActive}
-                        isTerminalView
-                        isActiveTab
-                        isFocused={focused}
-                        isVisible={panelVisible}
-                    />
+                    {split && (
+                        <PaneHeader
+                            label={terminalTitles.get(termId) ?? 'Shell'}
+                            Icon={TerminalIcon}
+                            focused={focused}
+                            onPointerDown={(event) => beginDockPointer(event, paneDockPayload(node))}
+                            onClose={() => closePaneInSplit(connectionId, node.id)}
+                        />
+                    )}
+                    <div className="flex-1 min-h-0 min-w-0">
+                        <TerminalComponent
+                            connectionId={connectionId}
+                            termId={termId}
+                            isWorkspaceActive={workspaceActive}
+                            isTerminalView
+                            isActiveTab
+                            isFocused={focused}
+                            isVisible={panelVisible}
+                        />
+                    </div>
                     {showFocus && <FocusEdges edges={edges} />}
                 </div>
             );

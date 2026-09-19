@@ -87,6 +87,9 @@ export interface AppSettings {
         dateTimeFormat: 'simple' | 'detailed';
         /** Last Places toggle. Unset uses overlay-open / pane-collapsed defaults. */
         placesCollapsed?: boolean;
+        /** Places → Recent. Unset shows Recent (default 5). */
+        placesRecentEnabled?: boolean;
+        placesRecentLimit?: number;
     };
     localTerm: {
         windowsShell: string;
@@ -234,6 +237,8 @@ export const defaultSettings: AppSettings = {
         sortFoldersFirst: true,
         dateTimeFormat: 'simple',
         placesCollapsed: undefined,
+        placesRecentEnabled: true,
+        placesRecentLimit: 5,
     },
     localTerm: {
         windowsShell: 'default'

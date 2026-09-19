@@ -1,12 +1,36 @@
 import {
     dockEdgeFromPoint,
     dockPreviewRect,
+    isSplitFeatureId,
     paneBoxAtPoint,
     type DockEdge,
+    type SplitFeatureId,
 } from '../../../lib/paneLayout';
 
+/** Full-view feature overlay; drop a shell here to split beside that feature. */
+export function overlayPaneId(featureId: string): string {
+    return `overlay:${featureId}`;
+}
+
+export function parseOverlayFeatureId(paneId: string | null | undefined): SplitFeatureId | null {
+    if (!paneId || !paneId.startsWith('overlay:')) return null;
+    const id = paneId.slice('overlay:'.length);
+    if (id.startsWith('plugin:')) return null;
+    return isSplitFeatureId(id) ? id : null;
+}
+
+export function overlayPluginPaneId(pluginId: string): string {
+    return `overlay:plugin:${pluginId}`;
+}
+
+export function parseOverlayPluginId(paneId: string | null | undefined): string | null {
+    if (!paneId || !paneId.startsWith('overlay:plugin:')) return null;
+    const id = paneId.slice('overlay:plugin:'.length);
+    return id || null;
+}
+
 /** Full-view Files overlay; drop a shell here to split beside Files. */
-export const FILES_OVERLAY_PANE_ID = 'overlay:files';
+export const FILES_OVERLAY_PANE_ID = overlayPaneId('files');
 
 export type DockTarget = {
     paneId: string | null;

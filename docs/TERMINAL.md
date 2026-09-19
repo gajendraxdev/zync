@@ -46,7 +46,7 @@ Zync embeds a full terminal per workspace connection (plus a local shell) using 
 - **GPU rendering** — WebGL2 primary with automatic DOM fallback
 - **Opt-in resource reclaim** — background remote host PTYs can suspend after idle timeout
 
-Each workspace can have multiple shell tabs. A **local shell** (`LOCAL_TERMINAL_CONNECTION_ID`) runs without SSH; **remote shells** attach to the active host connection. By default only the active shell is mounted; a **split** can mount up to four nested visible leaves (side by side first, or stacked). A leaf is a shell or a host feature (Files, Port Forwarding, Dashboard, Snippets). Inactive tabs keep their xterm instance and scrollback in `terminalCache`. Pane layout lives in `src/lib/paneLayout` (tree + cap). Workspace **+ → Files / Dashboard / …** is still the full-view overlay. Drag a feature tab or another shell tab to an edge to dock it as a pane. A split group always keeps at least one shell.
+Each workspace can have multiple shell tabs. A **local shell** (`LOCAL_TERMINAL_CONNECTION_ID`) runs without SSH; **remote shells** attach to the active host connection. By default only the active shell is mounted; a **split** can mount up to four nested visible panes (side by side first, or stacked). A pane holds **one** content (shell or docked host feature). Extra shells in a split leave the tab bar until unsplit. Inactive shells keep xterm in `terminalCache`. Pane layout: `src/lib/paneLayout`. Workspace container rules: [WORKSPACE.md](./WORKSPACE.md).
 
 ---
 
@@ -489,8 +489,8 @@ Terminal tab intro links jump to Appearance for look-and-feel.
 | WebGL + ligatures together | xterm-recommended order; better than mutual exclusion |
 | `terminalService` facade | Decouple `terminalSlice` from React component exports |
 | Passive OSC 7 only | No shell injection; works when prompt emits OSC 7 |
-| Files-in-split is a pane leaf, not a `terminals[]` row | No fake PTY; `tab.view` stays `terminal` so the overlay does not cover the split. **+ → Files** remains full-view. Split icons / Ctrl+Shift+arrows still create a shell. A group is dropped if it would have zero shells. |
-| Drag tab to an edge docks that tab | Nearest-edge drop with a half-pane preview on the pane under the pointer (nested splits stay local). The preview eases between edges. Feature tabs become feature leaves and leave the tab bar; another shell tab moves into this group (`tabVisible: false`) without killing its PTY. The current shell tab onto itself is a no-op. Right-click **Open in split to the Right / Bottom** on feature tabs, other shell tabs, and workspace **+** rows; a normal click still opens a tab. Plugins and global workspace tabs are not dockable. |
+| Files-in-split is a pane leaf, not a `terminals[]` row | No fake PTY. Files is a pane on the same canvas as the shell, not a covering overlay. **+ → Files** is a full-view tab (and can create more than one). Split icons / Ctrl+Shift+arrows on a shell create another shell; on Files they dock Files beside the shell. A group with zero shells may remain as a feature-only split and keep its Split N tab. |
+| Every workspace tab docks the same way | Shell, Files, Dashboard, tunnels, snippets, and plugin tabs share one dock id scheme (`term:`, `overlay:`, layout pane ids). Drop on a tab chip or on the visible pane. Unsplit shells expose a pane id so Files→terminal merge works without a prior split. |
 | Split intro is one-shot, not persisted | `splitPane` marks the new split id; the view consumes it on mount. Session restore and reduced-motion skip the grow-in. Divider drag never enables the flex transition. |
 | Fail-closed process probe | If sysinfo fails, defer suspend rather than kill busy shell |
 
@@ -535,7 +535,7 @@ src/components/terminal/
   useTerminalGhost.ts, useTerminalKeybindings.ts, useTerminalGlobalShortcuts.ts
   terminalTheme.ts
 
-src/lib/paneLayout/        # Split tree, cap, persist, dock geometry, split intro; term + feature leaves
+src/lib/paneLayout/        # Split tree, cap, persist, dock geometry, split intro; term + feature leaves; dock ids in targets.ts
 src/components/layout/tabDock/  # Drag a tab to an edge to dock it as a pane
 src/components/layout/CombinedTabBar.tsx  # Shell-tab drop target for Files → terminal (with TerminalHost.tsx)
 src/lib/terminal/          # See §5 — modules, index.ts public API (`fileDropToTerminal.ts` / `pasteFileDropToTerminal.ts` for Files → shell)

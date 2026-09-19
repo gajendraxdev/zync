@@ -50,6 +50,34 @@
     .drag-none {
         -webkit-app-region: no-drag;
     }
+
+    .scrollbar-hide,
+    .no-scrollbar,
+    .workspace-tabs-scroll {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+    }
+
+    .scrollbar-hide::-webkit-scrollbar,
+    .no-scrollbar::-webkit-scrollbar,
+    .workspace-tabs-scroll::-webkit-scrollbar {
+        display: none;
+    }
+
+    .workspace-tabs-fade-left {
+        mask-image: linear-gradient(to right, transparent 0, black 14px);
+        -webkit-mask-image: linear-gradient(to right, transparent 0, black 14px);
+    }
+
+    .workspace-tabs-fade-right {
+        mask-image: linear-gradient(to left, transparent 0, black 14px);
+        -webkit-mask-image: linear-gradient(to left, transparent 0, black 14px);
+    }
+
+    .workspace-tabs-fade-both {
+        mask-image: linear-gradient(to right, transparent 0, black 14px, black calc(100% - 14px), transparent 100%);
+        -webkit-mask-image: linear-gradient(to right, transparent 0, black 14px, black calc(100% - 14px), transparent 100%);
+    }
 }
 
 @layer base {

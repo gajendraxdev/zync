@@ -4,6 +4,35 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Added
+- **Disconnect on hover:** A connected host in the sidebar shows Disconnect on hover. The active connected workspace tab shows Disconnect (and Close) over the title on hover. Disconnect drops the session and leaves the tab open. ([a99db16])
+- **Workspace panes:** One split container for shell, Files, Dashboard, tunnels, snippets, and plugins. Drag a tab onto a pane **edge** to split (cap 4). Drag a pane header onto **another pane’s edge** to move it, or onto **its own edge** for a sibling (Files copies the current folder). Drop in the **center** cancels. Grouped items leave the tab bar as **Split N** and come back on unsplit. Files-only splits are valid — no shell required. ([1776541])
+- **Public URLs v2 binary data frames:** After handshake, agent and relay send page bytes as WebSocket binary frames instead of JSON+base64. Hello still sends `v: 1` plus `max_v: 2` so older relays keep working. ([ad505c5])
+
+### Changed
+- **Files is a pane, not an overlay:** Opening Files fills the workspace canvas like a shell. Extra Files tabs keep independent listings (folder, selection, error) instead of sharing one host-wide view. ([1776541])
+- **+ menu:** Dropped the extra Files in split / Port Forwarding in split / Dashboard in split / Snippets in split rows. Open a tab, then split from the toolbar or by dragging onto a pane edge. ([4debaba])
+- **Workspace tabs:** Close and Disconnect sit over the title on hover instead of stretching the tab. Overflowing tabs fade at the edges and scroll with the mouse wheel. ([a99db16])
+
+### Fixed
+- **Plugin full-view:** Opening a plugin tab is no longer covered by the terminal canvas. A plugin that is not in a split keeps its inventory tab. ([d7560f0])
+- **Split Files cut and Open Terminal Here:** Cut updates the source pane’s listing. Open Terminal Here uses that Files pane’s folder. ([d7560f0])
+- **Feature-only remainder persist:** A Files-only or plugin-only pane after the last shell exits is saved and restored. ([d7560f0])
+- **Public URLs loopback headers:** Origin, Referer, and X-Forwarded-Host are rewritten for localhost and not also forwarded raw. ([d7560f0])
+- **Pane header on a full-view tab:** The inner Files (and other feature) header with the X only shows after a split. Close the tab from the tab bar. ([4debaba])
+- **Split shell titles:** Extra shells in a split are named Shell 2, Shell 3, … instead of stacking “pane” on the source title. ([4debaba])
+- **Last shell `exit` in a mixed split:** Typing `exit` in the only shell beside Files no longer blanks the canvas. Remaining Files panes stay as **Split N**. ([1776541])
+- **Drag a pane onto itself:** Dropping in the middle of a pane no longer counts as the left edge or spawns extra splits. Only the outer edge band splits. ([1776541])
+- **Files disconnect in a split:** The disconnect banner follows that Files pane’s listing, not a shared host key. ([1776541])
+- **Files opens at Home:** Workspace **+ → Files** (and Files in split) lists the account home, not the active shell cwd. **Open File Manager Here** still uses the terminal directory. A confirmed SFTP home of `/` is listed; `~` is still not. ([aaa9e82])
+- **Places Recent:** Gear at the bottom of Places, or right-click the sidebar, to show/hide Recent, pick how many folders to keep, or clear the list (also in Settings → File Manager). Hiding Recent removes the whole section. ([09ea72c])
+- **Pin folders in Places:** Right-click a folder or empty listing to pin it, or drag a folder onto Pins. Drops from another host are ignored. ([063c515])
+- **Public URLs IPv6 localhost**: Shares stored as `127.0.0.1` now also dial `[::1]` when the local app bound IPv6-only (common for Node/Vite on Windows). Visitors were seeing “App unreachable” even though the agent was connected. ([fd36e88])
+- **Public URLs loopback latency**: The local hop races IPv4 and IPv6 and remembers the winner, so Windows no longer waits ~2s on a refused `127.0.0.1` before using `[::1]` on every request. ([fd36e88])
+- **Public URLs dial localhost**: The share agent forwards to `http://localhost:{port}` (ngrok/cloudflared/browser), not `127.0.0.1`, so Node/Astro bound on `[::1]` is reachable. ([fd36e88])
+- **Public URLs skip Happy Eyeballs delay**: After the first local race, HTTP pins `localhost` to the winning loopback IP so Windows does not wait ~300ms on a dead `127.0.0.1` every request. ([fd36e88])
+- **Public URLs stale-family retry**: GET/HEAD/OPTIONS retry once on an unpinned `localhost` client if the pinned loopback family fails. ([fd36e88])
+
 ## [2.31.0] - 2026-09-12
 
 ### Added
@@ -1548,3 +1577,8 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [b8241b9]: https://github.com/zync-sh/zync/commit/b8241b9
 [c54859c]: https://github.com/zync-sh/zync/commit/c54859c
 [9fc091c]: https://github.com/zync-sh/zync/commit/9fc091c
+[ad505c5]: https://github.com/zync-sh/zync/commit/ad505c5
+[fd36e88]: https://github.com/zync-sh/zync/commit/fd36e88
+[aaa9e82]: https://github.com/zync-sh/zync/commit/aaa9e82
+[09ea72c]: https://github.com/zync-sh/zync/commit/09ea72c
+[063c515]: https://github.com/zync-sh/zync/commit/063c515

@@ -1,4 +1,4 @@
-import { X, Settings as SettingsIcon, Network, Gift, Plus, Home, Shield, UserRound, ChevronDown, LogOut, RefreshCw, Monitor, Link2 } from 'lucide-react';
+import { X, Settings as SettingsIcon, Network, Gift, Plus, Home, Shield, UserRound, ChevronDown, LogOut, RefreshCw, Monitor, Link2, Unplug } from 'lucide-react';
 import { GoogleMarkIcon } from '../icons/providerIcons';
 import { OSIcon } from '../icons/OSIcon';
 import { ZyncMark } from '../brand/ZyncMark';
@@ -85,19 +85,29 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: 
 }
 
 // Extract SortableTab component
+function isConnectedHostTab(tab: Tab, connections: Connection[]): boolean {
+    if (tab.type !== 'connection' || !tab.connectionId || tab.connectionId === LOCAL_TERMINAL_CONNECTION_ID) {
+        return false;
+    }
+    return connections.some((connection) => connection.id === tab.connectionId && connection.status === 'connected');
+}
+
 function SortableTab({
     tab,
     isActive,
     onActivate,
     onClose,
+    onDisconnect,
     connections
 }: {
     tab: Tab;
     isActive: boolean;
     onActivate: (id: string) => void;
     onClose: (id: string, e: React.MouseEvent) => void;
+    onDisconnect: (connectionId: string, e: React.MouseEvent) => void;
     connections: Connection[];
 }) {
+    const tabRef = useRef<HTMLDivElement | null>(null);
     const {
         attributes,
         listeners,
@@ -106,6 +116,16 @@ function SortableTab({
         transition,
         isDragging
     } = useSortable({ id: tab.id });
+
+    const setTabNode = useCallback((node: HTMLDivElement | null) => {
+        tabRef.current = node;
+        setNodeRef(node);
+    }, [setNodeRef]);
+
+    useEffect(() => {
+        if (!isActive) return;
+        tabRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }, [isActive]);
 
     const style = {
         transform: CSS.Transform.toString(transform),
@@ -116,39 +136,67 @@ function SortableTab({
 
     return (
         <div
-            ref={setNodeRef}
+            ref={setTabNode}
             style={style}
             {...attributes}
             {...listeners}
             onClick={() => onActivate(tab.id)}
+            role="tab"
+            aria-selected={isActive}
+            tabIndex={isActive ? 0 : -1}
             className={cn(
-                "group flex items-center gap-1 px-2 py-1 h-7 text-[11px] rounded-md cursor-pointer select-none border border-transparent shrink-0 outline-none drag-none transition-all duration-200",
+                "group relative flex h-7 max-w-[160px] shrink-0 items-center gap-1.5 rounded-md border px-2 text-[11px] cursor-pointer select-none outline-none drag-none transition-[background-color,border-color,color,box-shadow] duration-150 before:pointer-events-none before:absolute before:-left-[3px] before:h-4 before:w-px before:bg-app-border/55 first:before:hidden focus-visible:ring-2 focus-visible:ring-app-accent/60",
                 isActive
-                    ? "bg-app-surface text-app-text shadow-sm font-semibold"
-                    : "text-app-muted hover:bg-app-surface/60 hover:text-app-text border-transparent"
+                    ? "bg-app-surface/90 text-app-text border-app-border/80 shadow-[0_1px_2px_rgba(0,0,0,0.28)] font-medium before:hidden"
+                    : "text-app-muted border-transparent hover:bg-app-surface/45 hover:text-app-text"
             )}
             title={tab.type === 'public-urls' ? 'Public URLs (Beta)' : tab.title}
         >
             {/* Icon based on type */}
-            {getIconForTab(tab, connections, 12)}
+            <span className={cn(
+                "flex shrink-0 items-center transition-opacity duration-150",
+                isActive ? "opacity-100" : "opacity-65 group-hover:opacity-90",
+            )}>
+                {getIconForTab(tab, connections, 12)}
+            </span>
 
-            {tab.type === 'public-urls' ? (
-                <PublicUrlsLabel className="text-[11px] font-semibold max-w-[120px]" />
-            ) : (
-                <span className="truncate max-w-[90px]">{tab.title}</span>
-            )}
-
-            <button
-                onClick={(e) => onClose(tab.id, e)}
-                // Prevent drag on close button
-                onPointerDown={(e) => e.stopPropagation()}
-                className={cn(
-                    "p-0.5 rounded-sm hover:bg-black/10 dark:hover:bg-white/10 transition-colors",
-                    isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+            <div className={cn(
+                "min-w-0 max-w-[132px]",
+            )}>
+                {tab.type === 'public-urls' ? (
+                    <PublicUrlsLabel className="block truncate text-[11px] font-semibold" />
+                ) : (
+                    <span className="block truncate">{tab.title}</span>
                 )}
-            >
-                <X size={12} />
-            </button>
+            </div>
+
+            <div className={cn(
+                "pointer-events-none absolute inset-y-0 right-1 my-auto flex h-6 items-center gap-1 rounded pl-1 opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100",
+                isActive ? "bg-app-surface/95" : "bg-app-surface",
+            )}>
+                {isActive && isConnectedHostTab(tab, connections) && tab.connectionId && (
+                    <button
+                        type="button"
+                        onClick={(e) => onDisconnect(tab.connectionId!, e)}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        className="inline-flex h-6 w-6 items-center justify-center rounded text-app-muted transition-colors hover:bg-app-bg/70 hover:text-red-400"
+                        aria-label={`Disconnect ${tab.title}`}
+                        title="Disconnect"
+                    >
+                        <Unplug size={12} strokeWidth={2.25} />
+                    </button>
+                )}
+                <button
+                    type="button"
+                    onClick={(e) => onClose(tab.id, e)}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    className="inline-flex h-6 w-6 items-center justify-center rounded text-app-muted transition-colors hover:bg-app-bg/70 hover:text-app-text"
+                    aria-label={`Close ${tab.title}`}
+                    title="Close tab"
+                >
+                    <X size={13} strokeWidth={2.25} />
+                </button>
+            </div>
         </div>
     );
 }
@@ -162,6 +210,7 @@ export function TabBar() {
         activateTab(tabId);
     }, [activateTab]);
     const closeTab = useAppStore(state => state.closeTab);
+    const disconnect = useAppStore(state => state.disconnect);
     const connections = useAppStore(state => state.connections);
     const reorderTabs = useAppStore(state => state.reorderTabs);
 
@@ -181,6 +230,33 @@ export function TabBar() {
     const showToast = useAppStore(state => state.showToast);
     const { showInTitleLeft, showInTitleRight } = useNotificationBellPlacement();
     const showHostAddressesInLists = useShowHostAddressesInLists();
+    const tabsViewportRef = useRef<HTMLDivElement | null>(null);
+    const [tabOverflow, setTabOverflow] = useState({ left: false, right: false });
+    const updateTabOverflow = useCallback(() => {
+        const viewport = tabsViewportRef.current;
+        if (!viewport) return;
+        setTabOverflow({
+            left: viewport.scrollLeft > 1,
+            right: viewport.scrollLeft + viewport.clientWidth < viewport.scrollWidth - 1,
+        });
+    }, []);
+    const handleTabsWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+        if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+        const viewport = tabsViewportRef.current;
+        if (!viewport || viewport.scrollWidth <= viewport.clientWidth) return;
+        viewport.scrollLeft += event.deltaY;
+        event.preventDefault();
+        window.requestAnimationFrame(updateTabOverflow);
+    }, [updateTabOverflow]);
+
+    useEffect(() => {
+        const viewport = tabsViewportRef.current;
+        if (!viewport) return;
+        updateTabOverflow();
+        const observer = new ResizeObserver(updateTabOverflow);
+        observer.observe(viewport);
+        return () => observer.disconnect();
+    }, [tabs, updateTabOverflow]);
 
     const [tabToClose, setTabToClose] = useState<string | null>(null);
 
@@ -256,6 +332,11 @@ export function TabBar() {
         state.closeTab(id);
     };
 
+    const handleDisconnectTab = (connectionId: string, e: React.MouseEvent) => {
+        e.stopPropagation();
+        void disconnect(connectionId);
+    };
+
     const confirmClose = () => {
         if (tabToClose) {
             closeTab(tabToClose);
@@ -325,7 +406,7 @@ export function TabBar() {
     return (
         <>
             <div ref={dragRegionRef} className={cn(
-                "relative z-[60] flex h-10 bg-app-bg items-center pr-1 gap-1 app-drag-region shrink-0 select-none",
+                "relative z-[60] flex h-10 bg-app-bg items-center pr-1 gap-1 app-drag-region shrink-0 select-none border-b border-app-border/40",
                 isMac ? "pl-2" : "pl-1"
             )} data-tauri-drag-region>
 
@@ -425,7 +506,17 @@ export function TabBar() {
                     onDragEnd={handleDragEnd}
                 >
                     <div
-                        className="flex items-center gap-1 flex-1 overflow-x-auto no-scrollbar min-w-0 h-full"
+                        ref={tabsViewportRef}
+                        role="tablist"
+                        aria-label="Open workspaces"
+                        className={cn(
+                            "workspace-tabs-scroll flex h-full min-w-0 flex-1 items-center gap-1 overflow-x-auto px-0.5",
+                            tabOverflow.left && tabOverflow.right && "workspace-tabs-fade-both",
+                            tabOverflow.left && !tabOverflow.right && "workspace-tabs-fade-left",
+                            !tabOverflow.left && tabOverflow.right && "workspace-tabs-fade-right",
+                        )}
+                        onWheel={handleTabsWheel}
+                        onScroll={updateTabOverflow}
                         onDoubleClick={() => {
                             window.ipcRenderer?.send('window:maximize');
                         }}
@@ -442,6 +533,7 @@ export function TabBar() {
                                     isActive={activeTabId === tab.id}
                                     onActivate={handleActivateTab}
                                     onClose={handleCloseTab}
+                                    onDisconnect={handleDisconnectTab}
                                     connections={connections}
                                 />
                             ))}
