@@ -5,12 +5,14 @@ All notable changes to Zync are documented in this file. The format is based on 
 ## [Unreleased]
 
 ### Added
+- **Disconnect on hover:** A connected host in the sidebar shows Disconnect on hover. The active connected workspace tab shows Disconnect (and Close) over the title on hover. Disconnect drops the session and leaves the tab open.
 - **Workspace panes:** One split container for shell, Files, Dashboard, tunnels, snippets, and plugins. Drag a tab onto a pane **edge** to split (cap 4). Drag a pane header onto **another pane’s edge** to move it, or onto **its own edge** for a sibling (Files copies the current folder). Drop in the **center** cancels. Grouped items leave the tab bar as **Split N** and come back on unsplit. Files-only splits are valid — no shell required. ([1776541])
 - **Public URLs v2 binary data frames:** After handshake, agent and relay send page bytes as WebSocket binary frames instead of JSON+base64. Hello still sends `v: 1` plus `max_v: 2` so older relays keep working. ([ad505c5])
 
 ### Changed
 - **Files is a pane, not an overlay:** Opening Files fills the workspace canvas like a shell. Extra Files tabs keep independent listings (folder, selection, error) instead of sharing one host-wide view. ([1776541])
 - **+ menu:** Dropped the extra Files in split / Port Forwarding in split / Dashboard in split / Snippets in split rows. Open a tab, then split from the toolbar or by dragging onto a pane edge. ([4debaba])
+- **Workspace tabs:** Close and Disconnect sit over the title on hover instead of stretching the tab. Overflowing tabs fade at the edges and scroll with the mouse wheel.
 
 ### Fixed
 - **Pane header on a full-view tab:** The inner Files (and other feature) header with the X only shows after a split. Close the tab from the tab bar. ([4debaba])
