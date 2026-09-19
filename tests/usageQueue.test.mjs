@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { bumpFeature, createQueueState, utcDay } from '../.tmp-agent-tests/src/features/usage/queue.js';
+import { bumpFeature, createQueueState, markCurrentFlushed, utcDay } from '../.tmp-agent-tests/src/features/usage/queue.js';
 
 function run(name, fn) {
   try {
@@ -33,6 +33,22 @@ run('many UTC rollovers keep only 7 pending days', () => {
   assert.equal(state.pending.length, 7);
   assert.equal(state.pending[0].day, '2026-09-03');
   assert.equal(state.current.day, '2026-09-10');
+});
+
+run('markCurrentFlushed clears dirty when counts did not grow', () => {
+  const sent = bumpFeature(createQueueState(new Date('2026-09-20T12:00:00.000Z')), 'files', new Date('2026-09-20T12:00:00.000Z'));
+  const flushed = markCurrentFlushed(sent, sent.current, 1_000);
+  assert.equal(flushed.current.dirty, false);
+  assert.equal(flushed.lastFlushAt, 1_000);
+});
+
+run('markCurrentFlushed keeps dirty when counts grew after the snapshot', () => {
+  const sent = bumpFeature(createQueueState(new Date('2026-09-20T12:00:00.000Z')), 'files', new Date('2026-09-20T12:00:00.000Z'));
+  const grew = bumpFeature(sent, 'files', new Date('2026-09-20T12:01:00.000Z'));
+  const flushed = markCurrentFlushed(grew, sent.current, 2_000);
+  assert.equal(flushed.current.dirty, true);
+  assert.equal(flushed.current.features.files, 2);
+  assert.equal(flushed.lastFlushAt, 2_000);
 });
 
 run('UTC rollover keeps the unsent day in pending', () => {

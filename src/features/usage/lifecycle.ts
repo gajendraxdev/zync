@@ -5,6 +5,9 @@ import { flushUsage, FLUSH_INTERVAL_MS } from './flush.js';
 let started = false;
 let intervalId: number | null = null;
 let unlistenClose: (() => void) | null = null;
+let closeGeneration = 0;
+let onHidden: (() => void) | null = null;
+let onPageHide: (() => void) | null = null;
 
 export function startUsageLifecycle(): void {
   if (started) return;
@@ -16,12 +19,16 @@ export function startUsageLifecycle(): void {
     void flushUsage();
   }, FLUSH_INTERVAL_MS);
 
-  const onHidden = () => {
+  onHidden = () => {
     if (document.visibilityState === 'hidden') void flushUsage(true);
   };
+  onPageHide = () => {
+    void flushUsage(true);
+  };
   document.addEventListener('visibilitychange', onHidden);
-  window.addEventListener('pagehide', () => { void flushUsage(true); });
+  window.addEventListener('pagehide', onPageHide);
 
+  const generation = ++closeGeneration;
   void getCurrentWindow().onCloseRequested(async (event) => {
     event.preventDefault();
     try {
@@ -30,6 +37,10 @@ export function startUsageLifecycle(): void {
       await getCurrentWindow().destroy();
     }
   }).then((unlisten) => {
+    if (generation !== closeGeneration) {
+      unlisten();
+      return;
+    }
     unlistenClose = unlisten;
   }).catch(() => {
     // browser / tests
@@ -37,9 +48,18 @@ export function startUsageLifecycle(): void {
 }
 
 export function stopUsageLifecycle(): void {
+  closeGeneration += 1;
   if (intervalId != null) {
     window.clearInterval(intervalId);
     intervalId = null;
+  }
+  if (onHidden) {
+    document.removeEventListener('visibilitychange', onHidden);
+    onHidden = null;
+  }
+  if (onPageHide) {
+    window.removeEventListener('pagehide', onPageHide);
+    onPageHide = null;
   }
   unlistenClose?.();
   unlistenClose = null;

@@ -45,7 +45,9 @@ export async function flushUsage(forceCurrent = false): Promise<void> {
       if (!pending.dirty) continue;
       await submitUsage(await toPayload(pending));
       saveQueue(dropPendingDay(loadQueue(), pending.day));
+      if (!isUsageEnabled()) return;
     }
+    if (!isUsageEnabled()) return;
     const due = forceCurrent
       || snapshot.current.dirty
       || snapshot.lastFlushAt == null

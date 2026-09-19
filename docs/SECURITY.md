@@ -38,7 +38,7 @@ Zync’s core security surface is **encrypted local vaulting**, optional **remem
 
 ### Anonymous usage (optional)
 
-When **Settings → General → Share anonymous usage** is on (default), the desktop app may POST to the Zync analytics API (`/api/v1/usage`): a random install id stored only on this device, app version, OS, UTC day, and feature names you opened (Files, terminal, split, tunnels, vault, Public URLs, snippets, dashboard, plugins) with a use count. It does **not** send IP, hostnames, paths, commands, vault contents, or terminal output. Turn the setting off to stop sending. The queue stays local until a flush on open, close, or every 15 minutes.
+When **Settings → General → Share anonymous usage** is on (default), the desktop app may POST to the Zync analytics API (`/api/v1/usage`). A random install id is stored on this device and sent in that request so the same install can be counted across days. The **payload** also has app version, OS, UTC day, and feature names you opened (Files, terminal, split, tunnels, vault, Public URLs, snippets, dashboard, plugins) with a use count. The payload does **not** include an IP address, hostnames, paths, commands, vault contents, or terminal output. Turn the setting off to stop sending. The queue stays local until a flush on open, close, or every 15 minutes.
 
 ### Public URLs (Beta)
 
