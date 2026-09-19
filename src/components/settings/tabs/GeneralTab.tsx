@@ -59,6 +59,7 @@ export function GeneralTab({
     const [isUpdatingAutoCheck, setIsUpdatingAutoCheck] = useState(false);
     const showHostAddressesInLists =
         settings.privacy?.showHostAddressesInLists ?? DEFAULT_SHOW_HOST_ADDRESSES_IN_LISTS;
+    const shareAnonymousUsage = settings.privacy?.shareAnonymousUsage === true;
     const selectedEditorProvider = settings.editor?.defaultProvider ?? defaultEditorProvider;
     const editorSelectOptions = useMemo(
         () => withOrphanSelectOption(editorProviderOptions, selectedEditorProvider, {
@@ -112,6 +113,45 @@ export function GeneralTab({
                             <span
                                 className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${
                                     showHostAddressesInLists ? 'translate-x-5' : 'translate-x-0'
+                                }`}
+                            />
+                        </button>
+                    </div>
+                </div>
+                <div className="p-4 rounded-lg bg-[var(--color-app-surface)]/50 border border-[var(--color-app-border)]">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-start gap-3">
+                            <div className="p-2 bg-[var(--color-app-bg)] rounded-md border border-[var(--color-app-border)] text-[var(--color-app-accent)]">
+                                <Eye size={20} />
+                            </div>
+                            <div>
+                                <h4 className="text-sm font-medium text-[var(--color-app-text)]">Share anonymous usage</h4>
+                                <p className="text-xs text-[var(--color-app-muted)] mt-1 max-w-md">
+                                    We periodically send daily totals: an install id, app version, OS, and which features you opened
+                                    (Files, splits, tunnels, and so on). No hosts, paths, commands, or IP.
+                                </p>
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => onUpdateSettings({
+                                privacy: {
+                                    ...(settings.privacy ?? {
+                                        showHostAddressesInLists: DEFAULT_SHOW_HOST_ADDRESSES_IN_LISTS,
+                                        shareAnonymousUsage: false,
+                                    }),
+                                    shareAnonymousUsage: !shareAnonymousUsage,
+                                },
+                            })}
+                            role="switch"
+                            aria-checked={shareAnonymousUsage}
+                            aria-label="Share anonymous usage"
+                            className={`w-11 h-6 rounded-full transition-colors relative focus:outline-none focus:ring-2 focus:ring-[var(--color-app-accent)]/50 ${
+                                shareAnonymousUsage ? 'bg-[var(--color-app-accent)]' : 'bg-[var(--color-app-border)]'
+                            }`}
+                        >
+                            <span
+                                className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${
+                                    shareAnonymousUsage ? 'translate-x-5' : 'translate-x-0'
                                 }`}
                             />
                         </button>

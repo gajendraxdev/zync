@@ -30,6 +30,7 @@ import {
     reduceTabCloseState,
 } from '../features/connections/application/connectionLifecycleService';
 import { pinFeatureOnConnectionIfNeeded } from '../features/connections/application/tunnelAutoStartService';
+import { track, usageFeatureForTabView } from '../features/usage';
 import {
     restartTunnelsAfterConnect,
     snapshotActiveTunnelsForReconnect,
@@ -972,6 +973,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                 view: 'port-forwarding',
             })), showWelcomeScreen: false };
         });
+        track('tunnels');
         // Dirty-checked in sessionSlice — redundant calls are harmless.
         get().saveSession();
     },
@@ -985,6 +987,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                 view: 'terminal',
             })), showWelcomeScreen: false };
         });
+        track('public_urls');
         get().saveSession();
     },
 
@@ -1024,6 +1027,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                 showWelcomeScreen: false,
             };
         });
+        track('vault');
         get().saveSession();
     },
 
@@ -1039,6 +1043,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
         set(state => {
             return { ...ensureGlobalSnippetsTab(state.tabs), showWelcomeScreen: false };
         });
+        track('snippets');
         // Dirty-checked in sessionSlice — redundant calls are harmless.
         get().saveSession();
     },
@@ -1100,6 +1105,8 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
         set(state => ({
             tabs: state.tabs.map(t => t.id === tabId ? { ...t, view } : t)
         }));
+        const feature = usageFeatureForTabView(view);
+        if (feature) track(feature);
     },
 
     addFolder: (name, tags) => {

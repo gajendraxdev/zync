@@ -74,9 +74,9 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
 }
 
 export function submitSurvey(payload: SurveyPayload): Promise<SurveyApiResult> {
-  return postJson<SurveyApiResult>('/v1/survey', payload);
+  return postJson<SurveyApiResult>('/api/v1/survey', payload);
 }
 
 export function submitFeedback(payload: FeedbackPayload): Promise<SurveyApiResult> {
-  return postJson<SurveyApiResult>('/v1/feedback', payload);
+  return postJson<SurveyApiResult>('/api/v1/feedback', payload);
 }

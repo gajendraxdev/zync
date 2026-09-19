@@ -1,7 +1,7 @@
 # Security Notes
 
-**Last updated:** 2026-08-29  
-**Scope:** Vault, Google Drive sync, Public URLs (Beta), credential handling, and operator guidance for current Zync releases.
+**Last updated:** 2026-09-20  
+**Scope:** Vault, Google Drive sync, Public URLs (Beta), credential handling, anonymous usage, and operator guidance for current Zync releases.
 
 ---
 
@@ -35,6 +35,10 @@ Zync’s core security surface is **encrypted local vaulting**, optional **remem
 - Vault backups and sync collections are stored in Google **`drive.appdata`** (hidden app folder, not user-visible Drive files).
 - Sync collections use a **separate encryption passphrase** (local-vault-derived or custom).
 - OAuth uses Google's installed/desktop app flow with scoped access to Drive app data and account email.
+
+### Anonymous usage (optional)
+
+When **Settings → General → Share anonymous usage** is on, the desktop app may POST to the Zync analytics API (`/api/v1/usage`): a random install id stored only on this device, app version, OS, UTC day, and feature names you opened (Files, terminal, split, tunnels, vault, Public URLs, snippets, dashboard, plugins) with a use count. It does **not** send IP, hostnames, paths, commands, vault contents, or terminal output. The setting is off until you turn it on. The queue stays local until a flush on open, close, or every 15 minutes.
 
 ### Public URLs (Beta)
 

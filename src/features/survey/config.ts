@@ -1,4 +1,4 @@
-/** Dev default points at local `zync-survey`. Override with VITE_SURVEY_API_URL for prod. */
+/** Dev default points at local `zync-analytics`. Override with VITE_SURVEY_API_URL for prod. */
 export function getSurveyApiBaseUrl(): string {
   const fromEnv = (import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_SURVEY_API_URL;
   const raw =

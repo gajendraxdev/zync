@@ -31,6 +31,75 @@ import {
     DEFAULT_SURVEY_SETTINGS,
     normalizeSurveySettings,
 } from '../features/survey/settings.js';
+import { setUsageEnabled, startUsageLifecycle, stopUsageLifecycle } from '../features/usage';
+
+let usageConsentWrites: Promise<void> = Promise.resolve();
+
+function applyUsageConsent(enabled: boolean): void {
+    setUsageEnabled(enabled);
+    if (enabled) startUsageLifecycle();
+    else stopUsageLifecycle();
+}
+
+async function persistSettingsUpdate(
+    get: () => AppStore,
+    set: (partial: Partial<AppStore>) => void,
+    newSettings: Partial<AppSettings>,
+): Promise<void> {
+    let actualSettings = { ...newSettings };
+
+    // Theme changes always revert to the active theme's default accent.
+    if ('theme' in newSettings) {
+        actualSettings.accentColor = null;
+    }
+
+    const previous = get().settings;
+    const previousTabs = get().tabs;
+    const updated = { ...previous, ...actualSettings };
+    const privacyPatch = actualSettings.privacy;
+    const privacyTitlesTouched = Boolean(
+        privacyPatch && 'showHostAddressesInLists' in privacyPatch,
+    );
+    const optimisticUsage = updated.privacy.shareAnonymousUsage === true;
+    const nextState: Partial<AppStore> = { settings: updated };
+    if (privacyTitlesTouched) {
+        nextState.tabs = refreshConnectionTabTitles(
+            previousTabs,
+            get().connections,
+            updated.privacy.showHostAddressesInLists,
+        );
+    }
+    set(nextState);
+    const changedKeys = Object.keys(actualSettings) as Array<keyof AppSettings>;
+    try {
+        await persistSettings(actualSettings);
+    } catch (error) {
+        console.error('Failed to save settings:', error);
+        const current = get().settings;
+        const currentUsage = current.privacy.shareAnonymousUsage === true;
+        const rollbackThisRequest = !privacyPatch || !('shareAnonymousUsage' in privacyPatch)
+            || currentUsage === optimisticUsage;
+        if (rollbackThisRequest) {
+            const rollbackPatch = Object.fromEntries(
+                changedKeys.map((key) => [key, previous[key]])
+            ) as Partial<AppSettings>;
+            const rollbackState: Partial<AppStore> = {
+                settings: { ...current, ...rollbackPatch },
+            };
+            if (privacyTitlesTouched) {
+                rollbackState.tabs = previousTabs;
+            }
+            set(rollbackState);
+            if (privacyPatch && 'shareAnonymousUsage' in privacyPatch) {
+                applyUsageConsent(previous.privacy.shareAnonymousUsage === true);
+            }
+        }
+        throw error;
+    }
+    if (privacyPatch && 'shareAnonymousUsage' in privacyPatch) {
+        applyUsageConsent(get().settings.privacy.shareAnonymousUsage === true);
+    }
+}
 import type { SurveySettings } from '../features/survey/types.js';
 import {
     DEFAULT_KEYBOARD_SETTINGS,
@@ -171,6 +240,8 @@ export interface AppSettings {
     privacy: {
         /** When true, browse lists show username@host. When false, show labels/tags (safer for screen share). */
         showHostAddressesInLists: boolean;
+        /** Anonymous daily usage (install id + feature names). No hosts, paths, or terminal content. */
+        shareAnonymousUsage: boolean;
     };
     notifications: NotificationSettings;
     statusBar: StatusBarSettings;
@@ -203,6 +274,7 @@ export const defaultSettings: AppSettings = {
     lastSeenVersion: '',
     privacy: {
         showHostAddressesInLists: DEFAULT_SHOW_HOST_ADDRESSES_IN_LISTS,
+        shareAnonymousUsage: false,
     },
     notifications: { ...DEFAULT_NOTIFICATION_SETTINGS },
     statusBar: { ...DEFAULT_STATUS_BAR_SETTINGS },
@@ -522,7 +594,11 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
                 })),
                 keyboard: normalizeKeyboardSettings(loaded?.keyboard),
                 ai: { ...defaultSettings.ai, ...(loaded?.ai || {}) },
-                privacy: { ...defaultSettings.privacy, ...(loaded?.privacy || {}) },
+                privacy: {
+                    ...defaultSettings.privacy,
+                    ...(loaded?.privacy || {}),
+                    shareAnonymousUsage: loaded?.privacy?.shareAnonymousUsage === true,
+                },
                 notifications: normalizeNotificationSettings(loaded?.notifications),
                 statusBar: normalizeStatusBarSettings(loaded?.statusBar),
                 survey: normalizeSurveySettings(loaded?.survey),
@@ -535,48 +611,15 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
         }
     },
 
-    updateSettings: async (newSettings) => {
-        let actualSettings = { ...newSettings };
-
-        // Theme changes always revert to the active theme's default accent.
-        if ('theme' in newSettings) {
-            actualSettings.accentColor = null;
-        }
-
-        const previous = get().settings;
-        const previousTabs = get().tabs;
-        const updated = { ...previous, ...actualSettings };
-        const privacyPatch = actualSettings.privacy;
-        const privacyTitlesTouched = Boolean(
-            privacyPatch && 'showHostAddressesInLists' in privacyPatch,
+    updateSettings: (newSettings) => {
+        const touchesUsageConsent = Boolean(
+            newSettings.privacy && 'shareAnonymousUsage' in newSettings.privacy,
         );
-        const nextState: Partial<AppStore> = { settings: updated };
-        if (privacyTitlesTouched) {
-            nextState.tabs = refreshConnectionTabTitles(
-                previousTabs,
-                get().connections,
-                updated.privacy.showHostAddressesInLists,
-            );
-        }
-        set(nextState);
-        const changedKeys = Object.keys(actualSettings) as Array<keyof AppSettings>;
-        try {
-            await persistSettings(actualSettings);
-        } catch (error) {
-            console.error('Failed to save settings:', error);
-            const current = get().settings;
-            const rollbackPatch = Object.fromEntries(
-                changedKeys.map((key) => [key, previous[key]])
-            ) as Partial<AppSettings>;
-            const rollbackState: Partial<AppStore> = {
-                settings: { ...current, ...rollbackPatch },
-            };
-            if (privacyTitlesTouched) {
-                rollbackState.tabs = previousTabs;
-            }
-            set(rollbackState);
-            throw error;
-        }
+        const run = () => persistSettingsUpdate(get, set, newSettings);
+        if (!touchesUsageConsent) return run();
+        const chained = usageConsentWrites.then(run, run);
+        usageConsentWrites = chained.then(() => undefined, () => undefined);
+        return chained;
     },
 
     updateAiSettings: async (updates) => {
