@@ -16,6 +16,12 @@ const recentPathsGeneration = new Map<string, number>();
  * .env -> base: .env, ext: ""
  * test.txt -> base: test, ext: .txt
  */
+/** Listing/cwd key. Overlay Files uses `connectionId`; split panes use `connectionId::instanceId`. */
+export function filesStoreKey(connectionId: string, instanceId?: string | null): string {
+    const id = (instanceId || '').trim();
+    return id ? `${connectionId}::${id}` : connectionId;
+}
+
 export function splitFileName(name: string): { base: string; ext: string } {
     // If it starts with a dot and has no other dots, it's a hidden file like .env
     if (name.startsWith('.') && name.indexOf('.', 1) === -1) {
@@ -49,23 +55,24 @@ export interface FileSystemState {
 }
 
 export interface FileSystemActions {
-    setPath: (connectionId: string, path: string) => void;
-    loadFiles: (connectionId: string, path?: string, skipHistory?: boolean, silent?: boolean) => Promise<void>;
-    refreshFiles: (connectionId: string) => Promise<void>;
-    createFolder: (connectionId: string, name: string) => Promise<void>;
-    renameEntry: (connectionId: string, oldName: string, newName: string) => Promise<void>;
-    deleteEntries: (connectionId: string, paths: string[]) => Promise<void>;
-    uploadFiles: (connectionId: string, localPaths: string[]) => Promise<void>;
+    setPath: (connectionId: string, path: string, instanceId?: string) => void;
+    loadFiles: (connectionId: string, path?: string, skipHistory?: boolean, silent?: boolean, instanceId?: string) => Promise<void>;
+    refreshFiles: (connectionId: string, instanceId?: string) => Promise<void>;
+    createFolder: (connectionId: string, name: string, instanceId?: string) => Promise<void>;
+    renameEntry: (connectionId: string, oldName: string, newName: string, instanceId?: string) => Promise<void>;
+    deleteEntries: (connectionId: string, paths: string[], instanceId?: string) => Promise<void>;
+    uploadFiles: (connectionId: string, localPaths: string[], instanceId?: string) => Promise<void>;
     downloadFiles: (connectionId: string, remotePaths: string[]) => Promise<void>;
-    navigateUp: (connectionId: string) => void;
-    navigateBack: (connectionId: string) => void;
-    navigateForward: (connectionId: string) => void;
-    navigateHistoryTo: (connectionId: string, index: number) => void;
+    navigateUp: (connectionId: string, instanceId?: string) => void;
+    navigateBack: (connectionId: string, instanceId?: string) => void;
+    navigateForward: (connectionId: string, instanceId?: string) => void;
+    navigateHistoryTo: (connectionId: string, index: number, instanceId?: string) => void;
     setClipboard: (files: FileEntry[], sourceConnectionId: string, sourcePath: string, op: 'copy' | 'cut') => void;
     clearClipboard: () => void;
     clearRecentPaths: (connectionId: string) => void;
-    pasteEntries: (connectionId: string, sources: string[], op: 'copy' | 'cut', destinationDirectory?: string) => Promise<void>;
+    pasteEntries: (connectionId: string, sources: string[], op: 'copy' | 'cut', destinationDirectory?: string, instanceId?: string) => Promise<void>;
     checkPathExists: (connectionId: string, path: string) => Promise<boolean>;
+    copyFilesListing: (connectionId: string, fromInstanceId: string | null | undefined, toInstanceId?: string | null) => void;
 }
 
 export type FileSystemSlice = FileSystemState & FileSystemActions;
@@ -95,15 +102,31 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
         }));
     },
 
-    setPath: (connectionId, path) => {
-        set(state => ({
-            currentPath: { ...state.currentPath, [connectionId]: path }
+    copyFilesListing: (connectionId, fromInstanceId, toInstanceId) => {
+        const fromKey = filesStoreKey(connectionId, fromInstanceId);
+        const toKey = filesStoreKey(connectionId, toInstanceId);
+        if (fromKey === toKey) return;
+        set((state) => ({
+            files: { ...state.files, [toKey]: state.files[fromKey] ?? [] },
+            currentPath: { ...state.currentPath, [toKey]: state.currentPath[fromKey] ?? '' },
+            history: { ...state.history, [toKey]: [...(state.history[fromKey] ?? [])] },
+            historyIndex: { ...state.historyIndex, [toKey]: state.historyIndex[fromKey] ?? 0 },
+            error: { ...state.error, [toKey]: state.error[fromKey] ?? null },
+            isLoading: { ...state.isLoading, [toKey]: false },
         }));
     },
 
-    loadFiles: async (connectionId, path, skipHistory = false, silent = false) => {
+    setPath: (connectionId, path, instanceId) => {
+        const key = filesStoreKey(connectionId, instanceId);
+        set(state => ({
+            currentPath: { ...state.currentPath, [key]: path }
+        }));
+    },
+
+    loadFiles: async (connectionId, path, skipHistory = false, silent = false, instanceId) => {
         const state = get();
-        let targetPath = (path !== undefined ? path : state.currentPath[connectionId] || '').trim();
+        const key = filesStoreKey(connectionId, instanceId);
+        let targetPath = (path !== undefined ? path : state.currentPath[key] || '').trim();
         if (!targetPath) return;
         const recentGen = recentPathsGeneration.get(connectionId) || 0;
         if (targetPath === '~' || targetPath.startsWith('~/')) {
@@ -122,13 +145,13 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
             targetPath = expanded;
         }
 
-        const loadGen = (filesLoadGeneration.get(connectionId) || 0) + 1;
-        filesLoadGeneration.set(connectionId, loadGen);
+        const loadGen = (filesLoadGeneration.get(key) || 0) + 1;
+        filesLoadGeneration.set(key, loadGen);
 
         // History Logic
-        if (!skipHistory && targetPath !== state.currentPath[connectionId]) {
-            const currentHistory = state.history[connectionId] || [];
-            const currentIndex = state.historyIndex[connectionId] || 0;
+        if (!skipHistory && targetPath !== state.currentPath[key]) {
+            const currentHistory = state.history[key] || [];
+            const currentIndex = state.historyIndex[key] || 0;
 
             // If we are at the end of history, push new path
             // If we are in middle, truncate future and push
@@ -136,25 +159,25 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
 
             // If history is empty, initialize it with BOTH previous path (if exists) and new path?
             // Or just make sure initial path is there.
-            if (newHistory.length === 1 && state.currentPath[connectionId]) {
+            if (newHistory.length === 1 && state.currentPath[key]) {
                 // First navigation: ensure start path is in history at index 0
-                newHistory.unshift(state.currentPath[connectionId]);
+                newHistory.unshift(state.currentPath[key]);
             }
 
             set(state => ({
-                history: { ...state.history, [connectionId]: newHistory },
-                historyIndex: { ...state.historyIndex, [connectionId]: newHistory.length - 1 }
+                history: { ...state.history, [key]: newHistory },
+                historyIndex: { ...state.historyIndex, [key]: newHistory.length - 1 }
             }));
         }
 
         if (!silent) {
             set(state => ({
-                isLoading: { ...state.isLoading, [connectionId]: true },
-                error: { ...state.error, [connectionId]: null }
+                isLoading: { ...state.isLoading, [key]: true },
+                error: { ...state.error, [key]: null }
             }));
         } else {
             set(state => ({
-                error: { ...state.error, [connectionId]: null }
+                error: { ...state.error, [key]: null }
             }));
         }
 
@@ -172,7 +195,7 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
                 group: typeof e.group === 'string' ? e.group : '',
             }));
 
-            if (filesLoadGeneration.get(connectionId) !== loadGen) return;
+            if (filesLoadGeneration.get(key) !== loadGen) return;
             const skipRecent = (recentPathsGeneration.get(connectionId) || 0) !== recentGen;
             set(state => {
                 const prevRecent = state.recentPaths[connectionId] || [];
@@ -180,17 +203,17 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
                 const nextRecent = recentUnchanged
                     ? prevRecent
                     : [targetPath, ...prevRecent.filter((p) => p !== targetPath)].slice(0, FILE_RECENT_LIMIT_MAX);
-                const currentHist = state.history[connectionId];
+                const currentHist = state.history[key];
                 const historyPatch = (!currentHist || currentHist.length === 0)
                     ? {
-                        history: { ...state.history, [connectionId]: [targetPath] },
-                        historyIndex: { ...state.historyIndex, [connectionId]: 0 },
+                        history: { ...state.history, [key]: [targetPath] },
+                        historyIndex: { ...state.historyIndex, [key]: 0 },
                     }
                     : {};
                 return {
-                    files: { ...state.files, [connectionId]: mappedEntries },
-                    currentPath: { ...state.currentPath, [connectionId]: targetPath },
-                    isLoading: { ...state.isLoading, [connectionId]: false },
+                    files: { ...state.files, [key]: mappedEntries },
+                    currentPath: { ...state.currentPath, [key]: targetPath },
+                    isLoading: { ...state.isLoading, [key]: false },
                     recentPaths: recentUnchanged
                         ? state.recentPaths
                         : { ...state.recentPaths, [connectionId]: nextRecent },
@@ -199,21 +222,21 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
             });
 
         } catch (error: any) {
-            if (filesLoadGeneration.get(connectionId) !== loadGen) return;
+            if (filesLoadGeneration.get(key) !== loadGen) return;
             console.error('Failed to load files:', error);
             const osError = error.message || String(error);
 
             if (osError.includes('DISCONNECTED:')) {
                 set(state => ({
-                    isLoading: { ...state.isLoading, [connectionId]: false },
-                    error: { ...state.error, [connectionId]: 'DISCONNECTED' }
+                    isLoading: { ...state.isLoading, [key]: false },
+                    error: { ...state.error, [key]: 'DISCONNECTED' }
                 }));
                 return;
             }
 
             set(state => ({
-                isLoading: { ...state.isLoading, [connectionId]: false },
-                error: { ...state.error, [connectionId]: osError }
+                isLoading: { ...state.isLoading, [key]: false },
+                error: { ...state.error, [key]: osError }
             }));
 
             // Handle "No such file" (Directory deleted?)
@@ -225,10 +248,10 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
                     console.log(`Path ${targetPath} not found, navigating up to ${parent}`);
                     // Update path state immediately to prevent loops
                     set(state => ({
-                        currentPath: { ...state.currentPath, [connectionId]: parent }
+                        currentPath: { ...state.currentPath, [key]: parent }
                     }));
                     // Try loading parent
-                    get().loadFiles(connectionId, parent);
+                    get().loadFiles(connectionId, parent, false, false, instanceId);
                     return;
                 }
             }
@@ -239,50 +262,51 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
         }
     },
 
-    refreshFiles: async (connectionId) => {
-        const path = get().currentPath[connectionId];
+    refreshFiles: async (connectionId, instanceId) => {
+        const key = filesStoreKey(connectionId, instanceId);
+        const path = get().currentPath[key];
         if (path) {
-            // Check if user is actively copying to avoid interrupting? No, standard refresh.
-            // Use silent=true to prevent flicker
-            await get().loadFiles(connectionId, path, true, true);
+            await get().loadFiles(connectionId, path, true, true, instanceId);
         }
     },
 
-    createFolder: async (connectionId, name) => {
-        const path = get().currentPath[connectionId];
+    createFolder: async (connectionId, name, instanceId) => {
+        const key = filesStoreKey(connectionId, instanceId);
+        const path = get().currentPath[key];
         const fullPath = path === '/' ? `/${name}` : `${path}/${name}`;
 
-        set(state => ({ isLoading: { ...state.isLoading, [connectionId]: true } }));
+        set(state => ({ isLoading: { ...state.isLoading, [key]: true } }));
         try {
             await ipc.invoke('fs_mkdir', { connectionId, path: fullPath });
             get().setLastAction(`Created folder "${name}"`, 'success');
-            await get().refreshFiles(connectionId);
+            await get().refreshFiles(connectionId, instanceId);
         } catch (error: any) {
             const msg = error.message || String(error);
             if (msg.includes('DISCONNECTED:')) {
-                set(state => ({ error: { ...state.error, [connectionId]: 'DISCONNECTED' } }));
-                set(state => ({ isLoading: { ...state.isLoading, [connectionId]: false } }));
+                set(state => ({ error: { ...state.error, [key]: 'DISCONNECTED' } }));
+                set(state => ({ isLoading: { ...state.isLoading, [key]: false } }));
                 return;
             } else {
                 notify.error(`Failed to create folder: ${msg}`, { source: 'files' });
             }
-            set(state => ({ isLoading: { ...state.isLoading, [connectionId]: false } }));
+            set(state => ({ isLoading: { ...state.isLoading, [key]: false } }));
         }
     },
 
-    renameEntry: async (connectionId, oldName, newName) => {
-        const path = get().currentPath[connectionId];
+    renameEntry: async (connectionId, oldName, newName, instanceId) => {
+        const key = filesStoreKey(connectionId, instanceId);
+        const path = get().currentPath[key];
         const oldPath = path === '/' ? `/${oldName}` : `${path}/${oldName}`;
         const newPath = path === '/' ? `/${newName}` : `${path}/${newName}`;
 
         try {
             await ipc.invoke('fs_rename', { connectionId, oldPath, newPath });
             get().setLastAction(`Renamed to "${newName}"`, 'success');
-            await get().refreshFiles(connectionId);
+            await get().refreshFiles(connectionId, instanceId);
         } catch (error: any) {
             const msg = error.message || String(error);
             if (msg.includes('DISCONNECTED:')) {
-                set(state => ({ error: { ...state.error, [connectionId]: 'DISCONNECTED' } }));
+                set(state => ({ error: { ...state.error, [key]: 'DISCONNECTED' } }));
                 return;
             } else {
                 notify.error(`Failed to rename: ${msg}`, { source: 'files' });
@@ -290,13 +314,14 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
         }
     },
 
-    deleteEntries: async (connectionId, paths) => {
+    deleteEntries: async (connectionId, paths, instanceId) => {
+        const key = filesStoreKey(connectionId, instanceId);
         // Optimistic update: Remove from state immediately
-        const previousFiles = get().files[connectionId] || [];
+        const previousFiles = get().files[key] || [];
         set(state => {
-            const currentFiles = state.files[connectionId] || [];
+            const currentFiles = state.files[key] || [];
             const newFiles = currentFiles.filter(f => !paths.includes(f.path));
-            return { files: { ...state.files, [connectionId]: newFiles } };
+            return { files: { ...state.files, [key]: newFiles } };
         });
 
         try {
@@ -311,28 +336,29 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
                 const successfullyDeleted = paths.filter(p => !failedPaths.includes(p));
                 set(state => {
                     const finalFiles = previousFiles.filter(f => !successfullyDeleted.includes(f.path));
-                    return { files: { ...state.files, [connectionId]: finalFiles } };
+                    return { files: { ...state.files, [key]: finalFiles } };
                 });
             } else {
                 // Full rollback if error is opaque or all failed
                 set(state => ({
-                    files: { ...state.files, [connectionId]: previousFiles }
+                    files: { ...state.files, [key]: previousFiles }
                 }));
             }
 
             if (msg.includes('DISCONNECTED:')) {
-                set(state => ({ error: { ...state.error, [connectionId]: 'DISCONNECTED' } }));
+                set(state => ({ error: { ...state.error, [key]: 'DISCONNECTED' } }));
                 return;
             } else {
                 notify.error(`Delete failed: ${msg}`, { source: 'files' });
             }
             // Final safety refresh
-            await get().refreshFiles(connectionId);
+            await get().refreshFiles(connectionId, instanceId);
         }
     },
 
-    uploadFiles: async (connectionId, localPaths) => {
-        const path = get().currentPath[connectionId];
+    uploadFiles: async (connectionId, localPaths, instanceId) => {
+        const key = filesStoreKey(connectionId, instanceId);
+        const path = get().currentPath[key];
         // Do not set isLoading to true here, as we want "background" upload
 
         // get().showToast('info', `Starting background upload of ${localPaths.length} items...`);
@@ -379,11 +405,12 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
         console.log('Download not fully implemented in store slice yet');
     },
 
-    pasteEntries: async (connectionId, sources, op, destinationDirectory) => {
+    pasteEntries: async (connectionId, sources, op, destinationDirectory, instanceId) => {
         const state = get();
-        const currentPath = destinationDirectory !== undefined ? destinationDirectory : (state.currentPath[connectionId] || '/');
+        const key = filesStoreKey(connectionId, instanceId);
+        const currentPath = destinationDirectory !== undefined ? destinationDirectory : (state.currentPath[key] || '/');
 
-        set(state => ({ isLoading: { ...state.isLoading, [connectionId]: true } }));
+        set(state => ({ isLoading: { ...state.isLoading, [key]: true } }));
 
         try {
             // Processing list for optimistic updates
@@ -482,7 +509,7 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
 
             // Apply Optimistic Updates
             set(state => {
-                const currentFiles = state.files[connectionId] || [];
+                const currentFiles = state.files[key] || [];
                 
                 // 1. Remove sources if this is a move (cut)
                 let filesAfterRemoval = currentFiles;
@@ -501,8 +528,8 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
                 const updatedFiles = filesAfterRemoval.concat(filteredNewEntries);
 
                 return {
-                    isLoading: { ...state.isLoading, [connectionId]: false },
-                    files: { ...state.files, [connectionId]: updatedFiles }
+                    isLoading: { ...state.isLoading, [key]: false },
+                    files: { ...state.files, [key]: updatedFiles }
                 };
             });
 
@@ -526,65 +553,69 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
         } catch (error: any) {
             const msg = error.message || String(error);
             if (msg.includes('DISCONNECTED:')) {
-                set(state => ({ error: { ...state.error, [connectionId]: 'DISCONNECTED' } }));
-                set(state => ({ isLoading: { ...state.isLoading, [connectionId]: false } }));
+                set(state => ({ error: { ...state.error, [key]: 'DISCONNECTED' } }));
+                set(state => ({ isLoading: { ...state.isLoading, [key]: false } }));
                 return;
             } else {
                 notify.error(`Paste failed: ${msg}`, { source: 'files' });
             }
-            set(state => ({ isLoading: { ...state.isLoading, [connectionId]: false } }));
+            set(state => ({ isLoading: { ...state.isLoading, [key]: false } }));
         }
     },
 
-    navigateUp: (connectionId) => {
-        const path = get().currentPath[connectionId];
+    navigateUp: (connectionId, instanceId) => {
+        const key = filesStoreKey(connectionId, instanceId);
+        const path = get().currentPath[key];
         if (!path) return;
         const parentPath = parentFilePath(path);
         if (!parentPath) return;
-        get().loadFiles(connectionId, parentPath);
+        get().loadFiles(connectionId, parentPath, false, false, instanceId);
     },
 
-    navigateBack: (connectionId) => {
+    navigateBack: (connectionId, instanceId) => {
+        const key = filesStoreKey(connectionId, instanceId);
         const state = get();
-        const history = state.history[connectionId] || [];
-        const index = state.historyIndex[connectionId] || 0;
+        const history = state.history[key] || [];
+        const index = state.historyIndex[key] || 0;
 
         if (index > 0) {
             const newIndex = index - 1;
             const prevPath = history[newIndex];
 
             set(state => ({
-                historyIndex: { ...state.historyIndex, [connectionId]: newIndex }
+                historyIndex: { ...state.historyIndex, [key]: newIndex }
             }));
 
-            get().loadFiles(connectionId, prevPath, true); // Skip history update
+            get().loadFiles(connectionId, prevPath, true, false, instanceId);
         }
     },
 
-    navigateForward: (connectionId) => {
+    navigateForward: (connectionId, instanceId) => {
+        const key = filesStoreKey(connectionId, instanceId);
         const state = get();
-        const history = state.history[connectionId] || [];
-        const index = state.historyIndex[connectionId] || 0;
+        const history = state.history[key] || [];
+        const index = state.historyIndex[key] || 0;
 
         if (index < history.length - 1) {
             const newIndex = index + 1;
             const nextPath = history[newIndex];
 
             set(state => ({
-                historyIndex: { ...state.historyIndex, [connectionId]: newIndex }
+                historyIndex: { ...state.historyIndex, [key]: newIndex }
             }));
 
-            get().loadFiles(connectionId, nextPath, true); // Skip history update
+            get().loadFiles(connectionId, nextPath, true, false, instanceId);
         }
     },
 
-    navigateHistoryTo: (connectionId, index) => {
-        const history = get().history[connectionId] || [];
+    navigateHistoryTo: (connectionId, index, instanceId) => {
+        const key = filesStoreKey(connectionId, instanceId);
+        const history = get().history[key] || [];
         if (index < 0 || index >= history.length) return;
         set((state) => ({
-            historyIndex: { ...state.historyIndex, [connectionId]: index },
+            historyIndex: { ...state.historyIndex, [key]: index },
         }));
-        get().loadFiles(connectionId, history[index], true);
+        get().loadFiles(connectionId, history[index], true, false, instanceId);
     },
 
     checkPathExists: async (connectionId, path) => {

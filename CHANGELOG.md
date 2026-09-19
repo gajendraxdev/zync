@@ -5,9 +5,16 @@ All notable changes to Zync are documented in this file. The format is based on 
 ## [Unreleased]
 
 ### Added
+- **Workspace panes:** One split container for shell, Files, Dashboard, tunnels, snippets, and plugins. Drag a tab onto a pane **edge** to split (cap 4). Drag a pane header onto **another pane’s edge** to move it, or onto **its own edge** for a sibling (Files copies the current folder). Drop in the **center** cancels. Grouped items leave the tab bar as **Split N** and come back on unsplit. Files-only splits are valid — no shell required.
 - **Public URLs v2 binary data frames:** After handshake, agent and relay send page bytes as WebSocket binary frames instead of JSON+base64. Hello still sends `v: 1` plus `max_v: 2` so older relays keep working. ([ad505c5])
 
+### Changed
+- **Files is a pane, not an overlay:** Opening Files fills the workspace canvas like a shell. Extra Files tabs keep independent listings (folder, selection, error) instead of sharing one host-wide view.
+
 ### Fixed
+- **Last shell `exit` in a mixed split:** Typing `exit` in the only shell beside Files no longer blanks the canvas. Remaining Files panes stay as **Split N**.
+- **Drag a pane onto itself:** Dropping in the middle of a pane no longer counts as the left edge and spawning extra splits. Only the outer edge band splits.
+- **Files disconnect in a split:** The disconnect banner follows that Files pane’s listing, not a shared host key.
 - **Files opens at Home:** Workspace **+ → Files** (and Files in split) lists the account home, not the active shell cwd. **Open File Manager Here** still uses the terminal directory. A confirmed SFTP home of `/` is listed; `~` is still not. ([aaa9e82])
 - **Places Recent:** Gear at the bottom of Places, or right-click the sidebar, to show/hide Recent, pick how many folders to keep, or clear the list (also in Settings → File Manager). Hiding Recent removes the whole section. ([09ea72c])
 - **Pin folders in Places:** Right-click a folder or empty listing to pin it, or drag a folder onto Pins. Drops from another host are ignored. ([063c515])

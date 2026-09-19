@@ -32,7 +32,7 @@ runTest('omits feature rows when the workspace cannot open features', () => {
   assert.equal(items.every((item) => item.kind !== 'feature'), true);
 });
 
-runTest('marks the active feature disabled', () => {
+runTest('keeps the active feature available for another tab', () => {
   const items = buildWorkspaceOpenItems({
     shells: [],
     canOpenFeature: true,
@@ -40,8 +40,8 @@ runTest('marks the active feature disabled', () => {
   });
   const dashboard = items.find((item) => item.featureId === 'dashboard');
   assert.ok(dashboard);
-  assert.equal(dashboard.disabled, true);
-  assert.equal(dashboard.hint, 'Active');
+  assert.equal(dashboard.disabled, undefined);
+  assert.equal(dashboard.hint, 'New tab');
 });
 
 runTest('root hides individual shells behind Other shells', () => {

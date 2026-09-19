@@ -8,8 +8,17 @@ import { cn } from '../../lib/utils';
 import { once, type UnlistenFn } from '@tauri-apps/api/event';
 import { queueTerminalInput } from '../../lib/terminal';
 import { LOCAL_TERMINAL_CONNECTION_ID } from '../../lib/terminal/connectionIds';
-import { findLayoutOwner, isSplitLayout, layoutForTerm } from '../../lib/paneLayout';
+import {
+    findLayoutOwner,
+    isFeatureContent,
+    isPaneLeaf,
+    isPluginContent,
+    isSplitLayout,
+    layoutForCanvas,
+    layoutForFeatureInstance,
+} from '../../lib/paneLayout';
 import { PaneLayoutView } from './PaneLayoutView';
+import type { DockTabPointerHandlers } from '../layout/tabDock';
 
 // TerminalTab interface is now in store/terminalSlice
 // export interface TerminalTab ... removed
@@ -20,6 +29,8 @@ export function TerminalManager({
     isWorkspaceActive,
     isTerminalView = true,
     hideTabs = false,
+    dockPointer,
+    featureInstanceId,
 }: {
     connectionId?: string;
     isVisible?: boolean;
@@ -28,6 +39,9 @@ export function TerminalManager({
     /** This workspace is showing the terminal view (false on Files/Dashboard). */
     isTerminalView?: boolean;
     hideTabs?: boolean;
+    dockPointer?: DockTabPointerHandlers;
+    /** Ungrouped Files/Dashboard tab: show that pane in this canvas, not an overlay. */
+    featureInstanceId?: string;
 }) {
     const workspaceActive = isWorkspaceActive ?? (isVisible !== false);
     const terminalView = isTerminalView ?? (isVisible !== false);
@@ -50,9 +64,14 @@ export function TerminalManager({
         : null;
     const paneLayout = useAppStore((state) => {
         if (!activeConnectionId) return undefined;
+        const groups = state.paneLayouts[activeConnectionId];
+        const groupOwner = state.activePaneGroupOwner[activeConnectionId];
+        if (featureInstanceId) {
+            return layoutForFeatureInstance(groups, featureInstanceId)
+                ?? layoutForCanvas(groups, state.activeTerminalIds[activeConnectionId], groupOwner);
+        }
         const activeId = state.activeTerminalIds[activeConnectionId];
-        if (!activeId) return undefined;
-        return layoutForTerm(state.paneLayouts[activeConnectionId], activeId);
+        return layoutForCanvas(groups, activeId, groupOwner);
     });
     const hostConnected = useAppStore((state) => {
         if (!activeConnectionId || activeConnectionId === LOCAL_TERMINAL_CONNECTION_ID) return true;
@@ -61,7 +80,6 @@ export function TerminalManager({
 
     // Actions (stable)
     const createTerminal = useAppStore(state => state.createTerminal);
-    const ensureTerminal = useAppStore(state => state.ensureTerminal);
     const closeTerminalGroup = useAppStore(state => state.closeTerminalGroup);
     const setActiveTerminal = useAppStore(state => state.setActiveTerminal);
     const terminalTransparencyEnabled = useAppStore(
@@ -76,14 +94,6 @@ export function TerminalManager({
         activeTabIdRef.current = activeTabId;
     }, [activeTabId]);
 
-
-    // Derived State - Removed (now selected directly)
-    // Initialize/Reset when connection changes
-    useEffect(() => {
-        if (activeConnectionId) {
-            ensureTerminal(activeConnectionId);
-        }
-    }, [activeConnectionId]);
 
     const handleNewTab = () => {
         if (activeConnectionId) {
@@ -270,7 +280,20 @@ export function TerminalManager({
 
             {/* Terminal Content Area */}
             <div ref={terminalContentRef} className={cn("flex-1 overflow-hidden relative", terminalTransparencyEnabled ? "bg-transparent" : "bg-app-bg")}>
-                {tabs.length === 0 ? (
+                {terminalView && hostConnected && paneLayout && (
+                    isSplitLayout(paneLayout)
+                    || (isPaneLeaf(paneLayout.root) && (isFeatureContent(paneLayout.root.content) || isPluginContent(paneLayout.root.content)))
+                ) ? (
+                    <div className="absolute inset-0 z-10">
+                        <PaneLayoutView
+                            connectionId={activeConnectionId}
+                            layout={paneLayout}
+                            workspaceActive={workspaceActive}
+                            panelVisible={panelVisible}
+                            dockPointer={dockPointer}
+                        />
+                    </div>
+                ) : tabs.length === 0 ? (
                     <div className={cn(
                         "h-full flex flex-col items-center justify-center text-app-muted z-20",
                         terminalTransparencyEnabled ? "bg-app-bg/80 backdrop-blur-xl" : "bg-app-bg"
@@ -279,17 +302,8 @@ export function TerminalManager({
                         <p>No active terminals</p>
                         <button onClick={handleNewTab} className="mt-4 text-app-accent hover:underline">Open New Terminal</button>
                     </div>
-                ) : activeTabId && terminalView && hostConnected && paneLayout && isSplitLayout(paneLayout) ? (
-                    <div className="absolute inset-0 z-10">
-                        <PaneLayoutView
-                            connectionId={activeConnectionId}
-                            layout={paneLayout}
-                            workspaceActive={workspaceActive}
-                            panelVisible={panelVisible}
-                        />
-                    </div>
                 ) : activeTabId && terminalView ? (
-                    <div className="absolute inset-0 z-10">
+                    <div className="absolute inset-0 z-10" data-pane-id={activeTabId}>
                         {/* Mount only the active shell while terminal view is shown — xterm stays in terminalCache. */}
                         <div className="h-full w-full">
                             <TerminalComponent

@@ -2,16 +2,22 @@ import { parsePaneLayout } from './persist';
 import { dropTerm, sanitizePaneLayout } from './ops';
 import {
     activeTermId,
+    collectLeaves,
     firstTermLeaf,
-    isPaneSplit,
+    isFeatureContent,
+    isPaneLeaf,
     isSafePaneLayout,
     isSplitLayout,
+    isTermContent,
     visibleTermIds,
 } from './query';
 import type { PaneLayout } from './types';
 
 /** owner tab id → split tree. One host can have several split tabs. */
 export type PaneLayoutGroups = Record<string, PaneLayout>;
+
+/** Layout owner when there is no shell (Files-only / mixed feature splits). */
+export const WORKSPACE_PANE_OWNER = 'workspace';
 
 export function sameSplitGroup(
     groups: PaneLayoutGroups | null | undefined,
@@ -22,23 +28,26 @@ export function sameSplitGroup(
     return (findLayoutOwner(groups, termA) ?? termA) === (findLayoutOwner(groups, termB) ?? termB);
 }
 
-/** Dragging a shell already in this group is a no-op — no layout write. */
+/** Whether the dragged shell is already visible in this exact pane layout. */
 export function sameGroupTermDock(
     groups: PaneLayoutGroups | null | undefined,
     owner: string,
     termId: string,
 ): 'self' | null {
-    return sameSplitGroup(groups, owner, termId) ? 'self' : null;
+    const layout = groups?.[owner];
+    return layout && visibleTermIds(layout).includes(termId) ? 'self' : null;
 }
 
 export function findLayoutOwner(
     groups: PaneLayoutGroups | null | undefined,
     termId: string,
 ): string | null {
-    if (!groups || !termId) return null;
-    if (groups[termId] && isSplitLayout(groups[termId])) return termId;
-    for (const [owner, layout] of Object.entries(groups)) {
-        if (visibleTermIds(layout).includes(termId)) return owner;
+    if (!groups) return null;
+    if (termId) {
+        if (groups[termId] && isSplitLayout(groups[termId])) return termId;
+        for (const [owner, layout] of Object.entries(groups)) {
+            if (visibleTermIds(layout).includes(termId)) return owner;
+        }
     }
     return null;
 }
@@ -49,6 +58,35 @@ export function layoutForTerm(
 ): PaneLayout | undefined {
     const owner = findLayoutOwner(groups, termId);
     return owner ? groups![owner] : undefined;
+}
+
+export function layoutForCanvas(
+    groups: PaneLayoutGroups | null | undefined,
+    termId: string | null | undefined,
+    groupOwner?: string | null,
+): PaneLayout | undefined {
+    if (groupOwner && groups?.[groupOwner]) return groups[groupOwner];
+    if (termId) {
+        const owned = layoutForTerm(groups, termId);
+        if (owned) return owned;
+    }
+    return groups?.[WORKSPACE_PANE_OWNER];
+}
+
+export function layoutForFeatureInstance(
+    groups: PaneLayoutGroups | null | undefined,
+    instanceId: string | null | undefined,
+): PaneLayout | undefined {
+    if (!groups || !instanceId) return undefined;
+    if (groups[instanceId]) return groups[instanceId];
+    for (const layout of Object.values(groups)) {
+        for (const leaf of collectLeaves(layout.root)) {
+            if (isFeatureContent(leaf.content) && leaf.content.instanceId === instanceId) {
+                return layout;
+            }
+        }
+    }
+    return undefined;
 }
 
 /** Prefer the layout's focused leaf over a stale active-terminal id after restore. */
@@ -95,8 +133,16 @@ export function detachTermFromGroups(
     delete next[owner];
     const remainingIds = dropped ? visibleTermIds(dropped).filter((id) => id !== termId) : [];
 
-    if (dropped && isSplitLayout(dropped) && remainingIds.length > 0) {
-        const nextOwner = remainingIds.includes(owner) ? owner : remainingIds[0];
+    if (dropped && (isSplitLayout(dropped) || (isPaneLeaf(dropped.root) && !isTermContent(dropped.root.content)))) {
+        let nextOwner = remainingIds.includes(owner) ? owner : remainingIds[0] ?? null;
+        if (!nextOwner) {
+            const featureLeaf = collectLeaves(dropped.root).find((leaf) => (
+                isFeatureContent(leaf.content) && leaf.content.instanceId
+            ));
+            nextOwner = (featureLeaf && isFeatureContent(featureLeaf.content) && featureLeaf.content.instanceId)
+                ? featureLeaf.content.instanceId
+                : owner;
+        }
         next[nextOwner] = dropped;
         return { next, remainingIds, nextOwner };
     }
@@ -116,6 +162,19 @@ function isLegacyLayout(raw: Record<string, unknown>): boolean {
     return 'root' in raw && 'activePaneId' in raw;
 }
 
+function hasValidGroupOwner(
+    owner: string,
+    layout: PaneLayout,
+    knownTermIds: ReadonlySet<string>,
+): boolean {
+    if (owner === WORKSPACE_PANE_OWNER) return true;
+    const termIds = visibleTermIds(layout);
+    if (knownTermIds.has(owner)) return termIds.includes(owner);
+    return collectLeaves(layout.root).some((leaf) => (
+        isFeatureContent(leaf.content) && leaf.content.instanceId === owner
+    ));
+}
+
 /** Restore per-tab groups. Old session files stored one tree per host. */
 export function parsePaneLayoutGroups(raw: unknown, knownTermIds: ReadonlySet<string>): PaneLayoutGroups {
     if (!isRecord(raw)) return {};
@@ -130,11 +189,12 @@ export function parsePaneLayoutGroups(raw: unknown, knownTermIds: ReadonlySet<st
     const out: PaneLayoutGroups = {};
     const seen = new Set<string>();
     for (const [owner, value] of Object.entries(raw)) {
-        if (!knownTermIds.has(owner)) continue;
+        const isWorkspace = owner === WORKSPACE_PANE_OWNER;
         const layout = parsePaneLayout(value, knownTermIds);
         if (!layout || !isSplitLayout(layout)) continue;
         const ids = visibleTermIds(layout);
-        if (!ids.includes(owner)) continue;
+        if (!isWorkspace && !hasValidGroupOwner(owner, layout, knownTermIds)) continue;
+        if (!ids.every((id) => knownTermIds.has(id))) continue;
         if (ids.some((id) => seen.has(id))) continue;
         for (const id of ids) seen.add(id);
         out[owner] = layout;
@@ -152,11 +212,14 @@ export function snapshotPaneLayoutGroups(
         const known = new Set((terminals[scopeId] ?? []).map((tab) => tab.id));
         const groupOut: PaneLayoutGroups = {};
         for (const [owner, layout] of Object.entries(groups)) {
-            if (!layout || !known.has(owner) || !isPaneSplit(layout.root)) continue;
+            const isWorkspace = owner === WORKSPACE_PANE_OWNER;
+            if (!layout) continue;
             const clean = sanitizePaneLayout(layout, known);
-            if (clean && isSplitLayout(clean) && isSafePaneLayout(clean)) {
-                groupOut[owner] = clean;
-            }
+            if (!clean || !isSplitLayout(clean) || !isSafePaneLayout(clean)) continue;
+            const ids = visibleTermIds(clean);
+            if (!isWorkspace && !hasValidGroupOwner(owner, clean, known)) continue;
+            if (!ids.every((id) => known.has(id))) continue;
+            groupOut[owner] = clean;
         }
         if (Object.keys(groupOut).length > 0) {
             out[scopeId] = groupOut;

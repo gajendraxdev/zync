@@ -1,5 +1,6 @@
 import {
     canSplit,
+    featurePaneContent,
     findLeafByFeature,
     findLeafByTerm,
     layoutForTerm,
@@ -220,7 +221,14 @@ export async function openTerminalHere(
     }
 
     showTerminalView(tabId);
-    reportDock(store.splitTermBesideFiles(connectionId, termId, options.edge, snapshot.filesPaneId));
+    reportDock(store.dockInSplit(
+        connectionId,
+        { kind: 'term', termId },
+        options.edge,
+        snapshot.filesPaneId ?? 'overlay:files',
+        undefined,
+        featurePaneContent('files'),
+    ));
 }
 
 export function canDockHere(connectionId: string, alreadyPresent = false): boolean {

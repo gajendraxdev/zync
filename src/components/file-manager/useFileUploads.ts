@@ -6,18 +6,20 @@ export function useFileUploads({
   connectionId,
   isConnected,
   onDragVisualClear,
+  instanceId,
 }: {
   connectionId: string | undefined;
   isConnected: boolean;
   onDragVisualClear: () => void;
+  instanceId?: string;
 }) {
   const uploadAction = useAppStore((state) => state.uploadFiles);
   const showToast = useAppStore((state) => state.showToast);
 
   const performUpload = useCallback(async (filePaths: string[]) => {
     if (!connectionId || !isConnected) return;
-    await uploadAction(connectionId, filePaths);
-  }, [connectionId, isConnected, uploadAction]);
+    await uploadAction(connectionId, filePaths, instanceId);
+  }, [connectionId, isConnected, instanceId, uploadAction]);
 
   const handleUpload = useCallback(async () => {
     if (!connectionId || !isConnected) return;

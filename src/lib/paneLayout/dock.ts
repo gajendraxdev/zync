@@ -26,9 +26,12 @@ export function splitFromDockEdge(edge: DockEdge): { direction: SplitDirection; 
     }
 }
 
+/** Fraction of a pane from each side that is a split zone. The center is not a drop. */
+export const DOCK_EDGE_BAND = 0.3;
+
 /**
- * Nearest edge while the pointer is inside the drop surface.
- * Outside the surface returns null (drop cancels).
+ * Nearest edge while the pointer is inside that pane's edge band.
+ * Center of the pane, and anything outside the box, return null (drop cancels).
  */
 export function dockEdgeFromPoint(
     x: number,
@@ -43,12 +46,14 @@ export function dockEdgeFromPoint(
     const right = width - x;
     const top = y;
     const bottom = height - y;
-    const sides: Array<{ edge: DockEdge; dist: number }> = [
-        { edge: 'left', dist: left },
-        { edge: 'right', dist: right },
-        { edge: 'top', dist: top },
-        { edge: 'bottom', dist: bottom },
-    ];
+    const bandX = width * DOCK_EDGE_BAND;
+    const bandY = height * DOCK_EDGE_BAND;
+    const sides: Array<{ edge: DockEdge; dist: number }> = [];
+    if (left <= bandX) sides.push({ edge: 'left', dist: left });
+    if (right <= bandX) sides.push({ edge: 'right', dist: right });
+    if (top <= bandY) sides.push({ edge: 'top', dist: top });
+    if (bottom <= bandY) sides.push({ edge: 'bottom', dist: bottom });
+    if (sides.length === 0) return null;
     let best = sides[0];
     for (let i = 1; i < sides.length; i += 1) {
         if (sides[i].dist < best.dist) best = sides[i];

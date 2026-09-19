@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { buildSessionData, MAX_TABS_PER_SCOPE } from '../.tmp-agent-tests/src/store/sessionPersistence.js';
-import { singlePane, splitPane } from '../.tmp-agent-tests/src/lib/paneLayout/index.js';
+import { singleFeaturePane, singlePane, splitPane, WORKSPACE_PANE_OWNER } from '../.tmp-agent-tests/src/lib/paneLayout/index.js';
 import { DEFAULT_VAULT_PROFILE_ID } from '../.tmp-agent-tests/src/vault/profileTypes.js';
 
 function runTest(name, fn) {
@@ -218,6 +218,65 @@ runTest('buildSessionData keeps pane-referenced hidden tabs without exceeding th
   assert.equal(data.terminals.conn1.some((tab) => tab.id === hiddenB.id), true);
   assert.ok(data.paneLayouts.conn1?.[owner.id]);
   assert.equal(data.terminals.conn1.some((tab) => tab.id === `term-${MAX_TABS_PER_SCOPE - 1}`), false);
+});
+
+runTest('buildSessionData keeps a shared hidden pane only once', () => {
+  const visibleA = makeTerminal(0);
+  const visibleB = makeTerminal(1);
+  const hidden = { ...makeTerminal(2), id: 'term-shared-hidden', tabVisible: false };
+  const first = splitPane(singlePane(visibleA.id, 'pane-a'), 'pane-a', 'vertical', { kind: 'term', termId: visibleB.id });
+  assert.equal(first.ok, true);
+  if (!first.ok) return;
+  const bLeaf = first.layout.root.type === 'split' ? first.layout.root.children[1] : null;
+  assert.ok(bLeaf);
+  const nested = splitPane(first.layout, bLeaf.id, 'horizontal', { kind: 'term', termId: hidden.id });
+  assert.equal(nested.ok, true);
+  if (!nested.ok) return;
+
+  const data = buildSessionData({
+    activeTabId: 'tab-1',
+    activeConnectionId: 'conn-1',
+    tabs: [makeConnectionTab()],
+    terminals: { conn1: [visibleA, visibleB, hidden] },
+    activeTerminalIds: { conn1: visibleA.id },
+    paneLayouts: { conn1: { [visibleA.id]: nested.layout } },
+  });
+
+  assert.equal(data.terminals.conn1.filter((tab) => tab.id === hidden.id).length, 1);
+  assert.equal(data.terminals.conn1.length, 3);
+});
+
+runTest('buildSessionData keeps hidden shells in a feature-owned split', () => {
+  const visible = makeTerminal(0);
+  const hidden = { ...makeTerminal(1), tabVisible: false };
+  const withVisible = splitPane(
+    singleFeaturePane('files', 'pane-files', 'files-a'),
+    'pane-files',
+    'horizontal',
+    { kind: 'term', termId: visible.id },
+  );
+  assert.equal(withVisible.ok, true);
+  if (!withVisible.ok) return;
+  const withHidden = splitPane(
+    withVisible.layout,
+    withVisible.newPaneId,
+    'vertical',
+    { kind: 'term', termId: hidden.id },
+  );
+  assert.equal(withHidden.ok, true);
+  if (!withHidden.ok) return;
+
+  const data = buildSessionData({
+    activeTabId: 'tab-1',
+    activeConnectionId: 'conn-1',
+    tabs: [makeConnectionTab()],
+    terminals: { conn1: [visible, hidden] },
+    activeTerminalIds: { conn1: visible.id },
+    paneLayouts: { conn1: { [WORKSPACE_PANE_OWNER]: withHidden.layout } },
+  });
+
+  assert.equal(data.terminals.conn1.some((tab) => tab.id === hidden.id), true);
+  assert.ok(data.paneLayouts.conn1?.[WORKSPACE_PANE_OWNER]);
 });
 
 runTest('buildSessionData keeps a split owner and drops extras that cannot fit', () => {

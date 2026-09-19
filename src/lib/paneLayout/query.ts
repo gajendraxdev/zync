@@ -6,6 +6,7 @@ import {
     type PaneLeaf,
     type PaneNode,
     type PaneSplit,
+    type PluginPaneContent,
     type SplitFeatureId,
     type TermPaneContent,
 } from './types';
@@ -24,6 +25,10 @@ export function isTermContent(content: PaneLeaf['content']): content is TermPane
 
 export function isFeatureContent(content: PaneLeaf['content']): content is FeaturePaneContent {
     return content.kind === 'feature';
+}
+
+export function isPluginContent(content: PaneLeaf['content']): content is PluginPaneContent {
+    return content.kind === 'plugin';
 }
 
 export function collectLeaves(node: PaneNode, out: PaneLeaf[] = []): PaneLeaf[] {
@@ -88,11 +93,25 @@ export function findLeafByFeature(node: PaneNode, featureId: SplitFeatureId): Pa
     return findLeafByFeature(node.children[0], featureId) ?? findLeafByFeature(node.children[1], featureId);
 }
 
+export function findLeafByPlugin(node: PaneNode, pluginId: string): PaneLeaf | null {
+    if (isPaneLeaf(node)) {
+        return isPluginContent(node.content) && node.content.pluginId === pluginId ? node : null;
+    }
+    return findLeafByPlugin(node.children[0], pluginId) ?? findLeafByPlugin(node.children[1], pluginId);
+}
+
 export function layoutHasFeature(
     layout: PaneLayout | null | undefined,
     featureId: SplitFeatureId,
 ): boolean {
     return Boolean(layout && findLeafByFeature(layout.root, featureId));
+}
+
+export function layoutHasPlugin(
+    layout: PaneLayout | null | undefined,
+    pluginId: string,
+): boolean {
+    return Boolean(layout && findLeafByPlugin(layout.root, pluginId));
 }
 
 export function layoutFeatureIds(layout: PaneLayout | null | undefined): SplitFeatureId[] {
@@ -149,13 +168,12 @@ export function activeTermId(layout: PaneLayout | null | undefined): string | nu
 export function isFeaturePaneFocused(
     layout: PaneLayout | null | undefined,
     featureId: SplitFeatureId,
+    instanceId?: string,
 ): boolean {
     if (!layout) return false;
     const focused = findNode(layout.root, layout.activePaneId);
-    return Boolean(
-        focused
-        && isPaneLeaf(focused)
-        && isFeatureContent(focused.content)
-        && focused.content.featureId === featureId,
-    );
+    if (!focused || !isPaneLeaf(focused) || !isFeatureContent(focused.content)) return false;
+    if (focused.content.featureId !== featureId) return false;
+    if (instanceId) return focused.content.instanceId === instanceId;
+    return !focused.content.instanceId;
 }

@@ -86,8 +86,7 @@ export function buildWorkspaceOpenItems(input: {
             label: meta.label,
             keywords: uniqueKeywords(meta.label, featureId, 'open'),
             featureId,
-            disabled: state?.isActive,
-            hint: state?.isActive ? 'Active' : state?.isOpen ? 'Open' : undefined,
+            hint: state?.isOpen ? 'New tab' : undefined,
         });
     }
 

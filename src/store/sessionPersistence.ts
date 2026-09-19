@@ -1,6 +1,6 @@
 import type { Tab } from '../features/connections/domain/types.js';
 import type { VaultProfileId } from '../vault/profileTypes.js';
-import { snapshotPaneLayoutGroups, visibleTermIds, type PaneLayoutGroups } from '../lib/paneLayout';
+import { findLayoutOwner, snapshotPaneLayoutGroups, visibleTermIds, type PaneLayoutGroups } from '../lib/paneLayout';
 
 export interface TerminalTabSnapshot {
     id: string;
@@ -63,14 +63,16 @@ function keepTerminalsForSession(
     const byId = new Map(tabs.map(t => [t.id, t]));
     const keptVisible: SessionTerminalTabState[] = [];
     const keptHidden: SessionTerminalTabState[] = [];
+    const keptHiddenIds = new Set<string>();
     let remaining = cap;
 
     for (const tab of visibleAll) {
         const extraHidden: SessionTerminalTabState[] = [];
-        const layout = groups?.[tab.id];
+        const owner = findLayoutOwner(groups, tab.id);
+        const layout = owner ? groups?.[owner] : undefined;
         if (layout) {
             for (const id of visibleTermIds(layout)) {
-                if (id === tab.id) continue;
+                if (id === tab.id || keptHiddenIds.has(id)) continue;
                 const extra = byId.get(id);
                 if (extra && extra.tabVisible === false) extraHidden.push(extra);
             }
@@ -84,6 +86,7 @@ function keepTerminalsForSession(
         }
         keptVisible.push(tab);
         keptHidden.push(...extraHidden);
+        for (const extra of extraHidden) keptHiddenIds.add(extra.id);
         remaining -= needed;
     }
 
