@@ -59,7 +59,7 @@ export function GeneralTab({
     const [isUpdatingAutoCheck, setIsUpdatingAutoCheck] = useState(false);
     const showHostAddressesInLists =
         settings.privacy?.showHostAddressesInLists ?? DEFAULT_SHOW_HOST_ADDRESSES_IN_LISTS;
-    const shareAnonymousUsage = settings.privacy?.shareAnonymousUsage === true;
+    const shareAnonymousUsage = settings.privacy?.shareAnonymousUsage !== false;
     const selectedEditorProvider = settings.editor?.defaultProvider ?? defaultEditorProvider;
     const editorSelectOptions = useMemo(
         () => withOrphanSelectOption(editorProviderOptions, selectedEditorProvider, {
@@ -137,7 +137,7 @@ export function GeneralTab({
                                 privacy: {
                                     ...(settings.privacy ?? {
                                         showHostAddressesInLists: DEFAULT_SHOW_HOST_ADDRESSES_IN_LISTS,
-                                        shareAnonymousUsage: false,
+                                        shareAnonymousUsage: true,
                                     }),
                                     shareAnonymousUsage: !shareAnonymousUsage,
                                 },

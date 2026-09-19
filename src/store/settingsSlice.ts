@@ -274,7 +274,7 @@ export const defaultSettings: AppSettings = {
     lastSeenVersion: '',
     privacy: {
         showHostAddressesInLists: DEFAULT_SHOW_HOST_ADDRESSES_IN_LISTS,
-        shareAnonymousUsage: false,
+        shareAnonymousUsage: true,
     },
     notifications: { ...DEFAULT_NOTIFICATION_SETTINGS },
     statusBar: { ...DEFAULT_STATUS_BAR_SETTINGS },
@@ -597,7 +597,7 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
                 privacy: {
                     ...defaultSettings.privacy,
                     ...(loaded?.privacy || {}),
-                    shareAnonymousUsage: loaded?.privacy?.shareAnonymousUsage === true,
+                    shareAnonymousUsage: loaded?.privacy?.shareAnonymousUsage !== false,
                 },
                 notifications: normalizeNotificationSettings(loaded?.notifications),
                 statusBar: normalizeStatusBarSettings(loaded?.statusBar),

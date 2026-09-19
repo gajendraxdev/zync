@@ -45,7 +45,7 @@ function AppContent() {
                 console.warn('[App] fetchSystemInfo failed:', e);
             }
             refreshVault().catch(e => console.warn('[App] refreshVault failed:', e));
-            const shareUsage = useAppStore.getState().settings.privacy.shareAnonymousUsage === true;
+            const shareUsage = useAppStore.getState().settings.privacy.shareAnonymousUsage !== false;
             setUsageEnabled(shareUsage);
             if (shareUsage) startUsageLifecycle();
         };
