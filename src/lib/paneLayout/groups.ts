@@ -6,6 +6,7 @@ import {
     firstTermLeaf,
     isFeatureContent,
     isPaneLeaf,
+    isPluginContent,
     isSafePaneLayout,
     isSplitLayout,
     isTermContent,
@@ -141,7 +142,7 @@ export function detachTermFromGroups(
             ));
             nextOwner = (featureLeaf && isFeatureContent(featureLeaf.content) && featureLeaf.content.instanceId)
                 ? featureLeaf.content.instanceId
-                : owner;
+                : WORKSPACE_PANE_OWNER;
         }
         next[nextOwner] = dropped;
         return { next, remainingIds, nextOwner };
@@ -171,8 +172,15 @@ function hasValidGroupOwner(
     const termIds = visibleTermIds(layout);
     if (knownTermIds.has(owner)) return termIds.includes(owner);
     return collectLeaves(layout.root).some((leaf) => (
-        isFeatureContent(leaf.content) && leaf.content.instanceId === owner
+        (isFeatureContent(leaf.content) && leaf.content.instanceId === owner)
+        || (isPluginContent(leaf.content) && leaf.content.pluginId === owner)
     ));
+}
+
+function isKeepableRemainder(layout: PaneLayout | null | undefined): layout is PaneLayout {
+    if (!layout) return false;
+    if (isSplitLayout(layout)) return true;
+    return isPaneLeaf(layout.root) && !isTermContent(layout.root.content);
 }
 
 /** Restore per-tab groups. Old session files stored one tree per host. */
@@ -191,7 +199,7 @@ export function parsePaneLayoutGroups(raw: unknown, knownTermIds: ReadonlySet<st
     for (const [owner, value] of Object.entries(raw)) {
         const isWorkspace = owner === WORKSPACE_PANE_OWNER;
         const layout = parsePaneLayout(value, knownTermIds);
-        if (!layout || !isSplitLayout(layout)) continue;
+        if (!layout || !isKeepableRemainder(layout) || !isSafePaneLayout(layout)) continue;
         const ids = visibleTermIds(layout);
         if (!isWorkspace && !hasValidGroupOwner(owner, layout, knownTermIds)) continue;
         if (!ids.every((id) => knownTermIds.has(id))) continue;
@@ -215,7 +223,7 @@ export function snapshotPaneLayoutGroups(
             const isWorkspace = owner === WORKSPACE_PANE_OWNER;
             if (!layout) continue;
             const clean = sanitizePaneLayout(layout, known);
-            if (!clean || !isSplitLayout(clean) || !isSafePaneLayout(clean)) continue;
+            if (!clean || !isKeepableRemainder(clean) || !isSafePaneLayout(clean)) continue;
             const ids = visibleTermIds(clean);
             if (!isWorkspace && !hasValidGroupOwner(owner, clean, known)) continue;
             if (!ids.every((id) => known.has(id))) continue;

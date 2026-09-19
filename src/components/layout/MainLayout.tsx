@@ -887,6 +887,7 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
                             <div
                                 className={cn(
                                     "absolute inset-0 z-20",
+                                    tab.view.startsWith('plugin:') && "hidden",
                                     terminalTransparencyEnabled && !forceOpaqueShell ? "bg-transparent" : "bg-app-bg"
                                 )}
                             >

@@ -32,7 +32,7 @@ export function FeaturePaneBody({
         <Suspense fallback={<FeaturePaneFallback />}>
             {featureId === 'files' && (
                 <ErrorBoundary isolate>
-                    <FileManager connectionId={connectionId} surface="pane" instanceId={instanceId} />
+                    <FileManager connectionId={connectionId} surface="pane" instanceId={instanceId} active={visible} />
                 </ErrorBoundary>
             )}
             {featureId === 'dashboard' && (

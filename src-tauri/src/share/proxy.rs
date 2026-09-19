@@ -523,8 +523,12 @@ fn apply_share_http_headers(
     open: &Open,
     target_url: &url::Url,
 ) -> reqwest::RequestBuilder {
+    let loopback = is_loopback_url(target_url);
     for (key, values) in &open.headers {
         if hop_header(key) {
+            continue;
+        }
+        if loopback && loopback_rewrite_header(key) {
             continue;
         }
         for value in values {
@@ -534,7 +538,7 @@ fn apply_share_http_headers(
 
     let host = localhost_http_host(target_url);
     builder = builder.header("Host", &host);
-    if is_loopback_url(target_url) {
+    if loopback {
         if header_get(&open.headers, "Origin").is_some() {
             builder = builder.header("Origin", loopback_origin(target_url.scheme(), &host));
         }
@@ -562,6 +566,13 @@ fn hop_header(key: &str) -> bool {
         key.to_ascii_lowercase().as_str(),
         "host" | "content-length" | "transfer-encoding" | "connection" | "keep-alive" | "te"
             | "trailers" | "upgrade" | "proxy-connection"
+    )
+}
+
+fn loopback_rewrite_header(key: &str) -> bool {
+    matches!(
+        key.to_ascii_lowercase().as_str(),
+        "origin" | "referer" | "x-forwarded-host"
     )
 }
 

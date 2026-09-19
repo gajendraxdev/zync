@@ -15,6 +15,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Workspace tabs:** Close and Disconnect sit over the title on hover instead of stretching the tab. Overflowing tabs fade at the edges and scroll with the mouse wheel. ([a99db16])
 
 ### Fixed
+- **Plugin full-view:** Opening a plugin tab is no longer covered by the terminal canvas. A plugin that is not in a split keeps its inventory tab.
+- **Split Files cut and Open Terminal Here:** Cut updates the source pane’s listing. Open Terminal Here uses that Files pane’s folder.
+- **Feature-only remainder persist:** A Files-only or plugin-only pane after the last shell exits is saved and restored.
+- **Public URLs loopback headers:** Origin, Referer, and X-Forwarded-Host are rewritten for localhost and not also forwarded raw.
 - **Pane header on a full-view tab:** The inner Files (and other feature) header with the X only shows after a split. Close the tab from the tab bar. ([4debaba])
 - **Split shell titles:** Extra shells in a split are named Shell 2, Shell 3, … instead of stacking “pane” on the source title. ([4debaba])
 - **Last shell `exit` in a mixed split:** Typing `exit` in the only shell beside Files no longer blanks the canvas. Remaining Files panes stay as **Split N**. ([1776541])

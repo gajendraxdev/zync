@@ -25,7 +25,7 @@ A **pane** is a container. Shell, Files, Dashboard, tunnels, and snippets are **
 
 ```
 paneLayouts[connectionId][layoutOwner] = PaneLayout
-  layoutOwner: ownerTermId | featureInstanceId | "workspace"
+  layoutOwner: terminalId | featureInstanceId | "workspace"
   leaf: { type: 'pane', id, content: term | feature | plugin }
 ```
 

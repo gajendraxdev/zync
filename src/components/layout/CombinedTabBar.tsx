@@ -686,7 +686,7 @@ export const CombinedTabBar = memo(function CombinedTabBar({
                     if (anchoredOwner && anchoredLayout && isSplitLayout(anchoredLayout)) {
                         return renderSplitTab(anchoredOwner, anchoredLayout);
                     }
-                    if (extraLeafPluginIds.has(panelId) || layoutHasPlugin(splitLayout, panelId)) return null;
+                    if (extraLeafPluginIds.has(panelId)) return null;
                     const panel = pluginPanels.find(p => p.id === panelId);
                     if (!panel) return null;
                     const isActive = activeView === featureId;

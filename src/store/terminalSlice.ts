@@ -1104,7 +1104,20 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                 const withoutSource = isSplitLayout(sourceLayout)
                     ? unsplitPane(sourceLayout, sourcePaneId)
                     : null;
-                const targetLayout = sourceOwner === owner ? withoutSource : groups?.[owner];
+                let targetLayout = sourceOwner === owner ? withoutSource : groups?.[owner];
+                if (!targetLayout && owner === WORKSPACE_PANE_OWNER && targetContent) {
+                    if (targetContent.kind === 'feature') {
+                        const instanceId = targetContent.instanceId ?? newFeatureInstanceId(targetContent.featureId);
+                        if (targetContent.featureId === 'files' && !targetContent.instanceId) {
+                            get().copyFilesListing(connectionId, undefined, instanceId);
+                        }
+                        targetLayout = singleFeaturePane(targetContent.featureId, undefined, instanceId);
+                    } else if (targetContent.kind === 'plugin') {
+                        targetLayout = singlePluginPane(targetContent.pluginId);
+                    } else if (targetContent.kind === 'term') {
+                        targetLayout = singlePane(targetContent.termId);
+                    }
+                }
                 if (!targetLayout) return 'no-target';
                 const moved = dockIntoLayout(targetLayout, sourceNode.content, edge, undefined, paneId);
                 if (!moved.ok) {
@@ -1136,6 +1149,7 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                         }
                         nextGroups[groupOwner] = groupOwner === owner ? moved.layout : groupLayout;
                     }
+                    nextGroups[owner] = moved.layout;
                     const releasedTerms = keepSourceGroup ? new Set<string>() : new Set(remainingTerms);
                     const movedTermId = sourceNode.content.kind === 'term' ? sourceNode.content.termId : null;
                     const nextTabs = tabs.map((tab) => {

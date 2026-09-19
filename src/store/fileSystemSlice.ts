@@ -50,6 +50,7 @@ export interface FileSystemState {
         files: FileEntry[];
         sourceConnectionId: string;
         sourcePath: string; // parent path
+        sourceInstanceId?: string;
         op: 'copy' | 'cut';
     } | null;
 }
@@ -67,7 +68,7 @@ export interface FileSystemActions {
     navigateBack: (connectionId: string, instanceId?: string) => void;
     navigateForward: (connectionId: string, instanceId?: string) => void;
     navigateHistoryTo: (connectionId: string, index: number, instanceId?: string) => void;
-    setClipboard: (files: FileEntry[], sourceConnectionId: string, sourcePath: string, op: 'copy' | 'cut') => void;
+    setClipboard: (files: FileEntry[], sourceConnectionId: string, sourcePath: string, op: 'copy' | 'cut', sourceInstanceId?: string) => void;
     clearClipboard: () => void;
     clearRecentPaths: (connectionId: string) => void;
     pasteEntries: (connectionId: string, sources: string[], op: 'copy' | 'cut', destinationDirectory?: string, instanceId?: string) => Promise<void>;
@@ -87,8 +88,8 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
     error: {},
     clipboard: null,
 
-    setClipboard: (files, sourceConnectionId, sourcePath, op) => {
-        set({ clipboard: { files, sourceConnectionId, sourcePath, op } });
+    setClipboard: (files, sourceConnectionId, sourcePath, op, sourceInstanceId) => {
+        set({ clipboard: { files, sourceConnectionId, sourcePath, sourceInstanceId, op } });
     },
 
     clearClipboard: () => {
@@ -129,24 +130,26 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
         let targetPath = (path !== undefined ? path : state.currentPath[key] || '').trim();
         if (!targetPath) return;
         const recentGen = recentPathsGeneration.get(connectionId) || 0;
+        const loadGen = (filesLoadGeneration.get(key) || 0) + 1;
+        filesLoadGeneration.set(key, loadGen);
         if (targetPath === '~' || targetPath.startsWith('~/')) {
             const conn = get().connections.find((c) => c.id === connectionId);
             let home = (conn?.homePath ?? '').trim();
             if (!home || home === '/' || home === '~') {
                 try {
                     const cwd = await ipc.invoke('fs_cwd', { connectionId });
+                    if (filesLoadGeneration.get(key) !== loadGen) return;
                     if (typeof cwd === 'string') home = cwd.trim();
                 } catch {
+                    if (filesLoadGeneration.get(key) !== loadGen) return;
                     home = '';
                 }
             }
+            if (filesLoadGeneration.get(key) !== loadGen) return;
             const expanded = expandTildeWithHome(targetPath, home);
             if (!expanded || expanded === '~' || expanded.startsWith('~/')) return;
             targetPath = expanded;
         }
-
-        const loadGen = (filesLoadGeneration.get(key) || 0) + 1;
-        filesLoadGeneration.set(key, loadGen);
 
         // History Logic
         if (!skipHistory && targetPath !== state.currentPath[key]) {
@@ -507,47 +510,35 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
                 await ipc.invoke(command, { connectionId, operations });
             }
 
-            // Apply Optimistic Updates
+            const sourceKey = filesStoreKey(
+                state.clipboard?.sourceConnectionId || connectionId,
+                state.clipboard?.sourceInstanceId,
+            );
+            const normalizedSourcesSet = new Set(sources.map(s => normalizePath(s)));
+
             set(state => {
-                const currentFiles = state.files[key] || [];
-                
-                // 1. Remove sources if this is a move (cut)
-                let filesAfterRemoval = currentFiles;
-                const normalizedSourcesSet = new Set(sources.map(s => normalizePath(s)));
-
-                if (op === 'cut') {
-                    filesAfterRemoval = currentFiles.filter(f => !normalizedSourcesSet.has(normalizePath(f.path)));
-                }
-
-                // 2. Only add new entries if they belong in the CURRENT directory
+                const destFiles = state.files[key] || [];
+                const destAfterCut = (op === 'cut' && sourceKey === key)
+                    ? destFiles.filter(f => !normalizedSourcesSet.has(normalizePath(f.path)))
+                    : destFiles;
                 const filteredNewEntries = newEntries.filter(entry => {
                     const entryParent = entry.path.substring(0, entry.path.lastIndexOf('/')) || '/';
                     return normalizePath(entryParent) === normCurrentPath;
                 });
-
-                const updatedFiles = filesAfterRemoval.concat(filteredNewEntries);
-
+                const nextFiles = {
+                    ...state.files,
+                    [key]: destAfterCut.concat(filteredNewEntries),
+                };
+                if (op === 'cut' && sourceKey !== key && state.files[sourceKey]) {
+                    nextFiles[sourceKey] = state.files[sourceKey].filter(
+                        f => !pathsToRemoveFromSource.map(p => normalizePath(p)).includes(normalizePath(f.path)),
+                    );
+                }
                 return {
                     isLoading: { ...state.isLoading, [key]: false },
-                    files: { ...state.files, [key]: updatedFiles }
+                    files: nextFiles,
                 };
             });
-
-            // If cut from DIFFERENT connection, we should also update the SOURCE list if it's loaded?
-            if (op === 'cut' && state.clipboard?.sourceConnectionId && state.clipboard.sourceConnectionId !== connectionId) {
-                // Optimistically remove from source
-                const srcId = state.clipboard.sourceConnectionId;
-                set(state => {
-                    const srcFiles = state.files[srcId];
-                    if (!srcFiles) return {}; // Not loaded, ignore
-                    return {
-                        files: {
-                            ...state.files,
-                            [srcId]: srcFiles.filter(f => !pathsToRemoveFromSource.map(p => normalizePath(p)).includes(normalizePath(f.path)))
-                        }
-                    };
-                });
-            }
 
             get().setLastAction(`${op === 'copy' ? 'Copying' : 'Moving'} ${sources.length} item(s)...`, 'info');
         } catch (error: any) {

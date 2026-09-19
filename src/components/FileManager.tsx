@@ -97,13 +97,13 @@ export interface Conflict {
 
 function terminalHereMenuItems(
   connectionId: string,
+  listedPath: string,
   file: { type: string; name: string; path?: string } | undefined,
   onDone: () => void,
 ): ContextMenuItem[] {
   const splitDisabled = !canSplitBesideFiles(connectionId);
   const run = (opts?: { synced?: boolean; edge?: 'left' | 'right' | 'top' | 'bottom' }) => {
-    const listed = useAppStore.getState().currentPath[connectionId] || '';
-    void openTerminalHere(connectionId, listed, { ...opts, file }).then(onDone);
+    void openTerminalHere(connectionId, listedPath, { ...opts, file }).then(onDone);
   };
   return [
     {
@@ -252,6 +252,7 @@ export const FileManager = memo(function FileManager({
     currentPath,
     files,
     selectedFiles,
+    instanceId,
   });
   const [sortColumn, setSortColumn] = useState<FileSortColumn>('name');
   const [sortDirection, setSortDirection] = useState<FileSortDirection>('asc');
@@ -420,7 +421,7 @@ export const FileManager = memo(function FileManager({
           }, {} as Record<string, string[]>);
 
           for (const [opType, sources] of Object.entries(groups)) {
-            await pasteEntries(activeConnectionId, sources, opType === 'move' ? 'cut' : 'copy', targetDirectory);
+            await pasteEntries(activeConnectionId, sources, opType === 'move' ? 'cut' : 'copy', targetDirectory, instanceId);
           }
         } else {
           // Cross connection: Loop through and start transfers
@@ -1546,6 +1547,7 @@ export const FileManager = memo(function FileManager({
         ...(activeConnectionId
           ? terminalHereMenuItems(
               activeConnectionId,
+              currentPath,
               contextMenu.file,
               () => setContextMenu(null),
             )
@@ -1606,7 +1608,7 @@ export const FileManager = memo(function FileManager({
         },
         { separator: true },
         ...(activeConnectionId
-          ? terminalHereMenuItems(activeConnectionId, undefined, () => setContextMenu(null))
+          ? terminalHereMenuItems(activeConnectionId, currentPath, undefined, () => setContextMenu(null))
           : []),
         { separator: true },
         {

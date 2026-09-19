@@ -24,6 +24,7 @@ import {
   leafCount,
   openFeatureInLayout,
   singleFeaturePane,
+  singlePluginPane,
   parsePaneLayout,
   parsePaneLayoutGroups,
   focusedTermIdForRestore,
@@ -494,6 +495,35 @@ runTest('detachTermFromGroups keeps Files panes when the last shell exits', () =
   assert.equal(isSplitLayout(remaining), true);
   assert.equal(layoutHasFeature(remaining, 'files'), true);
   assert.deepEqual(visibleTermIds(remaining), []);
+});
+
+runTest('detachTermFromGroups rekeys a plugin-only remainder to workspace', () => {
+  const mixed = dockIntoLayout(
+    singlePane('term-a', 'pane-a'),
+    { kind: 'plugin', pluginId: 'plug-1' },
+    'right',
+  );
+  assert.equal(mixed.ok, true);
+  if (!mixed.ok) return;
+  const gone = detachTermFromGroups({ 'term-a': mixed.layout }, 'term-a');
+  assert.equal(gone.nextOwner, WORKSPACE_PANE_OWNER);
+  const remaining = gone.next?.[WORKSPACE_PANE_OWNER];
+  assert.ok(remaining);
+  assert.equal(layoutHasPlugin(remaining, 'plug-1'), true);
+  assert.deepEqual(visibleTermIds(remaining), []);
+});
+
+runTest('snapshot and parse keep a single Files pane', () => {
+  const solo = singleFeaturePane('files', 'pane-files', 'files-a');
+  const snapped = snapshotPaneLayoutGroups(
+    { host: { 'files-a': solo } },
+    { host: [] },
+  );
+  assert.ok(snapped.host?.['files-a']);
+  const parsed = parsePaneLayoutGroups(snapped.host, new Set());
+  assert.ok(parsed['files-a']);
+  assert.equal(isSplitLayout(parsed['files-a']), false);
+  assert.equal(layoutHasFeature(parsed['files-a'], 'files'), true);
 });
 
 runTest('openFeatureInLayout splits Files beside a shell and focuses the new leaf', () => {
