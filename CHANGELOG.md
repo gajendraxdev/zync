@@ -5,7 +5,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 ## [Unreleased]
 
 ### Added
-- **Anonymous usage:** Settings → General → **Share anonymous usage** is on by default. The app may send a random install id, app version, OS, and which features you opened. No hosts, paths, commands, or IP. Flushes on open, close, and about every 15 minutes. Turn it off in Settings to stop. ([58610af])
+- **Anonymous usage:** Settings → General → **Share anonymous usage** is on by default. The app may send a random install id, app version, OS, and which features you opened. No hosts, paths, commands, or IP. Flushes on open, close, and about every 15 minutes. Turn it off in Settings to stop. ([58610af], [97743bc])
 - **Disconnect on hover:** A connected host in the sidebar shows Disconnect on hover. The active connected workspace tab shows Disconnect (and Close) over the title on hover. Disconnect drops the session and leaves the tab open. ([a99db16])
 - **Workspace panes:** One split container for shell, Files, Dashboard, tunnels, snippets, and plugins. Drag a tab onto a pane **edge** to split (cap 4). Drag a pane header onto **another pane’s edge** to move it, or onto **its own edge** for a sibling (Files copies the current folder). Drop in the **center** cancels. Grouped items leave the tab bar as **Split N** and come back on unsplit. Files-only splits are valid — no shell required. ([1776541])
 - **Public URLs v2 binary data frames:** After handshake, agent and relay send page bytes as WebSocket binary frames instead of JSON+base64. Hello still sends `v: 1` plus `max_v: 2` so older relays keep working. ([ad505c5])
