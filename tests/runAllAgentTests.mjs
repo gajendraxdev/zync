@@ -73,6 +73,7 @@ const tests = [
   'tests/redactContext.test.mjs',
   'tests/requestContext.test.mjs',
   'tests/sessionPersistence.test.mjs',
+  'tests/usageQueue.test.mjs',
   'tests/paneLayout.test.mjs',
   'tests/dockInSplit.self.test.mjs',
   'tests/workspaceOpenItems.test.mjs',

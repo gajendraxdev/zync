@@ -7,6 +7,7 @@ import { useVaultStore } from './vault/useVaultStore';
 import { WelcomeScreen } from './components/dashboard/WelcomeScreen';
 import { useTransferEvents } from './hooks/useTransferEvents';
 import { useAutoUpdater } from './features/updater';
+import { setUsageEnabled, startUsageLifecycle } from './features/usage';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { PluginProvider } from './context/PluginContext';
 import { GlobalConfirmDialog } from './components/ui/GlobalConfirmDialog';
@@ -44,6 +45,9 @@ function AppContent() {
                 console.warn('[App] fetchSystemInfo failed:', e);
             }
             refreshVault().catch(e => console.warn('[App] refreshVault failed:', e));
+            const shareUsage = useAppStore.getState().settings.privacy.shareAnonymousUsage !== false;
+            setUsageEnabled(shareUsage);
+            if (shareUsage) startUsageLifecycle();
         };
         init().catch(e => console.warn('[App] Initialisation error:', e));
         // eslint-disable-next-line react-hooks/exhaustive-deps -- store actions are stable

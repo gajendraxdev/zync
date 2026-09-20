@@ -145,7 +145,7 @@ function SortableTab({
             aria-selected={isActive}
             tabIndex={isActive ? 0 : -1}
             className={cn(
-                "group relative flex h-7 max-w-[160px] shrink-0 items-center gap-1.5 rounded-md border px-2 text-[11px] cursor-pointer select-none outline-none drag-none transition-[background-color,border-color,color,box-shadow] duration-150 before:pointer-events-none before:absolute before:-left-[3px] before:h-4 before:w-px before:bg-app-border/55 first:before:hidden focus-visible:ring-2 focus-visible:ring-app-accent/60",
+                "group relative flex h-7 max-w-[168px] shrink-0 items-center gap-2 rounded-md border px-2.5 text-[11px] cursor-pointer select-none outline-none drag-none transition-[background-color,border-color,color,box-shadow] duration-150 before:pointer-events-none before:absolute before:-left-[4px] before:h-4 before:w-px before:bg-app-border/55 first:before:hidden focus-visible:ring-2 focus-visible:ring-app-accent/60",
                 isActive
                     ? "bg-app-surface/90 text-app-text border-app-border/80 shadow-[0_1px_2px_rgba(0,0,0,0.28)] font-medium before:hidden"
                     : "text-app-muted border-transparent hover:bg-app-surface/45 hover:text-app-text"
@@ -161,7 +161,7 @@ function SortableTab({
             </span>
 
             <div className={cn(
-                "min-w-0 max-w-[132px]",
+                "min-w-0 max-w-[132px] px-0.5",
             )}>
                 {tab.type === 'public-urls' ? (
                     <PublicUrlsLabel className="block truncate text-[11px] font-semibold" />
@@ -171,7 +171,7 @@ function SortableTab({
             </div>
 
             <div className={cn(
-                "pointer-events-none absolute inset-y-0 right-1 my-auto flex h-6 items-center gap-1 rounded pl-1 opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100",
+                "pointer-events-none absolute inset-y-0 right-1.5 my-auto flex h-6 items-center gap-1.5 rounded pl-1.5 opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100",
                 isActive ? "bg-app-surface/95" : "bg-app-surface",
             )}>
                 {isActive && isConnectedHostTab(tab, connections) && tab.connectionId && (
@@ -510,7 +510,7 @@ export function TabBar() {
                         role="tablist"
                         aria-label="Open workspaces"
                         className={cn(
-                            "workspace-tabs-scroll flex h-full min-w-0 flex-1 items-center gap-1 overflow-x-auto px-0.5",
+                            "workspace-tabs-scroll flex h-full min-w-0 flex-1 items-center gap-1.5 overflow-x-auto px-1",
                             tabOverflow.left && tabOverflow.right && "workspace-tabs-fade-both",
                             tabOverflow.left && !tabOverflow.right && "workspace-tabs-fade-left",
                             !tabOverflow.left && tabOverflow.right && "workspace-tabs-fade-right",

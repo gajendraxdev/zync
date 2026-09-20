@@ -102,8 +102,9 @@ jobs:
           GITHUB_TOKEN: ${{ env.RELEASE_GITHUB_TOKEN }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          # Baked into the Vite bundle for survey/feedback API (prod).
-          VITE_SURVEY_API_URL: ${{ secrets.VITE_SURVEY_API_URL }}
+          # Baked into the Vite bundle for analytics (survey/feedback/usage).
+          VITE_ANALYTICS_API_URL: ${{ secrets.VITE_ANALYTICS_API_URL || secrets.VITE_SURVEY_API_URL }}
+          VITE_SURVEY_API_URL: ${{ secrets.VITE_SURVEY_API_URL || secrets.VITE_ANALYTICS_API_URL }}
           # Baked into the Rust binary at compile time. Do not hardcode production
           # Public URLs hosts in source. Set these repo secrets before tagging.
           ZYNC_SHARE_API_BASE: ${{ secrets.ZYNC_SHARE_API_BASE }}

@@ -168,6 +168,8 @@
         "src/lib/terminal/terminalConnectionWakeup.ts",
         "src/lib/terminal/index.ts",
 
+        "src/features/usage/catalog.ts",
+        "src/features/usage/queue.ts",
         "src/store/sessionPersistence.ts",
         "src/vault/credentialTypes.ts",
         "src/vault/profileTypes.ts",

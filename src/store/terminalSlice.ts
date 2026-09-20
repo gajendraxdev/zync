@@ -1,5 +1,6 @@
 import { StateCreator } from 'zustand';
 import type { AppStore } from './useAppStore';
+import { track } from '../features/usage';
 import { terminalService } from '../lib/terminal';
 import type { TerminalTabSnapshot } from './sessionPersistence';
 import { scheduleSaveSession } from './sessionSlice';
@@ -315,6 +316,7 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
             };
         });
         scheduleSaveSession(() => get().saveSession());
+        track('terminal');
         return newId;
     },
 
@@ -798,6 +800,7 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                 : state.activeTerminalIds,
         });
         scheduleSaveSession(() => get().saveSession());
+        track('split');
     },
 
     ensureFeaturePane: (connectionId, featureId, instanceId) => {
@@ -953,6 +956,7 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
             },
         });
         scheduleSaveSession(() => get().saveSession());
+        track('split');
         return 'opened';
     },
 
@@ -1374,6 +1378,7 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
             },
         });
         scheduleSaveSession(() => get().saveSession());
+        if (docked.created) track('split');
         return docked.created ? 'opened' : 'focused';
     },
 

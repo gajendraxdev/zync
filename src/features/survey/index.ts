@@ -1,5 +1,5 @@
 export { submitFeedback, submitSurvey } from './client.js';
-export { getSurveyApiBaseUrl } from './config.js';
+export { getAnalyticsApiBaseUrl, getSurveyApiBaseUrl } from './config.js';
 export { buildGitHubFeedbackIssueUrl } from './githubIssue.js';
 export { resolveSurveyPromptKind } from './eligibility.js';
 export {
