@@ -4,6 +4,14 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.32.1] - 2026-09-20
+
+### Changed
+- **Workspace tabs:** More space between tabs, a bit more padding in each tab, and more gap between Disconnect and Close on hover.
+
+### Fixed
+- **Analytics URL in release builds:** Production builds bake `VITE_ANALYTICS_API_URL` (falls back to `VITE_SURVEY_API_URL`) so usage/survey/feedback hit the analytics host instead of localhost.
+
 ## [2.32.0] - 2026-09-20
 
 ### Added
@@ -1442,7 +1450,8 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [d3f4060]: https://github.com/zync-sh/zync/commit/d3f4060
 [840afc2]: https://github.com/zync-sh/zync/commit/840afc2
 [193f568]: https://github.com/zync-sh/zync/commit/193f568
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.32.0...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.32.1...HEAD
+[2.32.1]: https://github.com/zync-sh/zync/compare/v2.32.0...v2.32.1
 [2.32.0]: https://github.com/zync-sh/zync/compare/v2.31.0...v2.32.0
 [2.31.0]: https://github.com/zync-sh/zync/compare/v2.30.0...v2.31.0
 [1776541]: https://github.com/zync-sh/zync/commit/1776541
