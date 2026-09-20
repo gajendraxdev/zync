@@ -4,6 +4,8 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.32.0] - 2026-09-20
+
 ### Added
 - **Anonymous usage:** Settings → General → **Share anonymous usage** is on by default. The app may send a random install id, app version, OS, and which features you opened. The payload has no IP, hosts, paths, or commands. Flushes on open, close, and about every 15 minutes. Turn it off in Settings to stop. ([58610af], [97743bc], [13f5301])
 - **Disconnect on hover:** A connected host in the sidebar shows Disconnect on hover. The active connected workspace tab shows Disconnect (and Close) over the title on hover. Disconnect drops the session and leaves the tab open. ([a99db16])
@@ -1440,8 +1442,16 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [d3f4060]: https://github.com/zync-sh/zync/commit/d3f4060
 [840afc2]: https://github.com/zync-sh/zync/commit/840afc2
 [193f568]: https://github.com/zync-sh/zync/commit/193f568
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.31.0...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.32.0...HEAD
+[2.32.0]: https://github.com/zync-sh/zync/compare/v2.31.0...v2.32.0
 [2.31.0]: https://github.com/zync-sh/zync/compare/v2.30.0...v2.31.0
+[1776541]: https://github.com/zync-sh/zync/commit/1776541
+[a99db16]: https://github.com/zync-sh/zync/commit/a99db16
+[4debaba]: https://github.com/zync-sh/zync/commit/4debaba
+[d7560f0]: https://github.com/zync-sh/zync/commit/d7560f0
+[58610af]: https://github.com/zync-sh/zync/commit/58610af
+[97743bc]: https://github.com/zync-sh/zync/commit/97743bc
+[13f5301]: https://github.com/zync-sh/zync/commit/13f5301
 [0a2a077]: https://github.com/zync-sh/zync/commit/0a2a077
 [df639a8]: https://github.com/zync-sh/zync/commit/df639a8
 [2fb21e6]: https://github.com/zync-sh/zync/commit/2fb21e6
