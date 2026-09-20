@@ -1,6 +1,7 @@
-/** Dev default points at local `zync-analytics`. Override with VITE_SURVEY_API_URL for prod. */
-export function getSurveyApiBaseUrl(): string {
-  const fromEnv = (import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_SURVEY_API_URL;
+/** Dev default points at local `zync-analytics`. Override with VITE_ANALYTICS_API_URL (or legacy VITE_SURVEY_API_URL). */
+export function getAnalyticsApiBaseUrl(): string {
+  const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env;
+  const fromEnv = env?.VITE_ANALYTICS_API_URL || env?.VITE_SURVEY_API_URL;
   const raw =
     typeof fromEnv === 'string' && fromEnv.trim()
       ? fromEnv.trim().replace(/\/$/, '')
@@ -10,7 +11,7 @@ export function getSurveyApiBaseUrl(): string {
   try {
     parsed = new URL(raw);
   } catch {
-    throw new Error('Invalid survey API URL');
+    throw new Error('Invalid analytics API URL');
   }
 
   const host = parsed.hostname.toLowerCase();
@@ -23,11 +24,16 @@ export function getSurveyApiBaseUrl(): string {
 
   if (parsed.protocol === 'http:') {
     if (!isLoopback) {
-      throw new Error('Survey API URL must use HTTPS for non-local hosts');
+      throw new Error('Analytics API URL must use HTTPS for non-local hosts');
     }
   } else if (parsed.protocol !== 'https:') {
-    throw new Error('Survey API URL must be http(s)');
+    throw new Error('Analytics API URL must be http(s)');
   }
 
   return raw;
+}
+
+/** @deprecated Use getAnalyticsApiBaseUrl */
+export function getSurveyApiBaseUrl(): string {
+  return getAnalyticsApiBaseUrl();
 }
