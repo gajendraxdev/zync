@@ -222,7 +222,8 @@ pub struct PendingPackageActivation {
 }
 
 impl PendingPackageActivation {
-    pub fn had_previous(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn had_previous(&self) -> bool {
         self.backup.is_some()
     }
 
