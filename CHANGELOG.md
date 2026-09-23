@@ -4,6 +4,13 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Added
+- **Plugin sandbox v2:** Manifest v2 permissions, brokered native capabilities, isolated panes and workers, runtime health/safe mode, automatic rollback, publisher identity, and generic plugin pane splitting. ([93f3fc0], [7ccfe31])
+- **Signed plugin distribution:** Local signing tools, signed registry verification and publisher binding, revocation and root-key rotation support, an operations runbook, and a testable manifest v2 demo plugin. ([2c21fc2])
+
+### Security
+- **Plugin and asset isolation:** The desktop CSP and Tauri asset protocol are restricted to approved plugin assets; plugin editor frames receive their own deny-by-default policy, and release notes no longer load local filesystem media. ([be3a109])
+
 ## [2.32.1] - 2026-09-20
 
 ### Changed
@@ -1463,6 +1470,10 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [13f5301]: https://github.com/zync-sh/zync/commit/13f5301
 [2857eaf]: https://github.com/zync-sh/zync/commit/2857eaf
 [b83c2f2]: https://github.com/zync-sh/zync/commit/b83c2f2
+[93f3fc0]: https://github.com/zync-sh/zync/commit/93f3fc0
+[7ccfe31]: https://github.com/zync-sh/zync/commit/7ccfe31
+[2c21fc2]: https://github.com/zync-sh/zync/commit/2c21fc2
+[be3a109]: https://github.com/zync-sh/zync/commit/be3a109
 [0a2a077]: https://github.com/zync-sh/zync/commit/0a2a077
 [df639a8]: https://github.com/zync-sh/zync/commit/df639a8
 [2fb21e6]: https://github.com/zync-sh/zync/commit/2fb21e6
