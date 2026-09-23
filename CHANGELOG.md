@@ -5,7 +5,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 ## [Unreleased]
 
 ### Fixed
-- **Files tabs on host switch:** Leaving a host (or Local) and coming back no longer adds another Files tab. The Files panes already saved for that host are reused. A Files pane docked beside a shell stays the active tab instead of a later Files pane. A new Files tab is created only when that host does not have one yet.
+- **Files tabs on host switch:** Leaving a host (or Local) and coming back no longer adds another Files tab. The Files panes already saved for that host are reused. A Files pane docked beside a shell stays the active tab instead of a later Files pane. A new Files tab is created only when that host does not have one yet. ([d251558])
 
 ## [2.32.1] - 2026-09-20
 
