@@ -88,6 +88,7 @@ import {
     dispatchTerminalConnectionWakeup,
     resetTerminalPtyForReconnect,
 } from '../lib/terminal';
+import { terminalCache } from '../lib/terminal/terminalCache';
 import type { TabSnapshot } from './sessionPersistence';
 import { DEFAULT_SHOW_HOST_ADDRESSES_IN_LISTS } from '../features/connections/domain/connectionDisplay.js';
 import { DEFAULT_VAULT_PROFILE_ID, isVaultProfileId, type VaultProfileId } from '../vault/profileTypes';
@@ -106,6 +107,18 @@ const cancelledConnectAttempts = new Set<string>();
 const pendingConnectCancellations = new Set<string>();
 const createConnectAttemptId = (connectionId: string): string =>
     `${connectionId}:${crypto.randomUUID()}`;
+
+async function waitForTerminalStartup(termId: string, timeoutMs = 2500): Promise<boolean> {
+    const deadline = performance.now() + timeoutMs;
+    while (performance.now() < deadline) {
+        const cached = terminalCache.get(termId);
+        if (cached?.spawned && !cached.starting) {
+            return true;
+        }
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 16));
+    }
+    return false;
+}
 
 export interface ConnectionSlice {
     connections: Connection[];
@@ -601,23 +614,23 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
             if (await finishCancelledConnect(true)) return;
             markConnectionBackendLive(id);
 
-            // Fetch home path after connection
-            let homePath = '';
-            let homePathResolved = false;
-            try {
-                homePath = (await getRemoteCwdIpc(id)).trim();
-                homePathResolved = Boolean(homePath);
-            } catch (e) {
-                console.error('[CONNECT] Failed to fetch home path:', e);
+            // Reset existing terminal bindings while the host is still marked as
+            // connecting. If we wait until after the connected state update,
+            // React can start a PTY and this reset immediately replaces it.
+            const existingTermIds = (get().terminals[id] ?? []).map((tab) => tab.id);
+            for (const termId of existingTermIds) {
+                resetTerminalPtyForReconnect(termId);
             }
-            // Final checkpoints around the success update so a late cancel is not lost to finally.
-            if (await finishCancelledConnect(true)) return;
+            const primaryTermId = get().ensureTerminal(id);
+            const activeWorkspace = get().tabs.find(tab => tab.id === get().activeTabId);
+            const terminalWillMount = activeWorkspace?.connectionId === id
+                && activeWorkspace.view === 'terminal';
 
             set(state => {
                 if (cancelledConnectAttempts.has(attemptId)) {
                     return state;
                 }
-                const connected = markConnectionConnected(state.connections, id, homePath, response?.detected_os);
+                const connected = markConnectionConnected(state.connections, id, '', response?.detected_os);
                 const newConns = legacyLocalKeyPassphraseIds.size > 0
                     ? connected.map(connection => legacyLocalKeyPassphraseIds.has(connection.id)
                         ? { ...connection, password: undefined }
@@ -638,12 +651,32 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
 
             // Clear pendingRestore so SSH terminal tabs can now spawn their PTYs.
             get().clearPendingRestore(id);
-            get().ensureTerminal(id);
             const termIds = (get().terminals[id] ?? []).map((tab) => tab.id);
-            for (const termId of termIds) {
-                resetTerminalPtyForReconnect(termId);
-            }
             dispatchTerminalConnectionWakeup(termIds);
+
+            // Give a visible terminal the first SSH session channel. Ubuntu's
+            // PAM MOTD is one-shot and would otherwise be consumed by SFTP.
+            if (terminalWillMount) {
+                await waitForTerminalStartup(primaryTermId);
+            }
+            if (await finishCancelledConnect(true)) return;
+
+            let homePath = '';
+            let homePathResolved = false;
+            try {
+                homePath = (await getRemoteCwdIpc(id)).trim();
+                homePathResolved = Boolean(homePath);
+            } catch (e) {
+                console.error('[CONNECT] Failed to fetch home path:', e);
+            }
+            if (await finishCancelledConnect(true)) return;
+            if (homePathResolved) {
+                set(state => {
+                    const connections = markConnectionConnected(state.connections, id, homePath);
+                    saveToMain(connections, state.folders);
+                    return { connections };
+                });
+            }
 
             const ghostSettings = get().settings.ghostSuggestions;
             if (
