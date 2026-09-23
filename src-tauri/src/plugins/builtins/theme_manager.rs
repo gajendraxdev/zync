@@ -47,12 +47,12 @@ pub(crate) fn builtin_theme_manager() -> Plugin {
                     try {
                         if (zync.plugins && zync.plugins.list) {
                             let plugins = await zync.plugins.list();
-                            
+
                             // Helper to process a plugin into a QuickPick item
                             const processPlugin = (p) => {
                                 if (!p.manifest || (!p.manifest.style && !p.manifest.mode)) return;
                                 if (p.manifest.id === 'com.zync.theme.manager') return;
-                                
+
                                 // Check if it's a built-in theme to avoid duplicates
                                 const simpleId = p.manifest.id.replace('com.zync.theme.', '');
                                 if (builtInThemes.some(t => t.id === simpleId)) return;
@@ -77,7 +77,7 @@ pub(crate) fn builtin_theme_manager() -> Plugin {
                     // Merge logic: Insert user themes into correct groups
                     // We'll reconstruct the list to keep headers
                     const finalThemes = [];
-                    
+
                     // Add System
                     finalThemes.push(builtInThemes[0]); // System
                     finalThemes.push(builtInThemes[1]); // Separator
@@ -91,7 +91,7 @@ pub(crate) fn builtin_theme_manager() -> Plugin {
                     // Add Dark Themes (Built-in + User)
                     builtInThemes.filter(t => t.mode === 'dark').forEach(t => finalThemes.push(t));
                     userThemes.filter(t => t.mode === 'dark').forEach(t => finalThemes.push(t));
-                    
+
                     // Add any undefined mode themes at the end
                     userThemes.filter(t => !t.mode || (t.mode !== 'light' && t.mode !== 'dark')).forEach(t => {
                         finalThemes.push(t);
