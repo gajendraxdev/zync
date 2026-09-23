@@ -265,7 +265,8 @@ fn apply_flush_instruction(
         bytes,
         reason,
         rearm_burst: _,
-    } = instruction {
+    } = instruction
+    {
         record_flush_reason(reason);
         flush_output_frame(output_channel, generation, bytes);
     }
