@@ -287,22 +287,18 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
     // Local state for open feature tabs.
     // The screen unmounts on host switch, so seed from panes that stayed in the store.
     const [openFeatures, setOpenFeatures] = useState<string[]>([]);
-    const initialActiveFeatureTabIdRef = useRef<string | null>(null);
-    const [featureTabs, setFeatureTabs] = useState<WorkspaceFeatureTab[]>(() => {
+    const [featureTabSeed] = useState(() => {
         const connectionId = tab.connectionId;
         const state = useAppStore.getState();
-        const seed = initialFeatureTabsForView(
+        return initialFeatureTabsForView(
             tab.view,
             connectionId ? state.paneLayouts[connectionId] : undefined,
             connectionId ? state.activePaneGroupOwner[connectionId] : null,
             newWorkspaceFeatureTab,
         );
-        initialActiveFeatureTabIdRef.current = seed.activeId;
-        return seed.tabs;
     });
-    const [activeFeatureTabId, setActiveFeatureTabId] = useState<string | null>(
-        initialActiveFeatureTabIdRef.current,
-    );
+    const [featureTabs, setFeatureTabs] = useState<WorkspaceFeatureTab[]>(() => featureTabSeed.tabs);
+    const [activeFeatureTabId, setActiveFeatureTabId] = useState<string | null>(() => featureTabSeed.activeId);
     const paneGroups = useAppStore(state => (
         tab.connectionId ? state.paneLayouts[tab.connectionId] : undefined
     ));
@@ -405,7 +401,9 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
             setFeatureTabs(prev => [...prev, created]);
             setActiveFeatureTabId(created.id);
             if (tab.connectionId) {
-                useAppStore.getState().ensureFeaturePane(tab.connectionId, feature, created.instanceId);
+                const store = useAppStore.getState();
+                store.ensureFeaturePane(tab.connectionId, feature, created.instanceId);
+                store.activatePaneGroup(tab.connectionId, created.instanceId);
             }
             setTabView(tab.id, feature);
             return;

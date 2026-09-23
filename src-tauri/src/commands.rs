@@ -13,7 +13,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex as StdMutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_store::StoreExt;
 use tokio::sync::Mutex;
 
@@ -2815,8 +2815,8 @@ pub async fn terminal_create(
             if let Some(app_state) = metadata_app.try_state::<AppState>() {
                 initialize_remote_metadata_after_terminal(
                     &metadata_connection_id,
-                    &metadata_term_id,
-                    generation,
+                    Some(&metadata_term_id),
+                    Some(generation),
                     deferred_startup,
                     deferred_shell,
                     deferred_cwd,
@@ -3021,9 +3021,15 @@ fn parse_windows_openssh_default_shell(output: &str) -> Option<String> {
     })
 }
 
+fn resolve_windows_openssh_shell(probe_output: Option<String>) -> Option<String> {
+    probe_output.map(|output| {
+        parse_windows_openssh_default_shell(&output).unwrap_or_else(|| "cmd.exe".to_string())
+    })
+}
+
 #[cfg(test)]
 mod remote_metadata_tests {
-    use super::parse_windows_openssh_default_shell;
+    use super::{parse_windows_openssh_default_shell, resolve_windows_openssh_shell};
 
     #[test]
     fn parses_windows_openssh_default_shell_registry_value() {
@@ -3045,12 +3051,33 @@ mod remote_metadata_tests {
             None
         );
     }
+
+    #[test]
+    fn successful_probe_without_registry_value_uses_cmd() {
+        assert_eq!(
+            resolve_windows_openssh_shell(Some(String::new())).as_deref(),
+            Some("cmd.exe")
+        );
+    }
+
+    #[test]
+    fn failed_probe_does_not_cache_cmd() {
+        assert_eq!(resolve_windows_openssh_shell(None), None);
+    }
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConnectionMetadataPayload {
+    connection_id: String,
+    detected_os: Option<String>,
+    detected_shell: Option<String>,
 }
 
 async fn initialize_remote_metadata_after_terminal(
     connection_id: &str,
-    term_id: &str,
-    generation: u32,
+    term_id: Option<&str>,
+    generation: Option<u32>,
     finalize_startup: bool,
     pending_shell: Option<String>,
     pending_cwd: Option<String>,
@@ -3069,7 +3096,7 @@ async fn initialize_remote_metadata_after_terminal(
         )
     };
     if cached_os.is_some() && cached_shell.is_some() {
-        if finalize_startup {
+        if let (true, Some(term_id), Some(generation)) = (finalize_startup, term_id, generation) {
             finalize_remote_terminal_startup(
                 term_id,
                 generation,
@@ -3118,14 +3145,14 @@ async fn initialize_remote_metadata_after_terminal(
         .as_deref()
         .is_some_and(|os| os.eq_ignore_ascii_case("windows"))
     {
-        run_connection_probe(
+        let probe_output = run_connection_probe(
             &session,
             r"cmd.exe /d /c reg.exe query HKLM\SOFTWARE\OpenSSH /v DefaultShell",
         )
-        .await
-        .and_then(|output| parse_windows_openssh_default_shell(&output))
-        // OpenSSH for Windows uses cmd.exe when DefaultShell is not configured.
-        .or_else(|| Some("cmd.exe".to_string()))
+        .await;
+        // OpenSSH uses cmd.exe when the registry query succeeds but DefaultShell
+        // is absent. A failed probe must remain unknown so it can be retried.
+        resolve_windows_openssh_shell(probe_output)
     } else {
         run_connection_probe(&session, "basename \"${SHELL:-}\"")
             .await
@@ -3155,18 +3182,46 @@ async fn initialize_remote_metadata_after_terminal(
         }
     };
 
-    if let Some((current_os, current_shell)) = current_metadata.filter(|_| finalize_startup) {
-        finalize_remote_terminal_startup(
-            term_id,
-            generation,
-            current_os.as_deref(),
-            current_shell.as_deref(),
-            pending_shell.as_deref(),
-            pending_cwd.as_deref(),
-            state,
-        )
-        .await;
+    if let Some((current_os, current_shell)) = current_metadata {
+        let _ = state.app_handle.emit(
+            "connection:metadata",
+            ConnectionMetadataPayload {
+                connection_id: connection_id.to_string(),
+                detected_os: current_os.clone(),
+                detected_shell: current_shell.clone(),
+            },
+        );
+
+        if let (true, Some(term_id), Some(generation)) = (finalize_startup, term_id, generation) {
+            finalize_remote_terminal_startup(
+                term_id,
+                generation,
+                current_os.as_deref(),
+                current_shell.as_deref(),
+                pending_shell.as_deref(),
+                pending_cwd.as_deref(),
+                state,
+            )
+            .await;
+        }
     }
+}
+
+fn probe_remote_metadata_after_sftp(connection_id: String, app_handle: AppHandle) {
+    tokio::spawn(async move {
+        if let Some(state) = app_handle.try_state::<AppState>() {
+            initialize_remote_metadata_after_terminal(
+                &connection_id,
+                None,
+                None,
+                false,
+                None,
+                None,
+                state.inner(),
+            )
+            .await;
+        }
+    });
 }
 
 async fn finalize_remote_terminal_startup(
@@ -3320,20 +3375,28 @@ async fn get_sftp_or_reconnect(
     if let Some(session) = existing_session {
         match open_sftp_session(&session).await {
             Ok(opened) => {
-                let mut connections = state.connections.lock().await;
-                let conn = connections
-                    .get_mut(id)
-                    .ok_or_else(|| "Connection was removed while SFTP started".to_string())?;
-                if conn.reconnect_generation != reconnect_generation {
-                    return conn
+                let (sftp, opened_first_sftp) = {
+                    let mut connections = state.connections.lock().await;
+                    let conn = connections
+                        .get_mut(id)
+                        .ok_or_else(|| "Connection was removed while SFTP started".to_string())?;
+                    if conn.reconnect_generation != reconnect_generation {
+                        return conn
+                            .sftp_session
+                            .clone()
+                            .ok_or_else(|| "Connection changed while SFTP started".to_string());
+                    }
+                    let opened_first_sftp = conn.sftp_session.is_none();
+                    let sftp = conn
                         .sftp_session
-                        .clone()
-                        .ok_or_else(|| "Connection changed while SFTP started".to_string());
+                        .get_or_insert_with(|| opened.clone())
+                        .clone();
+                    (sftp, opened_first_sftp)
+                };
+                if opened_first_sftp {
+                    probe_remote_metadata_after_sftp(id.to_string(), state.app_handle.clone());
                 }
-                return Ok(conn
-                    .sftp_session
-                    .get_or_insert_with(|| opened.clone())
-                    .clone());
+                return Ok(sftp);
             }
             Err(OpenSftpError::Transport(_)) => {
                 let mut connections = state.connections.lock().await;
@@ -3386,13 +3449,22 @@ async fn get_sftp_or_reconnect(
     let sftp = open_sftp_session(&session)
         .await
         .map_err(|error| error.to_string())?;
-    {
+    let opened_first_sftp = {
         let mut connections = state.connections.lock().await;
         if let Some(conn) = connections.get_mut(id) {
             if conn.reconnect_generation == reconnect_generation {
+                let opened_first_sftp = conn.sftp_session.is_none();
                 conn.sftp_session = Some(sftp.clone());
+                opened_first_sftp
+            } else {
+                false
             }
+        } else {
+            false
         }
+    };
+    if opened_first_sftp {
+        probe_remote_metadata_after_sftp(id.to_string(), state.app_handle.clone());
     }
 
     println!("[SFTP] Reconnected successfully for '{}'", id);
@@ -5640,8 +5712,6 @@ pub async fn settings_restore_last_known_good(
         modified_ms,
     })
 }
-
-use tauri::Emitter;
 
 #[derive(Clone, serde::Serialize)]
 struct TransferProgress {

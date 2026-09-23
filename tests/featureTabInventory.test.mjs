@@ -48,6 +48,15 @@ runTest('several saved Files panes come back without an extra tab', () => {
   assert.equal(seeded.activeId, 'files-a');
 });
 
+runTest('the active Files group restores its matching tab', () => {
+  const groups = {
+    'files-a': singleFeaturePane('files', 'pane-a', 'files-a'),
+    'files-b': singleFeaturePane('files', 'pane-b', 'files-b'),
+  };
+  const seeded = initialFeatureTabsForView('files', groups, 'files-b', createTab);
+  assert.equal(seeded.activeId, 'files-b');
+});
+
 runTest('a terminal view keeps saved Files panes and does not open a new one', () => {
   const groups = {
     'files-a': singleFeaturePane('files', 'pane-files', 'files-a'),

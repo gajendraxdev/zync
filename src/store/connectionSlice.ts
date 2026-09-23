@@ -23,6 +23,7 @@ import {
     LOCAL_TERMINAL_CONNECTION_ID,
 } from '../features/connections/application/tabService';
 import {
+    applyConnectionMetadata,
     getCloseTabPreActions,
     markConnectionConnected,
     markConnectionErrorIfNeeded,
@@ -149,6 +150,7 @@ export interface ConnectionSlice {
     disconnect: (id: string) => Promise<void>;
     /** WiFi drop / SSH EOF — stop active tunnels, keep terminal tabs and scrollback. */
     handleTransportLost: (id: string) => Promise<void>;
+    applyConnectionMetadata: (id: string, detectedOs?: string | null) => void;
     // Tab Actions
     openTab: (connectionId: string, startView?: CoreTabView) => void;
     openPortForwardingTab: () => void;
@@ -455,6 +457,15 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
         if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent(CONNECTIONS_CLEARED_EVENT));
         }
+    },
+
+    applyConnectionMetadata: (id, detectedOs) => {
+        set(state => {
+            const connections = applyConnectionMetadata(state.connections, id, detectedOs);
+            if (connections === state.connections) return state;
+            saveToMain(connections, state.folders);
+            return { connections };
+        });
     },
 
     connect: async (id, options) => {
