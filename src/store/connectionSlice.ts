@@ -667,18 +667,19 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
 
             // Give a visible terminal the first SSH session channel. Ubuntu's
             // PAM MOTD is one-shot and would otherwise be consumed by SFTP.
-            if (terminalWillMount) {
-                await waitForTerminalStartup(primaryTermId);
-            }
+            const terminalReady = !terminalWillMount
+                || await waitForTerminalStartup(primaryTermId);
             if (await finishCancelledConnect(true)) return;
 
             let homePath = '';
             let homePathResolved = false;
-            try {
-                homePath = (await getRemoteCwdIpc(id)).trim();
-                homePathResolved = Boolean(homePath);
-            } catch (e) {
-                console.error('[CONNECT] Failed to fetch home path:', e);
+            if (terminalReady) {
+                try {
+                    homePath = (await getRemoteCwdIpc(id)).trim();
+                    homePathResolved = Boolean(homePath);
+                } catch (e) {
+                    console.error('[CONNECT] Failed to fetch home path:', e);
+                }
             }
             if (await finishCancelledConnect(true)) return;
             if (homePathResolved) {
