@@ -2741,11 +2741,12 @@ pub async fn terminal_create(
         Ok(term_id)
     } else {
         let channel = open_ssh_channel_with_single_reconnect(&connection_id, &state).await?;
-        let (remote_os, forward_agent) = {
+        let (remote_os, detected_shell, forward_agent) = {
             let connections = state.connections.lock().await;
             let connection = connections.get(&connection_id);
             (
                 connection.and_then(|c| c.detected_os.clone()),
+                connection.and_then(|c| c.detected_shell.clone()),
                 connection
                     .and_then(|c| c.config.agent_forwarding.as_ref())
                     .is_some(),
@@ -2784,6 +2785,7 @@ pub async fn terminal_create(
                 output_channel,
                 shell,
                 remote_os,
+                detected_shell,
                 cwd,
                 auth_banner.clone(),
             )
@@ -3010,6 +3012,41 @@ async fn run_connection_probe(
     .flatten()
 }
 
+fn parse_windows_openssh_default_shell(output: &str) -> Option<String> {
+    output.lines().find_map(|line| {
+        let marker = "REG_SZ";
+        let marker_start = line.to_ascii_uppercase().find(marker)?;
+        let value = line[marker_start + marker.len()..].trim();
+        (!value.is_empty()).then(|| value.to_string())
+    })
+}
+
+#[cfg(test)]
+mod remote_metadata_tests {
+    use super::parse_windows_openssh_default_shell;
+
+    #[test]
+    fn parses_windows_openssh_default_shell_registry_value() {
+        let output = concat!(
+            "HKEY_LOCAL_MACHINE\\SOFTWARE\\OpenSSH\r\n",
+            "    DefaultShell    REG_SZ    C:\\Program Files\\PowerShell\\7\\pwsh.exe\r\n",
+        );
+
+        assert_eq!(
+            parse_windows_openssh_default_shell(output).as_deref(),
+            Some(r"C:\Program Files\PowerShell\7\pwsh.exe")
+        );
+    }
+
+    #[test]
+    fn missing_windows_openssh_default_shell_uses_caller_fallback() {
+        assert_eq!(
+            parse_windows_openssh_default_shell("ERROR: not found"),
+            None
+        );
+    }
+}
+
 async fn initialize_remote_metadata_after_terminal(
     connection_id: &str,
     term_id: &str,
@@ -3081,7 +3118,14 @@ async fn initialize_remote_metadata_after_terminal(
         .as_deref()
         .is_some_and(|os| os.eq_ignore_ascii_case("windows"))
     {
-        Some("powershell".to_string())
+        run_connection_probe(
+            &session,
+            r"cmd.exe /d /c reg.exe query HKLM\SOFTWARE\OpenSSH /v DefaultShell",
+        )
+        .await
+        .and_then(|output| parse_windows_openssh_default_shell(&output))
+        // OpenSSH for Windows uses cmd.exe when DefaultShell is not configured.
+        .or_else(|| Some("cmd.exe".to_string()))
     } else {
         run_connection_probe(&session, "basename \"${SHELL:-}\"")
             .await
