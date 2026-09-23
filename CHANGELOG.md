@@ -5,8 +5,8 @@ All notable changes to Zync are documented in this file. The format is based on 
 ## [Unreleased]
 
 ### Fixed
-- **SSH login banners and startup:** Authentication banners and the remote login MOTD now reach the first terminal instead of being consumed by metadata/SFTP setup. Deferred shell and working-directory startup uses generation-safe cached metadata, preserves Windows shell syntax, and will not inject commands after the user starts typing. Windows OpenSSH detects its configured default shell so CMD, PowerShell, explicit shell paths, and cross-drive navigation use the correct syntax. ([e3dab28], [2adf32b])
-- **Files tabs on host switch:** Leaving a host (or Local) and coming back no longer adds another Files tab. The Files panes already saved for that host are reused. A Files pane docked beside a shell stays the active tab instead of a later Files pane. A new Files tab is created only when that host does not have one yet. ([d251558])
+- **SSH login banners and startup:** Authentication banners and the remote login MOTD now reach the first terminal instead of being consumed by metadata/SFTP setup. Deferred shell and working-directory startup uses generation-safe cached metadata, preserves Windows shell syntax, and will not inject commands after the user starts typing. Windows OpenSSH detects its configured default shell so CMD, PowerShell, explicit shell paths, and cross-drive navigation use the correct syntax. ([e3dab28], [2adf32b], [00e7e49])
+- **Files tabs on host switch:** Leaving a host (or Local) and coming back no longer adds another Files tab. The Files panes already saved for that host are reused. A Files pane docked beside a shell stays the active tab instead of a later Files pane. A new Files tab is created only when that host does not have one yet. ([d251558], [00e7e49])
 
 ## [2.32.1] - 2026-09-20
 
