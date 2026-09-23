@@ -109,6 +109,12 @@ jobs:
           # Public URLs hosts in source. Set these repo secrets before tagging.
           ZYNC_SHARE_API_BASE: ${{ secrets.ZYNC_SHARE_API_BASE }}
           ZYNC_SHARE_RELAY_URL: ${{ secrets.ZYNC_SHARE_RELAY_URL }}
+          # The marketplace root private key stays offline. Release builds receive
+          # only the registry endpoint and raw Ed25519 public key.
+          ZYNC_PLUGIN_REGISTRY_URL: ${{ secrets.ZYNC_PLUGIN_REGISTRY_URL }}
+          # A comma-separated old,new bundle permits a staged root-key rotation.
+          # The singular secret remains a backwards-compatible fallback.
+          ZYNC_PLUGIN_REGISTRY_ROOT_KEYS: ${{ secrets.ZYNC_PLUGIN_REGISTRY_ROOT_KEYS || secrets.ZYNC_PLUGIN_REGISTRY_ROOT_KEY }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
