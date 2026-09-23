@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { Braces, ChevronLeft, ChevronRight, FolderOpen, LayoutDashboard, Loader2, Plus, RotateCw, Search, Terminal as TerminalIcon, Waypoints } from 'lucide-react';
+import { Braces, ChevronLeft, ChevronRight, FolderOpen, LayoutDashboard, Loader2, Plug, Plus, RotateCw, Search, Terminal as TerminalIcon, Waypoints } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 import { ShellIcon } from '../../icons/ShellIcon';
 import { TopbarDropdown } from '../../ui/TopbarDropdown';
@@ -15,6 +15,7 @@ import type {
     WorkspaceOpenCloseSource,
     WorkspaceOpenFeatureState,
     WorkspaceOpenItem,
+    WorkspaceOpenPluginState,
     WorkspaceOpenSplitFeatureState,
     WorkspaceOpenView,
 } from './types';
@@ -34,10 +35,13 @@ export function WorkspaceOpenMenu({
     onRefetchShells,
     canOpenFeature,
     features,
+    plugins,
     splitFeatures,
     onNewShell,
     onOpenFeature,
+    onOpenPlugin,
     onOpenSplitFeature,
+    onOpenSplitPlugin,
     onSplitNewShell,
     canSplitPane = true,
     onClose,
@@ -49,10 +53,13 @@ export function WorkspaceOpenMenu({
     onRefetchShells?: () => void;
     canOpenFeature: boolean;
     features: readonly WorkspaceOpenFeatureState[];
+    plugins?: readonly WorkspaceOpenPluginState[];
     splitFeatures?: readonly WorkspaceOpenSplitFeatureState[];
     onNewShell: (shell?: ShellEntry) => void;
     onOpenFeature?: (featureId: string) => void;
+    onOpenPlugin?: (pluginId: string) => void;
     onOpenSplitFeature?: (featureId: SplitFeatureId, edge?: DockEdge) => void;
+    onOpenSplitPlugin?: (pluginId: string, edge?: DockEdge) => void;
     onSplitNewShell?: (edge: DockEdge, shell?: ShellEntry) => void;
     canSplitPane?: boolean;
     onClose: (source?: WorkspaceOpenCloseSource) => void;
@@ -66,8 +73,8 @@ export function WorkspaceOpenMenu({
     const reduceMotion = useReducedMotion();
 
     const items = useMemo(
-        () => buildWorkspaceOpenItems({ shells, canOpenFeature, features }),
-        [shells, canOpenFeature, features],
+        () => buildWorkspaceOpenItems({ shells, canOpenFeature, features, plugins }),
+        [shells, canOpenFeature, features, plugins],
     );
     const visible = useMemo(
         () => visibleWorkspaceOpenItems(items, query, view),
@@ -118,6 +125,11 @@ export function WorkspaceOpenMenu({
             onClose();
             return;
         }
+        if (item.kind === 'plugin' && item.pluginId && onOpenPlugin) {
+            onOpenPlugin(item.pluginId);
+            onClose();
+            return;
+        }
         if (item.kind === 'split-feature' && isSplitFeatureId(item.featureId) && onOpenSplitFeature) {
             onOpenSplitFeature(item.featureId);
             onClose();
@@ -131,6 +143,7 @@ export function WorkspaceOpenMenu({
             if (state) return !state.canOpen;
             return !canSplitPane;
         }
+        if (item.kind === 'plugin') return !canSplitPane || !onOpenSplitPlugin;
         if (item.kind === 'new-shell' || item.kind === 'shell') {
             return !canSplitPane || !onSplitNewShell;
         }
@@ -141,6 +154,11 @@ export function WorkspaceOpenMenu({
         if (splitDisabledFor(item)) return;
         if ((item.kind === 'feature' || item.kind === 'split-feature') && isSplitFeatureId(item.featureId) && onOpenSplitFeature) {
             onOpenSplitFeature(item.featureId, edge);
+            onClose();
+            return;
+        }
+        if (item.kind === 'plugin' && item.pluginId && onOpenSplitPlugin) {
+            onOpenSplitPlugin(item.pluginId, edge);
             onClose();
             return;
         }
@@ -408,5 +426,6 @@ function WorkspaceOpenIcon({ item }: { item: WorkspaceOpenItem }): ReactNode {
         const Icon = FEATURE_ICON[item.featureId];
         return <Icon size={12} />;
     }
+    if (item.kind === 'plugin') return <Plug size={12} />;
     return <TerminalIcon size={12} />;
 }

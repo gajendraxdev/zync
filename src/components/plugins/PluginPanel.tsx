@@ -4,23 +4,28 @@ import { getZyncThemePayload } from '../../lib/themePayload';
 import { isDebugThemePayloadEnabled } from '../../lib/debugFlags';
 import { confirmPluginTerminalAction } from '../../features/plugins/confirmPluginTerminalAction';
 import { handlePanelPluginCommand } from '../../features/plugins/pluginCommandBridge';
+import { parsePluginPaneMessage } from '../../features/plugins/runtime/paneMessages';
+import { usePlugins } from '../../context/PluginContext';
 
 interface PluginPanelProps {
     html: string;
     panelId: string;
     pluginId: string;
     connectionId: string | null;
+    legacyAccess: boolean;
+    paneInstanceId: string;
 }
 
 /**
  * Renders a plugin panel inside a sandboxed iframe.
  * Provides a postMessage bridge so the panel can still call zync.terminal.send(), etc.
  */
-export function PluginPanel({ html, panelId, pluginId, connectionId }: PluginPanelProps) {
+export function PluginPanel({ html, panelId, pluginId, connectionId, legacyAccess, paneInstanceId }: PluginPanelProps) {
     const iframeRef = useRef<HTMLIFrameElement>(null);
     const frameGenerationRef = useRef(0);
     const theme = useAppStore(s => s.settings.theme);
     const accentColor = useAppStore(s => s.settings.accentColor);
+    const { postPaneMessage, registerPaneMessageTarget } = usePlugins();
 
     const sendTheme = useCallback(() => {
         if (!iframeRef.current || !iframeRef.current.contentWindow) return;
@@ -32,9 +37,9 @@ export function PluginPanel({ html, panelId, pluginId, connectionId }: PluginPan
         iframeRef.current.contentWindow.postMessage({
             type: 'zync:theme:update',
             // Back-compat: include the previous `theme` string field as well.
-            payload: { theme, ...payload }
+            payload: { theme, ...payload, paneInstanceId }
         }, '*');
-    }, [theme, accentColor]);
+    }, [theme, accentColor, paneInstanceId]);
 
     // Broadcast theme changes to the iframe natively
     useEffect(() => {
@@ -47,6 +52,11 @@ export function PluginPanel({ html, panelId, pluginId, connectionId }: PluginPan
         const handler = async (e: MessageEvent) => {
             const sourceWindow = iframeRef.current?.contentWindow;
             if (!sourceWindow || e.source !== sourceWindow) return;
+            if (!legacyAccess) {
+                const message = parsePluginPaneMessage(e.data);
+                if (message.ok) postPaneMessage(pluginId, panelId, paneInstanceId, message.message);
+                return;
+            }
             const generation = frameGenerationRef.current;
             const isCurrent = (requester: unknown) => (
                 active
@@ -88,10 +98,21 @@ export function PluginPanel({ html, panelId, pluginId, connectionId }: PluginPan
             active = false;
             window.removeEventListener('message', handler);
         };
-    }, [panelId, pluginId, connectionId]);
+    }, [panelId, pluginId, connectionId, legacyAccess, paneInstanceId, postPaneMessage]);
+
+    useEffect(() => registerPaneMessageTarget(
+        pluginId,
+        panelId,
+        paneInstanceId,
+        connectionId ?? 'local',
+        message => iframeRef.current?.contentWindow?.postMessage({
+            type: 'zync:pane:message',
+            payload: message,
+        }, '*'),
+    ), [connectionId, panelId, pluginId, paneInstanceId, registerPaneMessageTarget]);
 
     // Inject the zync shim into the panel HTML
-    const shimScript = `
+    const shimScript = legacyAccess ? `
 <script>
 window.zync = {
     terminal: {
@@ -159,9 +180,36 @@ window.zync = {
     }
 };
 </script>
+` : `
+<script>
+window.zync = Object.freeze({
+    pane: Object.freeze({
+        postMessage: function(message) {
+            window.parent.postMessage({ type: 'zync:pane:message', payload: message }, '*');
+        },
+        onMessage: function(callback) {
+            if (typeof callback !== 'function') return function() {};
+            const listener = function(event) {
+                if (event.source !== window.parent) return;
+                const data = event.data;
+                if (data && data.type === 'zync:pane:message') callback(data.payload);
+            };
+            window.addEventListener('message', listener);
+            return function() { window.removeEventListener('message', listener); };
+        }
+    })
+});
+</script>
 `;
 
-    const fullHtml = html.replace('<head>', `<head>\n${shimScript}`) || `<html><head>${shimScript}</head><body>${html}</body></html>`;
+    const securityMeta = `
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; font-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+`;
+
+    const injection = `${securityMeta}${shimScript}`;
+    const fullHtml = /<head(?:\s[^>]*)?>/i.test(html)
+        ? html.replace(/<head(?:\s[^>]*)?>/i, match => `${match}\n${injection}`)
+        : `<html><head>${injection}</head><body>${html}</body></html>`;
 
     return (
         <div className="absolute inset-0 z-10 bg-app-bg flex flex-col">
@@ -172,7 +220,7 @@ window.zync = {
                     frameGenerationRef.current += 1;
                     sendTheme();
                 }}
-                sandbox="allow-scripts allow-modals"
+                sandbox={legacyAccess ? 'allow-scripts allow-modals' : 'allow-scripts'}
                 className="flex-1 w-full border-0 bg-transparent"
                 title={`Plugin Panel: ${panelId}`}
             />

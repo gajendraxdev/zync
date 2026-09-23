@@ -8,7 +8,6 @@ import {
   handleWorkerTerminalCommand,
   isTrustedBuiltinTheme,
   postCurrentWorkerResponse,
-  resetPluginWorkers,
 } from '../.tmp-agent-tests/src/features/plugins/pluginCommandBridge.js';
 
 function deferred() {
@@ -370,12 +369,11 @@ await run('keeps app-owned Appearance themes and rejects filesystem theme CSS', 
 });
 
 await run('starts the real built-in theme manager and exposes only backed theme choices', async () => {
-  const rustSource = fs.readFileSync('src-tauri/src/plugins.rs', 'utf8');
-  const managerBlock = rustSource.slice(
-    rustSource.indexOf('fn builtin_theme_manager()'),
-    rustSource.indexOf('fn builtin_plain_editor_provider()'),
+  const managerSource = fs.readFileSync(
+    'src-tauri/src/plugins/builtins/theme_manager.rs',
+    'utf8',
   );
-  const script = /script: Some\(r#"([\s\S]*?)"#\.to_string\(\)\)/.exec(managerBlock)?.[1];
+  const script = /script: Some\(r#"([\s\S]*?)"#\.to_string\(\)\)/.exec(managerSource)?.[1];
   assert.ok(script, 'the app-owned theme manager script must exist');
 
   const manager = {
@@ -403,7 +401,7 @@ await run('starts the real built-in theme manager and exposes only backed theme 
     style: 'untrusted css',
   };
   const admitted = filterUnsupportedHostThemes([manager, light, dracula, evil]);
-  const runnable = resetPluginWorkers(admitted, new Map(), () => {});
+  const runnable = admitted.filter(plugin => plugin.enabled && plugin.script);
   assert.deepEqual(runnable, [manager], 'the trusted manager Worker must remain runnable');
 
   const listeners = new Map();
@@ -436,28 +434,6 @@ await run('starts the real built-in theme manager and exposes only backed theme 
   assert.ok(!shownItems.some(item => item.id === 'night-owl'));
   assert.ok(!shownItems.some(item => item.id === 'evil'));
   assert.equal(selectedTheme, 'dracula');
-});
-
-await run('stops the previous Worker generation and starts only enabled scripts', async () => {
-  const terminated = [];
-  const rejected = [];
-  const workers = new Map([
-    ['enabled', { terminate: () => terminated.push('enabled') }],
-    ['disabled', { terminate: () => terminated.push('disabled') }],
-    ['removed', { terminate: () => terminated.push('removed') }],
-  ]);
-  const plugins = [
-    { manifest: { id: 'enabled' }, enabled: true, script: 'run();' },
-    { manifest: { id: 'disabled' }, enabled: false, script: 'mustNotRun();' },
-    { manifest: { id: 'no-script' }, enabled: true },
-  ];
-
-  const runnable = resetPluginWorkers(plugins, workers, id => rejected.push(id));
-
-  assert.deepEqual(runnable, [plugins[0]]);
-  assert.deepEqual(terminated, ['enabled', 'disabled', 'removed']);
-  assert.deepEqual(rejected, ['enabled', 'disabled', 'removed']);
-  assert.equal(workers.size, 0);
 });
 
 await run('delivers quick pick response to the worker and rejects stale generation', async () => {

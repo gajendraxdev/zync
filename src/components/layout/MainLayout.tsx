@@ -874,6 +874,8 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
                                             html={panel.html}
                                             panelId={panel.id}
                                             pluginId={panel.pluginId}
+                                            legacyAccess={panel.legacyAccess}
+                                            paneInstanceId={`overlay:${panel.id}`}
                                             connectionId={tab.connectionId || null}
                                         />
                                     </div>

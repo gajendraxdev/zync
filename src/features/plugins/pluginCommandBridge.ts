@@ -35,11 +35,6 @@ export interface WorkerTerminalCommandDeps {
     dispatch: (type: string, detail: Record<string, unknown>) => void;
 }
 
-interface PluginRuntimeDescriptor {
-    enabled: boolean;
-    script?: string;
-}
-
 interface PluginDescriptor {
     path?: string;
     manifest: { id: string; type?: string };
@@ -91,22 +86,6 @@ export function postCurrentWorkerResponse<T extends WorkerResponseTarget>(
     if (!isCurrent(requester)) return false;
     requester.postMessage({ type: `${type}:response`, payload });
     return true;
-}
-
-/** Stops the previous runtime generation and returns only plugins allowed to start Workers. */
-export function resetPluginWorkers<T extends { terminate: () => void }, P extends PluginRuntimeDescriptor>(
-    plugins: P[],
-    workers: Map<string, T>,
-    beforeTerminate: (pluginId: string) => void,
-): Array<P & { script: string }> {
-    workers.forEach((worker, pluginId) => {
-        beforeTerminate(pluginId);
-        worker.terminate();
-    });
-    workers.clear();
-    return plugins.filter((plugin): plugin is P & { script: string } => (
-        plugin.enabled && typeof plugin.script === 'string' && plugin.script.length > 0
-    ));
 }
 
 function record(value: unknown): Record<string, unknown> | null {

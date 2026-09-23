@@ -451,7 +451,9 @@ export function PaneLayoutView({
             if (isFeatureContent(node.content) || isPluginContent(node.content)) {
                 const content = node.content;
                 const featureId = isFeatureContent(content) ? content.featureId : undefined;
-                const featureInstanceId = isFeatureContent(content) ? content.instanceId : undefined;
+                const contentInstanceId = isFeatureContent(content) || isPluginContent(content)
+                    ? content.instanceId
+                    : undefined;
                 const pluginId = isPluginContent(content) ? content.pluginId : undefined;
                 const dockPayload = paneDockPayload(node);
                 return (
@@ -460,7 +462,7 @@ export function PaneLayoutView({
                         connectionId={connectionId}
                         paneId={node.id}
                         featureId={featureId}
-                        instanceId={featureInstanceId}
+                        instanceId={contentInstanceId}
                         pluginId={pluginId}
                         pluginLabel={pluginId ? pluginTitles.get(pluginId) : undefined}
                         focused={focused}

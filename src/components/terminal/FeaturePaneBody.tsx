@@ -50,6 +50,8 @@ export function FeaturePaneBody({
                     panelId={plugin.id}
                     pluginId={plugin.pluginId}
                     connectionId={connectionId}
+                    legacyAccess={plugin.legacyAccess}
+                    paneInstanceId={instanceId ?? `plugin:${plugin.id}`}
                 />
             )}
         </Suspense>

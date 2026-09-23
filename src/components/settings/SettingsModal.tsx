@@ -30,7 +30,7 @@ import { useAboutStats } from './hooks/useAboutStats';
 import { PluginTabContentSwitch } from './tabs/plugins/PluginTabContentSwitch';
 import { PluginsInstalledTab } from './tabs/plugins/PluginsInstalledTab';
 import { PluginsMarketplaceTab } from './tabs/plugins/PluginsMarketplaceTab';
-import { PluginsDeveloperTab, type LocalInstallAction } from './tabs/plugins/PluginsDeveloperTab';
+import { PluginPermissionReview, PluginsDeveloperTab, type LocalInstallAction } from './tabs/plugins/PluginsDeveloperTab';
 import { useVaultStore } from '../../vault/useVaultStore';
 
 
@@ -210,7 +210,15 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         }
     };
 
-    const { executeCommand, editorProviders } = usePlugins();
+    const {
+        executeCommand,
+        editorProviders,
+        reloadPlugins,
+        retryPluginRuntime,
+        runtimeHealth,
+        pluginSafeMode,
+        exitPluginSafeMode,
+    } = usePlugins();
     const showConfirmDialog = useAppStore(state => state.showConfirmDialog);
     const isWindows = window.navigator.userAgent.indexOf('Windows') !== -1;
 
@@ -254,17 +262,25 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         setActiveMenu,
         processingId,
         needsRestart,
-        setNeedsRestart,
         localPluginInstallMode,
+        pendingPluginInspection,
+        isApprovingLocalPlugin,
         handleInstallLocalPlugin,
+        handleApproveLocalPlugin,
+        handleCancelLocalPluginReview,
         handleTogglePlugin,
         handleUninstallPlugin,
         handleUpdatePlugin,
+        handleInspectMarketplacePlugin,
+        handleSetOptionalPluginPermissions,
+        handleClearPluginData,
+        handleRollbackPlugin,
     } = useSettingsPlugins({
         isOpen,
         activeTab,
         showToast,
         showConfirmDialog,
+        reloadPluginRuntime: reloadPlugins,
     });
 
     const { contributors, stars } = useAboutStats({ isOpen, activeTab });
@@ -285,7 +301,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             label: 'Install ZIP package',
             title: 'Load packaged plugin build',
             description: 'Pick a local .zip to validate marketplace-ready packages before release.',
-            hint: 'Archive should include plugin.json at package root.',
+            hint: 'Archive should include manifest.json at package root.',
             icon: Package,
         },
         {
@@ -293,7 +309,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             label: 'Install from folder',
             title: 'Load unpacked plugin directory',
             description: 'Use this during active editor-provider or theme development without zipping every build.',
-            hint: 'Folder should contain plugin.json and dist/assets if used.',
+            hint: 'Folder should contain manifest.json and dist/assets if used.',
             icon: FolderOpen,
         },
     ];
@@ -357,6 +373,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
             // Escape: dismiss restart confirm first; otherwise close Settings.
             if (e.key === 'Escape') {
+                if (pendingPluginInspection) {
+                    void handleCancelLocalPluginReview();
+                    return;
+                }
                 if (showRestartConfirm) {
                     setShowRestartConfirm(false);
                     return;
@@ -388,7 +408,15 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [isOpen, activeTab, onClose, showRestartConfirm, setShowRestartConfirm]);
+    }, [
+        isOpen,
+        activeTab,
+        onClose,
+        showRestartConfirm,
+        setShowRestartConfirm,
+        pendingPluginInspection,
+        handleCancelLocalPluginReview,
+    ]);
 
     // Smooth Tab Transition Handler
     const handleTabChange = (newTab: Tab) => {
@@ -410,6 +438,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     const renderPluginInstalled = () => (
         <PluginsInstalledTab
             plugins={plugins}
+            runtimeHealth={runtimeHealth}
+            pluginSafeMode={pluginSafeMode}
             registry={registry}
             isLoadingPlugins={isLoadingPlugins}
             processingId={processingId}
@@ -420,6 +450,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             onTogglePlugin={handleTogglePlugin}
             onUpdatePlugin={handleUpdatePlugin}
             onUninstallPlugin={handleUninstallPlugin}
+            onRetryPluginRuntime={retryPluginRuntime}
+            onExitPluginSafeMode={exitPluginSafeMode}
+            onSaveOptionalPermissions={handleSetOptionalPluginPermissions}
+            onClearPluginData={handleClearPluginData}
+            onRollbackPlugin={handleRollbackPlugin}
             iconThemeCount={BUILTIN_ICON_THEME_COUNT + plugins.filter((plugin) => plugin.manifest.type === 'icon-theme').length}
             iconRenderer={IconResolver}
         />
@@ -428,7 +463,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     const renderPluginMarketplace = () => (
         <PluginsMarketplaceTab
             isLoadingRegistry={isLoadingRegistry}
-            onInstallSuccess={() => setNeedsRestart(true)}
+            registry={registry}
+            onInspectPlugin={handleInspectMarketplacePlugin}
         />
     );
 
@@ -808,6 +844,15 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             </div>
                         </div>
                     </div>
+                )}
+                {pendingPluginInspection && (
+                    <PluginPermissionReview
+                        key={pendingPluginInspection.inspectionId}
+                        inspection={pendingPluginInspection}
+                        isApproving={isApprovingLocalPlugin}
+                        onApprove={handleApproveLocalPlugin}
+                        onCancel={handleCancelLocalPluginReview}
+                    />
                 )}
                 </motion.div>
             </div>

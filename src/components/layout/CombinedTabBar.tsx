@@ -775,13 +775,20 @@ export const CombinedTabBar = memo(function CombinedTabBar({
                             isOpen: featureTabs.some(tab => tab.featureId === id),
                             isActive: activeView === id && featureTabs.some(tab => tab.id === activeFeatureTabId && tab.featureId === id),
                         }))}
+                        plugins={pluginPanels.map(panel => ({
+                            id: panel.id,
+                            title: panel.title,
+                            isOpen: openFeatures.includes(`plugin:${panel.id}`),
+                        }))}
                         onNewShell={onNewTerminal}
                         onOpenFeature={onOpenFeature}
+                        onOpenPlugin={(pluginId) => onTabSelect(`plugin:${pluginId}`)}
                         splitFeatures={SPLIT_FEATURE_IDS.map((id) => {
                             const isOpen = layoutHasFeature(splitLayout, id);
                             return { id, isOpen, canOpen: isOpen || canSplit };
                         })}
                         onOpenSplitFeature={onOpenSplitFeature}
+                        onOpenSplitPlugin={onOpenSplitPlugin}
                         onSplitNewShell={onSplitNewShell}
                         canSplitPane={canSplit}
                         onClose={(source) => {
