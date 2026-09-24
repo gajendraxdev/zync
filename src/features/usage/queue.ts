@@ -1,4 +1,6 @@
 import { isUsageFeatureId, type UsageFeatureId } from './catalog.js';
+import { currentUsageSession, dayOpenSeconds, sessionPayload } from './session.js';
+import type { UsageSessionPayload } from './types.js';
 
 const QUEUE_KEY = 'zync.usage.queue';
 const MAX_PENDING_DAYS = 7;
@@ -6,6 +8,8 @@ const MAX_PENDING_DAYS = 7;
 export interface UsageDayQueue {
   day: string;
   features: Partial<Record<UsageFeatureId, number>>;
+  openSeconds?: number;
+  sessions?: UsageSessionPayload[];
   dirty: boolean;
 }
 
@@ -36,7 +40,7 @@ export function loadQueue(now = new Date()): UsageQueueState {
     const current = normalizeDay(parsed.current, today);
     let pending = normalizePending(parsed.pending);
     if (current.day !== today) {
-      if (current.dirty) pending = retainPending(pending, current);
+      if (current.dirty) pending = retainPending(pending, sealDay(current, now));
       return {
         current: emptyDay(today),
         pending,
@@ -66,7 +70,7 @@ export function bumpFeature(state: UsageQueueState, feature: UsageFeatureId, now
   let current = state.current;
   let pending = state.pending;
   if (current.day !== today) {
-    if (current.dirty) pending = retainPending(pending, current);
+    if (current.dirty) pending = retainPending(pending, sealDay(current, now));
     current = emptyDay(today);
   }
   const nextCount = (current.features[feature] ?? 0) + 1;
@@ -111,6 +115,21 @@ function hasNewCounts(live: UsageDayQueue, sent: UsageDayQueue): boolean {
   return false;
 }
 
+/** Snapshot open time before a UTC day moves to the pending flush. */
+export function sealDay(day: UsageDayQueue, now = new Date()): UsageDayQueue {
+  if (day.sessions?.length || day.openSeconds != null) return day;
+  const session = currentUsageSession();
+  if (!session) return day;
+  const dayEnd = new Date(`${day.day}T00:00:00.000Z`);
+  dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
+  const stop = now.getTime() < dayEnd.getTime() ? now : dayEnd;
+  return {
+    ...day,
+    openSeconds: dayOpenSeconds(session, day.day, stop),
+    sessions: [sessionPayload(session, stop)],
+  };
+}
+
 function retainPending(pending: UsageDayQueue[], day: UsageDayQueue): UsageDayQueue[] {
   const without = pending.filter((item) => item.day !== day.day);
   const next = [...without, day];
@@ -146,5 +165,30 @@ function normalizeDay(raw: UsageDayQueue | undefined, fallbackDay: string): Usag
       if (n > 0) features[id] = n;
     }
   }
-  return { day, features, dirty: raw?.dirty !== false };
+  const openSeconds = typeof raw?.openSeconds === 'number' && Number.isFinite(raw.openSeconds)
+    ? Math.max(0, Math.min(24 * 60 * 60, Math.floor(raw.openSeconds)))
+    : undefined;
+  const sessions = normalizeSessions(raw?.sessions);
+  return { day, features, openSeconds, sessions, dirty: raw?.dirty !== false };
+}
+
+function normalizeSessions(raw: unknown): UsageSessionPayload[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const sessions: UsageSessionPayload[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as Partial<UsageSessionPayload>;
+    if (typeof row.id !== 'string' || typeof row.openedAt !== 'string') continue;
+    const session: UsageSessionPayload = { id: row.id, openedAt: row.openedAt };
+    if (typeof row.closedAt === 'string') session.closedAt = row.closedAt;
+    if (typeof row.openSeconds === 'number' && Number.isFinite(row.openSeconds)) {
+      session.openSeconds = Math.max(0, Math.min(24 * 60 * 60, Math.floor(row.openSeconds)));
+    }
+    if (typeof row.timezone === 'string' && row.timezone) session.timezone = row.timezone;
+    if (typeof row.utcOffsetMinutes === 'number' && Number.isFinite(row.utcOffsetMinutes)) {
+      session.utcOffsetMinutes = Math.trunc(row.utcOffsetMinutes);
+    }
+    sessions.push(session);
+  }
+  return sessions.length > 0 ? sessions : undefined;
 }

@@ -1378,7 +1378,10 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
             },
         });
         scheduleSaveSession(() => get().saveSession());
-        if (docked.created) track('split');
+        if (docked.created) {
+            track('split');
+            if (content.kind === 'feature' && content.featureId === 'files') track('split_files');
+        }
         return docked.created ? 'opened' : 'focused';
     },
 

@@ -31,7 +31,7 @@ import {
     reduceTabCloseState,
 } from '../features/connections/application/connectionLifecycleService';
 import { pinFeatureOnConnectionIfNeeded } from '../features/connections/application/tunnelAutoStartService';
-import { track, usageFeatureForTabView } from '../features/usage';
+import { track, trackConnectFailure, trackConnectSuccess, usageFeatureForTabView } from '../features/usage';
 import {
     restartTunnelsAfterConnect,
     snapshotActiveTunnelsForReconnect,
@@ -549,6 +549,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                     connections: markConnectionErrorIfNeeded(state.connections, id, message),
                 }));
                 get().showToast('error', message, 8000);
+                trackConnectFailure();
                 return;
             }
             const fullConfig = configResult.config;
@@ -651,6 +652,9 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                 return { connections: newConns };
             });
             if (await finishCancelledConnect(true)) return;
+            if (id !== 'local') {
+                trackConnectSuccess(get().connections.find(connection => connection.id === id));
+            }
             if (legacyLocalKeyPassphraseIds.size > 0) {
                 get().showToast(
                     'info',
@@ -850,6 +854,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                 return;
             }
             console.error('Connection failed:', message);
+            if (id !== 'local') trackConnectFailure();
             get().showToast('error', `Connection failed: ${message}`, 10000);
             // Only update to error state if not already in error to prevent loops
             set(state => {

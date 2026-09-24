@@ -74,6 +74,7 @@ const tests = [
   'tests/requestContext.test.mjs',
   'tests/sessionPersistence.test.mjs',
   'tests/usageQueue.test.mjs',
+  'tests/usageSession.test.mjs',
   'tests/featureTabInventory.test.mjs',
   'tests/paneLayout.test.mjs',
   'tests/dockInSplit.self.test.mjs',

@@ -171,6 +171,8 @@
 
         "src/features/usage/catalog.ts",
         "src/features/usage/queue.ts",
+        "src/features/usage/session.ts",
+        "src/features/usage/types.ts",
         "src/store/sessionPersistence.ts",
         "src/vault/credentialTypes.ts",
         "src/vault/profileTypes.ts",
