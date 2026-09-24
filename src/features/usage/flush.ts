@@ -38,7 +38,7 @@ async function toPayload(day: UsageDayQueue, now = new Date()): Promise<UsagePay
   if (day.day === now.toISOString().slice(0, 10)) {
     const session = ensureUsageSession(now);
     payload.openSeconds = dayOpenSeconds(session, day.day, now);
-    payload.sessions = [sessionPayload(session, now)];
+    payload.sessions = [sessionPayload(session, day.day, now)];
   } else if (day.sessions?.length || day.openSeconds != null) {
     payload.openSeconds = day.openSeconds;
     payload.sessions = day.sessions;

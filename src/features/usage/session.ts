@@ -41,13 +41,16 @@ export function dayOpenSeconds(session: UsageSession, day: string, now: Date): n
   return clampSeconds(stop - start);
 }
 
-export function sessionPayload(session: UsageSession, now: Date): UsageSessionPayload {
-  const opened = new Date(session.openedAt);
+export function sessionPayload(session: UsageSession, day: string, now: Date): UsageSessionPayload {
+  const dayStart = new Date(`${day}T00:00:00.000Z`).getTime();
+  const dayEnd = dayStart + MAX_OPEN_SECONDS * 1000;
+  const opened = Math.max(new Date(session.openedAt).getTime(), dayStart);
+  const closed = Math.min(Math.max(now.getTime(), opened), dayEnd);
   return {
     id: session.id,
-    openedAt: session.openedAt,
-    closedAt: now.toISOString(),
-    openSeconds: clampSeconds(now.getTime() - opened.getTime()),
+    openedAt: new Date(opened).toISOString(),
+    closedAt: new Date(closed).toISOString(),
+    openSeconds: clampSeconds(closed - opened),
     timezone: session.timezone,
     utcOffsetMinutes: session.utcOffsetMinutes,
   };

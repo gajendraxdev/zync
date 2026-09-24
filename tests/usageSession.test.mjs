@@ -17,6 +17,19 @@ run('day open time starts at UTC midnight when the app was already open', () => 
   assert.equal(dayOpenSeconds(session, '2026-09-24', now), 90 * 60);
 });
 
+run('session payload does not recount time from the previous day', () => {
+  const session = {
+    id: '33333333-3333-4333-8333-333333333333',
+    openedAt: '2026-09-23T22:00:00.000Z',
+    timezone: 'Asia/Kolkata',
+    utcOffsetMinutes: 330,
+  };
+  const payload = sessionPayload(session, '2026-09-24', new Date('2026-09-24T01:00:00.000Z'));
+  assert.equal(payload.openedAt, '2026-09-24T00:00:00.000Z');
+  assert.equal(payload.closedAt, '2026-09-24T01:00:00.000Z');
+  assert.equal(payload.openSeconds, 60 * 60);
+});
+
 run('session payload records close time and timezone offset', () => {
   const opened = new Date('2026-09-24T04:00:00.000Z');
   const session = {
@@ -25,7 +38,7 @@ run('session payload records close time and timezone offset', () => {
     timezone: 'Asia/Kolkata',
     utcOffsetMinutes: utcOffsetMinutes(new Date('2026-09-24T04:00:00.000Z')),
   };
-  const payload = sessionPayload(session, new Date('2026-09-24T04:20:00.000Z'));
+  const payload = sessionPayload(session, '2026-09-24', new Date('2026-09-24T04:20:00.000Z'));
   assert.equal(payload.id, session.id);
   assert.equal(payload.openedAt, session.openedAt);
   assert.equal(payload.closedAt, '2026-09-24T04:20:00.000Z');

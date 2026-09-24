@@ -675,44 +675,50 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                 || await waitForTerminalStartup(primaryTermId);
             if (await finishCancelledConnect(true)) return;
 
-            let homePath = '';
-            let homePathResolved = false;
-            if (terminalReady) {
+            const applyHomePath = async () => {
+                if (cancelledConnectAttempts.has(attemptId)) return;
+                let homePath = '';
                 try {
                     homePath = (await getRemoteCwdIpc(id)).trim();
-                    homePathResolved = Boolean(homePath);
                 } catch (e) {
                     console.error('[CONNECT] Failed to fetch home path:', e);
+                    return;
                 }
-            }
-            if (await finishCancelledConnect(true)) return;
-            if (homePathResolved) {
+                if (!homePath || cancelledConnectAttempts.has(attemptId)) return;
                 set(state => {
                     const connections = markConnectionConnected(state.connections, id, homePath);
                     saveToMain(connections, state.folders);
                     return { connections };
                 });
-            }
-
-            const ghostSettings = get().settings.ghostSuggestions;
-            if (
-                homePathResolved
-                && ghostSettings.importRemoteHistoryOnConnect
-                && ghostSettings.providers.history
-                && ghostSettings.inlineEnabled
-            ) {
-                void seedRemoteGhostHistory({
-                    connectionId: id,
-                    scope: id,
-                    homePath,
-                }).then((result) => {
-                    ghostDebug('seed', {
+                const ghostSettings = get().settings.ghostSuggestions;
+                if (
+                    ghostSettings.importRemoteHistoryOnConnect
+                    && ghostSettings.providers.history
+                    && ghostSettings.inlineEnabled
+                ) {
+                    void seedRemoteGhostHistory({
                         connectionId: id,
-                        imported: result.imported,
-                        skippedReason: result.skippedReason ?? null,
-                    });
-                }).catch(() => {});
+                        scope: id,
+                        homePath,
+                    }).then((result) => {
+                        ghostDebug('seed', {
+                            connectionId: id,
+                            imported: result.imported,
+                            skippedReason: result.skippedReason ?? null,
+                        });
+                    }).catch(() => {});
+                }
+            };
+
+            if (terminalReady) {
+                await applyHomePath();
+            } else if (terminalWillMount) {
+                void waitForTerminalStartup(primaryTermId, 20_000).then((ready) => {
+                    if (ready) return applyHomePath();
+                    return undefined;
+                });
             }
+            if (await finishCancelledConnect(true)) return;
 
             try {
                 await get().loadTunnels(id);

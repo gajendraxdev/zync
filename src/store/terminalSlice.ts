@@ -801,6 +801,7 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
         });
         scheduleSaveSession(() => get().saveSession());
         track('split');
+        if (nextContent.kind === 'feature' && nextContent.featureId === 'files') track('split_files');
     },
 
     ensureFeaturePane: (connectionId, featureId, instanceId) => {
@@ -957,6 +958,7 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
         });
         scheduleSaveSession(() => get().saveSession());
         track('split');
+        if (featureId === 'files') track('split_files');
         return 'opened';
     },
 

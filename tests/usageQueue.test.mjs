@@ -63,6 +63,16 @@ run('UTC rollover stores that day open time before it becomes pending', () => {
   clearUsageSession();
 });
 
+run('a session that starts the next day does not seal the previous day', () => {
+  clearUsageSession();
+  ensureUsageSession(new Date('2026-09-24T01:00:00.000Z'));
+  const day = createQueueState(new Date('2026-09-23T22:00:00.000Z'));
+  const sealed = sealDay(day.current, new Date('2026-09-24T01:30:00.000Z'));
+  assert.equal(sealed.openSeconds, undefined);
+  assert.equal(sealed.sessions, undefined);
+  clearUsageSession();
+});
+
 run('UTC rollover keeps the unsent day in pending', () => {
   const day1 = bumpFeature(createQueueState(new Date('2026-09-20T12:00:00.000Z')), 'files', new Date('2026-09-20T12:00:00.000Z'));
   const day2 = bumpFeature(day1, 'tunnels', new Date('2026-09-21T01:00:00.000Z'));

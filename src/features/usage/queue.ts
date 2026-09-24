@@ -40,10 +40,10 @@ export function loadQueue(now = new Date()): UsageQueueState {
     const current = normalizeDay(parsed.current, today);
     let pending = normalizePending(parsed.pending);
     if (current.day !== today) {
-      if (current.dirty) pending = retainPending(pending, sealDay(current, now));
+      const rolled = rollDay(current, pending, now);
       return {
-        current: emptyDay(today),
-        pending,
+        current: rolled.current,
+        pending: rolled.pending,
         lastFlushAt: typeof parsed.lastFlushAt === 'number' ? parsed.lastFlushAt : null,
       };
     }
@@ -70,8 +70,9 @@ export function bumpFeature(state: UsageQueueState, feature: UsageFeatureId, now
   let current = state.current;
   let pending = state.pending;
   if (current.day !== today) {
-    if (current.dirty) pending = retainPending(pending, sealDay(current, now));
-    current = emptyDay(today);
+    const rolled = rollDay(current, pending, now);
+    current = rolled.current;
+    pending = rolled.pending;
   }
   const nextCount = (current.features[feature] ?? 0) + 1;
   return {
@@ -120,14 +121,24 @@ export function sealDay(day: UsageDayQueue, now = new Date()): UsageDayQueue {
   if (day.sessions?.length || day.openSeconds != null) return day;
   const session = currentUsageSession();
   if (!session) return day;
-  const dayEnd = new Date(`${day.day}T00:00:00.000Z`);
-  dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
+  const dayStart = new Date(`${day.day}T00:00:00.000Z`).getTime();
+  const dayEndMs = dayStart + 24 * 60 * 60 * 1000;
+  const opened = new Date(session.openedAt).getTime();
+  if (opened >= dayEndMs || now.getTime() <= dayStart) return day;
+  const dayEnd = new Date(dayEndMs);
   const stop = now.getTime() < dayEnd.getTime() ? now : dayEnd;
   return {
     ...day,
     openSeconds: dayOpenSeconds(session, day.day, stop),
-    sessions: [sessionPayload(session, stop)],
+    sessions: [sessionPayload(session, day.day, stop)],
   };
+}
+
+function rollDay(current: UsageDayQueue, pending: UsageDayQueue[], now: Date): { current: UsageDayQueue; pending: UsageDayQueue[] } {
+  const sealed = sealDay(current, now);
+  const hasTiming = sealed.openSeconds != null || (sealed.sessions?.length ?? 0) > 0;
+  if (current.dirty || hasTiming) pending = retainPending(pending, sealed);
+  return { current: emptyDay(utcDay(now)), pending };
 }
 
 function retainPending(pending: UsageDayQueue[], day: UsageDayQueue): UsageDayQueue[] {
