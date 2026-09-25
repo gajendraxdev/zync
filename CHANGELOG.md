@@ -5,16 +5,24 @@ All notable changes to Zync are documented in this file. The format is based on 
 ## [Unreleased]
 
 ### Added
+- **Plugin authoring SDK (beta):** A separately versioned local npm package with Manifest v2 and host-provided Worker/pane types, a manifest helper, pre-signing validation, a starter template, and automatic package/type/release checks. Manifest v2 engine ranges are enforced by Zync before install, load, and rollback. The SDK is not yet published to npm. ([ea32a61], [cdda828])
 - **Plugin sandbox v2:** Manifest v2 permissions, brokered native capabilities, isolated panes and workers, runtime health/safe mode, automatic rollback, publisher identity, and generic plugin pane splitting. ([93f3fc0], [7ccfe31])
 - **Signed plugin distribution:** Local signing tools, signed registry verification and publisher binding, revocation and root-key rotation support, an operations runbook, and a testable manifest v2 demo plugin. ([2c21fc2])
 
 ### Security
+
+- **Plugin registry release gate**: Added a bounded live staging/production registry check with HTTPS-only redirects, root-rotation signature verification, expiry and version floors, a protected staging workflow, and a production release preflight that rejects partial or invalid trust configuration and can require marketplace-enabled builds. ([da2b064])
+- **Plugin marketplace updates:** Marketplace package downgrades and same-version package replacement are rejected; explicit retained-version rollback remains available. ([ea32a61])
+- **Plugin beta releases:** Signed registry entries can publish stable and beta builds of one plugin. The marketplace keeps one listing and offers an opt-in beta switch per plugin; native inspection rejects beta installs without that opt-in. ([ea32a61], [79a6f73])
 - **Plugin and asset isolation:** The desktop CSP and Tauri asset protocol are restricted to approved plugin assets; plugin editor frames receive their own deny-by-default policy, and release notes no longer load local filesystem media. ([be3a109])
+- **Plugin Developer Mode boundary:** Local and legacy plugins now require an explicit, persisted Developer Mode that defaults off. Disabling it stops those plugins and revokes active runtime identities without affecting signed marketplace plugins. ([ea32a61], [79a6f73])
+- **Typed plugin broker boundary:** Manifest v2 messages now leave React composition code through a dedicated, generation-aware frontend broker before reaching the native policy engine; legacy bridge operations remain isolated behind Developer Mode. ([79a6f73])
+- **Plugin adversarial defenses:** Hostile package and permission tests now cover archive traversal and bombs, oversized pane content, unknown capability grants, malformed Worker messages, and network-scope smuggling. Unknown optional permissions remain denied, invalid wildcard scopes are rejected, and highly compressed archive entries fail before extraction. ([ea32a61], [79a6f73])
 
 ## [2.32.2] - 2026-09-24
 
 ### Changed
-- **Anonymous usage:** The daily report also includes how long the app was open, when it was opened and closed, the timezone, and counts for connections, sign-in method, tunnel starts, finished file transfers, snippets sent to a shell, and Files splits. Still no IP, hosts, paths, or commands. ([7c5509b], [69ce069])
+- **Anonymous usage:** The daily report also includes how long the app was open, when it was opened and closed, the timezone, and counts for connections, sign-in method, tunnel starts, finished file transfers, snippet insertion attempts, and Files splits. Still no IP, hosts, paths, or commands. ([7c5509b], [69ce069])
 
 ### Fixed
 - **SSH login banners and startup:** Authentication banners and the remote login MOTD now reach the first terminal instead of being consumed by metadata/SFTP setup. Deferred shell and working-directory startup uses generation-safe cached metadata, preserves Windows shell syntax, and will not inject commands after the user starts typing. Windows OpenSSH detects its configured default shell so CMD, PowerShell, explicit shell paths, and cross-drive navigation use the correct syntax. ([e3dab28], [2adf32b], [00e7e49])

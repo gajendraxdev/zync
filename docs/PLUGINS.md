@@ -1,6 +1,6 @@
 # Zync plugins — security, runtime, permissions, and marketplace architecture
 
-**Last updated:** 2026-09-23
+**Last updated:** 2026-09-25
 **Status:** The local Manifest v2 Sandbox MVP is implemented. Signed marketplace install review, permission-diff review, publisher-key rotation, monotonic revocation, retained-version rollback, and repeated-crash automatic recovery are implemented. Production registry deployment and independent security review remain operational beta work.
 **Related:** [SECURITY.md](./SECURITY.md), [WORKSPACE.md](./WORKSPACE.md), [TERMINAL.md](./TERMINAL.md), [VAULT.md](./VAULT.md)
 
@@ -19,6 +19,8 @@ The Sandbox MVP is complete on `feature/plugin-sandbox-v2` for locally reviewed 
 - a native signed-registry verifier now authenticates canonical versioned metadata against a release-baked root key, rejects expired, future-dated, rolled-back, forged, oversized, duplicate, non-HTTPS, and publisher/key-mismatched entries, and persists the highest accepted version plus cumulative revocations through recoverable atomic replacement;
 - marketplace install and update requests now send only plugin identity and version to native code; native code reloads the trusted registry, selects the signed release, downloads its fixed URL, verifies package digest, Manifest v2 identity, publisher signature and registered signing key, then routes the staged package through the same host-owned permission review as local packages;
 - local packages are staged before execution, reviewed in host-owned permission UI, and activated only after required permissions are accepted;
+- Developer Mode is a native, persisted, default-off policy boundary: local inspection and activation require it, local and legacy packages stay stopped while it is off, disabling it invalidates runtime identities, and signed marketplace packages remain available;
+- the typed frontend message broker now lives under `src/features/plugins/broker/`; it validates and routes Manifest v2 pane, notification, confirmation, command, storage, network, and filesystem requests while `PluginContext` retains lifecycle composition and the explicit Manifest v1 compatibility bridge;
 - permission decisions are stored natively and bound to the publisher, version, and SHA-256 digest of the reviewed package; optional permissions default to denied;
 - worker generations receive host-owned native runtime identities; notifications, command registration, and private plugin storage are enforced against the live runtime, package digest, declaration, grant, and request-rate limit, while command identity and title must also match the manifest contribution;
 - `zync.storage` persists bounded string values in a publisher/plugin namespace with atomic replacement; plugins cannot select or enumerate another plugin's storage path;
@@ -37,9 +39,11 @@ The Sandbox MVP is complete on `feature/plugin-sandbox-v2` for locally reviewed 
 - Tauri's local asset protocol is limited to installed plugin packages under the app-config plugin directory; release-note media accepts HTTPS sources and cannot request arbitrary local files;
 - the main webview has production and development CSPs that deny remote scripts, remote frames, objects, base-tag changes, and form submission; every plugin and editor frame adds its own no-network CSP rather than inheriting the host's approved destinations. Tauri script-hash augmentation is disabled only for `script-src` because sandboxed `srcDoc` panes require inline bootstrap code; removing that exception requires moving pane documents to a separately served origin;
 - focused native and frontend contract tests cover permission identity and validation boundaries.
+- adversarial package and permission tests exercise traversal and platform-conflicting paths, entry-count and compression bombs, package tampering, oversized manifests/files/pane HTML, forged identity/signatures, unknown permission grants, wildcard host-scope smuggling, runtime/handle ownership, request floods, and malformed, cyclic, deep, or oversized Worker messages;
 - an installable local example lives at `examples/plugins/manifest-v2-demo` for exercising the Developer install flow and command activation.
+- an independently versioned, locally installable `@zync/plugin-sdk` beta package lives at `packages/plugin-sdk`; it exposes Manifest v2 authoring types, brokered Worker/pane API types, a manifest identity helper, pre-signing validation, and a basic starter template. Manifest v2 engine ranges are now enforced by the native host during review, activation, load, and rollback. SDK publication and live staging evidence remain Phase 5 work.
 
-The completion gate includes TypeScript validation, a production frontend build, the full agent regression suite, 67 native plugin security tests, package corpus checks, and the manually exercised demo flows recorded in `examples/plugins/manifest-v2-demo/README.md`. The Plugins settings surface was also checked in the local browser test view; native install and permission behavior is covered by the desktop demo flow and native integration tests because a normal browser cannot access Tauri's plugin store.
+The completion gate includes TypeScript validation, a production frontend build, the full agent regression suite, 77 native plugin security tests, package corpus checks, and the manually exercised demo flows recorded in `examples/plugins/manifest-v2-demo/README.md`. The Plugins settings surface was also checked in the local browser test view; native install and permission behavior is covered by the desktop demo flow and native integration tests because a normal browser cannot access Tauri's plugin store.
 
 Permission review and durable package-bound install grants are implemented for local and trusted-marketplace Manifest v2 packages. Updates show added, changed, removed, and unchanged access before activation; unchanged optional grants are preserved while new or scope-changed optional access defaults off, and approval is bound to the exact installed package reviewed. New packages now pass a bounded Worker-ready health check before their rollback copy is retained; failed checks restore both the previous package and its approval, while interrupted transactions recover on next launch. Plugin details expose the retained last-known-good version, and a user-requested rollback atomically rotates the current and retained packages, restores the matching permission approval, and health-checks the restored runtime. The native broker now enforces notification emission, host-owned confirmation dialogs, command registration, plugin-private storage, bounded public HTTPS reads, runtime-scoped user-selected local filesystem reads and writes, and pane-bound SSH home-folder reads. Package-level integrity, Ed25519 package signatures, signed registry verification, publisher-key binding and rotation, expiry, rollback protection, cumulative publisher-key and exact-release revocation, native registry-selected marketplace installation, staged root-key rotation, and repeated-crash automatic rollback are implemented. Deploying the signed registry remains operational beta work. Persisted/workspace handles, remote writes, remaining compatibility APIs, broader scoped/temporary grant lifetimes, stronger runtime-level network confinement, and final management screens also remain; Zync must not yet describe the entire compatibility bridge as fully sandboxed. Registry publication, backup, compromise, and root rotation are covered by [PLUGIN_REGISTRY_OPERATIONS.md](./PLUGIN_REGISTRY_OPERATIONS.md).
 
@@ -523,6 +527,8 @@ npm run plugin:registry-verify -- --registry .\dist\registry.json --key C:\safe\
 
 The release descriptor contains only publication choices; identity and integrity values are derived from the verified signed package so they cannot drift from the package bytes:
 
+Each release may set `"channel": "stable"` (the default) or `"channel": "beta"`. Stable versions must be ordinary semantic versions; beta versions must use a prerelease suffix such as `1.1.0-beta.2`. Publish both channels as releases of the same plugin id in one signed registry. The marketplace shows one plugin listing, defaults to stable, and lets users opt into beta per plugin. Beta opt-in is stored on this device and checked natively before installing a beta. Turning it off stops future beta updates without silently downgrading an installed beta; a newer stable version or an explicit retained-version rollback is required to leave that installed build. Local demo sources and a packaging helper are kept in the sibling `zync-plugin-channel-examples/` folder outside this repository.
+
 ```json
 {
   "releases": [
@@ -551,6 +557,10 @@ The release descriptor contains only publication choices; identity and integrity
 ```
 
 Keep `registry-root-key.json` offline and backed up. Never put it in the repository or CI. Configure releases with the public `ZYNC_PLUGIN_REGISTRY_ROOT_KEYS`, increase the registry version for every publication, use a short expiry appropriate to the hosting operation, and upload the generated `registry.json` only after `plugin:registry-verify` succeeds. Follow the operations runbook for two-person recovery drills and staged root rotation.
+
+Published metadata can be checked without the private root key using `npm run plugin:registry-check`. The manual **Plugin registry staging** workflow verifies a protected staging environment, and the desktop **Release** workflow validates any configured production registry before creating a draft. URL and roots must be configured together; setting `ZYNC_PLUGIN_REGISTRY_REQUIRED=true` additionally prohibits marketplace-disabled releases. A configured registry must be reachable, correctly signed, at or above its version floor, no larger than 2 MiB, and valid for at least another 24 hours. Redirects are followed only while every hop remains HTTPS. See [PLUGIN_REGISTRY_OPERATIONS.md](./PLUGIN_REGISTRY_OPERATIONS.md) for environment setup and the manual install/revocation smoke checklist.
+
+Marketplace installation is monotonic. A lower package version is rejected, and an existing version cannot be replaced by different bytes. The explicit retained-version rollback action remains the audited recovery path.
 
 Publisher-key rotation does not change plugin ownership: sign the next package with the publisher's new key and publish that release in a higher registry version. If the old key is compromised, add a `publisherKey` revocation in the same or an earlier registry publication. Use `pluginRelease` when only one exact signed package must be blocked. Zync permanently unions accepted revocations into its local trust state, rejects installs and updates for revoked entries, and prevents an installed revoked package from being enabled again. Removing a revocation from a later registry does not restore trust.
 
@@ -621,7 +631,7 @@ Each plugin details page includes:
 
 ### 11.3 Developer Mode
 
-Developer Mode is explicit and reversible. It permits local folders and unsigned archives, clearly labels their surfaces, disables automatic marketplace updates for them, and shows that local code has not been verified by Zync.
+Developer Mode is explicit, persisted, default-off, and reversible. It permits local folders and unsigned archives, clearly labels their surfaces, disables automatic marketplace updates for them, and shows that local code has not been verified by Zync. Turning it off stops local and legacy packages and revokes their active runtime identities; signed marketplace packages are unaffected.
 
 Development tools include:
 
@@ -763,13 +773,13 @@ The current Web Worker and sandboxed-frame implementation is a useful compatibil
 - Document every existing worker, panel, editor, filesystem, terminal, SSH, theme, window, and marketplace API.
 - Stop adding unscoped bridge operations.
 - Add security regression tests around current behavior.
-- Mark current executable plugins as **Legacy access** in management UI.
+- Mark current executable plugins as **Legacy access** in management UI and require explicit Developer Mode before they can run. *(Implemented.)*
 
 ### Phase 1 — manifest v2 and central policy
 
 - Introduce manifest schema, contribution declarations, engine compatibility, permissions, and publisher fields.
 - Add installed package registry and grant store.
-- Route all plugin messages through one typed frontend broker and one native policy engine.
+- Route Manifest v2 plugin messages through one typed frontend broker and one native policy engine. *(Implemented; legacy compatibility remains explicitly separated.)*
 - Bind each request to host-owned runtime identity and package digest.
 
 ### Phase 2 — close ambient access
@@ -793,9 +803,10 @@ The current Web Worker and sandboxed-frame implementation is a useful compatibil
 
 ### Phase 5 — ecosystem SDK
 
+- The beta authoring package, pre-signing validator, starter template, release checklist, and package-boundary/type tests are in `packages/plugin-sdk`. It is not published to npm yet and is not a substitute for native manifest validation. Run `npm run plugin:validate -- <plugin-directory>` after building and before signing; the CLI bundled in the SDK uses `zync-plugin validate <plugin-directory> [--zync-version <version>]`. `npm run sdk:release-check` runs the automatic publication gate. A protected staging-registry desktop smoke test and external security review are still required before a public stable release.
 - Publish typed SDK, schemas, packaging/signing CLI, templates, test host, documentation, compatibility guarantees, and submission checks.
 - Migrate official plugins first and use them as conformance fixtures.
-- Disable legacy mode by default, then remove it after a published compatibility window.
+- Keep legacy mode disabled by default, then remove it after a published compatibility window. *(Default-off enforcement is implemented; removal remains.)*
 
 ### Soon after the strong beta — `zync://` deep links
 
