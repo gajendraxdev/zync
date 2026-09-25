@@ -8,8 +8,13 @@ use validation::{
     validate_permissions, validate_required_text, validate_text,
 };
 
+pub(crate) fn is_known_permission_id(permission_id: &str) -> bool {
+    validation::is_known_permission_id(permission_id)
+}
+
 const LEGACY_MANIFEST_VERSION: u32 = 1;
 const CURRENT_MANIFEST_VERSION: u32 = 2;
+pub const PLUGIN_API_VERSION: &str = "2.0.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct EditorManifest {
@@ -140,6 +145,68 @@ pub struct Manifest {
 }
 
 impl Manifest {
+    pub fn validate_host_compatibility(&self) -> Result<()> {
+        if self.manifest_version() < CURRENT_MANIFEST_VERSION {
+            return Ok(());
+        }
+        let zync = semver::Version::parse(env!("CARGO_PKG_VERSION"))
+            .context("Zync build version is invalid")?;
+        let plugin_api = semver::Version::parse(PLUGIN_API_VERSION)
+            .context("Zync plugin API version is invalid")?;
+        self.validate_compatibility_with(&zync, &plugin_api)
+    }
+
+    fn validate_compatibility_with(
+        &self,
+        zync: &semver::Version,
+        plugin_api: &semver::Version,
+    ) -> Result<()> {
+        if self.manifest_version() < CURRENT_MANIFEST_VERSION {
+            return Ok(());
+        }
+        let engines = self
+            .extensions
+            .engines
+            .as_ref()
+            .ok_or_else(|| anyhow!("Manifest v2 requires engines"))?;
+        for (label, range, installed) in [
+            ("engines.zync", engines.zync.as_deref(), zync),
+            (
+                "engines.pluginApi",
+                engines.plugin_api.as_deref(),
+                plugin_api,
+            ),
+        ] {
+            let range = range.ok_or_else(|| anyhow!("Manifest v2 requires {label}"))?;
+            let parts = range
+                .split(|character: char| character == ',' || character.is_whitespace())
+                .filter(|part| !part.is_empty())
+                .collect::<Vec<_>>();
+            let mut comparisons = Vec::new();
+            let mut index = 0;
+            while index < parts.len() {
+                if matches!(parts[index], ">" | ">=" | "<" | "<=" | "=" | "~" | "^")
+                    && index + 1 < parts.len()
+                {
+                    comparisons.push(format!("{}{}", parts[index], parts[index + 1]));
+                    index += 2;
+                } else {
+                    comparisons.push(parts[index].to_string());
+                    index += 1;
+                }
+            }
+            let normalized = comparisons.join(", ");
+            let requirement = semver::VersionReq::parse(&normalized)
+                .with_context(|| format!("Invalid {label} version range: {range}"))?;
+            if !requirement.matches(installed) {
+                return Err(anyhow!(
+                    "Plugin requires {label} {range}, but this Zync build provides {installed}"
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub fn manifest_version(&self) -> u32 {
         self.extensions
             .manifest_version

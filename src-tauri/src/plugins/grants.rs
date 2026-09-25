@@ -218,6 +218,11 @@ pub(super) fn validate_optional_selection(
     let mut approved = Vec::new();
     let mut seen = HashSet::new();
     for permission_id in selected {
+        if !super::manifest::is_known_permission_id(&permission_id) {
+            return Err(anyhow!(
+                "Unknown optional permission cannot be granted: {permission_id}"
+            ));
+        }
         if !declared.contains(permission_id.as_str()) {
             return Err(anyhow!(
                 "Permission was not declared as optional: {permission_id}"
@@ -230,7 +235,12 @@ pub(super) fn validate_optional_selection(
     Ok(approved)
 }
 
-pub fn is_package_approved(app: &AppHandle, manifest: &Manifest, digest: &str) -> bool {
+pub fn is_package_approved(
+    app: &AppHandle,
+    manifest: &Manifest,
+    digest: &str,
+    developer_mode: bool,
+) -> bool {
     let Ok(path) = grant_store_path(app) else {
         return false;
     };
@@ -241,8 +251,14 @@ pub fn is_package_approved(app: &AppHandle, manifest: &Manifest, digest: &str) -
         let identity_matches = grant.package_digest == digest
             && grant.version == manifest.version
             && grant.publisher == manifest.extensions.publisher;
-        identity_matches && grant_revocation_reason(app, grant).is_ok_and(|reason| reason.is_none())
+        identity_matches
+            && approval_source_allowed(grant.registry_version, developer_mode)
+            && grant_revocation_reason(app, grant).is_ok_and(|reason| reason.is_none())
     })
+}
+
+fn approval_source_allowed(registry_version: Option<u64>, developer_mode: bool) -> bool {
+    registry_version.is_some() || developer_mode
 }
 
 pub fn is_capability_granted(
@@ -250,6 +266,7 @@ pub fn is_capability_granted(
     manifest: &Manifest,
     digest: &str,
     capability: &str,
+    developer_mode: bool,
 ) -> bool {
     let Ok(path) = grant_store_path(app) else {
         return false;
@@ -258,7 +275,8 @@ pub fn is_capability_granted(
         return false;
     };
     store.grants.get(&manifest.id).is_some_and(|grant| {
-        grant.package_digest == digest
+        approval_source_allowed(grant.registry_version, developer_mode)
+            && grant.package_digest == digest
             && grant.version == manifest.version
             && grant.publisher == manifest.extensions.publisher
             && (grant.required_permissions.iter().any(|id| id == capability)
@@ -281,7 +299,7 @@ pub fn ensure_installed_plugin_is_approved(app: &AppHandle, plugin_id: &str) -> 
     let manifest_text = super::package::read_manifest_file(&plugin_dir.join("manifest.json"))?;
     let manifest: Manifest = serde_json::from_str(&manifest_text)?;
     if manifest.manifest_version() < 2 {
-        return Ok(());
+        return super::PluginScanner::require_developer_mode(app);
     }
     let digest = digest_directory(&plugin_dir)?;
     let store = load_store(&grant_store_path(app)?)?;
@@ -290,6 +308,14 @@ pub fn ensure_installed_plugin_is_approved(app: &AppHandle, plugin_id: &str) -> 
             "This plugin package has not been approved. Reinstall it to review its permissions."
         ));
     };
+    if !approval_source_allowed(
+        grant.registry_version,
+        super::PluginScanner::developer_mode_enabled(app)?,
+    ) {
+        return Err(anyhow!(
+            "Developer Mode is off. Local plugins cannot be enabled."
+        ));
+    }
     if grant.package_digest != digest
         || grant.version != manifest.version
         || grant.publisher != manifest.extensions.publisher
@@ -361,6 +387,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn local_approvals_require_developer_mode_but_marketplace_approvals_do_not() {
+        assert!(!approval_source_allowed(None, false));
+        assert!(approval_source_allowed(None, true));
+        assert!(approval_source_allowed(Some(7), false));
+    }
+
+    #[test]
     fn grant_store_round_trips_without_losing_optional_denials() {
         let root =
             std::env::temp_dir().join(format!("zync-plugin-grants-{}", uuid::Uuid::new_v4()));
@@ -420,5 +453,27 @@ mod tests {
         .expect("declared optional permission");
         assert_eq!(approved, ["ui.notifications.emit"]);
         assert!(validate_optional_selection(&manifest, vec!["network.fetch".into()]).is_err());
+    }
+
+    #[test]
+    fn unknown_optional_permissions_can_never_be_granted() {
+        let manifest: Manifest = serde_json::from_value(serde_json::json!({
+            "manifestVersion": 2,
+            "id": "dev.example.future",
+            "name": "Future permission",
+            "version": "1.0.0",
+            "publisher": "dev.example",
+            "permissions": {
+                "optional": [{
+                    "id": "future.secret.read",
+                    "reason": "Try a capability this host does not know."
+                }]
+            }
+        }))
+        .expect("parse manifest");
+
+        let error = validate_optional_selection(&manifest, vec!["future.secret.read".into()])
+            .expect_err("unknown optional capability must stay denied");
+        assert!(error.to_string().contains("cannot be granted"));
     }
 }

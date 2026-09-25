@@ -77,6 +77,8 @@ pub struct TrustedRegistryPlugin {
     pub id: String,
     pub name: String,
     pub version: String,
+    #[serde(default)]
+    pub channel: PluginReleaseChannel,
     pub description: String,
     pub publisher: String,
     pub download_url: String,
@@ -90,6 +92,14 @@ pub struct TrustedRegistryPlugin {
     pub thumbnail_url: Option<String>,
     #[serde(default)]
     pub plugin_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PluginReleaseChannel {
+    #[default]
+    Stable,
+    Beta,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -425,6 +435,19 @@ fn validate_plugin(plugin: &TrustedRegistryPlugin) -> Result<()> {
             "Plugin marketplace contains an invalid plugin identity"
         ));
     }
+    let version = semver::Version::parse(&plugin.version)
+        .context("Plugin marketplace release version must use semantic versioning")?;
+    if version.pre.is_empty() != (plugin.channel == PluginReleaseChannel::Stable) {
+        return Err(anyhow!("Plugin release channel does not match its version"));
+    }
+    if plugin.channel == PluginReleaseChannel::Beta
+        && version.pre.as_str() != "beta"
+        && !version.pre.as_str().starts_with("beta.")
+    {
+        return Err(anyhow!(
+            "Beta plugin versions must use a beta prerelease suffix"
+        ));
+    }
     validate_https_url(&plugin.download_url, "plugin download")?;
     validate_sha256(&plugin.package_digest, "package digest")?;
     validate_sha256(&plugin.publisher_key_id, "publisher key id")?;
@@ -569,29 +592,13 @@ fn write_state(path: &Path, state: &RegistryState) -> Result<()> {
             "Plugin marketplace state exceeds its retention limit"
         ));
     }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let temporary = path.with_extension(format!("tmp-{}", uuid::Uuid::new_v4().simple()));
     let backup = path.with_extension("backup.json");
-    fs::write(&temporary, bytes)?;
-
-    let had_previous = path.exists();
-    if had_previous {
-        if backup.exists() {
-            fs::remove_file(&backup)?;
-        }
-        fs::rename(path, &backup)?;
-    }
-    if let Err(error) = fs::rename(&temporary, path) {
-        if had_previous {
-            let _ = fs::rename(&backup, path);
-        }
-        return Err(error.into());
-    }
-    if had_previous {
-        let _ = fs::remove_file(backup);
-    }
+    // Keep a durable recovery copy: read_state accepts either file and retains
+    // the highest verified version and every revocation after an interrupted write.
+    crate::atomic_io::durable_replace(&backup, &bytes)
+        .context("Failed to save plugin marketplace state backup")?;
+    crate::atomic_io::durable_replace(path, &bytes)
+        .context("Failed to save plugin marketplace state")?;
     Ok(())
 }
 

@@ -7114,11 +7114,45 @@ pub async fn plugins_load(app: AppHandle) -> Result<Vec<crate::plugins::Plugin>,
 }
 
 #[tauri::command]
+pub async fn plugins_developer_mode_get(app: AppHandle) -> Result<bool, String> {
+    crate::plugins::PluginScanner::developer_mode_enabled(&app).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn plugins_developer_mode_set(
+    app: AppHandle,
+    broker: State<'_, crate::plugins::broker::PluginBrokerState>,
+    enabled: bool,
+) -> Result<(), String> {
+    crate::plugins::PluginScanner::set_developer_mode(&app, enabled)
+        .map_err(|error| error.to_string())?;
+    // Mode changes invalidate every runtime identity. The renderer reloads eligible
+    // plugins after this command, while stale workers lose native broker authority now.
+    broker.reset();
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn plugins_registry_load(
     app: AppHandle,
 ) -> Result<crate::plugins::registry::TrustedRegistrySnapshot, String> {
     crate::plugins::registry::load(&app)
         .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn plugins_beta_plugins_get(app: AppHandle) -> Result<Vec<String>, String> {
+    crate::plugins::PluginScanner::beta_plugins(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn plugins_beta_plugin_set(
+    app: AppHandle,
+    plugin_id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    crate::plugins::PluginScanner::set_beta_enabled(&app, &plugin_id, enabled)
         .map_err(|error| error.to_string())
 }
 

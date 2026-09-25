@@ -23,6 +23,10 @@ fn known_permission_ids() -> &'static HashSet<String> {
     })
 }
 
+pub(super) fn is_known_permission_id(permission_id: &str) -> bool {
+    known_permission_ids().contains(permission_id)
+}
+
 pub(super) fn validate_permissions(
     declarations: Option<&PluginPermissionDeclarations>,
 ) -> Result<()> {
@@ -58,7 +62,7 @@ fn validate_permission(
             permission.id
         ));
     }
-    if required && !known_permission_ids().contains(&permission.id) {
+    if required && !is_known_permission_id(&permission.id) {
         return Err(anyhow!("Unknown required permission: {}", permission.id));
     }
     if !permission.hosts.is_empty()
@@ -161,6 +165,9 @@ fn validate_surface_contributions(
 }
 
 fn validate_network_host(host: &str) -> Result<()> {
+    if host.contains('*') && !host.starts_with("*.") {
+        return Err(anyhow!("Invalid permission host: {host}"));
+    }
     let normalized = host.strip_prefix("*.").unwrap_or(host);
     if normalized.is_empty()
         || normalized.contains('/')

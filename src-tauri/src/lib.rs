@@ -234,7 +234,11 @@ pub fn run() {
             commands::app_exit,
             commands::app_relaunch,
             commands::plugins_load,
+            commands::plugins_developer_mode_get,
+            commands::plugins_developer_mode_set,
             commands::plugins_registry_load,
+            commands::plugins_beta_plugins_get,
+            commands::plugins_beta_plugin_set,
             commands::plugins_toggle,
             commands::plugins_inspect_local,
             commands::plugins_inspect_marketplace,
@@ -366,6 +370,15 @@ pub fn run() {
             share::share_agent_start,
             share::share_agent_stop,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                if let Some(recovery) = app.try_state::<plugins::recovery::PluginRecoveryState>() {
+                    if let Err(error) = recovery.mark_clean_exit() {
+                        log::warn!("[Plugins] Failed to record a clean app exit: {error}");
+                    }
+                }
+            }
+        });
 }

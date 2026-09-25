@@ -11,6 +11,8 @@ const MAX_PACKAGE_FILE_BYTES: u64 = 20 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 256 * 1024;
 const MAX_PACKAGE_ENTRIES: usize = 2_048;
 const MAX_PACKAGE_PATH_BYTES: usize = 512;
+const MAX_PACKAGE_COMPRESSION_RATIO: u64 = 200;
+const COMPRESSION_RATIO_CHECK_BYTES: u64 = 1024 * 1024;
 
 pub fn read_manifest_file(path: &Path) -> Result<String> {
     let metadata = fs::symlink_metadata(path)
@@ -68,6 +70,16 @@ pub fn extract_archive<R: Read + Seek>(
         let declared_size = entry.size();
         if declared_size > MAX_PACKAGE_FILE_BYTES {
             return Err(anyhow!("Plugin file exceeds 20 MiB: {entry_name}"));
+        }
+        if declared_size >= COMPRESSION_RATIO_CHECK_BYTES
+            && declared_size
+                > entry
+                    .compressed_size()
+                    .saturating_mul(MAX_PACKAGE_COMPRESSION_RATIO)
+        {
+            return Err(anyhow!(
+                "Plugin file has an unsafe compression ratio: {entry_name}"
+            ));
         }
         expanded_bytes = expanded_bytes
             .checked_add(declared_size)

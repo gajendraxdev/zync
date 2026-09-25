@@ -37,8 +37,11 @@ pub struct Plugin {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
 struct PluginState {
     enabled_plugins: HashMap<String, bool>,
+    developer_mode: bool,
+    beta_plugins: std::collections::HashSet<String>,
 }
 
 pub struct PluginScanner;
@@ -68,12 +71,21 @@ impl PluginScanner {
 
                 if path.is_dir() {
                     if let Ok(mut plugin) = Self::load_plugin(&path) {
-                        // Legacy packages keep their compatibility behavior until the migration
-                        // window closes. Manifest v2 packages never run without a matching grant.
-                        let approved = plugin.manifest.manifest_version() < 2
-                            || package::digest_directory(&path).ok().is_some_and(|digest| {
-                                grants::is_package_approved(app, &plugin.manifest, &digest)
+                        let manifest_version = plugin.manifest.manifest_version();
+                        let package_approved = manifest_version >= 2
+                            && package::digest_directory(&path).ok().is_some_and(|digest| {
+                                grants::is_package_approved(
+                                    app,
+                                    &plugin.manifest,
+                                    &digest,
+                                    state.developer_mode,
+                                )
                             });
+                        let approved = user_plugin_enabled_by_policy(
+                            manifest_version,
+                            state.developer_mode,
+                            package_approved,
+                        );
                         // Check if enabled (default true if not present)
                         plugin.enabled = approved
                             && *state
@@ -133,10 +145,64 @@ impl PluginScanner {
         Ok(*state.enabled_plugins.get(plugin_id).unwrap_or(&true))
     }
 
+    pub(crate) fn developer_mode_enabled(app: &AppHandle) -> Result<bool> {
+        Ok(Self::load_state(app)?.developer_mode)
+    }
+
+    pub fn set_developer_mode(app: &AppHandle, enabled: bool) -> Result<()> {
+        let mut state = Self::load_state(app)?;
+        state.developer_mode = enabled;
+        Self::write_state(app, &state)
+    }
+
+    pub fn beta_enabled(app: &AppHandle, plugin_id: &str) -> Result<bool> {
+        Ok(Self::load_state(app)?.beta_plugins.contains(plugin_id))
+    }
+
+    pub fn beta_plugins(app: &AppHandle) -> Result<Vec<String>> {
+        Ok(Self::load_state(app)?.beta_plugins.into_iter().collect())
+    }
+
+    pub fn set_beta_enabled(app: &AppHandle, plugin_id: &str, enabled: bool) -> Result<()> {
+        if plugin_id.is_empty()
+            || plugin_id.len() > 128
+            || !plugin_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+        {
+            return Err(anyhow!("Invalid plugin id"));
+        }
+        let mut state = Self::load_state(app)?;
+        if enabled {
+            state.beta_plugins.insert(plugin_id.to_string());
+        } else {
+            state.beta_plugins.remove(plugin_id);
+        }
+        Self::write_state(app, &state)
+    }
+
+    pub(crate) fn require_developer_mode(app: &AppHandle) -> Result<()> {
+        if Self::developer_mode_enabled(app)? {
+            Ok(())
+        } else {
+            Err(anyhow!(
+                "Developer Mode is off. Enable it in Settings > Plugins > Developer before using local or legacy plugins."
+            ))
+        }
+    }
+
     pub fn save_state(app: &AppHandle, id: String, enabled: bool) -> Result<()> {
         if enabled {
             grants::ensure_installed_plugin_is_approved(app, &id)?;
         }
+        let mut state = Self::load_state(app)?;
+
+        state.enabled_plugins.insert(id, enabled);
+
+        Self::write_state(app, &state)
+    }
+
+    fn write_state(app: &AppHandle, state: &PluginState) -> Result<()> {
         let config_dir = app
             .path()
             .app_config_dir()
@@ -144,16 +210,9 @@ impl PluginScanner {
         if !config_dir.exists() {
             fs::create_dir_all(&config_dir)?;
         }
-
         let state_path = config_dir.join("plugins.json");
-        let mut state = Self::load_state(app)?;
-
-        state.enabled_plugins.insert(id, enabled);
-
-        let content = serde_json::to_string_pretty(&state)?;
-        fs::write(state_path, content)?;
-
-        Ok(())
+        crate::atomic_io::durable_replace(&state_path, &serde_json::to_vec_pretty(state)?)
+            .context("Failed to save plugin state")
     }
 
     fn load_plugin(dir: &PathBuf) -> Result<Plugin> {
@@ -166,6 +225,7 @@ impl PluginScanner {
         manifest
             .validate()
             .context("Plugin manifest validation failed")?;
+        manifest.validate_host_compatibility()?;
 
         // Signed metadata is never advisory: if present, it must still match every payload byte
         // before the package can be loaded. Unsigned packages remain a Developer Mode concern.
@@ -276,9 +336,21 @@ fn should_scan_plugin_dir(name: &OsStr) -> bool {
     !name.starts_with('.') && !name.starts_with("tmp-")
 }
 
+fn user_plugin_enabled_by_policy(
+    manifest_version: u32,
+    developer_mode: bool,
+    package_approved: bool,
+) -> bool {
+    if manifest_version < 2 {
+        developer_mode
+    } else {
+        package_approved
+    }
+}
+
 #[cfg(test)]
 mod scanner_tests {
-    use super::should_scan_plugin_dir;
+    use super::{should_scan_plugin_dir, user_plugin_enabled_by_policy};
     use std::ffi::OsStr;
 
     #[test]
@@ -286,5 +358,13 @@ mod scanner_tests {
         assert!(!should_scan_plugin_dir(OsStr::new(".plugin-rollback-123")));
         assert!(!should_scan_plugin_dir(OsStr::new("tmp-extract-123")));
         assert!(should_scan_plugin_dir(OsStr::new("dev.example.tool")));
+    }
+
+    #[test]
+    fn legacy_activation_requires_developer_mode() {
+        assert!(!user_plugin_enabled_by_policy(1, false, true));
+        assert!(user_plugin_enabled_by_policy(1, true, false));
+        assert!(user_plugin_enabled_by_policy(2, false, true));
+        assert!(!user_plugin_enabled_by_policy(2, true, false));
     }
 }

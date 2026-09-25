@@ -17,6 +17,7 @@ fn signed_registry(version: u64, expires_at_ms: u64) -> (Vec<u8>, String) {
             id: "dev.example.monitor".into(),
             name: "Monitor".into(),
             version: "1.2.3".into(),
+            channel: PluginReleaseChannel::Stable,
             description: "A signed test plugin".into(),
             publisher: "dev.example".into(),
             download_url: "https://plugins.example.dev/monitor-1.2.3.zip".into(),
@@ -55,6 +56,37 @@ fn verifies_registry_and_binds_publisher_key() {
     assert!(snapshot.plugins[0]
         .id
         .starts_with(&format!("{}.", snapshot.plugins[0].publisher)));
+}
+
+#[test]
+fn beta_release_requires_a_prerelease_version_and_explicit_channel() {
+    let (bytes, root_key) = signed_registry(4, NOW + 60_000);
+    let mut envelope: Value = serde_json::from_slice(&bytes).unwrap();
+    envelope["signed"]["plugins"][0]["channel"] = json!("beta");
+    envelope["signed"]["plugins"][0]["version"] = json!("1.3.0-beta.1");
+    let signing_key = SigningKey::from_bytes(&[11u8; 32]);
+    let signed = envelope["signed"].clone();
+    envelope["signatures"][0]["signature"] = json!(STANDARD.encode(
+        signing_key
+            .sign(format!("{SIGNING_DOMAIN}{}", canonical_json(&signed).unwrap()).as_bytes())
+            .to_bytes()
+    ));
+    let valid = serde_json::to_vec(&envelope).unwrap();
+    let snapshot = verify_registry(&valid, &root_key, 0, NOW).expect("beta release");
+    assert_eq!(snapshot.plugins[0].channel, PluginReleaseChannel::Beta);
+
+    envelope["signed"]["plugins"][0]["channel"] = json!("stable");
+    let signed = envelope["signed"].clone();
+    envelope["signatures"][0]["signature"] = json!(STANDARD.encode(
+        signing_key
+            .sign(format!("{SIGNING_DOMAIN}{}", canonical_json(&signed).unwrap()).as_bytes())
+            .to_bytes()
+    ));
+    let invalid = serde_json::to_vec(&envelope).unwrap();
+    assert!(verify_registry(&invalid, &root_key, 0, NOW)
+        .unwrap_err()
+        .to_string()
+        .contains("channel"));
 }
 
 #[test]
@@ -229,4 +261,41 @@ fn rejects_a_revocation_too_large_for_persisted_state() {
     let error =
         validate_revocation(&revocation, NOW).expect_err("oversized revocation metadata must fail");
     assert!(error.to_string().contains("too large"));
+}
+
+#[test]
+fn state_backup_recovers_the_latest_version_and_revocations() {
+    let root = std::env::temp_dir().join(format!("zync-registry-state-{}", uuid::Uuid::new_v4()));
+    let path = root.join("plugin-registry-state.json");
+    let initial = RegistryState {
+        highest_version: 4,
+        revocations: Vec::new(),
+    };
+    write_state(&path, &initial).expect("write initial state");
+
+    let latest = RegistryState {
+        highest_version: 5,
+        revocations: vec![RegistryRevocation {
+            kind: RegistryRevocationKind::PublisherKey,
+            publisher: "dev.example".into(),
+            key_id: Some(format!("sha256:{}", "44".repeat(32))),
+            plugin_id: None,
+            version: None,
+            package_digest: None,
+            revoked_at_ms: NOW,
+            reason: "Compromised key".into(),
+        }],
+    };
+    write_state(&path, &latest).expect("write updated state");
+    fs::write(&path, serde_json::to_vec(&initial).unwrap()).expect("restore stale primary");
+    let interrupted = read_state(&path).expect("recover interrupted replacement");
+    assert_eq!(interrupted.highest_version, latest.highest_version);
+    assert_eq!(interrupted.revocations, latest.revocations);
+
+    fs::write(&path, b"corrupt primary").expect("damage primary state");
+
+    let recovered = read_state(&path).expect("recover from backup");
+    assert_eq!(recovered.highest_version, latest.highest_version);
+    assert_eq!(recovered.revocations, latest.revocations);
+    fs::remove_dir_all(root).expect("remove test state");
 }

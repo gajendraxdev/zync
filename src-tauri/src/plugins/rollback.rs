@@ -102,6 +102,14 @@ pub fn rollback(app: &AppHandle, plugin_id: &str) -> Result<PluginRollbackResult
     let retained_path = rollback_path(app, plugin_id)?;
     let retained = read_validated_record(&retained_path, plugin_id)?;
     let retained_package = retained_path.join("package");
+    let retained_manifest: Manifest = serde_json::from_str(&read_manifest_file(
+        &retained_package.join("manifest.json"),
+    )?)
+    .context("Retained plugin manifest is invalid")?;
+    retained_manifest
+        .validate()
+        .context("Retained plugin manifest is invalid")?;
+    retained_manifest.validate_host_compatibility()?;
 
     let target = installed_path(app, plugin_id)?;
     let active_manifest: Manifest =

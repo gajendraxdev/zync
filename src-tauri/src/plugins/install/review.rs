@@ -75,6 +75,7 @@ impl PluginScanner {
     }
 
     pub fn inspect_local_plugin(app: &AppHandle, path: &str) -> Result<PluginInstallInspection> {
+        Self::require_developer_mode(app)?;
         let candidate_path = PathBuf::from(path);
         let source_path = fs::canonicalize(&candidate_path)
             .with_context(|| format!("Failed to resolve path: {}", candidate_path.display()))?;
@@ -133,6 +134,11 @@ impl PluginScanner {
             .find(|release| release.id == plugin_id && release.version == version)
             .cloned()
             .ok_or_else(|| anyhow!("Plugin release is not present in the trusted marketplace"))?;
+        if release.channel == crate::plugins::registry::PluginReleaseChannel::Beta
+            && !Self::beta_enabled(app, plugin_id)?
+        {
+            return Err(anyhow!("Beta releases are not enabled for this plugin"));
+        }
         if let Some(reason) = snapshot.release_revocation_reason(&release) {
             return Err(anyhow!(
                 "Plugin release was revoked by the marketplace: {reason}"
@@ -160,6 +166,16 @@ impl PluginScanner {
             ));
         }
         let inspection = read_inspection_metadata(app, inspection_id)?;
+        if inspection.registry_version.is_none() {
+            Self::require_developer_mode(app)?;
+        } else if !semver::Version::parse(&inspection.manifest.version)
+            .context("Reviewed marketplace version is invalid")?
+            .pre
+            .is_empty()
+            && !Self::beta_enabled(app, &inspection.manifest.id)?
+        {
+            return Err(anyhow!("Beta releases are not enabled for this plugin"));
+        }
         if inspection.package_digest != expected_digest {
             return Err(anyhow!("Plugin review no longer matches this package"));
         }
@@ -169,6 +185,7 @@ impl PluginScanner {
         manifest
             .validate()
             .context("Plugin manifest validation failed")?;
+        manifest.validate_host_compatibility()?;
         let actual_digest = digest_directory(&staging_dir)?;
         if actual_digest != expected_digest {
             let _ = fs::remove_dir_all(&staging_dir);
@@ -339,6 +356,7 @@ fn inspect_staged_package(
     manifest
         .validate()
         .context("Plugin manifest validation failed")?;
+    manifest.validate_host_compatibility()?;
     let signature_status = verify_package_signature(staging_dir, &manifest)?;
     Ok(PluginInstallInspection {
         inspection_id,
@@ -374,6 +392,7 @@ fn inspect_marketplace_staged_package(
     manifest
         .validate()
         .context("Plugin manifest validation failed")?;
+    manifest.validate_host_compatibility()?;
     if manifest.manifest_version() < 2 {
         return Err(anyhow!("Marketplace plugins must use Manifest v2"));
     }
@@ -442,13 +461,50 @@ fn attach_installed_update_context(
             "Installed plugin identity does not match its directory"
         ));
     }
+    let installed_digest = digest_directory(&target_dir)?;
+    if inspection.registry_version.is_some() && requires_marketplace_version_check(&installed_manifest) {
+        validate_marketplace_update(
+            &installed_manifest.version,
+            &installed_digest,
+            &inspection.manifest.version,
+            &inspection.package_digest,
+        )?;
+    }
     inspection.previous_version = Some(installed_manifest.version.clone());
-    inspection.previous_package_digest = Some(digest_directory(&target_dir)?);
+    inspection.previous_package_digest = Some(installed_digest);
     inspection.previous_permissions = installed_manifest.extensions.permissions.clone();
     inspection.previously_granted_optional =
         crate::plugins::grants::approval_summary(app, &inspection.manifest.id)?
             .map(|grant| grant.optional_permissions)
             .unwrap_or_default();
+    Ok(())
+}
+
+fn requires_marketplace_version_check(installed_manifest: &Manifest) -> bool {
+    installed_manifest.manifest_version() >= 2
+        && semver::Version::parse(&installed_manifest.version).is_ok()
+}
+
+fn validate_marketplace_update(
+    installed_version: &str,
+    installed_digest: &str,
+    candidate_version: &str,
+    candidate_digest: &str,
+) -> Result<()> {
+    let installed =
+        semver::Version::parse(installed_version).context("Installed plugin version is invalid")?;
+    let candidate = semver::Version::parse(candidate_version)
+        .context("Marketplace plugin version is invalid")?;
+    if candidate < installed {
+        return Err(anyhow!(
+            "Marketplace downgrade was rejected. Use the retained-version rollback action instead."
+        ));
+    }
+    if candidate == installed && candidate_digest != installed_digest {
+        return Err(anyhow!(
+            "Marketplace release changed without a version increase"
+        ));
+    }
     Ok(())
 }
 
@@ -661,6 +717,7 @@ mod tests {
                 id: "dev.zync.examples.manifest-v2-demo".into(),
                 name: "Manifest v2 Demo".into(),
                 version: "1.4.0".into(),
+                channel: crate::plugins::registry::PluginReleaseChannel::Stable,
                 description: "test".into(),
                 publisher: "dev.zync.examples".into(),
                 download_url: "https://plugins.example.test/demo.zip".into(),
@@ -719,6 +776,20 @@ mod tests {
     }
 
     #[test]
+    fn local_review_rejects_an_incompatible_plugin_before_permission_review() {
+        let (root, _) = unsigned_marketplace_fixture();
+        let manifest_path = root.join("manifest.json");
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+        manifest["engines"]["pluginApi"] = serde_json::json!("^3.0.0");
+        fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        let error = inspect_staged_package("review".into(), &root, &root)
+            .expect_err("an incompatible plugin must not reach permission review");
+        assert!(error.to_string().contains("engines.pluginApi"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn update_review_is_bound_to_the_installed_package_digest() {
         let root = std::env::temp_dir().join(format!(
             "zync-update-review-digest-{}",
@@ -733,5 +804,36 @@ mod tests {
         assert!(ensure_update_target_unchanged(&root, Some(&digest)).is_err());
         assert!(ensure_update_target_unchanged(&root, None).is_err());
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn marketplace_updates_reject_downgrades_and_mutated_versions() {
+        let downgrade = validate_marketplace_update("2.0.0", "sha256:old", "1.9.9", "sha256:new")
+            .expect_err("marketplace downgrade must fail");
+        assert!(downgrade.to_string().contains("downgrade"));
+
+        let mutation = validate_marketplace_update("2.0.0", "sha256:old", "2.0.0", "sha256:new")
+            .expect_err("same-version package replacement must fail");
+        assert!(mutation.to_string().contains("without a version increase"));
+
+        validate_marketplace_update("2.0.0", "sha256:old", "2.1.0", "sha256:new")
+            .expect("higher marketplace version");
+        validate_marketplace_update("2.0.0", "sha256:same", "2.0.0", "sha256:same")
+            .expect("idempotent reinstall");
+    }
+
+    #[test]
+    fn marketplace_migration_accepts_legacy_installed_versions() {
+        let mut installed: Manifest = serde_json::from_str(
+            r#"{"id":"dev.example.demo","name":"Demo","version":"1"}"#,
+        )
+        .unwrap();
+        assert!(!requires_marketplace_version_check(&installed));
+
+        installed.extensions.manifest_version = Some(2);
+        assert!(!requires_marketplace_version_check(&installed));
+
+        installed.version = "1.0.0".into();
+        assert!(requires_marketplace_version_check(&installed));
     }
 }

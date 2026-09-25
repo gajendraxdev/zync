@@ -40,6 +40,76 @@ fn extracts_a_small_package() {
 }
 
 #[test]
+fn rejects_absolute_and_parent_archive_entries() {
+    for path in ["/outside.js", "../outside.js", "dist/../../outside.js"] {
+        let mut archive = archive(&[(path, b"malicious")]);
+        let destination = test_directory("archive-escape");
+        fs::create_dir_all(&destination).expect("create destination");
+        let error = extract_archive(&mut archive, &destination)
+            .expect_err("escaping archive entry must fail");
+        assert!(error.to_string().contains("Invalid plugin archive path"));
+        assert!(!destination.join("outside.js").exists());
+        fs::remove_dir_all(destination).expect("remove destination");
+    }
+}
+
+#[test]
+fn rejects_extreme_compression_ratios_before_extraction() {
+    let mut buffer = Cursor::new(Vec::new());
+    {
+        let mut writer = zip::ZipWriter::new(&mut buffer);
+        let options =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        writer
+            .start_file("worker.js", options)
+            .expect("start compressed entry");
+        writer
+            .write_all(&vec![0; 2 * 1024 * 1024])
+            .expect("write compressed payload");
+        writer.finish().expect("finish zip");
+    }
+    buffer.set_position(0);
+    let mut archive = zip::ZipArchive::new(buffer).expect("open compressed archive");
+    let destination = test_directory("compression-ratio");
+    fs::create_dir_all(&destination).expect("create destination");
+
+    let error = extract_archive(&mut archive, &destination)
+        .expect_err("extreme compression ratio must fail");
+    assert!(error.to_string().contains("unsafe compression ratio"));
+    assert!(!destination.join("worker.js").exists());
+    fs::remove_dir_all(destination).expect("remove destination");
+}
+
+#[test]
+fn rejects_archives_with_too_many_entries_before_extraction() {
+    let mut buffer = Cursor::new(Vec::new());
+    {
+        let mut writer = zip::ZipWriter::new(&mut buffer);
+        for index in 0..=MAX_PACKAGE_ENTRIES {
+            writer
+                .start_file(format!("files/{index}.txt"), SimpleFileOptions::default())
+                .expect("start zip entry");
+        }
+        writer.finish().expect("finish zip");
+    }
+    buffer.set_position(0);
+    let mut archive = zip::ZipArchive::new(buffer).expect("open large archive");
+    let destination = test_directory("too-many-entries");
+    fs::create_dir_all(&destination).expect("create destination");
+
+    let error =
+        extract_archive(&mut archive, &destination).expect_err("entry-count bomb must fail");
+    assert!(error.to_string().contains("more than"));
+    assert_eq!(
+        fs::read_dir(&destination)
+            .expect("list destination")
+            .count(),
+        0
+    );
+    fs::remove_dir_all(destination).expect("remove destination");
+}
+
+#[test]
 fn rejects_case_only_duplicate_paths() {
     let mut archive = archive(&[("dist/worker.js", b"a"), ("DIST/worker.js", b"b")]);
     let destination = test_directory("duplicate");
@@ -60,6 +130,9 @@ fn rejects_platform_ambiguous_package_paths() {
         "dist/worker.js.",
         "dist//worker.js",
         "dist/../worker.js",
+        "C:/outside.js",
+        "dist\\worker.js",
+        "dist/control\u{0000}.js",
     ] {
         let error = validate_package_path(path).expect_err("ambiguous path must fail");
         assert!(

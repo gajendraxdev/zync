@@ -176,13 +176,16 @@ impl PluginBrokerState {
         };
 
         if manifest.manifest_version() < 2 {
-            // Compatibility runtimes retain legacy access until the migration window closes.
+            PluginScanner::require_developer_mode(app)?;
             return Ok(());
         }
         if capability == "legacy.compatibility" {
             return Err(anyhow!(
                 "Legacy plugin API is unavailable to Manifest v2 plugins"
             ));
+        }
+        if !super::manifest::is_known_permission_id(capability) {
+            return Err(anyhow!("Unknown plugin capability: {capability}"));
         }
         let declared = manifest
             .extensions
@@ -198,7 +201,13 @@ impl PluginBrokerState {
         if !declared {
             return Err(anyhow!("Plugin did not declare capability {capability}"));
         }
-        if !super::grants::is_capability_granted(app, &manifest, &current_digest, capability) {
+        if !super::grants::is_capability_granted(
+            app,
+            &manifest,
+            &current_digest,
+            capability,
+            PluginScanner::developer_mode_enabled(app)?,
+        ) {
             return Err(anyhow!("Plugin permission is not granted: {capability}"));
         }
         Ok(())
@@ -604,5 +613,23 @@ mod tests {
         let html = read_pane_entry(&plugin_root, "ui/counter.html").expect("read pane entry");
         assert!(html.contains("Isolated plugin pane"));
         assert!(read_pane_entry(&plugin_root, "../manifest.json").is_err());
+    }
+
+    #[test]
+    fn pane_entry_rejects_oversized_html_before_reading_it() {
+        let plugin_root = std::env::temp_dir().join(format!(
+            "zync-plugin-pane-oversized-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        fs::create_dir_all(&plugin_root).expect("create plugin root");
+        let entry = plugin_root.join("pane.html");
+        let file = fs::File::create(&entry).expect("create pane entry");
+        file.set_len(MAX_PANE_HTML_BYTES + 1)
+            .expect("grow pane entry");
+
+        let error =
+            read_pane_entry(&plugin_root, "pane.html").expect_err("oversized pane must fail");
+        assert!(error.to_string().contains("too large"));
+        fs::remove_dir_all(plugin_root).expect("remove plugin root");
     }
 }
