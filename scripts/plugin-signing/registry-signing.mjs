@@ -13,10 +13,11 @@ import { verifySignedPlugin } from './package-signing.mjs';
 const REGISTRY_TYPE = 'zync.plugin-registry';
 const REGISTRY_DOMAIN = 'zync-plugin-registry-v1\n';
 const ROOT_KEY_PURPOSE = 'zync-plugin-registry-root';
-const MAX_REGISTRY_BYTES = 2 * 1024 * 1024;
+export const MAX_REGISTRY_BYTES = 2 * 1024 * 1024;
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
 const MAX_PACKAGE_BYTES = 100 * 1024 * 1024;
 const MAX_FILES = 2_048;
+const MAX_TRUSTED_ROOT_KEYS = 4;
 
 function sha256(bytes) {
   return `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
@@ -61,6 +62,7 @@ function validateHttpsUrl(value, label) {
   if (url.protocol !== 'https:' || !url.hostname || url.username || url.password || url.hash) {
     throw new Error(`${label} must use HTTPS without credentials or fragments`);
   }
+  return url;
 }
 
 function canonicalJson(value) {
@@ -113,6 +115,30 @@ function publicKeyFromRecord(key) {
     key: { kty: 'OKP', crv: 'Ed25519', x: toBase64Url(key.publicKey) },
     format: 'jwk',
   });
+}
+
+function trustedRootRecords(value) {
+  const encoded = String(value ?? '')
+    .split(',')
+    .map(candidate => candidate.trim())
+    .filter(Boolean);
+  if (encoded.length === 0 || encoded.length > MAX_TRUSTED_ROOT_KEYS) {
+    throw new Error(`Trusted registry must configure between 1 and ${MAX_TRUSTED_ROOT_KEYS} root keys`);
+  }
+  return encoded.map(publicKey => {
+    const bytes = Buffer.from(publicKey, 'base64');
+    if (bytes.length !== 32 || bytes.toString('base64') !== publicKey) {
+      throw new Error('Trusted registry root key must be 32 bytes of canonical base64');
+    }
+    return {
+      publicKey,
+      keyId: sha256(bytes),
+    };
+  });
+}
+
+export function validateTrustedRootPublicKeys(value) {
+  return trustedRootRecords(value).map(key => key.keyId);
 }
 
 function packageFiles(root) {
@@ -204,6 +230,7 @@ function releaseFromDescriptor(descriptor, baseDirectory) {
     id: manifest.id,
     name: manifest.name,
     version: manifest.version,
+    channel: descriptor.channel ?? 'stable',
     description: descriptor.description ?? manifest.description ?? '',
     publisher: manifest.publisher,
     downloadUrl: descriptor.downloadUrl,
@@ -231,6 +258,18 @@ function validateRegistryRelease(release) {
   }
   if (typeof release.description !== 'string' || typeof release.publisherVerified !== 'boolean') {
     throw new Error(`Registry release metadata is invalid for ${release.id}`);
+  }
+  const channel = release.channel ?? 'stable';
+  if (channel !== 'stable' && channel !== 'beta') throw new Error(`Invalid plugin release channel for ${release.id}`);
+  const parsedVersion = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(release.version);
+  if (!parsedVersion || Boolean(parsedVersion[1]) !== (channel === 'beta')) {
+    throw new Error(`Plugin release channel does not match version for ${release.id}`);
+  }
+  if (parsedVersion[1]?.split('.').some(identifier => /^0\d+$/.test(identifier))) {
+    throw new Error(`Plugin release version is not valid semantic versioning for ${release.id}`);
+  }
+  if (channel === 'beta' && parsedVersion[1] !== 'beta' && !parsedVersion[1].startsWith('beta.')) {
+    throw new Error(`Beta plugin version must use a beta prerelease suffix for ${release.id}`);
   }
   for (const field of ['icon', 'thumbnailUrl', 'pluginType']) {
     if (release[field] !== undefined && (typeof release[field] !== 'string' || !release[field].trim())) {
@@ -408,19 +447,47 @@ export function buildSignedRegistryFromFile({ descriptorPath, ...options }) {
   });
 }
 
-export function verifySignedRegistry(registryPath, rootKeyPath, currentTimeMs = Date.now()) {
-  const envelope = readJson(path.resolve(registryPath), 'Signed registry', MAX_REGISTRY_BYTES);
+export function verifySignedRegistry(
+  registryPath,
+  rootKeyPath,
+  currentTimeMs = Date.now(),
+) {
   const key = loadRootKey(rootKeyPath, false);
+  const resolved = path.resolve(registryPath);
+  const stat = fs.lstatSync(resolved);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Signed registry must be a regular file');
+  if (stat.size > MAX_REGISTRY_BYTES) throw new Error('Signed registry is too large');
+  const bytes = fs.readFileSync(resolved);
+  return verifySignedRegistryBytes(bytes, key.publicKey, currentTimeMs);
+}
+
+export function verifySignedRegistryBytes(
+  bytes,
+  trustedRootPublicKeys,
+  currentTimeMs = Date.now(),
+) {
+  const encoded = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
+  if (encoded.length > MAX_REGISTRY_BYTES) throw new Error('Signed registry is too large');
+  let envelope;
+  try {
+    envelope = JSON.parse(encoded.toString('utf8'));
+  } catch (error) {
+    throw new Error(`Signed registry is invalid JSON: ${error.message}`);
+  }
   if (!envelope || typeof envelope !== 'object' || !Array.isArray(envelope.signatures) || envelope.signatures.length !== 1) {
     throw new Error('Signed registry must contain exactly one root signature');
   }
   const registrySignature = envelope.signatures[0];
-  if (registrySignature.keyId !== key.keyId) throw new Error('Registry root key is not trusted');
+  const key = trustedRootRecords(trustedRootPublicKeys)
+    .find(candidate => candidate.keyId === registrySignature.keyId);
+  if (!key) throw new Error('Registry root key is not trusted');
+  const signatureBytes = Buffer.from(registrySignature.signature ?? '', 'base64');
+  if (signatureBytes.length !== 64) throw new Error('Registry signature must be 64 bytes');
   const valid = verify(
     null,
     Buffer.from(`${REGISTRY_DOMAIN}${canonicalJson(envelope.signed)}`),
     publicKeyFromRecord(key),
-    Buffer.from(registrySignature.signature ?? '', 'base64'),
+    signatureBytes,
   );
   if (!valid) throw new Error('Registry signature is invalid');
 

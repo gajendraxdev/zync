@@ -79,6 +79,37 @@ try {
   assert.equal(release.packageDigest, digestPluginDirectory(signed));
   assert.equal(release.publisherVerified, true);
 
+  const betaSource = path.join(root, 'beta-source');
+  const betaSigned = path.join(root, 'beta-signed');
+  fs.mkdirSync(betaSource);
+  writeJson(path.join(betaSource, 'manifest.json'), {
+    manifestVersion: 2,
+    id: 'dev.example.registry-test',
+    name: 'Registry test',
+    version: '1.3.0-beta.1',
+    publisher: 'dev.example',
+    type: 'workspace',
+  });
+  fs.writeFileSync(path.join(betaSource, 'worker.js'), 'self.onmessage = () => {};\n');
+  signPluginDirectory(betaSource, publisherKeyPath, betaSigned, issuedAtMs);
+  const channelDescriptor = path.join(root, 'channel-releases.json');
+  writeJson(channelDescriptor, { releases: [
+    { packagePath: './signed', downloadUrl: 'https://plugins.example.test/stable.zip', publisherVerified: true },
+    { packagePath: './beta-signed', downloadUrl: 'https://plugins.example.test/beta.zip', channel: 'beta', publisherVerified: true },
+  ] });
+  const channelRegistry = path.join(root, 'channel-registry.json');
+  buildSignedRegistryFromFile({ descriptorPath: channelDescriptor, keyPath: rootKeyPath,
+    outputPath: channelRegistry, version: 8, issuedAtMs, expiresAtMs });
+  const channels = JSON.parse(fs.readFileSync(channelRegistry, 'utf8')).signed.plugins;
+  assert.deepEqual(channels.map(item => item.channel), ['stable', 'beta']);
+  assert.equal(verifySignedRegistry(channelRegistry, rootKeyPath, issuedAtMs + 1).pluginCount, 2);
+  writeJson(channelDescriptor, { releases: [
+    { packagePath: './beta-signed', downloadUrl: 'https://plugins.example.test/beta.zip', channel: 'stable', publisherVerified: true },
+  ] });
+  assert.throws(() => buildSignedRegistryFromFile({ descriptorPath: channelDescriptor, keyPath: rootKeyPath,
+    outputPath: path.join(root, 'mismatched-channel.json'), version: 9, issuedAtMs, expiresAtMs }),
+  /channel does not match version/);
+
   envelope.signed.plugins[0].name = 'Tampered';
   const tamperedPath = path.join(root, 'registry-tampered.json');
   writeJson(tamperedPath, envelope);

@@ -9,6 +9,7 @@ import {
   generateRegistryRootKey,
   verifySignedRegistry,
 } from './registry-signing.mjs';
+import { checkPublishedRegistry } from './registry-release-check.mjs';
 
 function options(args) {
   const parsed = new Map();
@@ -62,6 +63,9 @@ function usage() {
     '',
     'Verify signed marketplace metadata:',
     '  npm run plugin:registry-verify -- --registry ./dist/registry.json --key C:\\safe\\registry-root-key.json',
+    '',
+    'Check a published staging or production registry:',
+    '  npm run plugin:registry-check -- --url https://plugins.example.com/registry.json --root-keys BASE64_PUBLIC_KEY --minimum-version 1',
   ].join('\n');
 }
 
@@ -122,6 +126,24 @@ try {
     console.log(`Plugin releases: ${result.pluginCount}`);
     console.log(`Revocations: ${result.revocationCount}`);
     console.log(`Root key fingerprint: ${result.keyId}`);
+  } else if (command === 'registry-check') {
+    const minimumValidityHours = parsed.has('min-valid-for-hours')
+      ? positiveInteger(required(parsed, 'min-valid-for-hours'), 'Minimum validity hours')
+      : 24;
+    const result = await checkPublishedRegistry({
+      registryUrl: required(parsed, 'url'),
+      trustedRootPublicKeys: required(parsed, 'root-keys'),
+      minimumVersion: parsed.has('minimum-version')
+        ? positiveInteger(required(parsed, 'minimum-version'), 'Minimum registry version')
+        : 1,
+      minimumValidityMs: minimumValidityHours * 60 * 60 * 1_000,
+    });
+    console.log(`Published registry is valid: version ${result.version}`);
+    console.log(`Endpoint: ${result.finalUrl}`);
+    console.log(`Plugin releases: ${result.pluginCount}`);
+    console.log(`Revocations: ${result.revocationCount}`);
+    console.log(`Root key fingerprint: ${result.keyId}`);
+    console.log(`Expires: ${new Date(result.expiresAtMs).toISOString()}`);
   } else {
     throw new Error(`Unknown command: ${command}\n\n${usage()}`);
   }
