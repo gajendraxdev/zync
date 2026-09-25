@@ -8,6 +8,7 @@ import {
     type PluginInstallInspection,
     type PluginPermissionRequest,
 } from '../../../../features/plugins/types';
+import { Toggle } from '../../common/Toggle';
 
 export interface LocalInstallAction {
     mode: 'zip' | 'folder';
@@ -21,12 +22,18 @@ export interface LocalInstallAction {
 interface PluginsDeveloperTabProps {
     localInstallActions: LocalInstallAction[];
     localPluginInstallMode: 'zip' | 'folder' | null;
+    developerMode: boolean;
+    isUpdatingDeveloperMode: boolean;
+    onSetDeveloperMode: (enabled: boolean) => Promise<void>;
     onInstallLocalPlugin: (mode: 'zip' | 'folder') => Promise<void>;
 }
 
 export function PluginsDeveloperTab({
     localInstallActions,
     localPluginInstallMode,
+    developerMode,
+    isUpdatingDeveloperMode,
+    onSetDeveloperMode,
     onInstallLocalPlugin,
 }: PluginsDeveloperTabProps) {
     return (
@@ -46,11 +53,24 @@ export function PluginsDeveloperTab({
                 </div>
             </div>
 
+            <div className="overflow-hidden rounded-xl border border-amber-500/25 bg-amber-500/5">
+                <Toggle
+                    label="Developer Mode"
+                    description="Allow local and legacy plugins that are not verified by the signed marketplace. Keep this off unless you are testing code you trust."
+                    checked={developerMode}
+                    disabled={isUpdatingDeveloperMode}
+                    onChange={(enabled) => {
+                        void onSetDeveloperMode(enabled);
+                    }}
+                />
+            </div>
+
             <div className="grid gap-3 md:grid-cols-2">
                 {localInstallActions.map((action) => {
                     const ActionIcon = action.icon;
                     const isInstallingThis = localPluginInstallMode === action.mode;
                     const isAnyInstallRunning = localPluginInstallMode !== null;
+                    const disabled = !developerMode || isAnyInstallRunning || isUpdatingDeveloperMode;
 
                     return (
                         <button
@@ -60,9 +80,10 @@ export function PluginsDeveloperTab({
                                     console.error('Failed to install local plugin', error);
                                 });
                             }}
-                            disabled={isAnyInstallRunning}
+                            disabled={disabled}
                             aria-busy={isInstallingThis}
-                            aria-disabled={isAnyInstallRunning}
+                            aria-disabled={disabled}
+                            title={!developerMode ? 'Enable Developer Mode to install local plugins' : undefined}
                             className="group min-h-[168px] rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/35 p-4 text-left transition-all hover:border-[var(--color-app-accent)]/35 hover:bg-[var(--color-app-surface)] disabled:cursor-not-allowed disabled:opacity-60"
                             type="button"
                         >
@@ -72,7 +93,7 @@ export function PluginsDeveloperTab({
                                     <span className="text-[11px] font-semibold uppercase tracking-wide">{action.label}</span>
                                 </div>
                                 <span className="text-[10px] font-medium text-[var(--color-app-muted)] group-hover:text-[var(--color-app-text)]">
-                                    {isInstallingThis ? 'Installing...' : 'Choose'}
+                                    {isInstallingThis ? 'Installing...' : developerMode ? 'Choose' : 'Locked'}
                                 </span>
                             </div>
                             <p className="text-sm font-medium text-[var(--color-app-text)]">{action.title}</p>
@@ -84,8 +105,12 @@ export function PluginsDeveloperTab({
             </div>
 
             <div className="rounded-lg border border-dashed border-[var(--color-app-border)]/60 bg-[var(--color-app-bg)]/40 p-3 text-xs leading-5 text-[var(--color-app-muted)]">
-                Installed local plugins appear in the <span className="font-medium text-[var(--color-app-text)]">Installed</span> tab after install.
-                Use this flow to test theme-follow behavior and editor-provider integration before marketplace publication.
+                {developerMode
+                    ? <>
+                        Installed local plugins appear in the <span className="font-medium text-[var(--color-app-text)]">Installed</span> tab after install.
+                        Use this flow to test theme-follow behavior and editor-provider integration before marketplace publication.
+                    </>
+                    : 'Local and legacy plugins stay stopped while Developer Mode is off. Signed marketplace plugins are unaffected.'}
             </div>
 
         </div>

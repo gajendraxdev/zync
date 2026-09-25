@@ -15,6 +15,7 @@ import type {
     RegistryRevocation,
     TrustedPluginRegistrySnapshot,
 } from '../../../features/plugins/types';
+import { selectMarketplaceReleases } from '../../../features/plugins/marketplace/releases';
 
 export type { InstalledPlugin, RegistryPlugin } from '../../../features/plugins/types';
 
@@ -45,10 +46,12 @@ export function useSettingsPlugins({
 }: UseSettingsPluginsOptions) {
     const isMountedRef = useRef(false);
     const processingRef = useRef<string | null>(null);
+    const approvalInProgressRef = useRef(false);
     const showToastRef = useRef(showToast);
     const [plugins, setPlugins] = useState<InstalledPlugin[]>([]);
     const [isLoadingPlugins, setIsLoadingPlugins] = useState(false);
     const [registry, setRegistry] = useState<RegistryPlugin[]>([]);
+    const [betaPluginIds, setBetaPluginIds] = useState<Set<string>>(new Set());
     const [isLoadingRegistry, setIsLoadingRegistry] = useState(false);
     const [activeMenu, setActiveMenu] = useState<string | null>(null);
     const [processingId, setProcessingId] = useState<string | null>(null);
@@ -56,6 +59,8 @@ export function useSettingsPlugins({
     const [localPluginInstallMode, setLocalPluginInstallMode] = useState<'zip' | 'folder' | null>(null);
     const [pendingPluginInspection, setPendingPluginInspection] = useState<PluginInstallInspection | null>(null);
     const [isApprovingLocalPlugin, setIsApprovingLocalPlugin] = useState(false);
+    const [pluginDeveloperMode, setPluginDeveloperMode] = useState(false);
+    const [isUpdatingDeveloperMode, setIsUpdatingDeveloperMode] = useState(false);
 
     useEffect(() => {
         isMountedRef.current = true;
@@ -100,6 +105,22 @@ export function useSettingsPlugins({
                 if (isMounted) setIsLoadingPlugins(false);
             });
 
+        return () => {
+            isMounted = false;
+        };
+    }, [isOpen, activeTab]);
+
+    useEffect(() => {
+        if (!(isOpen && activeTab === 'plugins')) return;
+        let isMounted = true;
+        window.ipcRenderer.invoke('plugins:developer_mode_get')
+            .then((enabled: boolean) => {
+                if (isMounted) setPluginDeveloperMode(enabled === true);
+            })
+            .catch((error: unknown) => {
+                console.error('Failed to load plugin Developer Mode state', error);
+                if (isMounted) setPluginDeveloperMode(false);
+            });
         return () => {
             isMounted = false;
         };
@@ -157,7 +178,34 @@ export function useSettingsPlugins({
         };
     }, [isOpen, activeTab]);
 
+    useEffect(() => {
+        if (!(isOpen && activeTab === 'plugins')) return;
+        let mounted = true;
+        window.ipcRenderer.invoke('plugins:beta_plugins_get')
+            .then((ids: string[]) => { if (mounted) setBetaPluginIds(new Set(ids)); })
+            .catch((error: unknown) => console.error('Failed to load plugin beta preferences', error));
+        return () => { mounted = false; };
+    }, [isOpen, activeTab]);
+
+    const handleSetPluginBeta = async (pluginId: string, enabled: boolean) => {
+        try {
+            await window.ipcRenderer.invoke('plugins:beta_plugin_set', { pluginId, enabled });
+            setBetaPluginIds(current => {
+                const next = new Set(current);
+                if (enabled) next.add(pluginId);
+                else next.delete(pluginId);
+                return next;
+            });
+        } catch (error) {
+            showToastRef.current('error', `Could not change beta updates: ${String(error)}`);
+        }
+    };
+
     const handleInstallLocalPlugin = async (mode: 'zip' | 'folder') => {
+        if (!pluginDeveloperMode) {
+            showToastRef.current('warning', 'Enable Developer Mode before installing local plugins.');
+            return;
+        }
         if (isMountedRef.current) setLocalPluginInstallMode(mode);
         try {
             const selection = await open(
@@ -196,9 +244,44 @@ export function useSettingsPlugins({
         }
     };
 
+    const handleSetPluginDeveloperMode = async (enabled: boolean) => {
+        if (isUpdatingDeveloperMode || enabled === pluginDeveloperMode) return;
+        if (enabled) {
+            const confirmed = await showConfirmDialog({
+                title: 'Enable Developer Mode?',
+                message: 'Developer Mode allows local and legacy plugins that have not been verified by the signed marketplace. Enable it only while testing code you trust.',
+                confirmText: 'Enable Developer Mode',
+                variant: 'danger',
+            });
+            if (!confirmed) return;
+        }
+
+        setIsUpdatingDeveloperMode(true);
+        try {
+            await window.ipcRenderer.invoke('plugins:developer_mode_set', { enabled });
+            setPluginDeveloperMode(enabled);
+            const runtimeReloaded = await reloadPluginRuntime();
+            await reloadPluginsInModal();
+            showToastRef.current(
+                runtimeReloaded ? 'success' : 'warning',
+                enabled
+                    ? 'Developer Mode enabled for local plugin testing.'
+                    : runtimeReloaded
+                        ? 'Developer Mode disabled. Local and legacy plugins were stopped.'
+                        : 'Developer Mode disabled. Restart Zync before using plugins again.',
+            );
+        } catch (error) {
+            console.error('Failed to update plugin Developer Mode', error);
+            showToastRef.current('error', 'Failed to update Developer Mode.');
+        } finally {
+            if (isMountedRef.current) setIsUpdatingDeveloperMode(false);
+        }
+    };
+
     const handleApproveLocalPlugin = async (optionalPermissionIds: string[]) => {
         const inspection = pendingPluginInspection;
-        if (!inspection || isApprovingLocalPlugin) return;
+        if (!inspection || approvalInProgressRef.current) return;
+        approvalInProgressRef.current = true;
         setIsApprovingLocalPlugin(true);
         try {
             const activation = await window.ipcRenderer.invoke('plugins:install_inspected', {
@@ -248,6 +331,7 @@ export function useSettingsPlugins({
                 showToastRef.current('error', `Plugin installation failed: ${message}`);
             }
         } finally {
+            approvalInProgressRef.current = false;
             if (isMountedRef.current) {
                 setIsApprovingLocalPlugin(false);
             }
@@ -255,6 +339,7 @@ export function useSettingsPlugins({
     };
 
     const handleCancelLocalPluginReview = async () => {
+        if (approvalInProgressRef.current) return;
         const inspection = pendingPluginInspection;
         setPendingPluginInspection(null);
         if (!inspection) return;
@@ -290,7 +375,8 @@ export function useSettingsPlugins({
         } catch (error) {
             console.error('Failed to toggle plugin', error);
             if (isMountedRef.current) {
-                showToastRef.current('error', 'Failed to update plugin state');
+                const message = error instanceof Error ? error.message : String(error);
+                showToastRef.current('error', `Failed to update plugin state: ${message}`);
                 setPlugins(prev => prev.map(p => p.manifest.id === id ? { ...p, enabled: !enabled } : p));
             }
         } finally {
@@ -525,6 +611,9 @@ export function useSettingsPlugins({
             : plugins,
         isLoadingPlugins,
         registry,
+        selectedRegistry: selectMarketplaceReleases(registry, betaPluginIds),
+        betaPluginIds,
+        handleSetPluginBeta,
         isLoadingRegistry,
         activeMenu,
         setActiveMenu,
@@ -532,9 +621,12 @@ export function useSettingsPlugins({
         needsRestart,
         setNeedsRestart,
         localPluginInstallMode,
+        pluginDeveloperMode,
+        isUpdatingDeveloperMode,
         pendingPluginInspection,
         isApprovingLocalPlugin,
         handleInstallLocalPlugin,
+        handleSetPluginDeveloperMode,
         handleApproveLocalPlugin,
         handleCancelLocalPluginReview,
         handleTogglePlugin,

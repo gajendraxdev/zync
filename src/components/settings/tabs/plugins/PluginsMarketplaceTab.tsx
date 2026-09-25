@@ -5,10 +5,13 @@ import type { RegistryPlugin } from '../../../../features/plugins/types';
 interface PluginsMarketplaceTabProps {
     isLoadingRegistry: boolean;
     registry: RegistryPlugin[];
+    selectedRegistry: RegistryPlugin[];
+    betaPluginIds: ReadonlySet<string>;
+    onSetPluginBeta: (pluginId: string, enabled: boolean) => Promise<void>;
     onInspectPlugin: (plugin: RegistryPlugin) => Promise<void>;
 }
 
-export function PluginsMarketplaceTab({ isLoadingRegistry, registry, onInspectPlugin }: PluginsMarketplaceTabProps) {
+export function PluginsMarketplaceTab({ isLoadingRegistry, registry, selectedRegistry, betaPluginIds, onSetPluginBeta, onInspectPlugin }: PluginsMarketplaceTabProps) {
     if (isLoadingRegistry) {
         return (
             <div
@@ -25,7 +28,7 @@ export function PluginsMarketplaceTab({ isLoadingRegistry, registry, onInspectPl
 
     return (
         <div className="h-full">
-            <Marketplace registry={registry} onInspectPlugin={onInspectPlugin} />
+            <Marketplace registry={registry} selectedRegistry={selectedRegistry} betaPluginIds={betaPluginIds} onSetPluginBeta={onSetPluginBeta} onInspectPlugin={onInspectPlugin} />
         </div>
     );
 }

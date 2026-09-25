@@ -6,9 +6,13 @@ import { formatEditorCapabilities, getPluginCategory, getPluginCategoryLabel, ty
 import { ipcRenderer } from '../../lib/tauri-ipc';
 import { Select } from '../ui/Select';
 import type { RegistryPlugin } from '../../features/plugins/types';
+import { compareVersion } from '../../features/plugins/marketplace/releases';
 
 interface MarketplaceProps {
     registry: RegistryPlugin[];
+    selectedRegistry: RegistryPlugin[];
+    betaPluginIds: ReadonlySet<string>;
+    onSetPluginBeta: (pluginId: string, enabled: boolean) => Promise<void>;
     onInspectPlugin: (plugin: RegistryPlugin) => Promise<void>;
 }
 
@@ -44,7 +48,7 @@ const PluginImage = ({ url, icon, name, size = 20 }: { url?: string, icon?: stri
     );
 };
 
-export function Marketplace({ registry, onInspectPlugin }: MarketplaceProps) {
+export function Marketplace({ registry, selectedRegistry, betaPluginIds, onSetPluginBeta, onInspectPlugin }: MarketplaceProps) {
     const { plugins: installedPlugins, reloadPlugins } = usePlugins();
     const [installingId, setInstallingId] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
@@ -89,7 +93,7 @@ export function Marketplace({ registry, onInspectPlugin }: MarketplaceProps) {
         return p?.manifest.version;
     };
 
-    const filteredPlugins = registry.filter(p =>
+    const filteredPlugins = selectedRegistry.filter(p =>
         (categoryFilter === 'all' || getPluginCategory(p) === categoryFilter) &&
         (
             p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -138,6 +142,8 @@ export function Marketplace({ registry, onInspectPlugin }: MarketplaceProps) {
                         const localVersion = getInstalledVersion(plugin.id);
                         const processing = installingId === plugin.id;
                         const revoked = Boolean(plugin.revokedReason);
+                        const betaAvailable = registry.some(release => release.id === plugin.id && release.channel === 'beta' && !release.revokedReason);
+                        const betaEnabled = betaPluginIds.has(plugin.id);
                         const categoryLabel = getPluginCategoryLabel(getPluginCategory(plugin));
 
                         return (
@@ -163,7 +169,7 @@ export function Marketplace({ registry, onInspectPlugin }: MarketplaceProps) {
                                                     {categoryLabel}
                                                 </span>
                                             </div>
-                                            <p className="text-[10px] text-[var(--color-app-muted)] mt-0.5">v{plugin.version} • by {plugin.publisher ?? plugin.author ?? 'Unknown publisher'}</p>
+                                            <p className="text-[10px] text-[var(--color-app-muted)] mt-0.5">v{plugin.version} {plugin.channel === 'beta' ? '· Beta' : '· Stable'} • by {plugin.publisher ?? plugin.author ?? 'Unknown publisher'}</p>
                                             <p className={clsx(
                                                 "mt-0.5 text-[9px]",
                                                 revoked ? "text-red-500" : plugin.registryVerified ? "text-emerald-500" : "text-amber-500",
@@ -178,7 +184,7 @@ export function Marketplace({ registry, onInspectPlugin }: MarketplaceProps) {
                                         {/* Action Button */}
                                         {installed ? (
                                             <div className="flex items-center gap-2">
-                                                {localVersion && plugin.version !== localVersion && (
+                                                {localVersion && compareVersion(plugin.version, localVersion) > 0 && (
                                                     <button
                                                         onClick={() => handleInstall(plugin)}
                                                         disabled={processing || !plugin.registryVerified || revoked}
@@ -229,6 +235,20 @@ export function Marketplace({ registry, onInspectPlugin }: MarketplaceProps) {
                                     <p className="text-[11px] text-[var(--color-app-muted)] mt-1 line-clamp-1 opacity-80">
                                         {plugin.description}
                                     </p>
+                                    {plugin.registryVerified && betaAvailable && (
+                                        <label className="mt-2 inline-flex items-center gap-1.5 text-[10px] text-[var(--color-app-muted)] cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={betaEnabled}
+                                                onChange={event => { void onSetPluginBeta(plugin.id, event.target.checked); }}
+                                                aria-label={`Receive beta releases for ${plugin.name}`}
+                                            />
+                                            Receive beta releases
+                                        </label>
+                                    )}
+                                    {installed && localVersion?.includes('-') && !betaEnabled && (
+                                        <p className="mt-1 text-[10px] text-[var(--color-app-muted)]">Beta updates are off. This installed beta remains until a newer stable release is available.</p>
+                                    )}
                                     {getPluginCategory(plugin) === 'editor-provider' && plugin.editor?.supports?.length ? (
                                         <p className="mt-1 text-[10px] text-[var(--color-app-muted)]">
                                             Capabilities: {formatEditorCapabilities(plugin.editor.supports, 4)}

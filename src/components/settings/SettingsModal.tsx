@@ -257,15 +257,21 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         plugins,
         isLoadingPlugins,
         registry,
+        selectedRegistry,
+        betaPluginIds,
+        handleSetPluginBeta,
         isLoadingRegistry,
         activeMenu,
         setActiveMenu,
         processingId,
         needsRestart,
         localPluginInstallMode,
+        pluginDeveloperMode,
+        isUpdatingDeveloperMode,
         pendingPluginInspection,
         isApprovingLocalPlugin,
         handleInstallLocalPlugin,
+        handleSetPluginDeveloperMode,
         handleApproveLocalPlugin,
         handleCancelLocalPluginReview,
         handleTogglePlugin,
@@ -440,7 +446,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             plugins={plugins}
             runtimeHealth={runtimeHealth}
             pluginSafeMode={pluginSafeMode}
-            registry={registry}
+            registry={selectedRegistry}
             isLoadingPlugins={isLoadingPlugins}
             processingId={processingId}
             activeMenu={activeMenu}
@@ -464,6 +470,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         <PluginsMarketplaceTab
             isLoadingRegistry={isLoadingRegistry}
             registry={registry}
+            selectedRegistry={selectedRegistry}
+            betaPluginIds={betaPluginIds}
+            onSetPluginBeta={handleSetPluginBeta}
             onInspectPlugin={handleInspectMarketplacePlugin}
         />
     );
@@ -472,6 +481,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         <PluginsDeveloperTab
             localInstallActions={localInstallActions}
             localPluginInstallMode={localPluginInstallMode}
+            developerMode={pluginDeveloperMode}
+            isUpdatingDeveloperMode={isUpdatingDeveloperMode}
+            onSetDeveloperMode={handleSetPluginDeveloperMode}
             onInstallLocalPlugin={handleInstallLocalPlugin}
         />
     );

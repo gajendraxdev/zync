@@ -133,6 +133,7 @@ export interface RegistryPlugin {
     id: string;
     name: string;
     version: string;
+    channel?: 'stable' | 'beta';
     description: string;
     author?: string;
     publisher?: string;

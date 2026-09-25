@@ -198,6 +198,7 @@ export function PluginsInstalledTab({
                         const registryItem = registry.find(r => r.id === plugin.manifest.id);
                         const hasUpdate = Boolean(
                             registryItem
+                            && registryItem.registryVerified
                             && !registryItem.revokedReason
                             && registryItem.version
                             && plugin.manifest.version

@@ -10,6 +10,14 @@ const workerSource = fs.readFileSync(
   path.join(process.cwd(), 'src', 'context', 'PluginContext.tsx'),
   'utf8',
 );
+const brokerSource = fs.readFileSync(
+  path.join(process.cwd(), 'src', 'features', 'plugins', 'broker', 'pluginMessageBroker.ts'),
+  'utf8',
+);
+const notificationBrokerSource = fs.readFileSync(
+  path.join(process.cwd(), 'src', 'features', 'plugins', 'broker', 'pluginNotificationBroker.ts'),
+  'utf8',
+);
 const confirmationSource = fs.readFileSync(
   path.join(process.cwd(), 'src', 'features', 'plugins', 'confirmPluginTerminalAction.ts'),
   'utf8',
@@ -20,6 +28,10 @@ const settingsPluginsSource = fs.readFileSync(
 );
 const marketplaceSource = fs.readFileSync(
   path.join(process.cwd(), 'src', 'components', 'settings', 'Marketplace.tsx'),
+  'utf8',
+);
+const installedPluginsSource = fs.readFileSync(
+  path.join(process.cwd(), 'src', 'components', 'settings', 'tabs', 'plugins', 'PluginsInstalledTab.tsx'),
   'utf8',
 );
 const nativeRuntimeSource = fs.readFileSync(
@@ -90,11 +102,11 @@ assert.match(source, /Content-Security-Policy/, 'Manifest v2 panes must receive 
 assert.doesNotMatch(source, /legacyAccess \? '' : `\s*<meta http-equiv="Content-Security-Policy"/, 'legacy panes must not skip the frame CSP');
 assert.match(source, /connect-src 'none'/, 'all plugin panes must be unable to use the app network allowlist');
 assert.match(source, /if \(!legacyAccess\) \{[\s\S]{0,240}parsePluginPaneMessage[\s\S]{0,240}return;/, 'Manifest v2 panes must use only the bounded pane message channel');
-assert.match(workerSource, /case 'api:panel:post-message'/, 'Workers must use the pane-scoped return channel');
-assert.match(workerSource, /paneMessageTargets\.current\.get\(`\$\{pluginId\}\\0\$\{paneInstanceId\}`\)/, 'pane replies must be scoped by host-owned plugin and pane instance');
+assert.match(brokerSource, /case 'api:panel:post-message'/, 'Workers must use the pane-scoped return channel');
+assert.match(workerSource, /getPaneMessageTarget:[\s\S]{0,160}paneMessageTargets\.current\.get\(`\$\{pluginId\}\\0\$\{paneInstanceId\}`\)/, 'pane replies must be scoped by host-owned plugin and pane instance');
 assert.match(workerSource, /handlePluginMessage\(plugin\.manifest\.id, type, payload, worker\)/, 'worker identity must travel with its message');
 assert.match(workerSource, /handleWorkerTerminalCommand/, 'worker terminal input must use the tested bridge');
-assert.match(workerSource, /runtimeSupervisor\.current\.isCurrentWorker\(pluginId, candidate\)/, 'stale workers must be rejected after confirmation');
+assert.match(notificationBrokerSource, /runtime\.isCurrentWorker\(pluginId, requester\)/, 'stale workers must be rejected after confirmation');
 assert.match(workerSource, /if \(!runtimeSupervisor\.current\.isCurrentWorker\(pluginId, requester\)\) return;/, 'all messages from a terminated Worker must be rejected');
 assert.match(workerSource, /runtimeSupervisor\.current\.stopAll/, 'plugin reloads must stop the previous Worker generation');
 assert.match(workerSource, /runtimeSupervisor\.current\.markCrash/, 'Worker crashes must be recorded by the runtime supervisor');
@@ -103,18 +115,18 @@ assert.match(workerSource, /type === 'host:heartbeat:ping'/, 'the Worker bootstr
 assert.match(workerSource, /setCommands\(\[\]\)/, 'plugin reloads must discard registrations from the previous Worker generation');
 assert.match(workerSource, /reloadPlugins:\s*\(healthCheckPluginId\?: string\)\s*=>\s*Promise<boolean>/, 'the plugin runtime must expose a health-checkable live reload contract');
 assert.match(workerSource, /startNativePluginRuntime/, 'each Worker generation must receive a native runtime identity before startup');
-assert.match(workerSource, /authorizePluginCapability\(runtimeInstanceId, 'ui\.notifications\.emit'\)/, 'plugin notifications must pass through native capability authorization');
-assert.match(workerSource, /authorizePluginCommandRegistration/, 'plugin command registration must pass through native contribution and permission authorization');
-assert.match(workerSource, /registerNativePluginPane/, 'Manifest v2 panes must resolve through the native contribution broker');
+assert.match(notificationBrokerSource, /authorizePluginCapability\(runtimeInstanceId, 'ui\.notifications\.emit'\)/, 'plugin notifications must pass through native capability authorization');
+assert.match(brokerSource, /authorizePluginCommandRegistration/, 'plugin command registration must pass through native contribution and permission authorization');
+assert.match(brokerSource, /registerNativePluginPane/, 'Manifest v2 panes must resolve through the native contribution broker');
 assert.match(workerSource, /authorizePluginCapability\(runtimeInstanceId, 'legacy\.compatibility'\)/, 'legacy Worker APIs must be denied by the native broker for Manifest v2');
 assert.doesNotMatch(workerSource, /api:window:create/, 'plugins must not receive the removed arbitrary window API');
 assert.doesNotMatch(nativeCommandsSource, /plugin_window_create/, 'native IPC must not expose arbitrary plugin-created webviews');
-assert.match(workerSource, /authorizePluginCapability\(runtimeInstanceId, 'ui\.dialog\.confirm'\)/, 'plugin confirmation dialogs must require a reviewed native capability');
+assert.match(notificationBrokerSource, /authorizePluginCapability\(runtimeInstanceId, 'ui\.dialog\.confirm'\)/, 'plugin confirmation dialogs must require a reviewed native capability');
 assert.match(workerSource, /confirm: \(opts\) => zync\.request\('api:ui:confirm', opts\)/, 'Manifest v2 SDK must expose the brokered confirmation API');
-assert.match(workerSource, /respond\(requester, pluginId, type, \{ requestId, result: confirmed \}\)/, 'confirmation result must use the shared Worker response envelope');
-assert.match(workerSource, /normalizePluginConfirmRequest\(payload\)/, 'plugin confirmation text must be bounded before rendering');
+assert.match(notificationBrokerSource, /respond\(\{ requestId, result: confirmed \}\)/, 'confirmation result must use the shared Worker response envelope');
+assert.match(notificationBrokerSource, /normalizePluginConfirmRequest\(payload\)/, 'plugin confirmation text must be bounded before rendering');
 assert.match(workerSource, /messageRateLimiter\.consume\(\)/, 'every Worker generation must have a frontend message budget');
-assert.match(workerSource, /!runtimeSupervisor\.current\.isCurrentRuntime\(pluginId, runtimeInstanceId\)/, 'authorization results must be rejected after runtime replacement');
+assert.match(brokerSource, /runtime\.isCurrentRuntime\(pluginId, runtimeInstanceId\)/, 'authorization results must be rejected after runtime replacement');
 assert.match(workerSource, /resetNativePluginRuntimes/, 'reload and shutdown must revoke native plugin runtimes');
 assert.match(nativeRuntimeSource, /plugins:runtime_start/, 'runtime creation must use the native plugin broker');
 assert.match(nativeRuntimeSource, /plugins:runtime_authorize/, 'capability checks must use the native plugin broker');
@@ -122,19 +134,19 @@ assert.match(nativeRuntimeSource, /plugins:runtime_register_command/, 'command r
 assert.match(nativeRuntimeSource, /plugins:runtime_register_pane/, 'pane registration must use the native plugin broker');
 assert.match(nativeRuntimeSource, /plugins:recovery_status/, 'startup safe mode must come from native recovery state');
 assert.match(nativeRuntimeSource, /plugins:recovery_record_failure/, 'runtime failures must be persisted natively');
-assert.match(workerSource, /api:storage:get/, 'plugin storage reads must use the host bridge');
-assert.match(workerSource, /api:storage:set/, 'plugin storage writes must use the host bridge');
+assert.match(brokerSource, /api:storage:get/, 'plugin storage reads must use the host bridge');
+assert.match(brokerSource, /api:storage:set/, 'plugin storage writes must use the host bridge');
 assert.match(pluginStorageSource, /plugins:storage_get/, 'private storage reads must use native IPC');
 assert.match(pluginStorageSource, /plugins:storage_set/, 'private storage writes must use native IPC');
 assert.match(workerSource, /blockedNetworkGlobals[\s\S]{0,500}WebSocket[\s\S]{0,500}importScripts/, 'ambient Worker networking primitives must be blocked before plugin code runs');
-assert.match(workerSource, /case 'api:network:fetch'/, 'approved Worker network requests must use the host bridge');
+assert.match(brokerSource, /case 'api:network:fetch'/, 'approved Worker network requests must use the host bridge');
 assert.match(pluginNetworkSource, /plugins:network_fetch/, 'plugin network requests must use native IPC');
 assert.match(nativeNetworkSource, /Policy::none/, 'the native broker must handle and revalidate redirects itself');
 assert.match(nativeNetworkSource, /resolve\(&host, address\)/, 'validated DNS results must be pinned for the outgoing request');
 assert.match(nativeNetworkSource, /private or reserved address/, 'the native broker must reject SSRF destinations');
 assert.match(nativeNetworkSource, /MAX_RESPONSE_BYTES/, 'network responses must have a native byte limit');
 assert.match(demoWorkerSource, /accept: 'application\/vnd\.github\+json'/, 'the demo network request must use a GitHub-supported media type');
-assert.match(workerSource, /handlePluginFilesystemMessage/, 'external filesystem messages must use the isolated host bridge');
+assert.match(brokerSource, /handlePluginFilesystemMessage/, 'external filesystem messages must use the isolated host bridge');
 assert.match(pluginFilesystemSource, /'api:filesystem:pick'/, 'external filesystem selection must use the host bridge');
 assert.match(pluginFilesystemSource, /'api:filesystem:read-text'/, 'external file reads must use opaque handles');
 assert.match(pluginFilesystemSource, /plugins:filesystem_pick/, 'external selection must use native IPC');
@@ -188,6 +200,11 @@ assert.match(settingsPluginsSource, /plugins:install_inspected[\s\S]{0,700}reloa
 assert.match(settingsPluginsSource, /!runtimeReloaded[\s\S]{0,300}plugins:rollback_activation/, 'failed plugin activation must restore the previous package');
 assert.match(settingsPluginsSource, /plugins:commit_activation/, 'healthy plugin activation must discard its rollback copy');
 assert.match(workerSource, /host:runtime:ready/, 'the isolated Worker must explicitly acknowledge successful activation');
+assert.match(
+  workerSource,
+  /if \(value !== undefined\) requestPayload\[key\] = value/,
+  'the Worker bridge must omit optional undefined fields before strict envelope validation',
+);
 assert.match(pluginManagementSource, /plugins:rollback_version/, 'plugin management must expose retained-version rollback');
 assert.match(pluginDetailsSource, /Previous version[\s\S]{0,900}Restore/, 'plugin details must show a user-facing retained-version rollback action');
 assert.match(settingsPluginsSource, /rollbackPluginVersion\(pluginId\)[\s\S]{0,500}reloadPluginRuntime\(pluginId\)/, 'manual rollback must health-check the restored runtime');
@@ -205,6 +222,7 @@ assert.match(marketplaceSource, /Legacy catalog · publisher not verified/, 'uns
 assert.match(settingsPluginsSource, /plugins:inspect_marketplace/, 'marketplace packages must enter native inspection by registry identity');
 assert.doesNotMatch(marketplaceSource, /plugins_install/, 'marketplace UI must not install an arbitrary presentation URL');
 assert.match(marketplaceSource, /disabled=\{processing \|\| !plugin\.registryVerified \|\| revoked\}/, 'legacy and revoked catalog entries must not be installable');
+assert.match(installedPluginsSource, /const hasUpdate = Boolean\([\s\S]{0,120}registryItem\.registryVerified[\s\S]{0,120}!registryItem\.revokedReason/, 'installed plugins must not offer unsigned catalog updates');
 assert.match(marketplaceSource, /Revoked · \$\{plugin\.revokedReason\}/, 'signed registry revocations must be visible in marketplace UI');
 assert.match(settingsPluginsSource, /plugins:discard_inspection/, 'cancelled permission reviews must discard staged plugin code');
 assert.match(confirmationSource, /showConfirmDialog/, 'all plugin command bridges must share the confirmation policy');
