@@ -1,7 +1,7 @@
 # Security Notes
 
-**Last updated:** 2026-09-20  
-**Scope:** Vault, Google Drive sync, Public URLs (Beta), credential handling, anonymous usage, and operator guidance for current Zync releases.
+**Last updated:** 2026-09-26
+**Scope:** Vault, Google Drive sync, Public URLs (Beta), plugins, credential handling, anonymous usage, and operator guidance, including the Zync 2.33.0 release candidate.
 
 ---
 
@@ -39,6 +39,18 @@ Zync’s core security surface is **encrypted local vaulting**, optional **remem
 ### Anonymous usage (optional)
 
 When **Settings → General → Share anonymous usage** is on (default), the desktop app may POST to the Zync analytics API (`/api/v1/usage`). A random install id is stored on this device and sent in that request so the same install can be counted across days. The **payload** also has app version, OS, UTC day, and feature names you opened (Files, terminal, split, tunnels, vault, Public URLs, snippets, dashboard, plugins) with a use count. The payload does **not** include an IP address, hostnames, paths, commands, vault contents, or terminal output. Turn the setting off to stop sending. The queue stays local until a flush on open, close, or every 15 minutes.
+
+### Plugins and granted capabilities (2.33.0)
+
+- **Manifest v2 isolation.** Workers and pane frames have no direct host DOM, raw IPC, or unrestricted filesystem/network bridge. Native brokers check the current runtime, package identity, permission grant, and applicable scope. This does not make every approved capability harmless.
+- **Remote commands are powerful.** Plugin API 2.1's `ssh.command.execute` grants command execution as the SSH account on the server bound to that pane. It is not a read-only PM2 permission or a remote OS sandbox. A granted plugin can receive command output, including sensitive server data. Arguments, time, output size, concurrency, and pane ownership are bounded; those limits do not prevent all remote side effects.
+- **Host-owned consent.** Required access is reviewed during installation/update. For declared optional access, Allow records a package-bound grant; Deny cancels the action without persisting a rejection and the next attempt can ask again. Grants can be revoked in Settings -> Plugins. Revocation or pane rebind cancels brokered channels but cannot undo completed operations or guarantee that remote daemonized work stops.
+- **Selected-file access and logs.** Local file operations use host-selected destinations and runtime-owned handles. Exported logs may contain secrets or personal data; choose a trusted destination. A plugin with separately granted network access may send permitted data to third-party services. Review its source and privacy practices.
+- **Signed distribution.** Trusted marketplace metadata and package signatures establish publisher/package provenance, not a guarantee that plugin behavior is safe. Release compatibility, permission changes, revocation, retained-version rollback, and crash recovery remain host-controlled. Production trusted marketplace availability depends on valid registry configuration.
+- **Legacy trust boundary.** Local and legacy plugins require Developer Mode, which defaults off. Their compatibility bridge is broader than Manifest v2's brokered API; do not describe legacy plugins as having the same isolation. Crash quarantine targets a failing plugin; safe mode disables third-party plugins for troubleshooting.
+- **Shortcut messages are untrusted.** A focused iframe and matching binding do not prove a user keypress. The host permits only a restricted set of presentation/navigation requests; privileged actions stay host-controlled.
+
+See [PLUGINS.md](./PLUGINS.md) for the implemented boundaries and remaining release gates, and [PLUGIN_REGISTRY_OPERATIONS.md](./PLUGIN_REGISTRY_OPERATIONS.md) for signing-key custody and staging procedures.
 
 ### Public URLs (Beta)
 
@@ -114,7 +126,7 @@ These are **product scope** limits today, not vulnerabilities:
 
 - **No team/org policy controls** — vault and sync are single-user oriented; shared/team vaults are deferred to later phases.
 - **No live bi-directional sync scheduling** — Google sync is manual upload/restore; there is no background auto-sync scheduler yet.
-- **Plugins** — marketplace plugins do **not** receive raw vault secrets by design. The target sandbox, permission, publisher, package, and marketplace model is documented in [PLUGINS.md](./PLUGINS.md). Standard plugins must use brokered credential operations rather than future raw-secret export/copy flows.
+- **Plugins** — there is no standard raw-vault-secret export API. Granted remote-command or file access can nevertheless expose sensitive data outside the vault. See the implemented trust boundary above and [PLUGINS.md](./PLUGINS.md); broader credential-sharing capabilities remain deferred.
 - **Public URLs Beta** — no team/org sharing, no custom domains, no pricing plans in-app; GA hardening is deferred.
 
 ### AI credential policy
