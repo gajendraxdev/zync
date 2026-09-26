@@ -10,6 +10,14 @@ import {
   verifySignedRegistry,
 } from './registry-signing.mjs';
 import { checkPublishedRegistry } from './registry-release-check.mjs';
+import { readKeyText } from '../../packages/plugin-sdk/bin/pem-key.mjs';
+import { readHiddenPassphrase } from '../../packages/plugin-sdk/bin/keygen.mjs';
+
+async function keyOptions(keyPath) {
+  return readKeyText(keyPath).includes('-----BEGIN ENCRYPTED PRIVATE KEY-----')
+    ? { passphrase: await readHiddenPassphrase('Key passphrase: ') }
+    : {};
+}
 
 function options(args) {
   const parsed = new Map();
@@ -86,6 +94,8 @@ try {
       required(parsed, 'source'),
       required(parsed, 'key'),
       required(parsed, 'out'),
+      Date.now(),
+      await keyOptions(required(parsed, 'key')),
     );
     console.log(`Signed ${result.pluginId}: ${result.outputPath}`);
     console.log(`Key fingerprint: ${result.keyId}`);
@@ -102,6 +112,7 @@ try {
     console.log('Keep the key file offline, private, and backed up. Release builds need only the public key.');
   } else if (command === 'registry-build') {
     const result = buildSignedRegistryFromFile({
+      ...await keyOptions(required(parsed, 'key')),
       descriptorPath: required(parsed, 'releases'),
       keyPath: required(parsed, 'key'),
       outputPath: required(parsed, 'out'),
@@ -121,6 +132,7 @@ try {
       required(parsed, 'registry'),
       required(parsed, 'key'),
       parsed.has('at') ? timestamp(required(parsed, 'at'), 'Verification time') : Date.now(),
+      await keyOptions(required(parsed, 'key')),
     );
     console.log(`Valid registry version: ${result.version}`);
     console.log(`Plugin releases: ${result.pluginCount}`);

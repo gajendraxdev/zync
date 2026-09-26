@@ -15,6 +15,8 @@ for (const args of [
   [path.join(root, 'tests', 'pluginSdkValidator.test.mjs')],
   [path.join(root, 'tests', 'pluginSdkTemplate.test.mjs')],
   [path.join(root, 'tests', 'pluginSdkPackage.test.mjs')],
+  [path.join(root, 'tests', 'pluginSdkKeygen.test.mjs')],
+  [path.join(root, 'tests', 'pluginPemSigning.test.mjs')],
 ]) {
   const result = spawnSync(process.execPath, args, {
     cwd: root,

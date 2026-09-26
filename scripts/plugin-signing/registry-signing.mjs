@@ -9,6 +9,7 @@ import {
 import fs from 'node:fs';
 import path from 'node:path';
 import { verifySignedPlugin } from './package-signing.mjs';
+import { readKeyText, readPemKey } from '../../packages/plugin-sdk/bin/pem-key.mjs';
 
 const REGISTRY_TYPE = 'zync.plugin-registry';
 const REGISTRY_DOMAIN = 'zync-plugin-registry-v1\n';
@@ -83,7 +84,11 @@ function canonicalJson(value) {
   throw new Error('Registry metadata contains an unsupported value');
 }
 
-function loadRootKey(keyPath, requirePrivate) {
+function loadRootKey(keyPath, requirePrivate, passphrase) {
+  const text = readKeyText(path.resolve(keyPath));
+  if (text.trimStart().startsWith('-----BEGIN ')) {
+    return readPemKey(text, { requirePrivate, passphrase });
+  }
   const key = readJson(path.resolve(keyPath), 'Registry root key');
   if (key.version !== 1 || key.algorithm !== 'ed25519' || key.purpose !== ROOT_KEY_PURPOSE) {
     throw new Error('Unsupported registry root key format');
@@ -99,6 +104,7 @@ function loadRootKey(keyPath, requirePrivate) {
 }
 
 function privateKeyFromRecord(key) {
+  if (key.keyObject) return key.keyObject;
   return createPrivateKey({
     key: {
       kty: 'OKP',
@@ -361,6 +367,7 @@ export function buildSignedRegistry({
   revocations = [],
   baseDirectory = process.cwd(),
   keyPath,
+  passphrase,
   outputPath,
   version,
   issuedAtMs = Date.now(),
@@ -404,7 +411,7 @@ export function buildSignedRegistry({
     Buffer.from(canonicalJson(right)),
   ));
 
-  const key = loadRootKey(keyPath, true);
+  const key = loadRootKey(keyPath, true, passphrase);
   const signed = {
     _type: REGISTRY_TYPE,
     version,
@@ -451,8 +458,9 @@ export function verifySignedRegistry(
   registryPath,
   rootKeyPath,
   currentTimeMs = Date.now(),
+  options = {},
 ) {
-  const key = loadRootKey(rootKeyPath, false);
+  const key = loadRootKey(rootKeyPath, false, options.passphrase);
   const resolved = path.resolve(registryPath);
   const stat = fs.lstatSync(resolved);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Signed registry must be a regular file');

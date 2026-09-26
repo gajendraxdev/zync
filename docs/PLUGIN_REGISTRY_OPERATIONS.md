@@ -2,13 +2,27 @@
 
 This runbook covers the production trust root for Zync's signed plugin registry. The private root key is an offline release authority, not an application secret. Desktop builds receive public keys only.
 
-## Custody and recovery
+## Marketplace root custody and recovery
 
 - Generate the root key on an offline machine. Never copy the private key into this repository, GitHub Actions, the registry host, chat, logs, or issue trackers.
 - Keep two encrypted backups on separate media and in separate physical locations. Record the key id and public key in the release log.
 - Require two people for key recovery, registry signing, revocation publication, and destruction of retired key material.
 - Every quarter, restore a backup on an offline disposable machine, verify a known registry fixture, record the result, and securely erase the restored copy.
 - Losing every private-key copy means the current desktop trust root cannot publish new metadata. It does not justify bypassing signature checks.
+
+## Publisher key custody and automated releases
+
+Plugin publishers choose how they generate, store and use their own signing keys. Local signing, protected CI secrets, hardware-backed keys and external signing services are supported operating models; Zync does not require publisher keys to remain offline or prohibit publisher-controlled CI signing. Publisher private keys must never be included in plugin packages, committed to source, logged, or submitted to the marketplace. Marketplace operators receive public keys, fingerprints and signed artifacts, not publisher private keys.
+
+For CI signing, recommended safeguards are protected release branches/tags, approval-gated environments, least-privilege workflow permissions, restricted access to secrets, reviewed/pinned build dependencies and actions, and temporary key files that are removed after signing. Keep PR validation and untrusted plugin code separate from jobs that receive signing secrets. A solo maintainer may use self-approval as an intentional release checkpoint; it is not independent review. Passphrase encryption is the publisher's choice and does not protect against a compromised signing job that receives both the key and its passphrase.
+
+Before marketplace publication, validate the signature, package integrity, approved publisher/key binding, manifest, compatibility, permissions and package limits, and perform the applicable release review. A valid signature establishes provenance and integrity, not benign behavior. Revoke compromised publisher keys or releases through higher, cumulatively revoked registry metadata. Publisher CI automation does not waive the separate root-custody and registry-publication requirements in this runbook.
+
+## Standard OpenSSL publisher key generation
+
+The SDK's `zync-sdk keygen` command wraps the standard OpenSSL CLI. See `packages/plugin-sdk/README.md` for usage. It generates publisher keys only, not registry roots. This new command must be published in a new SDK version before it is available through npm.
+
+Keep private PEM files and passphrases private; distribute only public PEM files. The operator signing CLI accepts Ed25519 PEM keys as well as existing JSON keys. Encrypted private PEM keys prompt for a passphrase; registry verification can use the public PEM file without a passphrase. Keep publisher and root keys separate: PEM itself has no publisher or purpose label. Do not change desktop trust configuration using PEM text: release builds require the raw 32-byte public key encoded as base64. The offline custody and two-person requirements apply to marketplace roots and registry operations, not every publisher's package-signing workflow.
 
 ## Publishing checklist
 
@@ -74,4 +88,4 @@ GitHub Actions needs:
 
 GitHub Actions also accepts the repository variables `ZYNC_PLUGIN_REGISTRY_MIN_VERSION` as the production version floor and `ZYNC_PLUGIN_REGISTRY_REQUIRED=true` to prohibit marketplace-disabled builds. The release check requires a configured registry to remain valid for at least 24 hours.
 
-`ZYNC_PLUGIN_REGISTRY_ROOT_KEY` is accepted only as a compatibility fallback. Private registry or publisher keys must never be configured as repository secrets.
+`ZYNC_PLUGIN_REGISTRY_ROOT_KEY` is accepted only as a compatibility fallback. Private registry root keys must never be configured as repository or environment secrets. Publisher-controlled workflows may store publisher signing keys in protected CI secrets according to the publisher's chosen custody model; these keys are separate from Zync's marketplace root and are not required in the desktop release repository.
