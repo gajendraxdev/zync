@@ -4,6 +4,14 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Plugin staging workflow:** Quote the native registry test command so YAML parses correctly and GitHub can start the manually triggered staging checks. ([cb3e9a9])
+
+### Changed
+
+- **Plugin security guidance:** Clarify Manifest v2 isolation, powerful remote-command permissions, optional Allow/Deny grants, sensitive log exports, legacy Developer Mode limits, and publisher-signature guarantees. ([cb3e9a9])
+
 ## [2.33.0] - 2026-09-26
 
 ### Added
@@ -1657,3 +1665,4 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [c20e841]: https://github.com/zync-sh/zync/commit/c20e841
 [41eaaa2]: https://github.com/zync-sh/zync/commit/41eaaa2
 [da6ac74]: https://github.com/zync-sh/zync/commit/da6ac74
+[cb3e9a9]: https://github.com/zync-sh/zync/commit/cb3e9a9
