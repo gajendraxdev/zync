@@ -4,6 +4,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Release documentation:** Correct the 2.33.1 changelog comparison links and clarify that production registry metadata must expire within seven days; zero-expiry metadata is supported only for historical verification.
+
 ## [2.33.1] - 2026-09-27
 
 ### Fixed
@@ -1510,7 +1514,8 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [d3f4060]: https://github.com/zync-sh/zync/commit/d3f4060
 [840afc2]: https://github.com/zync-sh/zync/commit/840afc2
 [193f568]: https://github.com/zync-sh/zync/commit/193f568
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.33.0...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.33.1...HEAD
+[2.33.1]: https://github.com/zync-sh/zync/compare/v2.33.0...v2.33.1
 [2.33.0]: https://github.com/zync-sh/zync/compare/v2.32.2...v2.33.0
 [2.32.2]: https://github.com/zync-sh/zync/compare/v2.32.1...v2.32.2
 [2.32.1]: https://github.com/zync-sh/zync/compare/v2.32.0...v2.32.1
