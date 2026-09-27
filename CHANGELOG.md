@@ -4,10 +4,12 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.33.1] - 2026-09-27
+
 ### Fixed
 
-- **Plugin startup recovery:** Ordinary app restarts no longer globally pause third-party plugins. Per-plugin crash-loop quarantine is retained, and unavailable or corrupt recovery history blocks activation without overwriting the original history.
-- **Tunnel reconciliation:** Send the required `connectionId` argument to Tauri for positional and object calls, retaining compatibility with legacy `connection_id` callers.
+- **Plugin startup recovery:** Ordinary app restarts no longer globally pause third-party plugins. Per-plugin crash-loop quarantine is retained, and unavailable or corrupt recovery history blocks activation without overwriting the original history. ([57b9c5e])
+- **Tunnel reconciliation:** Send the required `connectionId` argument to Tauri for positional and object calls, retaining compatibility with legacy `connection_id` callers. ([57b9c5e])
 - **SDK signing guidance:** Use operation-neutral passphrase errors and accurately describe published versus upcoming CLI commands and unattended signing requirements. ([cef8c21])
 - **Plugin staging workflow:** Quote the native registry test command so YAML parses correctly and GitHub can start the manually triggered staging checks. ([cb3e9a9])
 
@@ -1673,3 +1675,5 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [41eaaa2]: https://github.com/zync-sh/zync/commit/41eaaa2
 [da6ac74]: https://github.com/zync-sh/zync/commit/da6ac74
 [cb3e9a9]: https://github.com/zync-sh/zync/commit/cb3e9a9
+[cef8c21]: https://github.com/zync-sh/zync/commit/cef8c21
+[57b9c5e]: https://github.com/zync-sh/zync/commit/57b9c5e
