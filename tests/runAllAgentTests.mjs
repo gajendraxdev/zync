@@ -54,6 +54,7 @@ const tests = [
   'tests/pluginCommandBridge.test.mjs',
   'tests/pluginShortcuts.test.mjs',
   'tests/pluginManifestTypes.test.mjs',
+  'tests/pluginIconPath.test.mjs',
   'tests/pluginPaneRetention.test.mjs',
   'tests/pluginDeveloperMode.test.mjs',
   'tests/pluginBrokerBoundary.test.mjs',

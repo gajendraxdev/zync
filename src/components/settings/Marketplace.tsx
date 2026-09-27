@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Search, Download, Trash2, Loader2, Package, Plug, Activity, Cpu, Gauge, Layers, Globe, Zap, Shield, Lock, Monitor, FileText, Settings as SettingsIcon } from 'lucide-react';
+import { Search, Download, Trash2, Loader2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { usePlugins } from '../../context/PluginContext';
 import { formatEditorCapabilities, getPluginCategory, getPluginCategoryLabel, type PluginCategory } from '../editor/providers';
@@ -7,6 +7,7 @@ import { ipcRenderer } from '../../lib/tauri-ipc';
 import { Select } from '../ui/Select';
 import type { RegistryPlugin } from '../../features/plugins/types';
 import { compareVersion } from '../../features/plugins/marketplace/releases';
+import { IconResolver } from './common/IconResolver';
 
 interface MarketplaceProps {
     registry: RegistryPlugin[];
@@ -16,26 +17,22 @@ interface MarketplaceProps {
     onInspectPlugin: (plugin: RegistryPlugin) => Promise<void>;
 }
 
-// Icon Resolver Helper
-const IconResolver = ({ name, size = 16, className = "" }: { name?: string, size?: number, className?: string }) => {
-    const icons: any = {
-        Activity, Cpu, Gauge, Layers, Globe, Zap, Shield, Lock, Package, Plug, Monitor, FileText, SettingsIcon
-    };
-
-    const Icon = (name && icons[name]) || (name && icons[name.charAt(0).toUpperCase() + name.slice(1)]) || Plug;
-    return <Icon size={size} className={className} />;
-};
-
 // Robust Image component with fallback to IconResolver
-const PluginImage = ({ url, icon, name, size = 20 }: { url?: string, icon?: string, name: string, size?: number }) => {
+const PluginImage = ({ url, icon, path, name, size = 20 }: { url?: string, icon?: string, path?: string, name: string, size?: number }) => {
     const [error, setError] = useState(false);
+    let safeUrl: string | undefined;
+    try {
+        const parsed = new URL(url ?? '');
+        if (parsed.protocol === 'https:' && !parsed.username && !parsed.password) safeUrl = parsed.href;
+    } catch { /* Missing or invalid thumbnails use the package icon. */ }
 
-    if (url && !error) {
+    if (!path && safeUrl && !error) {
         return (
             <img
-                src={url}
+                src={safeUrl}
                 alt={name}
-                className="w-full h-full object-cover"
+                className="w-full h-full object-contain p-1"
+                referrerPolicy="no-referrer"
                 onError={() => setError(true)}
             />
         );
@@ -43,7 +40,7 @@ const PluginImage = ({ url, icon, name, size = 20 }: { url?: string, icon?: stri
 
     return (
         <div className="w-full h-full flex items-center justify-center bg-[var(--color-app-bg)] text-[var(--color-app-accent)]">
-            <IconResolver name={icon} size={size} />
+            <IconResolver name={icon} path={path} size={size} />
         </div>
     );
 };
@@ -138,6 +135,7 @@ export function Marketplace({ registry, selectedRegistry, betaPluginIds, onSetPl
             {/* List */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 {filteredPlugins.map(plugin => {
+                        const localPlugin = installedPlugins.find(candidate => candidate.manifest.id === plugin.id);
                         const installed = isInstalled(plugin.id);
                         const localVersion = getInstalledVersion(plugin.id);
                         const processing = installingId === plugin.id;
@@ -156,7 +154,7 @@ export function Marketplace({ registry, selectedRegistry, betaPluginIds, onSetPl
                             >
                                 {/* Thumbnail / Icon */}
                                 <div className="w-10 h-10 rounded bg-[var(--color-app-surface)] flex items-center justify-center shrink-0 border border-[var(--color-app-border)] overflow-hidden">
-                                    <PluginImage url={plugin.thumbnailUrl} icon={plugin.icon} name={plugin.name} />
+                                    <PluginImage key={`${plugin.thumbnailUrl ?? ''}:${localPlugin?.path ?? ''}:${localPlugin?.manifest.icon ?? plugin.icon ?? ''}`} url={plugin.thumbnailUrl} icon={localPlugin?.manifest.icon ?? plugin.icon} path={localPlugin?.path} name={plugin.name} />
                                 </div>
 
                                 {/* Details */}
