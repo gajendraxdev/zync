@@ -36,6 +36,8 @@ paneLayouts[connectionId][layoutOwner] = PaneLayout
 - **Ungrouped Files / Dashboard / …** = a **pane** filling the workspace (same canvas as a shell). Not a z-30 overlay. Drag onto a shell **or onto itself** to split. A layout does **not** need a shell.
 - **Pane header** = the drag handle once content is grouped. Drag a header onto **another pane’s edge** to move it, or onto **its own edge** to split a sibling. Dropping in the center of a pane cancels. Repeat until the shared four-pane cap.
 - Plugin frames stay inside the pane's content area; they must not cover the shared header. Pane requests wait for native connection binding, and divider pointer capture keeps resizing continuous across frames.
+- Visited workspace tabs, plugin overlays, and pane canvases stay mounted while hidden. Unvisited items do not mount; closing removes them from the retained inventory. Plugin runtime reload/uninstall removes frames, and SSH disconnection tears them down before reconnect. Structural docking/splitting may still recreate a frame.
+- Plugin panes receive `zync:pane:visibility` from their parent on load and on visibility changes. The pane shim offers optional `isVisible()` / `onVisibilityChange(callback)` APIs. Hidden plugins should stop automatic reads; host window visibility also participates. Visibility is a lifecycle hint, not a permission grant. Older plugins remain compatible but must adopt the signal to reliably pause their own background work.
 - **Split** always duplicates the focused pane's content. Shells create another shell session; Files receives a new listing instance copied from the source pane's current folder; other features and plugins mount another independent pane instance.
 
 ---
@@ -46,7 +48,11 @@ Per-pane tab stacks (`leaf.tabs[]`), inner GroupTabStrip, `openWorkspaceTab` sta
 
 ---
 
-## 4. File map
+## 4. Planned follow-up: remove the unsplit plugin overlay
+
+Unsplit plugins still use a full-view overlay above the hidden terminal canvas. Migrate them to single-pane canvases using the existing pane container and content renderer, then remove the overlay path. Keep layout operations independent of plugin identity, preserve iframe isolation and connection bindings, and retain the shared visibility lifecycle. Before shipping, verify focus, drag/drop, resize, split/close, reconnect, and versioned session restoration without rewriting terminal PTY/cache internals. This migration is planned, not implemented.
+
+## 5. File map
 
 | Path | Role |
 |---|---|

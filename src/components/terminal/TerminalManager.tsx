@@ -1,5 +1,6 @@
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
+import { useRetainedItems } from '../layout/useRetainedItems';
 import { TerminalComponent } from './Terminal';
 import { useAppStore } from '../../store/useAppStore';
 import { useShallow } from 'zustand/react/shallow';
@@ -77,6 +78,13 @@ export function TerminalManager({
         if (!activeConnectionId || activeConnectionId === LOCAL_TERMINAL_CONNECTION_ID) return true;
         return state.connections.find((c) => c.id === activeConnectionId)?.status === 'connected';
     });
+    const canvasLayouts = useMemo(() => Object.entries(paneGroups ?? {}).filter(([, layout]) =>
+        isSplitLayout(layout)
+        || (isPaneLeaf(layout.root) && (isFeatureContent(layout.root.content) || isPluginContent(layout.root.content))),
+    ), [paneGroups]);
+    const canvasIds = useMemo(() => canvasLayouts.map(([owner]) => owner), [canvasLayouts]);
+    const selectedCanvas = canvasLayouts.find(([, layout]) => layout === paneLayout)?.[0] ?? null;
+    const retainedCanvases = useRetainedItems(canvasIds, panelVisible ? selectedCanvas : null);
 
     // Actions (stable)
     const createTerminal = useAppStore(state => state.createTerminal);
@@ -280,20 +288,18 @@ export function TerminalManager({
 
             {/* Terminal Content Area */}
             <div ref={terminalContentRef} className={cn("flex-1 overflow-hidden relative", terminalTransparencyEnabled ? "bg-transparent" : "bg-app-bg")}>
-                {terminalView && hostConnected && paneLayout && (
-                    isSplitLayout(paneLayout)
-                    || (isPaneLeaf(paneLayout.root) && (isFeatureContent(paneLayout.root.content) || isPluginContent(paneLayout.root.content)))
-                ) ? (
-                    <div className="absolute inset-0 z-10">
+                {hostConnected && canvasLayouts.filter(([owner]) => retainedCanvases.has(owner)).map(([owner, layout]) => (
+                    <div key={owner} className={cn('absolute inset-0 z-10', (!panelVisible || owner !== selectedCanvas) && 'hidden')}>
                         <PaneLayoutView
                             connectionId={activeConnectionId}
-                            layout={paneLayout}
+                            layout={layout}
                             workspaceActive={workspaceActive}
-                            panelVisible={panelVisible}
+                            panelVisible={panelVisible && owner === selectedCanvas}
                             dockPointer={dockPointer}
                         />
                     </div>
-                ) : tabs.length === 0 ? (
+                ))}
+                {terminalView && hostConnected && selectedCanvas ? null : tabs.length === 0 ? (
                     <div className={cn(
                         "h-full flex flex-col items-center justify-center text-app-muted z-20",
                         terminalTransparencyEnabled ? "bg-app-bg/80 backdrop-blur-xl" : "bg-app-bg"

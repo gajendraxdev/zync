@@ -53,6 +53,7 @@ export function FeaturePaneBody({
                     connectionId={connectionId}
                     legacyAccess={plugin.legacyAccess}
                     paneInstanceId={instanceId ?? `plugin:${plugin.id}`}
+                    visible={visible}
                 />
             )}
             {pluginId && !plugin && (loaded ? <PluginUnavailable panelId={pluginId} /> : <FeaturePaneFallback />)}

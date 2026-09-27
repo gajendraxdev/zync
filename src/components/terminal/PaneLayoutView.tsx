@@ -393,7 +393,7 @@ function FeaturePaneLeaf({
                     featureId={featureId}
                     pluginId={pluginId}
                     instanceId={instanceId}
-                    visible={focused && panelVisible}
+                    visible={panelVisible}
                 />
             </div>
             {showFocus && <FocusEdges edges={edges} />}

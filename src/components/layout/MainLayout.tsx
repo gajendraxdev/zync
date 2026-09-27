@@ -1,5 +1,6 @@
 import { ReactNode, lazy, Suspense, useState, useEffect, useLayoutEffect, memo, useCallback, useRef, useMemo } from 'react';
 import { Sidebar } from './Sidebar';
+import { useRetainedItems } from './useRetainedItems';
 import { useAppStore, Tab } from '../../store/useAppStore';
 import type { CoreTabView } from '../../features/connections/domain/types';
 import { usePlugins } from '../../context/PluginContext';
@@ -317,6 +318,13 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
     // Effect hooks must be unconditional
     // Ensure pinned feature kinds and restored split instances have inventory tabs.
     const pinnedFeatures = tab.connectionId === LOCAL_TERMINAL_CONNECTION_ID ? (localPinnedFeatures || EMPTY_ARRAY) : (connection?.pinnedFeatures || EMPTY_ARRAY);
+    const availablePluginViews = useMemo(
+        () => pluginPanels
+            .map(panel => `plugin:${panel.id}`)
+            .filter(view => openFeatures.includes(view) || pinnedFeatures.includes(view) || tab.view === view),
+        [pluginPanels, openFeatures, pinnedFeatures, tab.view],
+    );
+    const retainedPluginViews = useRetainedItems(availablePluginViews, isActive ? tab.view : null);
 
     useEffect(() => {
         if (isSplitFeatureId(tab.view)) {
@@ -870,22 +878,22 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
                             {/* Plugin Panels */}
                             {pluginPanels.map(panel => {
                                 const viewId = `plugin:${panel.id}`;
-                                if (tab.view !== viewId) return null;
-                                // Race condition check: obtain latest ID from store to ensure we haven't switched tabs
-                                if (tab.connectionId !== useAppStore.getState().activeConnectionId) return null;
+                                if (!retainedPluginViews.has(viewId)) return null;
+                                const visible = isActive && tab.view === viewId;
                                 return (
                                     <div
                                         key={panel.id}
                                         data-pane-id={overlayPluginPaneId(panel.id)}
-                                        className="absolute inset-0 z-10 bg-app-bg"
+                                        className={cn('absolute inset-0 z-10 bg-app-bg', !visible && 'hidden')}
                                     >
                                         <PluginPanel
                                             html={panel.html}
                                             panelId={panel.id}
                                             pluginId={panel.pluginId}
                                             legacyAccess={panel.legacyAccess}
-                                            paneInstanceId={`overlay:${panel.id}`}
+                                            paneInstanceId={`overlay:${tab.id}:${panel.id}`}
                                             connectionId={tab.connectionId || null}
+                                            visible={visible}
                                         />
                                     </div>
                                 );
@@ -910,7 +918,7 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
                                 <TerminalManager
                                     connectionId={tab.connectionId}
                                     isWorkspaceActive={isActive}
-                                    isTerminalView
+                                    isTerminalView={!tab.view.startsWith('plugin:')}
                                     hideTabs={true}
                                     dockPointer={dockPointer}
                                     featureInstanceId={
@@ -970,11 +978,11 @@ export function MainLayout({ children }: { children: ReactNode }) {
         () => (activeTabId !== null ? tabs.find((t: Tab) => t.id === activeTabId) : undefined),
         [tabs, activeTabId],
     );
-    /** Sync stays mounted after first open so restore/upload spinners and in-flight IPC survive tab switches. */
-    const stickySyncTabs = useMemo(
-        () => tabs.filter((tab: Tab) => tab.type === 'sync'),
+    const workspaceTabIds = useMemo(
+        () => tabs.map(tab => tab.id),
         [tabs],
     );
+    const retainedWorkspaceTabs = useRetainedItems(workspaceTabIds, activeWorkspaceTab?.id ?? null);
     const suspendIdleHostPtys = useAppStore(
         state => state.settings.terminal.suspendIdleHostPtys ?? false,
     );
@@ -1447,20 +1455,13 @@ export function MainLayout({ children }: { children: ReactNode }) {
                     <div className="flex-1 overflow-hidden relative flex flex-col">
                         {tabs.length > 0 && !showWelcomeScreen && activeWorkspaceTab ? (
                             <>
-                                {stickySyncTabs.map((tab: Tab) => (
+                                {tabs.filter(tab => retainedWorkspaceTabs.has(tab.id)).map((tab: Tab) => (
                                     <TabContent
                                         key={tab.id}
                                         tab={tab}
                                         isActive={tab.id === activeWorkspaceTab.id}
                                     />
                                 ))}
-                                {activeWorkspaceTab.type !== 'sync' && (
-                                    <TabContent
-                                        key={activeWorkspaceTab.id}
-                                        tab={activeWorkspaceTab}
-                                        isActive
-                                    />
-                                )}
                             </>
                         ) : (
                             <div className="flex-1 bg-app-bg">{children}</div>

@@ -6,6 +6,8 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Fixed
 
+- **Plugin tab lifecycle:** Preserve visited plugin frames across workspace and pane-tab switches, signal visibility to pause background reads, and dispose closed or disconnected panes without plugin-specific layout branches.
+- **Retained-tab correctness:** Start plugin visibility as hidden until confirmed by the host, and retain visited connection-free tabs through the same live inventory as connection tabs.
 - **Release documentation:** Correct the 2.33.1 changelog comparison links and clarify that production registry metadata must expire within seven days; zero-expiry metadata is supported only for historical verification.
 
 ## [2.33.1] - 2026-09-27
