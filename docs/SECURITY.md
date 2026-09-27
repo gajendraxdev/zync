@@ -1,6 +1,6 @@
 # Security Notes
 
-**Last updated:** 2026-09-26
+**Last updated:** 2026-09-27
 **Scope:** Vault, Google Drive sync, Public URLs (Beta), plugins, credential handling, anonymous usage, and operator guidance, including the Zync 2.33.0 release candidate.
 
 ---
@@ -47,6 +47,7 @@ When **Settings → General → Share anonymous usage** is on (default), the des
 - **Host-owned consent.** Required access is reviewed during installation/update. For declared optional access, Allow records a package-bound grant; Deny cancels the action without persisting a rejection and the next attempt can ask again. Grants can be revoked in Settings -> Plugins. Revocation or pane rebind cancels brokered channels but cannot undo completed operations or guarantee that remote daemonized work stops.
 - **Selected-file access and logs.** Local file operations use host-selected destinations and runtime-owned handles. Exported logs may contain secrets or personal data; choose a trusted destination. A plugin with separately granted network access may send permitted data to third-party services. Review its source and privacy practices.
 - **Signed distribution.** Trusted marketplace metadata and package signatures establish publisher/package provenance, not a guarantee that plugin behavior is safe. Release compatibility, permission changes, revocation, retained-version rollback, and crash recovery remain host-controlled. Production trusted marketplace availability depends on valid registry configuration.
+- **Registry freshness tradeoff (next build).** Signed `expiresAtMs: 0` metadata is non-expiring. Signature verification, retained version floors, and cumulative revocations remain enforced, but a fresh installation or cleared trust state can accept an older signed index missing newer revocations. Expiring registries still enforce their signed deadline. Protected CI root signing is supported; compromise of that job or its secret permits registry forgery and requires root recovery/rotation. Previously released builds reject the zero-expiry form.
 - **Legacy trust boundary.** Local and legacy plugins require Developer Mode, which defaults off. Their compatibility bridge is broader than Manifest v2's brokered API; do not describe legacy plugins as having the same isolation. Crash quarantine targets a failing plugin; safe mode disables third-party plugins for troubleshooting.
 - **Shortcut messages are untrusted.** A focused iframe and matching binding do not prove a user keypress. The host permits only a restricted set of presentation/navigation requests; privileged actions stay host-controlled.
 

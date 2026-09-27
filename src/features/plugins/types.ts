@@ -164,6 +164,7 @@ export interface RegistryRevocation {
 
 export interface TrustedPluginRegistrySnapshot {
     version: number;
+    /** Zero means explicitly non-expiring signed metadata. */
     expiresAtMs: number;
     plugins: RegistryPlugin[];
     revocations: RegistryRevocation[];

@@ -375,8 +375,10 @@ export function buildSignedRegistry({
 }) {
   assertSafeInteger(version, 'Registry version');
   assertSafeInteger(issuedAtMs, 'Registry issue time');
-  assertSafeInteger(expiresAtMs, 'Registry expiry time');
-  if (expiresAtMs <= issuedAtMs) throw new Error('Registry expiry must be after its issue time');
+  if (expiresAtMs !== 0) {
+    assertSafeInteger(expiresAtMs, 'Registry expiry time');
+    if (expiresAtMs <= issuedAtMs) throw new Error('Registry expiry must be after its issue time');
+  }
   if (!Array.isArray(releases) || releases.length > 10_000) {
     throw new Error('Registry releases must contain no more than 10,000 entries');
   }
@@ -503,9 +505,10 @@ export function verifySignedRegistryBytes(
   if (!payload || payload._type !== REGISTRY_TYPE) throw new Error('Unsupported registry metadata');
   assertSafeInteger(payload.version, 'Registry version');
   assertSafeInteger(payload.issuedAtMs, 'Registry issue time');
-  assertSafeInteger(payload.expiresAtMs, 'Registry expiry time');
+  if (payload.expiresAtMs !== 0) assertSafeInteger(payload.expiresAtMs, 'Registry expiry time');
   if (payload.issuedAtMs > currentTimeMs + 5 * 60 * 1_000) throw new Error('Registry is dated in the future');
-  if (payload.expiresAtMs <= currentTimeMs || payload.expiresAtMs <= payload.issuedAtMs) {
+  if (payload.expiresAtMs !== 0
+    && (payload.expiresAtMs <= currentTimeMs || payload.expiresAtMs <= payload.issuedAtMs)) {
     throw new Error('Registry has expired');
   }
   if (!Array.isArray(payload.plugins) || payload.plugins.length > 10_000) {

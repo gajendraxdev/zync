@@ -155,7 +155,7 @@ jobs:
           # Public URLs hosts in source. Set these repo secrets before tagging.
           ZYNC_SHARE_API_BASE: ${{ secrets.ZYNC_SHARE_API_BASE }}
           ZYNC_SHARE_RELAY_URL: ${{ secrets.ZYNC_SHARE_RELAY_URL }}
-          # The marketplace root private key stays offline. Release builds receive
+          # Registry signing is separate from application builds. Release builds receive
           # only the registry endpoint and raw Ed25519 public key.
           ZYNC_PLUGIN_REGISTRY_URL: ${{ vars.ZYNC_PLUGIN_REGISTRY_URL || secrets.ZYNC_PLUGIN_REGISTRY_URL }}
           # A comma-separated old,new bundle permits a staged root-key rotation.

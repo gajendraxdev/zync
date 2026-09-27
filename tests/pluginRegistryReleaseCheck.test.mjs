@@ -46,6 +46,28 @@ try {
   const bytes = fs.readFileSync(registryPath);
   const rotatingRoots = `${oldRoot.publicKey}, ${currentRoot.publicKey}`;
 
+  const permanentPath = path.join(root, 'registry-non-expiring.json');
+  buildSignedRegistryFromFile({
+    descriptorPath, keyPath, outputPath: permanentPath, version: 13,
+    issuedAtMs: now - 1_000, expiresAtMs: 0,
+  });
+  const permanentBytes = fs.readFileSync(permanentPath);
+  const permanent = await checkPublishedRegistry({
+    registryUrl: 'https://staging.plugins.example.test/registry.json',
+    trustedRootPublicKeys: currentRoot.publicKey,
+    minimumVersion: 13,
+    currentTimeMs: now + 365 * 86_400_000,
+    fetchImpl: fetchSequence([new Response(permanentBytes)]).fetchImpl,
+  });
+  assert.equal(permanent.expiresAtMs, 0);
+  await assert.rejects(checkPublishedRegistry({
+    registryUrl: 'https://staging.plugins.example.test/registry.json',
+    trustedRootPublicKeys: currentRoot.publicKey,
+    minimumVersion: 14,
+    currentTimeMs: now,
+    fetchImpl: fetchSequence([new Response(permanentBytes)]).fetchImpl,
+  }), /below required version/);
+
   const verified = verifySignedRegistryBytes(bytes, rotatingRoots, now);
   assert.equal(verified.version, 12);
   assert.equal(verified.keyId, currentRoot.keyId);

@@ -53,7 +53,7 @@ export async function checkPublishedRegistry({
   if (verified.version < minimumVersion) {
     throw new Error(`Registry version ${verified.version} is below required version ${minimumVersion}`);
   }
-  if (verified.expiresAtMs - currentTimeMs < minimumValidityMs) {
+  if (verified.expiresAtMs !== 0 && verified.expiresAtMs - currentTimeMs < minimumValidityMs) {
     throw new Error('Registry expires before the required release validation window');
   }
   return {

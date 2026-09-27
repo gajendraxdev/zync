@@ -120,7 +120,8 @@ try {
       issuedAtMs: parsed.has('issued-at')
         ? timestamp(required(parsed, 'issued-at'), 'Registry issue time')
         : Date.now(),
-      expiresAtMs: timestamp(required(parsed, 'expires-at'), 'Registry expiry time'),
+      expiresAtMs: required(parsed, 'expires-at') === '0'
+        ? 0 : timestamp(required(parsed, 'expires-at'), 'Registry expiry time'),
     });
     console.log(`Signed registry created: ${result.outputPath}`);
     console.log(`Registry version: ${result.version}`);
@@ -155,7 +156,7 @@ try {
     console.log(`Plugin releases: ${result.pluginCount}`);
     console.log(`Revocations: ${result.revocationCount}`);
     console.log(`Root key fingerprint: ${result.keyId}`);
-    console.log(`Expires: ${new Date(result.expiresAtMs).toISOString()}`);
+    console.log(`Expires: ${result.expiresAtMs === 0 ? 'Never' : new Date(result.expiresAtMs).toISOString()}`);
   } else {
     throw new Error(`Unknown command: ${command}\n\n${usage()}`);
   }

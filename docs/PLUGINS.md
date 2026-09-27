@@ -520,7 +520,7 @@ Developers can manually exercise this flow with `npm run plugin:keygen`, `npm ru
 
 ### 10.3 Registry resilience
 
-Use signed, versioned registry metadata with separated root, targets, snapshot, and timestamp responsibilities. This protects against stale metadata, rollback, mix-and-match releases, and compromise of a single online key. Clients retain a last-known-good index and enforce metadata expiry without deleting already installed plugins.
+The current registry uses one root signature, not separate TUF targets/snapshot/timestamp roles. Clients retain version floors and cumulative revocations. Positive `expiresAtMs` timestamps enforce expiry without deleting installed plugins; zero explicitly means no expiry in the next compatible build. Non-expiring metadata does not protect fresh installations or cleared trust state against an old signed registry missing newer revocations.
 
 Marketplace installation accepts only the signed download target and digest from registry metadata—not an arbitrary URL supplied by presentation data.
 
@@ -567,7 +567,7 @@ Each release may set `"channel": "stable"` (the default) or `"channel": "beta"`.
 }
 ```
 
-Keep `registry-root-key.json` offline and backed up. Never put it in the repository or CI. Configure releases with the public `ZYNC_PLUGIN_REGISTRY_ROOT_KEYS`, increase the registry version for every publication, use a short expiry appropriate to the hosting operation, and upload the generated `registry.json` only after `plugin:registry-verify` succeeds. Follow the operations runbook for two-person recovery drills and staged root rotation.
+Keep root keys private and backed up. Local signing or protected registry-release CI signing is permitted; private roots must never enter desktop build jobs, package artifacts, or logs. Configure desktop releases with public `ZYNC_PLUGIN_REGISTRY_ROOT_KEYS`, increase the version for every publication, and publish only after verification against those roots. `expiresAtMs: 0` supports non-expiring metadata in compatible builds; previously released verifiers reject it. Follow the operations runbook for recovery, solo-maintainer self-review, and staged root rotation.
 
 Published metadata can be checked without the private root key using `npm run plugin:registry-check`. The manual **Plugin registry staging** workflow verifies a protected staging environment, and the desktop **Release** workflow validates any configured production registry before creating a draft. URL and roots must be configured together; setting `ZYNC_PLUGIN_REGISTRY_REQUIRED=true` additionally prohibits marketplace-disabled releases. A configured registry must be reachable, correctly signed, at or above its version floor, no larger than 2 MiB, and valid for at least another 24 hours. Redirects are followed only while every hop remains HTTPS. See [PLUGIN_REGISTRY_OPERATIONS.md](./PLUGIN_REGISTRY_OPERATIONS.md) for environment setup and the manual install/revocation smoke checklist.
 
