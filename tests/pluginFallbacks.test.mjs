@@ -12,10 +12,24 @@ assert.ok(start >= 0 && end > start);
 const { outputText } = ts.transpileModule(`${marketplace.slice(start, end)}\nglobalThis.renderImage = PluginImage;`, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
 });
-let failed = false;
+// Each component has one hook; give it its own persistent state and real setter.
+function createStateHook() {
+    let initialized = false;
+    let state;
+    return initial => {
+        if (!initialized) {
+            state = typeof initial === 'function' ? initial() : initial;
+            initialized = true;
+        }
+        return [state, next => {
+            state = typeof next === 'function' ? next(state) : next;
+        }];
+    };
+}
+
 const context = {
     exports: {}, require, URL,
-    useState: () => [failed, () => {}],
+    useState: createStateHook(),
     IconResolver: () => null,
 };
 runInNewContext(outputText, context);
@@ -33,7 +47,9 @@ assert.equal(context.renderImage({ url: thumbnail, icon: 'Plug' }).type, 'img');
 for (const url of ['http://example.com/icon.svg', 'https://user:password@example.com/icon.svg', 'invalid', undefined]) {
     assert.equal(context.renderImage({ url }).type, 'div', 'Unsafe thumbnails still use the icon fallback');
 }
-failed = true;
+const thumbnailImage = context.renderImage({ url: thumbnail });
+assert.equal(thumbnailImage.type, 'img');
+thumbnailImage.props.onError();
 assert.equal(context.renderImage({ url: thumbnail }).type, 'div', 'Failed thumbnails use the icon fallback');
 const registryFallback = context.renderImage({ url: thumbnail, path: 'installed/plugin', icon: 'Activity' });
 assert.equal(registryFallback.props.children.props.name, 'Activity');
@@ -45,11 +61,15 @@ const assetEnd = assetSource.indexOf('export function PluginAssetIcon');
 const assetCode = ts.transpileModule(`${assetSource.slice(assetStart, assetEnd)}\nglobalThis.renderAsset = AssetImage;`, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
 }).outputText;
-runInNewContext(assetCode, context);
+const assetContext = { exports: {}, require, useState: createStateHook() };
+runInNewContext(assetCode, assetContext);
 const fallback = local.props.children.props.fallback;
-assert.equal(context.renderAsset({ src: 'asset://missing.svg', fallback }), fallback, 'A failed local image renders the thumbnail');
-failed = false;
-assert.equal(context.renderAsset({ src: 'asset://icon.svg', fallback }).type, 'img', 'Usable local images retain priority');
+const assetProps = { src: 'asset://icon.svg', fallback };
+const assetImage = assetContext.renderAsset(assetProps);
+assert.equal(assetImage.type, 'img', 'Thumbnail failure does not affect a usable local image');
+assetImage.props.onError();
+assert.equal(assetContext.renderAsset(assetProps), fallback, 'The local image error handler renders the thumbnail');
+assert.equal(context.renderImage({ url: thumbnail }).type, 'div', 'Local failure cannot reset thumbnail failure state');
 
 const manager = readFileSync('src/components/terminal/TerminalManager.tsx', 'utf8');
 assert.match(manager, /terminalView && selectedCanvas \? null : terminalView && pluginPanelId \? \(/);
