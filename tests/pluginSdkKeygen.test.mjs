@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { generateKeys } from '../packages/plugin-sdk/bin/keygen.mjs';
+import { generateKeys, readHiddenPassphrase } from '../packages/plugin-sdk/bin/keygen.mjs';
+
+await assert.rejects(readHiddenPassphrase('Key passphrase: ', { isTTY: false }), /Passphrase entry needs an interactive terminal/);
 
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'zync-sdk-keygen-test-'));
 try {

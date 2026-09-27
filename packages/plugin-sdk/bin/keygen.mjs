@@ -5,7 +5,7 @@ import { emitKeypressEvents } from 'node:readline';
 
 export function readHiddenPassphrase(label, input = process.stdin, output = process.stdout) {
   if (!input.isTTY || typeof input.setRawMode !== 'function') {
-    return Promise.reject(new Error('Key generation needs an interactive terminal. Run it in PowerShell, Terminal or a terminal tab.'));
+    return Promise.reject(new Error('Passphrase entry needs an interactive terminal. Run it in PowerShell, Terminal or a terminal tab.'));
   }
   return new Promise((resolve, reject) => {
     let value = '';

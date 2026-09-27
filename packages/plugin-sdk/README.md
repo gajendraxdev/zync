@@ -2,15 +2,15 @@
 
 Public authoring types for Manifest v2 plugins. This package lives in the Zync repository but has its own npm version and release lifecycle.
 
-The working tree now targets API **2.1** (`2.1.0-beta.1`, not yet published). It adds `sshCommand.execute(paneInstanceId, { program, args, expectedConnectionToken? })`, requiring `ssh.command.execute` and `engines.pluginApi: "^2.1.0"`. The returned `connectionToken` must be carried into commands following a confirmation so reconnect/rebind cannot silently change their destination. Commands use the SSH account's full authority; this is not a read-only or PM2-only permission. API 2.0 hosts reject plugins requiring this addition.
+The published SDK targets API **2.1** (`2.1.0-beta.1`). It adds `sshCommand.execute(paneInstanceId, { program, args, expectedConnectionToken? })`, requiring `ssh.command.execute` and `engines.pluginApi: "^2.1.0"`. The returned `connectionToken` must be carried into commands following a confirmation so reconnect/rebind cannot silently change their destination. Commands use the SSH account's full authority; this is not a read-only or PM2-only permission. API 2.0 hosts reject plugins requiring this addition.
 
-While API 2.1 is unpublished, install the local SDK as a development dependency:
+To test unpublished CLI additions, install the local SDK as a development dependency:
 
 ```sh
 npm install --save-dev /path/to/zync/packages/plugin-sdk
 ```
 
-The published `@beta` release is currently **2.0.0-beta.1** and does not include the 2.1 SSH command API. Once SDK 2.1 is published and the `beta` tag points to it, use:
+The published `@beta` release is currently **2.1.0-beta.1** and includes the 2.1 SSH command API. Install it with:
 
 ```sh
 npm install --save-dev @zync-sh/plugin-sdk@beta
@@ -48,7 +48,7 @@ Write the resulting object to `manifest.json` during your build. Zync installs t
 
 ### Generate a publisher key using OpenSSL
 
-The new `keygen` command is implemented locally, but is not in the published `2.1.0-beta.1` package yet. After a new SDK release containing it is published, use the official scoped package explicitly:
+The published `2.1.0-beta.1` package does not include `keygen` or the `zync-sdk` executable. These are implemented locally and require a new SDK version published and tagged `beta`. After that release, use the official scoped package explicitly:
 
 ```powershell
 npx --package=@zync-sh/plugin-sdk@beta zync-sdk keygen --out C:\ZyncSigningKeys\publisher-v1
