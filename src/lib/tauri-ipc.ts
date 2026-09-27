@@ -424,10 +424,10 @@ const ipcRenderer = {
         }
       } else if (tauriCommand === 'tunnel_reconcile_connection') {
         if (args.length === 1 && typeof args[0] === 'string') {
-          payload = { connection_id: args[0] };
+          payload = { connectionId: args[0] };
         } else if (args.length === 1 && isPlainObject(args[0])) {
           const arg = args[0] as { connectionId?: string; connection_id?: string };
-          payload = { connection_id: arg.connection_id ?? arg.connectionId };
+          payload = { connectionId: arg.connectionId ?? arg.connection_id };
         }
       } else if (tauriCommand === 'tunnel_save') {
         payload = { tunnelVal: args[0] };

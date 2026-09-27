@@ -554,13 +554,15 @@ export const PluginProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             try {
                 recovery = await getNativePluginRecoveryStatus();
             } catch (error) {
-                // If recovery state cannot be trusted, keep third-party code stopped while
-                // leaving built-in plugins available so the user can still repair the app.
-                console.error('[Plugins] Failed to read runtime recovery state:', error);
-                recovery = { safeMode: true, diagnostics: [] };
+                // Unknown history cannot safely authorize a new Worker generation.
+                // Preserve supervisor quarantine and let an explicit reload retry status.
+                console.warn('[Plugins] Recovery history is unavailable:', error);
+                throw new Error('Plugin startup blocked: recovery history is unavailable.');
             }
             if (!isCurrent()) return false;
-            setPluginSafeMode(recovery.safeMode);
+            // Ignore the retired global flag from older hosts and saved state.
+            recovery.safeMode = false;
+            setPluginSafeMode(false);
             recovery.diagnostics.forEach(diagnostic => {
                 runtimeSupervisor.current.restoreFailures(
                     diagnostic.pluginId,

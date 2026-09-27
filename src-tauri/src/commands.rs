@@ -7260,8 +7260,10 @@ pub async fn plugins_discard_inspection(
 pub async fn plugins_runtime_start(
     app: AppHandle,
     state: State<'_, crate::plugins::broker::PluginBrokerState>,
+    recovery: State<'_, crate::plugins::recovery::PluginRecoveryState>,
     plugin_id: String,
 ) -> Result<crate::plugins::broker::PluginRuntimeRegistration, String> {
+    recovery.status().map_err(|error| error.to_string())?;
     state
         .start_runtime(&app, &plugin_id)
         .map_err(|error| error.to_string())

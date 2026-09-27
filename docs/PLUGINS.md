@@ -38,7 +38,7 @@ The Sandbox MVP is complete on `feature/plugin-sandbox-v2` for locally reviewed 
 - Manifest v2 pane registration resolves the declared title and HTML entry from the verified package in native code; pane ids are host-namespaced, frames use opaque origins and a restrictive CSP, and the legacy panel bridge is not exposed;
 - every mounted plugin pane has a host-generated instance id and a bounded JSON message channel to its own Worker; Worker replies are routed only to a live pane instance owned by that plugin;
 - the frontend runtime supervisor owns Worker generations, monitors responsiveness without treating host sleep as a failure, exposes runtime health in plugin management, removes contributions after a crash or heartbeat timeout, and quarantines a plugin after three failures within one minute;
-- native recovery state retains bounded failure classifications and an unclean-shutdown marker; after an unexpected exit Zync starts with third-party plugins paused until the user chooses **Try plugins**;
+- native recovery state retains bounded failure classifications and an unclean-shutdown marker; unclean exits do not globally pause third-party plugins. Crash-loop quarantine is restored per plugin before activation. If recovery history cannot be read, startup is blocked until it is available rather than treating unknown history as empty;
 - installed plugin details are resolved from the native package and grant stores, show publisher/source/digest/runtime/storage information, allow optional permissions to be changed against the exact approved package, and clear only that plugin's private device store after revoking its live native runtime;
 - uninstall now revokes the runtime and grants immediately, keeps private plugin data by default, and offers a separate confirmed **Uninstall and delete data** action; a data-deletion failure is reported without pretending the already-removed package is still installed;
 - raw compatibility Worker APIs for filesystem paths, external windows, theme mutation, status mutation, plugin inventory, and terminal input are broker-blocked for Manifest v2 packages;
@@ -767,7 +767,7 @@ The plugin platform requires automated tests at every boundary.
 - plugin pane open, split, self-split, dock, close, unsplit, restore, and missing-plugin placeholder;
 - independent state for multiple pane instances;
 - live disable/reload without unrelated pane or terminal changes;
-- update rollback and safe-mode startup;
+- update rollback and normal plugin startup after app restarts;
 - uninstall with keep-data and delete-data choices;
 - accessibility, keyboard navigation, reduced motion, and theme contrast.
 
@@ -809,7 +809,7 @@ The current Web Worker and sandboxed-frame implementation is a useful compatibil
 
 ### Phase 4 — supervisor and management
 
-- Add lazy activation, live disable/reload, quotas, health state, crash quarantine, safe mode, diagnostics, and data controls.
+- Add lazy activation, live disable/reload, quotas, health state, per-plugin crash quarantine, diagnostics, and data controls. App restarts must not globally pause unrelated plugins.
 - Add plugin details, grants, publisher, source, storage, logs, rollback, and security-state UI.
 
 ### Phase 5 — ecosystem SDK
@@ -878,7 +878,7 @@ Zync may describe standard plugins as sandboxed when all of these are true:
 - UI frames use strict sandboxing, CSP, schema validation, and host-owned security UI;
 - updates show permission changes and support atomic rollback;
 - users can inspect and revoke every meaningful grant;
-- crash quarantine and third-party-plugin safe mode work before normal workspace startup;
+- per-plugin crash quarantine restores before normal workspace startup; previous unclean app exits must not globally pause third-party plugins;
 - official plugins pass conformance, malicious-package, and permission-bypass suites;
 - the legacy unrestricted bridge is disabled for marketplace packages.
 

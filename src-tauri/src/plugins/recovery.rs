@@ -52,30 +52,48 @@ pub struct PluginRecoveryStatus {
 pub struct PluginRecoveryState {
     file: Mutex<RecoveryFile>,
     path: PathBuf,
+    startup_error: Option<String>,
 }
 
 impl PluginRecoveryState {
     pub fn load_and_begin(app: &AppHandle) -> Result<Self> {
         let path = recovery_path(app)?;
-        let mut file = load_recovery_file(&path).unwrap_or_else(|error| {
-            log::warn!("[Plugins] Recovery state was unreadable; starting in safe mode: {error}");
-            RecoveryFile {
-                version: RECOVERY_VERSION,
-                safe_mode: true,
-                ..RecoveryFile::default()
-            }
-        });
-        file.safe_mode |= file.session_open;
-        file.session_open = true;
-        prune_failures(&mut file, now_ms());
-        save_recovery_file(&path, &file)?;
+        Self::load_from_path(path)
+    }
+
+    fn load_from_path(path: PathBuf) -> Result<Self> {
+        let (mut file, startup_error) = match load_recovery_file(&path) {
+            Ok(file) => (file, None),
+            Err(error) => (
+                RecoveryFile {
+                    version: RECOVERY_VERSION,
+                    ..RecoveryFile::default()
+                },
+                Some(format!("Plugin recovery history is unavailable: {error:#}")),
+            ),
+        };
+        if startup_error.is_none() {
+            begin_session(&mut file, now_ms());
+            save_recovery_file(&path, &file)?;
+        }
         Ok(Self {
             file: Mutex::new(file),
             path,
+            startup_error,
         })
     }
 
+    fn ensure_available(&self) -> Result<()> {
+        if let Some(error) = &self.startup_error {
+            return Err(anyhow!(
+                "{error}. Repair the recovery file and restart Zync."
+            ));
+        }
+        Ok(())
+    }
+
     pub fn status(&self) -> Result<PluginRecoveryStatus> {
+        self.ensure_available()?;
         let mut file = self
             .file
             .lock()
@@ -85,6 +103,7 @@ impl PluginRecoveryState {
     }
 
     pub fn record_failure(&self, plugin_id: &str, kind: &str) -> Result<()> {
+        self.ensure_available()?;
         validate_plugin_id(plugin_id)?;
         if !matches!(kind, "worker-error" | "heartbeat-timeout" | "start-failure") {
             return Err(anyhow!("Unknown plugin runtime failure kind"));
@@ -107,6 +126,7 @@ impl PluginRecoveryState {
     }
 
     pub fn clear_safe_mode(&self) -> Result<()> {
+        self.ensure_available()?;
         let mut file = self
             .file
             .lock()
@@ -116,6 +136,7 @@ impl PluginRecoveryState {
     }
 
     pub fn clear_plugin_failures(&self, plugin_id: &str) -> Result<()> {
+        self.ensure_available()?;
         validate_plugin_id(plugin_id)?;
         let mut file = self
             .file
@@ -126,6 +147,7 @@ impl PluginRecoveryState {
     }
 
     pub fn mark_clean_exit(&self) -> Result<()> {
+        self.ensure_available()?;
         let mut file = self
             .file
             .lock()
@@ -143,14 +165,25 @@ fn recovery_path(app: &AppHandle) -> Result<PathBuf> {
         .join("plugin-runtime-recovery.json"))
 }
 
+fn begin_session(file: &mut RecoveryFile, now: u64) {
+    // An app restart is not evidence that any particular plugin crashed.
+    // Clear legacy global safe mode while retaining per-plugin failure history.
+    file.safe_mode = false;
+    file.session_open = true;
+    prune_failures(file, now);
+}
+
 fn load_recovery_file(path: &Path) -> Result<RecoveryFile> {
-    if !path.exists() {
-        return Ok(RecoveryFile {
-            version: RECOVERY_VERSION,
-            ..RecoveryFile::default()
-        });
-    }
-    let bytes = fs::read(path).context("Failed to read plugin recovery state")?;
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(RecoveryFile {
+                version: RECOVERY_VERSION,
+                ..RecoveryFile::default()
+            })
+        }
+        Err(error) => return Err(error).context("Failed to read plugin recovery state"),
+    };
     let file: RecoveryFile =
         serde_json::from_slice(&bytes).context("Plugin recovery state is corrupt")?;
     if file.version != RECOVERY_VERSION {
@@ -214,16 +247,44 @@ mod tests {
     use super::*;
 
     #[test]
-    fn previous_open_session_enables_safe_mode() {
-        let file = RecoveryFile {
+    fn unreadable_history_blocks_status_and_never_overwrites_original() {
+        let path =
+            std::env::temp_dir().join(format!("zync-recovery-test-{}.json", uuid::Uuid::new_v4()));
+        let original = b"not valid recovery JSON";
+        fs::write(&path, original).unwrap();
+        let state = PluginRecoveryState::load_from_path(path.clone()).unwrap();
+        assert!(state.status().is_err());
+        assert!(state.clear_safe_mode().is_err());
+        assert!(state.clear_plugin_failures("dev.example.monitor").is_err());
+        assert!(state
+            .record_failure("dev.example.monitor", "worker-error")
+            .is_err());
+        assert!(state.mark_clean_exit().is_err());
+        assert_eq!(fs::read(&path).unwrap(), original);
+        fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn restart_clears_global_safe_mode_and_preserves_plugin_failures() {
+        let mut restarted = RecoveryFile {
             version: RECOVERY_VERSION,
             session_open: true,
-            safe_mode: false,
-            failures: BTreeMap::new(),
+            safe_mode: true,
+            failures: BTreeMap::from([(
+                "dev.example.monitor".into(),
+                vec![PersistedPluginFailure {
+                    at_ms: 100,
+                    kind: "worker-error".into(),
+                }],
+            )]),
         };
-        let mut restarted = file;
-        restarted.safe_mode |= restarted.session_open;
-        assert!(restarted.safe_mode);
+        begin_session(&mut restarted, 200);
+        assert!(!status_from_file(&restarted).safe_mode);
+        assert!(restarted.session_open);
+        assert_eq!(restarted.failures["dev.example.monitor"].len(), 1);
+        begin_session(&mut restarted, 300);
+        assert!(!status_from_file(&restarted).safe_mode);
+        assert_eq!(restarted.failures["dev.example.monitor"].len(), 1);
     }
 
     #[test]
