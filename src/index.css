@@ -433,6 +433,11 @@
     }
 }
 
+/* Keep host docking events outside sandboxed frames during a drag. */
+[data-pane-docking="true"] iframe {
+    pointer-events: none;
+}
+
 .tab-dock-preview {
     transition:
         left 180ms cubic-bezier(0.22, 1, 0.36, 1),

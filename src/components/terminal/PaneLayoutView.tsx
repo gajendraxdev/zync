@@ -373,6 +373,7 @@ function FeaturePaneLeaf({
             data-files-instance-id={featureId === 'files' ? instanceId : undefined}
             className="relative h-full w-full min-h-0 min-w-0 overflow-hidden flex flex-col bg-app-bg"
             onMouseDown={onFocus}
+            onFocusCapture={onFocus}
             onWheelCapture={() => {
                 if (!focused) onFocus();
             }}

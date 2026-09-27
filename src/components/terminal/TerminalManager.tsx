@@ -4,11 +4,10 @@ import { useRetainedItems } from '../layout/useRetainedItems';
 import { TerminalComponent } from './Terminal';
 import { useAppStore } from '../../store/useAppStore';
 import { useShallow } from 'zustand/react/shallow';
-import { Terminal as TerminalIcon, Plus, X, Zap } from 'lucide-react';
+import { Terminal as TerminalIcon, Plus, X, Zap, Loader2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { once, type UnlistenFn } from '@tauri-apps/api/event';
 import { queueTerminalInput } from '../../lib/terminal';
-import { LOCAL_TERMINAL_CONNECTION_ID } from '../../lib/terminal/connectionIds';
 import {
     findLayoutOwner,
     isFeatureContent,
@@ -17,6 +16,7 @@ import {
     isSplitLayout,
     layoutForCanvas,
     layoutForFeatureInstance,
+    layoutForPlugin,
 } from '../../lib/paneLayout';
 import { PaneLayoutView } from './PaneLayoutView';
 import type { DockTabPointerHandlers } from '../layout/tabDock';
@@ -32,6 +32,7 @@ export function TerminalManager({
     hideTabs = false,
     dockPointer,
     featureInstanceId,
+    pluginPanelId,
 }: {
     connectionId?: string;
     isVisible?: boolean;
@@ -43,6 +44,8 @@ export function TerminalManager({
     dockPointer?: DockTabPointerHandlers;
     /** Ungrouped Files/Dashboard tab: show that pane in this canvas, not an overlay. */
     featureInstanceId?: string;
+    /** A plugin view selects its own canvas, never the last active shell's canvas. */
+    pluginPanelId?: string;
 }) {
     const workspaceActive = isWorkspaceActive ?? (isVisible !== false);
     const terminalView = isTerminalView ?? (isVisible !== false);
@@ -67,16 +70,13 @@ export function TerminalManager({
         if (!activeConnectionId) return undefined;
         const groups = state.paneLayouts[activeConnectionId];
         const groupOwner = state.activePaneGroupOwner[activeConnectionId];
+        if (pluginPanelId) return layoutForPlugin(groups, pluginPanelId);
         if (featureInstanceId) {
             return layoutForFeatureInstance(groups, featureInstanceId)
                 ?? layoutForCanvas(groups, state.activeTerminalIds[activeConnectionId], groupOwner);
         }
         const activeId = state.activeTerminalIds[activeConnectionId];
         return layoutForCanvas(groups, activeId, groupOwner);
-    });
-    const hostConnected = useAppStore((state) => {
-        if (!activeConnectionId || activeConnectionId === LOCAL_TERMINAL_CONNECTION_ID) return true;
-        return state.connections.find((c) => c.id === activeConnectionId)?.status === 'connected';
     });
     const canvasLayouts = useMemo(() => Object.entries(paneGroups ?? {}).filter(([, layout]) =>
         isSplitLayout(layout)
@@ -288,7 +288,7 @@ export function TerminalManager({
 
             {/* Terminal Content Area */}
             <div ref={terminalContentRef} className={cn("flex-1 overflow-hidden relative", terminalTransparencyEnabled ? "bg-transparent" : "bg-app-bg")}>
-                {hostConnected && canvasLayouts.filter(([owner]) => retainedCanvases.has(owner)).map(([owner, layout]) => (
+                {canvasLayouts.filter(([owner]) => retainedCanvases.has(owner)).map(([owner, layout]) => (
                     <div key={owner} className={cn('absolute inset-0 z-10', (!panelVisible || owner !== selectedCanvas) && 'hidden')}>
                         <PaneLayoutView
                             connectionId={activeConnectionId}
@@ -299,7 +299,12 @@ export function TerminalManager({
                         />
                     </div>
                 ))}
-                {terminalView && hostConnected && selectedCanvas ? null : tabs.length === 0 ? (
+                {terminalView && selectedCanvas ? null : terminalView && pluginPanelId ? (
+                    <div role="status" className="flex h-full items-center justify-center gap-2 text-sm text-app-muted">
+                        <Loader2 size={16} className="animate-spin" aria-hidden="true" />
+                        <span>Preparing plugin pane…</span>
+                    </div>
+                ) : tabs.length === 0 ? (
                     <div className={cn(
                         "h-full flex flex-col items-center justify-center text-app-muted z-20",
                         terminalTransparencyEnabled ? "bg-app-bg/80 backdrop-blur-xl" : "bg-app-bg"

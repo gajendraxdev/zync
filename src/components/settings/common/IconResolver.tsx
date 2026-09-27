@@ -1,4 +1,4 @@
-import { type ComponentType } from 'react';
+import { type ComponentType, type ReactNode } from 'react';
 import { Activity, Cpu, Gauge, Globe, Layers, Lock, Monitor, Package, Plug, Settings as SettingsIcon, Shield, Terminal, Zap, FileText, Folder } from 'lucide-react';
 import { PluginAssetIcon } from '../../icons/PluginAssetIcon';
 import { isPluginImageIcon } from '../../../features/plugins/pluginIconPath';
@@ -8,6 +8,7 @@ interface IconResolverProps {
     path?: string;
     size?: number;
     className?: string;
+    fallback?: ReactNode;
 }
 
 const icons: Record<string, ComponentType<{ size?: number; className?: string }>> = {
@@ -35,9 +36,9 @@ const normalizedIcons = Object.entries(icons).reduce<Record<string, ComponentTyp
     return acc;
 }, {});
 
-export function IconResolver({ name, path, size = 16, className = "" }: IconResolverProps) {
+export function IconResolver({ name, path, size = 16, className = "", fallback }: IconResolverProps) {
     if (isPluginImageIcon(name)) {
-        return <PluginAssetIcon icon={name} pluginPath={path} size={size} className={className} />;
+        return <PluginAssetIcon icon={name} pluginPath={path} size={size} className={className} fallback={fallback} />;
     }
 
     const resolvedName = (name || '').trim();

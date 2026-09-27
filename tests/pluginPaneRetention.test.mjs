@@ -18,8 +18,11 @@ assert.deepEqual([...retained], ['two'], 'Reopening an inactive item does not re
 assert.deepEqual([...retainLiveItems([], retained, null)], []);
 
 const frame = readFileSync('src/components/plugins/PluginPanel.tsx', 'utf8');
+assert.match(frame, /useLayoutEffect\(\(\) => \{\s+visibleRef.current = visible;\s+\}, \[visible\]\)/, 'Visibility refs update only after commit');
+assert.equal(frame.match(/visibleRef.current = visible/g)?.length, 1);
 const layout = readFileSync('src/components/layout/MainLayout.tsx', 'utf8');
-assert.match(layout, /paneInstanceId=\{`overlay:\$\{tab.id\}:\$\{panel.id\}`\}/, 'Retained host panes must have separate routing identities');
+assert.doesNotMatch(layout, /paneInstanceId=\{`overlay:/, 'Plugin tabs render through the shared pane canvas');
+assert.match(layout, /ensurePluginPane/, 'Restored plugin tabs receive persisted pane identities');
 assert.match(frame, /PluginPanelFrame key=\{frameKey\}/, 'Connection or pane identity changes recreate the frame');
 assert.match(frame, /event.source !== window.parent/);
 assert.match(frame, /typeof data.visible !== 'boolean'/);

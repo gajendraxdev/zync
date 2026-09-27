@@ -1,4 +1,5 @@
 export { createPaneId } from './ids';
+export { isKeepableRemainder, ownerForLayout } from './groups';
 export {
     focusPaneInDirection,
     neighborPaneId,
@@ -56,6 +57,7 @@ export {
     focusedTermIdForRestore,
     layoutForCanvas,
     layoutForFeatureInstance,
+    layoutForPlugin,
     layoutForTerm,
     parsePaneLayoutGroups,
     sameGroupTermDock,

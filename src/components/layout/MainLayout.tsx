@@ -12,13 +12,10 @@ import { ShortcutManager } from '../managers/ShortcutManager';
 import { CommandPalette } from './CommandPalette';
 import { WorkspaceTabBar } from './WorkspaceTabBar';
 import {
-    overlayPluginPaneId,
-    parseOverlayFeatureId,
-    parseOverlayPluginId,
     TabDockOverlay,
     type DockTabPointerHandlers,
 } from './tabDock';
-import { collectLeaves, isFeatureContent, isPluginContent, isSplitFeatureId, isSplitLayout, layoutForCanvas, layoutForFeatureInstance, layoutHasPlugin } from '../../lib/paneLayout';
+import { collectLeaves, isFeatureContent, isPluginContent, isSplitFeatureId, isSplitLayout, layoutForPlugin, layoutForFeatureInstance, layoutHasPlugin } from '../../lib/paneLayout';
 import { featureTabsFromPaneGroups, initialFeatureTabsForView, mergeFeatureTabs, preferredFeatureTabId, stablePluginPanelInventory } from './featureTabInventory';
 import type { ShellEntry } from '../../lib/shells/types';
 import type { FeatureId, WorkspaceFeatureTab } from './featureMeta';
@@ -78,12 +75,10 @@ declare global {
 const TerminalManager = lazy(() => import('../terminal/TerminalManager').then(module => ({ default: module.TerminalManager })));
 const GlobalTunnelList = lazy(() => import('../tunnel/GlobalTunnelList').then(module => ({ default: module.GlobalTunnelList })));
 const PublicUrlsPanel = lazy(() => import('../share/PublicUrlsPanel').then(module => ({ default: module.PublicUrlsPanel })));
-const PluginPanel = lazy(() => import('../plugins/PluginPanel').then(module => ({ default: module.PluginPanel })));
 const SettingsJsonEditorPanel = lazy(() =>
     import('../settings/SettingsJsonEditorPanel').then(module => ({ default: module.SettingsJsonEditorPanel }))
 );
 import { VaultWorkspaceLoading } from '../vault/VaultWorkspaceLoading';
-import { PluginUnavailable } from '../plugins/PluginUnavailable';
 
 const VaultWorkspacePanel = lazy(() =>
     import('../vault/VaultWorkspacePanel').then(module => ({ default: module.default }))
@@ -262,7 +257,7 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
     const connection = useAppStore(useShallow(state => state.connections.find(c => c.id === tab.connectionId)));
 
     // Plugin panels
-    const { panels: pluginPanels, plugins: installedPlugins, loaded: pluginsLoaded } = usePlugins();
+    const { panels: pluginPanels, plugins: installedPlugins } = usePlugins();
     const workspacePluginPanels = useMemo(
         () => stablePluginPanelInventory(pluginPanels, installedPlugins),
         [pluginPanels, installedPlugins],
@@ -272,15 +267,6 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
     const createTerminal = useAppStore(state => state.createTerminal);
     const closeTerminalGroup = useAppStore(state => state.closeTerminalGroup);
     const setActiveTerminal = useAppStore(state => state.setActiveTerminal);
-    const canvasSplit = useAppStore((state) => {
-        if (!tab.connectionId) return false;
-        const layout = layoutForCanvas(
-            state.paneLayouts[tab.connectionId],
-            state.activeTerminalIds[tab.connectionId],
-            state.activePaneGroupOwner[tab.connectionId],
-        );
-        return isSplitLayout(layout);
-    });
 
     // Feature Pinning
     const toggleConnectionFeature = useAppStore(state => state.toggleConnectionFeature);
@@ -311,20 +297,31 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
     const [isSnippetSidebarOpen, setIsSnippetSidebarOpen] = useState(false);
 
     const dockSurfaceRef = useRef<HTMLDivElement>(null);
-    const viewBeforeDockRef = useRef<string | null>(null);
     const dockInSplit = useAppStore((state) => state.dockInSplit);
     const showToast = useAppStore((state) => state.showToast);
 
     // Effect hooks must be unconditional
     // Ensure pinned feature kinds and restored split instances have inventory tabs.
     const pinnedFeatures = tab.connectionId === LOCAL_TERMINAL_CONNECTION_ID ? (localPinnedFeatures || EMPTY_ARRAY) : (connection?.pinnedFeatures || EMPTY_ARRAY);
-    const availablePluginViews = useMemo(
-        () => pluginPanels
-            .map(panel => `plugin:${panel.id}`)
-            .filter(view => openFeatures.includes(view) || pinnedFeatures.includes(view) || tab.view === view),
-        [pluginPanels, openFeatures, pinnedFeatures, tab.view],
-    );
-    const retainedPluginViews = useRetainedItems(availablePluginViews, isActive ? tab.view : null);
+    useEffect(() => {
+        if (!tab.connectionId) return;
+        const views = new Set([...openFeatures, ...pinnedFeatures, tab.view]);
+        for (const view of views) {
+            if (isPluginTabView(view)) {
+                useAppStore.getState().ensurePluginPane(tab.connectionId, view.slice('plugin:'.length));
+            }
+        }
+
+        if (isActive && isPluginTabView(tab.view)) {
+            const state = useAppStore.getState();
+            const groups = state.paneLayouts[tab.connectionId];
+            const layout = layoutForPlugin(groups, tab.view.slice('plugin:'.length));
+            const owner = Object.entries(groups ?? {}).find(([, candidate]) => candidate === layout)?.[0];
+            if (owner && state.activePaneGroupOwner[tab.connectionId] !== owner) {
+                state.activatePaneGroup(tab.connectionId, owner);
+            }
+        }
+    }, [openFeatures, pinnedFeatures, tab.connectionId, tab.view, isActive]);
 
     useEffect(() => {
         if (isSplitFeatureId(tab.view)) {
@@ -594,6 +591,9 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
     }, [activeFeatureTabId, featureTabs, workspacePluginPanels, setTabView, tab.id, tab.connectionId, setActiveTerminal]);
 
     const handleFeatureClose = useCallback((feature: string) => {
+        if (isPluginTabView(feature) && tab.connectionId) {
+            useAppStore.getState().closePluginPanes(tab.connectionId, feature.slice('plugin:'.length));
+        }
         if (feature.startsWith('plugin:') && tab.connectionId && pinnedFeatures.includes(feature)) {
             toggleConnectionFeature(tab.connectionId, feature);
         }
@@ -732,66 +732,24 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
     const handleFeaturePaneOpened = useCallback((_feature: string) => {
     }, []);
 
-    const restoreViewBeforeDock = useCallback(() => {
-        const previous = viewBeforeDockRef.current;
-        viewBeforeDockRef.current = null;
-        if (previous && previous !== 'terminal') {
-            setTabView(tab.id, previous as Tab['view']);
-        }
-    }, [setTabView, tab.id]);
 
     const dockPointer = useMemo<DockTabPointerHandlers>(() => ({
         getSurface: () => dockSurfaceRef.current,
-        onDragStart: (payload) => {
-            if (canvasSplit) {
-                viewBeforeDockRef.current = null;
-                if (tab.view !== 'terminal') setTabView(tab.id, 'terminal');
-                return;
-            }
-            if (tab.view !== 'terminal') {
-                viewBeforeDockRef.current = tab.view;
-                if (payload.kind === 'term') return;
-                if (payload.kind === 'feature' && tab.view === payload.featureId) return;
-                if (payload.kind === 'plugin' && tab.view === `plugin:${payload.pluginId}`) return;
-                setTabView(tab.id, 'terminal');
-            } else {
-                viewBeforeDockRef.current = null;
-            }
-        },
+        // Dragging never changes the visible destination canvas.
+        onDragStart: () => {},
         onDragEnd: (payload, edge, paneId) => {
-            if (!edge || !tab.connectionId) {
-                restoreViewBeforeDock();
-                return;
-            }
-            const overlayFeature = parseOverlayFeatureId(paneId);
-            const overlayPlugin = parseOverlayPluginId(paneId);
-            const overlayFeatureTab = overlayFeature
-                ? featureTabs.find(item => item.id === activeFeatureTabId && item.featureId === overlayFeature)
-                : undefined;
-            const overlayTargetContent = overlayFeature
-                ? { kind: 'feature' as const, featureId: overlayFeature, instanceId: overlayFeatureTab?.instanceId }
-                : overlayPlugin
-                    ? { kind: 'plugin' as const, pluginId: overlayPlugin }
-                    : undefined;
-            const result = dockInSplit(tab.connectionId, payload, edge, paneId, undefined, overlayTargetContent);
+            if (!edge || !paneId || !tab.connectionId) return;
+            const result = dockInSplit(tab.connectionId, payload, edge, paneId);
             if (result === 'refused-cap') {
                 showToast('info', 'This tab already has 4 panes.');
-                restoreViewBeforeDock();
                 return;
             }
-            if (result === 'self' || result === 'no-target') {
-                restoreViewBeforeDock();
-                return;
-            }
-            viewBeforeDockRef.current = null;
-            if (payload.kind === 'feature' || payload.kind === 'plugin' || overlayTargetContent) {
+            if (result === 'opened' || result === 'moved' || result === 'focused') {
                 setTabView(tab.id, 'terminal');
             }
         },
-        onDragCancel: () => {
-            restoreViewBeforeDock();
-        },
-    }), [activeFeatureTabId, canvasSplit, dockInSplit, featureTabs, restoreViewBeforeDock, setTabView, showToast, tab.connectionId, tab.id, tab.view]);
+        onDragCancel: () => {},
+    }), [dockInSplit, setTabView, showToast, tab.connectionId, tab.id]);
 
     const handleTogglePin = useCallback((feature: string) => {
         if (tab.connectionId) {
@@ -875,34 +833,6 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
                     {/* Content Area */}
                     <div ref={dockSurfaceRef} className="flex-1 overflow-hidden relative flex flex-col">
                         <Suspense fallback={<TabLoading />}>
-                            {/* Plugin Panels */}
-                            {pluginPanels.map(panel => {
-                                const viewId = `plugin:${panel.id}`;
-                                if (!retainedPluginViews.has(viewId)) return null;
-                                const visible = isActive && tab.view === viewId;
-                                return (
-                                    <div
-                                        key={panel.id}
-                                        data-pane-id={overlayPluginPaneId(panel.id)}
-                                        className={cn('absolute inset-0 z-10 bg-app-bg', !visible && 'hidden')}
-                                    >
-                                        <PluginPanel
-                                            html={panel.html}
-                                            panelId={panel.id}
-                                            pluginId={panel.pluginId}
-                                            legacyAccess={panel.legacyAccess}
-                                            paneInstanceId={`overlay:${tab.id}:${panel.id}`}
-                                            connectionId={tab.connectionId || null}
-                                            visible={visible}
-                                        />
-                                    </div>
-                                );
-                            })}
-                            {isPluginTabView(tab.view) && !pluginPanels.some(panel => `plugin:${panel.id}` === tab.view) && (
-                                <div className="absolute inset-0 z-10">
-                                    {pluginsLoaded ? <PluginUnavailable panelId={tab.view.slice('plugin:'.length)} /> : <TabLoading />}
-                                </div>
-                            )}
 
                             {/* 
                                 Terminal View
@@ -910,15 +840,15 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
                             */}
                             <div
                                 className={cn(
-                                    "absolute inset-0 z-20",
-                                    tab.view.startsWith('plugin:') && "hidden",
+                                    "flex-1 min-h-0 min-w-0 relative",
                                     terminalTransparencyEnabled && !forceOpaqueShell ? "bg-transparent" : "bg-app-bg"
                                 )}
                             >
                                 <TerminalManager
                                     connectionId={tab.connectionId}
                                     isWorkspaceActive={isActive}
-                                    isTerminalView={!tab.view.startsWith('plugin:')}
+                                    isTerminalView
+                                    pluginPanelId={isPluginTabView(tab.view) ? tab.view.slice('plugin:'.length) : undefined}
                                     hideTabs={true}
                                     dockPointer={dockPointer}
                                     featureInstanceId={

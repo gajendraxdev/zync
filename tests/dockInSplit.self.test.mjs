@@ -25,10 +25,10 @@ const paneMove = source.slice(paneMoveStart, paneMoveEnd);
 assert.match(paneMove, /sourcePaneId !== paneId/, 'dropping a pane onto a different pane must use move behavior');
 assert.match(paneMove, /unsplitPane\(sourceLayout, sourcePaneId\)/, 'moving must detach the exact source pane');
 assert.match(paneMove, /sourceOwner === owner \? withoutSource : groups\?\.\[owner\]/, 'cross-group moves must resolve the hovered layout');
-assert.match(paneMove, /dockIntoLayout\(targetLayout, sourceNode\.content, edge, undefined, paneId\)/, 'moving must dock the original content at the hovered pane');
+assert.match(paneMove, /dockIntoLayout\(targetLayout, sourceNode\.content, edge, undefined, paneId, sourcePaneId\)/, 'moving must preserve the original content and pane identity at the hovered pane');
 assert.match(paneMove, /if \(sourceOwner !== owner\)/, 'pane moves between Split tabs must update both layouts');
-assert.match(paneMove, /const keepSourceGroup = Boolean\(withoutSource && isSplitLayout\(withoutSource\)\)/, 'a feature-only source split must survive a cross-group move');
-assert.match(paneMove, /remainingTerms\.includes\(sourceOwner\)/, 'a moved owner shell must promote a remaining owner');
+assert.match(paneMove, /isKeepableRemainder\(withoutSource\)/, 'source remainders use the same retention policy as session persistence');
+assert.match(paneMove, /ownerForLayout\(withoutSource, sourceOwner\)/, 'surviving content determines the new owner');
 assert.match(paneMove, /activePaneGroupOwner:[\s\S]*?\[connectionId\]: owner/, 'a cross-group move must activate its target group');
 
 const activateGroupStart = source.indexOf('activatePaneGroup: (connectionId, owner) =>');
@@ -85,7 +85,7 @@ assert.match(
 );
 
 const ensureFeatureStart = source.indexOf('ensureFeaturePane: (connectionId, featureId, instanceId) =>');
-const ensureFeatureEnd = source.indexOf('activatePaneGroup:', ensureFeatureStart);
+const ensureFeatureEnd = source.indexOf('ensurePluginPane:', ensureFeatureStart);
 assert.ok(ensureFeatureStart >= 0 && ensureFeatureEnd > ensureFeatureStart, 'feature-pane ensure branch not found');
 assert.doesNotMatch(
   source.slice(ensureFeatureStart, ensureFeatureEnd),

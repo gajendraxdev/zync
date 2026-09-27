@@ -690,12 +690,16 @@ export const CombinedTabBar = memo(function CombinedTabBar({
                     }
                     if (extraLeafPluginIds.has(panelId)) return null;
                     const panel = pluginPanels.find(p => p.id === panelId) ?? { id: panelId, title: 'Plugin' };
+                    const pluginLeaf = allPaneLeaves.find(leaf =>
+                        isPluginContent(leaf.content) && leaf.content.pluginId === panelId,
+                    );
                     const isActive = activeView === featureId;
                     return (
                         <div
                             key={featureId}
-                            data-pane-id={`overlay:plugin:${panelId}`}
-                            onPointerDown={(event) => beginDockPointer(event, { kind: 'plugin', pluginId: panelId })}
+                            onPointerDown={(event) => beginDockPointer(event, pluginLeaf
+                                ? paneDockPayload(pluginLeaf)
+                                : { kind: 'plugin', pluginId: panelId })}
                             onClick={() => {
                                 if (consumeClickIfDragged()) return;
                                 onTabSelect(featureId);

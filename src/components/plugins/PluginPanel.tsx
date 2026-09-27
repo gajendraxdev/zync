@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import { getZyncThemePayload } from '../../lib/themePayload';
 import { isDebugThemePayloadEnabled } from '../../lib/debugFlags';
@@ -9,7 +9,7 @@ import { usePlugins } from '../../context/PluginContext';
 import { isPluginShortcutCommandAllowed, matchPluginShortcut, pluginShortcutBindings, pluginShortcutBridgeScript } from '../../features/shortcuts/pluginShortcuts';
 import { runShortcutCommand } from '../../features/shortcuts/actions';
 import { TerminalDisconnectedView } from '../terminal/TerminalDisconnectedView';
-import { findNode, layoutForCanvas } from '../../lib/paneLayout';
+import { findNode, layoutForCanvas, layoutForPlugin } from '../../lib/paneLayout';
 
 interface PluginPanelProps {
     html: string;
@@ -34,9 +34,10 @@ export function PluginPanel(props: PluginPanelProps) {
     const isSurfaceActive = useAppStore(s => {
         const tab = s.tabs.find(t => t.id === s.activeTabId);
         if (!props.connectionId || tab?.connectionId !== props.connectionId) return false;
-        if (props.paneInstanceId.startsWith('overlay:')) return tab.view === `plugin:${props.panelId}`;
-        if (tab.view.startsWith('plugin:')) return false;
-        const layout = layoutForCanvas(s.paneLayouts[props.connectionId], s.activeTerminalIds[props.connectionId], s.activePaneGroupOwner[props.connectionId]);
+        const groups = s.paneLayouts[props.connectionId];
+        const layout = tab.view.startsWith('plugin:')
+            ? layoutForPlugin(groups, tab.view.slice('plugin:'.length))
+            : layoutForCanvas(groups, s.activeTerminalIds[props.connectionId], s.activePaneGroupOwner[props.connectionId]);
         const focused = layout && findNode(layout.root, layout.activePaneId);
         return focused?.type === 'pane' && focused.content.kind === 'plugin' && focused.content.instanceId === props.paneInstanceId;
     });
@@ -63,7 +64,9 @@ function PluginPanelFrame({ html, panelId, pluginId, connectionId, legacyAccess,
     const iframeRef = useRef<HTMLIFrameElement>(null);
     const frameGenerationRef = useRef(0);
     const visibleRef = useRef(visible);
-    visibleRef.current = visible;
+    useLayoutEffect(() => {
+        visibleRef.current = visible;
+    }, [visible]);
     const sendVisibility = useCallback(() => {
         iframeRef.current?.contentWindow?.postMessage({
             type: 'zync:pane:visibility',

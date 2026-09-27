@@ -6,6 +6,11 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Fixed
 
+- **Plugin fallbacks:** Keep valid marketplace thumbnails when installed plugins have no icon or their local image fails to load, preserve registry icon fallbacks, and show a loading state while a plugin canvas is being prepared instead of a blank view.
+- **Plugin visibility:** Publish only committed pane visibility so interrupted renders cannot change background polling state.
+- **Standalone shell self-drop:** Recognize an unsplit shell as its own canvas so dragging its tab onto itself creates a sibling shell instead of hiding the original tab.
+- **Same-canvas pane dragging:** Preserve moved pane IDs and suppress the browser's trailing drop click so rearranging panes cannot activate a close button after the layout changes.
+- **Shared plugin canvases:** Render standalone plugins through the shared pane layout instead of terminal overlays, keep the destination selected during tab docking, preserve pane identities and surviving canvases after moves/close, and keep host drag events outside sandboxed frames.
 - **Plugin icons:** Load package-relative image assets dynamically in workspace menus, pane headers, installed-plugin settings, and details. Marketplace cards use installed icons or HTTPS thumbnails, with safe-path validation and generic fallbacks.
 - **Plugin tab lifecycle:** Preserve visited plugin frames across workspace and pane-tab switches, signal visibility to pause background reads, and dispose closed or disconnected panes without plugin-specific layout branches.
 - **Retained-tab correctness:** Start plugin visibility as hidden until confirmed by the host, and retain visited connection-free tabs through the same live inventory as connection tabs.

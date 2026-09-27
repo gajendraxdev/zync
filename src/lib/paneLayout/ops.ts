@@ -93,6 +93,7 @@ export function splitPane(
     content: PaneContent,
     cap = MAX_VISIBLE_PANES,
     insert: SplitInsert = 'after',
+    incomingPaneId?: string,
 ): { ok: true; layout: PaneLayout; newPaneId: string } | { ok: false; reason: SplitFailReason } {
     if (leafCount(layout.root) >= cap) {
         return { ok: false, reason: 'cap' };
@@ -101,7 +102,7 @@ export function splitPane(
     if (!target) return { ok: false, reason: 'missing-pane' };
     if (!isPaneLeaf(target)) return { ok: false, reason: 'not-leaf' };
 
-    const newLeaf: PaneNode = { type: 'pane', id: createPaneId(), content };
+    const newLeaf: PaneNode = { type: 'pane', id: incomingPaneId ?? createPaneId(), content };
     const splitId = createPaneId();
     const root = mapNode(layout.root, paneId, (current) => ({
         type: 'split',
@@ -204,6 +205,7 @@ export function dockIntoLayout(
     edge: DockEdge,
     cap = MAX_VISIBLE_PANES,
     targetPaneId?: string,
+    incomingPaneId?: string,
 ): { ok: true; layout: PaneLayout; paneId: string; created: boolean } | { ok: false; reason: SplitFailReason } {
     if (content.kind === 'term') {
         const existing = findLeafByTerm(layout.root, content.termId);
@@ -226,7 +228,7 @@ export function dockIntoLayout(
     const focused = findNode(layout.root, layout.activePaneId);
     const target = hinted && isPaneLeaf(hinted) ? hinted : (focused && isPaneLeaf(focused) ? focused : firstLeaf(layout.root));
     const { direction, insert } = splitFromDockEdge(edge);
-    const result = splitPane(layout, target.id, direction, content, cap, insert);
+    const result = splitPane(layout, target.id, direction, content, cap, insert, incomingPaneId);
     if (!result.ok) return result;
     return {
         ok: true,

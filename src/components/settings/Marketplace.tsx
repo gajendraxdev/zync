@@ -18,7 +18,7 @@ interface MarketplaceProps {
 }
 
 // Robust Image component with fallback to IconResolver
-const PluginImage = ({ url, icon, path, name, size = 20 }: { url?: string, icon?: string, path?: string, name: string, size?: number }) => {
+const PluginImage = ({ url, icon, localIcon, path, name, size = 20 }: { url?: string, icon?: string, localIcon?: string, path?: string, name: string, size?: number }) => {
     const [error, setError] = useState(false);
     let safeUrl: string | undefined;
     try {
@@ -26,21 +26,23 @@ const PluginImage = ({ url, icon, path, name, size = 20 }: { url?: string, icon?
         if (parsed.protocol === 'https:' && !parsed.username && !parsed.password) safeUrl = parsed.href;
     } catch { /* Missing or invalid thumbnails use the package icon. */ }
 
-    if (!path && safeUrl && !error) {
-        return (
-            <img
-                src={safeUrl}
-                alt={name}
-                className="w-full h-full object-contain p-1"
-                referrerPolicy="no-referrer"
-                onError={() => setError(true)}
-            />
-        );
-    }
+    const fallback = safeUrl && !error ? (
+        <img
+            src={safeUrl}
+            alt={name}
+            className="w-full h-full object-contain p-1"
+            referrerPolicy="no-referrer"
+            onError={() => setError(true)}
+        />
+    ) : <IconResolver name={icon} size={size} />;
+
+    if (!(path && localIcon?.trim()) && safeUrl && !error) return fallback;
 
     return (
         <div className="w-full h-full flex items-center justify-center bg-[var(--color-app-bg)] text-[var(--color-app-accent)]">
-            <IconResolver name={icon} path={path} size={size} />
+            {path && localIcon?.trim()
+                ? <IconResolver name={localIcon} path={path} size={size} fallback={fallback} />
+                : fallback}
         </div>
     );
 };
@@ -154,7 +156,7 @@ export function Marketplace({ registry, selectedRegistry, betaPluginIds, onSetPl
                             >
                                 {/* Thumbnail / Icon */}
                                 <div className="w-10 h-10 rounded bg-[var(--color-app-surface)] flex items-center justify-center shrink-0 border border-[var(--color-app-border)] overflow-hidden">
-                                    <PluginImage key={`${plugin.thumbnailUrl ?? ''}:${localPlugin?.path ?? ''}:${localPlugin?.manifest.icon ?? plugin.icon ?? ''}`} url={plugin.thumbnailUrl} icon={localPlugin?.manifest.icon ?? plugin.icon} path={localPlugin?.path} name={plugin.name} />
+                                    <PluginImage key={`${plugin.thumbnailUrl ?? ''}:${localPlugin?.path ?? ''}:${localPlugin?.manifest.icon ?? ''}:${plugin.icon ?? ''}`} url={plugin.thumbnailUrl} icon={plugin.icon} localIcon={localPlugin?.manifest.icon} path={localPlugin?.path} name={plugin.name} />
                                 </div>
 
                                 {/* Details */}
