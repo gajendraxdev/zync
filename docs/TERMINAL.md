@@ -1,6 +1,7 @@
 # Zync Terminal — Architecture & Reference
 
-**Last updated:** 2026-09-11  
+**Last updated:** 2026-09-27
+
 **Applies to:** Zync v2.30.0+
 
 This document describes **how Zync’s integrated terminal works today** — local and remote shells, stack choices, architecture, IPC, renderer, lifecycle, ghost suggestions, settings, and code layout. It is the single place to learn what the terminal system is and how it behaves, not a development plan or backlog.
@@ -46,7 +47,7 @@ Zync embeds a full terminal per workspace connection (plus a local shell) using 
 - **GPU rendering** — WebGL2 primary with automatic DOM fallback
 - **Opt-in resource reclaim** — background remote host PTYs can suspend after idle timeout
 
-Each workspace can have multiple shell tabs. A **local shell** (`LOCAL_TERMINAL_CONNECTION_ID`) runs without SSH; **remote shells** attach to the active host connection. By default only the active shell is mounted; a **split** can mount up to four nested visible panes (side by side first, or stacked). A pane holds **one** content (shell or docked host feature). Extra shells in a split leave the tab bar until unsplit. Inactive shells keep xterm in `terminalCache`. Pane layout: `src/lib/paneLayout`. Workspace container rules: [WORKSPACE.md](./WORKSPACE.md).
+Each workspace can have multiple shell tabs. A **local shell** (`LOCAL_TERMINAL_CONNECTION_ID`) runs without SSH; **remote shells** attach to the active host connection. Unvisited shells do not mount; visited live content hosts stay mounted while hidden. A **split** shows up to four nested visible panes (side by side first, or stacked), without reparenting content hosts. A pane holds **one** content (shell or docked host feature). Extra shells in a split leave the tab bar until unsplit. Hidden shells receive inactive/hidden lifecycle flags; xterm/PTY ownership remains in `terminalCache`. Pane layout: `src/lib/paneLayout`. Workspace container rules: [WORKSPACE.md](./WORKSPACE.md).
 
 ---
 
@@ -139,7 +140,8 @@ flowchart TB
 | File | Role |
 |------|------|
 | `TerminalManager.tsx` | Mounts one to four visible shells; keeps inactive tabs warm; routes snippet/plugin writes through `queueTerminalInput` |
-| `PaneLayoutView.tsx` / `PaneDivider.tsx` | Split tree renderer; term leaves and Files leaves; 1px seams; accent on the focused pane's inner edges only; drag, scroll, or arrow keys to resize; double-click a seam to even both sides. New splits grow in once (`paneLayout/intro.ts`); divider drag/scroll does not use that transition |
+| `PaneLayoutView.tsx` / `PaneDivider.tsx` | Split geometry and allocation slots; 1px seams; drag, scroll, or arrow keys to resize; double-click a seam to even both sides. New splits grow in once (`paneLayout/intro.ts`); divider drag/scroll does not use that transition |
+| `PaneLeafView.tsx` / `components/workspace/` | Stable content hosts, shared pane chrome and focus edges; geometry changes do not remount or reparent terminal/plugin content |
 | `paneLayout/nav.ts` | Spatial neighbor for Ctrl+Alt+arrows |
 | `Terminal.tsx` | Hook wiring (~270 lines): lifecycle, theme, search, ghost, keybindings, global shortcuts |
 | `TerminalHost.tsx` | Connected-state presentation: search bar, context menu, ghost overlays, xterm container. While a Files drag is active, a pane overlay accepts the drop on **any visible shell** (not only the Files split neighbor). Drop a Files item onto a **Shell tab** to paste into that session even when Files is the full overlay. Quoted path(s) paste at the cursor (no Enter). Local Windows uses cmd/PowerShell quoting; remote and Unix local shells use POSIX quoting. |

@@ -1,7 +1,8 @@
 
 import { useEffect, useMemo, useRef } from 'react';
-import { useRetainedItems } from '../layout/useRetainedItems';
-import { TerminalComponent } from './Terminal';
+import { PaneSurfaceLayer } from '../workspace/PaneSurfaceLayer';
+import { layoutSurfaces, paneSurfaceKey } from '../workspace/paneSurfaces';
+import { usePaneSurfaceGeometry } from '../workspace/usePaneSurfaceGeometry';
 import { useAppStore } from '../../store/useAppStore';
 import { useShallow } from 'zustand/react/shallow';
 import { Terminal as TerminalIcon, Plus, X, Zap, Loader2 } from 'lucide-react';
@@ -17,8 +18,12 @@ import {
     layoutForCanvas,
     layoutForFeatureInstance,
     layoutForPlugin,
+    collectLeaves,
+    isTermContent,
+    singlePane,
 } from '../../lib/paneLayout';
 import { PaneLayoutView } from './PaneLayoutView';
+import { PaneLeafView } from './PaneLeafView';
 import type { DockTabPointerHandlers } from '../layout/tabDock';
 
 // TerminalTab interface is now in store/terminalSlice
@@ -82,9 +87,20 @@ export function TerminalManager({
         isSplitLayout(layout)
         || (isPaneLeaf(layout.root) && (isFeatureContent(layout.root.content) || isPluginContent(layout.root.content))),
     ), [paneGroups]);
-    const canvasIds = useMemo(() => canvasLayouts.map(([owner]) => owner), [canvasLayouts]);
     const selectedCanvas = canvasLayouts.find(([, layout]) => layout === paneLayout)?.[0] ?? null;
-    const retainedCanvases = useRetainedItems(canvasIds, panelVisible ? selectedCanvas : null);
+    const standaloneLayouts = useMemo(() => {
+        const groupedTerms = new Set(canvasLayouts.flatMap(([, layout]) =>
+            collectLeaves(layout.root).flatMap(leaf => isTermContent(leaf.content) ? [leaf.content.termId] : []),
+        ));
+        return tabs.filter(tab => !groupedTerms.has(tab.id)).map(tab => singlePane(tab.id, tab.id));
+    }, [canvasLayouts, tabs]);
+    const standaloneLayout = standaloneLayouts.find(layout => layout.activePaneId === activeTabId);
+    const standalonePane = standaloneLayout && isPaneLeaf(standaloneLayout.root) ? standaloneLayout.root : undefined;
+    const standaloneVisible = panelVisible && !selectedCanvas && !pluginPanelId;
+    const surfaces = useMemo(() => [
+        ...canvasLayouts.flatMap(([owner, layout]) => layoutSurfaces(layout, panelVisible && owner === selectedCanvas)),
+        ...standaloneLayouts.flatMap(layout => layoutSurfaces(layout, standaloneVisible && layout === standaloneLayout)),
+    ], [canvasLayouts, panelVisible, selectedCanvas, standaloneLayouts, standaloneLayout, standaloneVisible]);
 
     // Actions (stable)
     const createTerminal = useAppStore(state => state.createTerminal);
@@ -94,6 +110,7 @@ export function TerminalManager({
         state => state.settings.enableVibrancy && (state.settings.windowOpacity ?? 1) < 1
     );
     const terminalContentRef = useRef<HTMLDivElement>(null);
+    const { registerSlot, registerHost } = usePaneSurfaceGeometry(terminalContentRef);
     const pendingReadyRef = useRef<Record<string, { timeoutId: any; unlistenFn?: UnlistenFn; sent?: boolean }>>({});
     const activeTabIdRef = useRef(activeTabId);
 
@@ -288,17 +305,32 @@ export function TerminalManager({
 
             {/* Terminal Content Area */}
             <div ref={terminalContentRef} className={cn("flex-1 overflow-hidden relative", terminalTransparencyEnabled ? "bg-transparent" : "bg-app-bg")}>
-                {canvasLayouts.filter(([owner]) => retainedCanvases.has(owner)).map(([owner, layout]) => (
-                    <div key={owner} className={cn('absolute inset-0 z-10', (!panelVisible || owner !== selectedCanvas) && 'hidden')}>
+                {canvasLayouts.filter(([owner]) => owner === selectedCanvas).map(([owner, layout]) => (
+                    <div key={owner} className={cn('absolute inset-0', !panelVisible && 'hidden')}>
                         <PaneLayoutView
                             connectionId={activeConnectionId}
                             layout={layout}
-                            workspaceActive={workspaceActive}
-                            panelVisible={panelVisible && owner === selectedCanvas}
-                            dockPointer={dockPointer}
+                            registerSlot={registerSlot}
                         />
                     </div>
                 ))}
+                <PaneSurfaceLayer
+                    key={activeConnectionId}
+                    surfaces={surfaces}
+                    registerHost={registerHost}
+                    renderSurface={surface => (
+                        <PaneLeafView
+                            connectionId={activeConnectionId}
+                            node={surface.node}
+                            layout={surface.layout}
+                            split={surface.split}
+                            edges={surface.edges}
+                            workspaceActive={workspaceActive}
+                            panelVisible={surface.visible}
+                            dockPointer={dockPointer}
+                        />
+                    )}
+                />
                 {terminalView && selectedCanvas ? null : terminalView && pluginPanelId ? (
                     <div role="status" className="flex h-full items-center justify-center gap-2 text-sm text-app-muted">
                         <Loader2 size={16} className="animate-spin" aria-hidden="true" />
@@ -313,20 +345,11 @@ export function TerminalManager({
                         <p>No active terminals</p>
                         <button onClick={handleNewTab} className="mt-4 text-app-accent hover:underline">Open New Terminal</button>
                     </div>
-                ) : activeTabId && terminalView ? (
-                    <div className="absolute inset-0 z-10" data-pane-id={activeTabId}>
-                        {/* Mount only the active shell while terminal view is shown — xterm stays in terminalCache. */}
-                        <div className="h-full w-full">
-                            <TerminalComponent
-                                connectionId={activeConnectionId}
-                                termId={activeTabId}
-                                isWorkspaceActive={workspaceActive}
-                                isTerminalView
-                                isActiveTab
-                                isVisible={panelVisible}
-                            />
-                        </div>
-                    </div>
+                ) : standalonePane && terminalView ? (
+                    <div
+                        ref={node => registerSlot(paneSurfaceKey(standalonePane), node)}
+                        className={cn('absolute inset-0', !panelVisible && 'hidden')}
+                    />
                 ) : null}
             </div>
         </div>

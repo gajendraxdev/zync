@@ -37,6 +37,8 @@ function normalizeEmittedImports(directory) {
 normalizeEmittedImports(path.resolve('.tmp-agent-tests'));
 
 const tests = [
+  'tests/pluginPaneClose.test.mjs',
+  'tests/paneSurfaces.test.mjs',
   'tests/pluginFallbacks.test.mjs',
   'tests/paneDropClick.test.mjs',
   'tests/agentRunStore.partialize.test.mjs',

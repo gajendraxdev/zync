@@ -861,7 +861,12 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
             for (const [owner, layout] of Object.entries(groups)) {
                 const remaining = dropPlugin(layout, pluginId);
                 if (isKeepableRemainder(remaining)) {
-                    const nextOwner = ownerForLayout(remaining, owner);
+                    const candidateOwner = ownerForLayout(remaining, owner);
+                    // Reserve original keys too: a later group must not overwrite
+                    // a remainder that was promoted into its owner slot.
+                    const occupied = Object.prototype.hasOwnProperty.call(next, candidateOwner)
+                        || (candidateOwner !== owner && Object.prototype.hasOwnProperty.call(groups, candidateOwner));
+                    const nextOwner = occupied ? owner : candidateOwner;
                     next[nextOwner] = remaining;
                     if (activeOwner === owner) activeOwner = nextOwner;
                 } else {

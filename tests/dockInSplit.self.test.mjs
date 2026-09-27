@@ -139,7 +139,7 @@ assert.match(
 );
 
 const paneViewSource = fs.readFileSync(
-  path.join(process.cwd(), 'src', 'components', 'terminal', 'PaneLayoutView.tsx'),
+  path.join(process.cwd(), 'src', 'components', 'terminal', 'PaneLeafView.tsx'),
   'utf8',
 );
 assert.match(
