@@ -6,15 +6,17 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Fixed
 
-- **Plugin fallbacks:** Keep valid marketplace thumbnails when installed plugins have no icon or their local image fails to load, preserve registry icon fallbacks, and show a loading state while a plugin canvas is being prepared instead of a blank view.
-- **Plugin visibility:** Publish only committed pane visibility so interrupted renders cannot change background polling state.
-- **Standalone shell self-drop:** Recognize an unsplit shell as its own canvas so dragging its tab onto itself creates a sibling shell instead of hiding the original tab.
-- **Same-canvas pane dragging:** Preserve moved pane IDs and suppress the browser's trailing drop click so rearranging panes cannot activate a close button after the layout changes.
-- **Shared plugin canvases:** Render standalone plugins through the shared pane layout instead of terminal overlays, keep the destination selected during tab docking, preserve pane identities and surviving canvases after moves/close, and keep host drag events outside sandboxed frames.
-- **Plugin icons:** Load package-relative image assets dynamically in workspace menus, pane headers, installed-plugin settings, and details. Marketplace cards use installed icons or HTTPS thumbnails, with safe-path validation and generic fallbacks.
-- **Plugin tab lifecycle:** Preserve visited plugin frames across workspace and pane-tab switches, signal visibility to pause background reads, and dispose closed or disconnected panes without plugin-specific layout branches.
-- **Retained-tab correctness:** Start plugin visibility as hidden until confirmed by the host, and retain visited connection-free tabs through the same live inventory as connection tabs.
-- **Release documentation:** Correct the 2.33.1 changelog comparison links and clarify that production registry metadata must expire within seven days; zero-expiry metadata is supported only for historical verification.
+- **Plugin close ownership:** Preserve surviving canvases when promoted owner keys collide, including groups processed later, and retain the correct active selection. ([feed932])
+- **Structural pane retention:** Keep content hosts and their DOM order stable across splits, moves, owner changes and collapse, preserving iframe documents and pane state. Split geometry and resize observations are separate from content lifecycle; closed content is disposed and hidden terminals remain inactive. ([feed932])
+- **Plugin fallbacks:** Keep valid marketplace thumbnails when installed plugins have no icon or their local image fails to load, preserve registry icon fallbacks, and show a loading state while a plugin canvas is being prepared instead of a blank view. ([7b7ac50])
+- **Plugin visibility:** Publish only committed pane visibility so interrupted renders cannot change background polling state. ([7b7ac50])
+- **Standalone shell self-drop:** Recognize an unsplit shell as its own canvas so dragging its tab onto itself creates a sibling shell instead of hiding the original tab. ([7b7ac50])
+- **Same-canvas pane dragging:** Preserve moved pane IDs and suppress the browser's trailing drop click so rearranging panes cannot activate a close button after the layout changes. ([7b7ac50])
+- **Shared plugin canvases:** Render standalone plugins through the shared pane layout instead of terminal overlays, keep the destination selected during tab docking, preserve pane identities and surviving canvases after moves/close, and keep host drag events outside sandboxed frames. ([7b7ac50])
+- **Plugin icons:** Load package-relative image assets dynamically in workspace menus, pane headers, installed-plugin settings, and details. Marketplace cards use installed icons or HTTPS thumbnails, with safe-path validation and generic fallbacks. ([76b045b])
+- **Plugin tab lifecycle:** Preserve visited plugin frames across workspace and pane-tab switches, signal visibility to pause background reads, and dispose closed or disconnected panes without plugin-specific layout branches. ([e58e875])
+- **Retained-tab correctness:** Start plugin visibility as hidden until confirmed by the host, and retain visited connection-free tabs through the same live inventory as connection tabs. ([e58e875])
+- **Release documentation:** Correct the 2.33.1 changelog comparison links and clarify that production registry metadata must expire within seven days; zero-expiry metadata is supported only for historical verification. ([dc9f7f9])
 
 ## [2.33.1] - 2026-09-27
 
@@ -1692,3 +1694,8 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [cb3e9a9]: https://github.com/zync-sh/zync/commit/cb3e9a9
 [cef8c21]: https://github.com/zync-sh/zync/commit/cef8c21
 [57b9c5e]: https://github.com/zync-sh/zync/commit/57b9c5e
+[7b7ac50]: https://github.com/zync-sh/zync/commit/7b7ac50cda7fd1a4a73cf94ae4756754efdc8d25
+[76b045b]: https://github.com/zync-sh/zync/commit/76b045b
+[e58e875]: https://github.com/zync-sh/zync/commit/e58e875
+[dc9f7f9]: https://github.com/zync-sh/zync/commit/dc9f7f9
+[feed932]: https://github.com/zync-sh/zync/commit/feed932040da773f83f1d69c79b1a8c6e8aaf613
