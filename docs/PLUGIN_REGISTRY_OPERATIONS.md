@@ -44,7 +44,7 @@ Before promoting a staged object, run the same live check used by release CI:
 npm run plugin:registry-check -- --url $env:ZYNC_PLUGIN_STAGING_REGISTRY_URL --root-keys $env:ZYNC_PLUGIN_STAGING_REGISTRY_ROOT_KEYS --minimum-version 1 --min-valid-for-hours 24
 ```
 
-The check follows at most three HTTPS-only redirects, reads at most 2 MiB, verifies the root signature against the complete rotation bundle, enforces a version floor, and checks the requested validity window for expiring metadata. Explicit non-expiring metadata has no refresh deadline. It never needs the root private key.
+The check follows at most three HTTPS-only redirects, reads at most 2 MiB, verifies the root signature against the complete rotation bundle, enforces a version floor, rejects non-expiring metadata or validity periods longer than seven days, and checks the requested remaining validity window. General signature verification retains historical zero-expiry compatibility, but the release gate does not. It never needs the root private key.
 
 ## Staging release gate
 
@@ -55,7 +55,7 @@ Create a protected GitHub environment named `plugin-staging` with these public c
 
 Run **Plugin registry staging** manually with the minimum registry version being promoted. The workflow validates the live endpoint, signing tools, native trust rules, and frontend production build. After it passes, manually use a desktop build pointed at staging to install one release, reject one permission review, accept it on a second attempt, exercise its command and pane, and verify rollback or revocation with a higher registry version. Record the tested registry version and package digest in the release log.
 
-The normal **Release** workflow separately checks the production endpoint before it creates a draft release. Configure `ZYNC_PLUGIN_REGISTRY_MIN_VERSION` whenever production must reject an older published registry, and set `ZYNC_PLUGIN_REGISTRY_REQUIRED=true` when every release must include the trusted marketplace. URL and roots must either both be absent (an intentionally marketplace-disabled build) or both be configured. Once required, missing, wrongly signed, or unreachable metadata blocks release. Positive expiry timestamps also require an unexpired registry with sufficient remaining validity; signed zero-expiry metadata has no refresh deadline.
+The normal **Release** workflow separately checks the production endpoint before it creates a draft release. Configure `ZYNC_PLUGIN_REGISTRY_MIN_VERSION` whenever production must reject an older published registry, and set `ZYNC_PLUGIN_REGISTRY_REQUIRED=true` when every release must include the trusted marketplace. URL and roots must either both be absent (an intentionally marketplace-disabled build) or both be configured. Once required, missing, wrongly signed, or unreachable metadata blocks release. Metadata must expire within seven days of issuance and have sufficient remaining validity; signed zero-expiry metadata blocks release.
 
 Marketplace updates cannot downgrade an installed plugin or replace an existing semantic version with different bytes. Use Zync's retained-version rollback action for recovery.
 

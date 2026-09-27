@@ -52,14 +52,27 @@ try {
     issuedAtMs: now - 1_000, expiresAtMs: 0,
   });
   const permanentBytes = fs.readFileSync(permanentPath);
-  const permanent = await checkPublishedRegistry({
+  await assert.rejects(checkPublishedRegistry({
     registryUrl: 'https://staging.plugins.example.test/registry.json',
     trustedRootPublicKeys: currentRoot.publicKey,
     minimumVersion: 13,
     currentTimeMs: now + 365 * 86_400_000,
     fetchImpl: fetchSequence([new Response(permanentBytes)]).fetchImpl,
+  }), /non-expiring metadata is not allowed/);
+  // General verification remains compatible with historical signed metadata.
+  assert.equal(verifySignedRegistryBytes(permanentBytes, currentRoot.publicKey, now).expiresAtMs, 0);
+
+  const longLivedPath = path.join(root, 'registry-long-lived.json');
+  buildSignedRegistryFromFile({
+    descriptorPath, keyPath, outputPath: longLivedPath, version: 14,
+    issuedAtMs: now, expiresAtMs: now + 8 * 86_400_000,
   });
-  assert.equal(permanent.expiresAtMs, 0);
+  await assert.rejects(checkPublishedRegistry({
+    registryUrl: 'https://staging.plugins.example.test/registry.json',
+    trustedRootPublicKeys: currentRoot.publicKey,
+    currentTimeMs: now,
+    fetchImpl: fetchSequence([new Response(fs.readFileSync(longLivedPath))]).fetchImpl,
+  }), /must not exceed seven days/);
   await assert.rejects(checkPublishedRegistry({
     registryUrl: 'https://staging.plugins.example.test/registry.json',
     trustedRootPublicKeys: currentRoot.publicKey,

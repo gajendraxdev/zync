@@ -540,6 +540,11 @@ export const PluginProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             runtimeSupervisor.current.stopAll(pluginId => {
                 rejectPendingPluginNotifyActionsForPlugin(pluginId, 'Plugin reloaded');
             });
+            // Registrations and routing belong to the Workers just stopped, even if reload fails.
+            setCommands([]);
+            setPanels([]);
+            paneMessageTargets.current.clear();
+            paneBindingQueue.current.clear();
             await resetNativePluginRuntimes();
             if (!isCurrent()) return false;
             if (healthCheckPluginId) {
@@ -620,13 +625,6 @@ export const PluginProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             registerThemePluginModes(enabledPlugins);
             window.dispatchEvent(new CustomEvent('zync:theme-registry-ready'));
             setPlugins(loadedPlugins);
-            // Commands and panes belong to a Worker generation. Keeping registrations from the
-            // previous generation makes removed commands look alive after an update.
-            setCommands([]);
-            setPanels([]);
-            paneMessageTargets.current.clear();
-            paneBindingQueue.current.clear();
-
             // Initialize Workers
             for (const plugin of runnablePlugins) {
                 if (!runtimeSupervisor.current.beginStart(plugin.manifest.id)) continue;

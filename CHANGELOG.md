@@ -8,6 +8,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Fixed
 
+- **Failed plugin reload cleanup:** Remove commands, panels, and pane routing as soon as their workers stop, even when recovery-status loading fails.
 - **Plugin startup recovery:** Ordinary app restarts no longer globally pause third-party plugins. Per-plugin crash-loop quarantine is retained, and unavailable or corrupt recovery history blocks activation without overwriting the original history. ([57b9c5e])
 - **Tunnel reconciliation:** Send the required `connectionId` argument to Tauri for positional and object calls, retaining compatibility with legacy `connection_id` callers. ([57b9c5e])
 - **SDK signing guidance:** Use operation-neutral passphrase errors and accurately describe published versus upcoming CLI commands and unattended signing requirements. ([cef8c21])
@@ -19,6 +20,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Security
 
+- **Production registry release gate:** Reject non-expiring metadata and signed validity periods longer than seven days, independently of the publication pipeline.
 - **Registry freshness guidance:** Production registry publication uses a maximum seven-day expiry with daily automated refreshes. The next desktop release must raise its minimum registry version to reject historical non-expiring metadata; signing workflow and input protection remain required operational controls. ([cef8c21])
 
 ## [2.33.0] - 2026-09-26

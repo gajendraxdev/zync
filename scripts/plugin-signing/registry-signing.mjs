@@ -539,6 +539,7 @@ export function verifySignedRegistryBytes(
   }
   return {
     version: payload.version,
+    issuedAtMs: payload.issuedAtMs,
     expiresAtMs: payload.expiresAtMs,
     pluginCount: payload.plugins.length,
     revocationCount: revocations.length,
