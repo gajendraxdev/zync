@@ -39,6 +39,7 @@
         "src/components/editor/codemirror/fileTypes.ts",
         "src/components/editor/codemirror/keymap.ts",
         "src/components/editor/codemirror/performance.ts",
+        "src/components/editor/codemirror/saveState.ts",
         "src/components/editor/codemirror/sessionCache.ts",
         "src/components/editor/codemirror/status.ts",
         "src/components/editor/codemirror/theme.ts",
@@ -188,6 +189,8 @@
         "src/lib/terminal/index.ts",
 
         "src/features/usage/catalog.ts",
+        "src/features/usage/flush.ts",
+        "src/features/usage/payload.ts",
         "src/features/usage/queue.ts",
         "src/features/usage/session.ts",
         "src/features/usage/types.ts",

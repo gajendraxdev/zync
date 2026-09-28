@@ -4,6 +4,18 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Added
+
+- **File editor controls:** Added mouse-accessible Save, Go to Line, Find/Replace and Close actions, Zync-styled tooltips, and a shortcuts dialog. ([fd34b9c])
+
+### Changed
+
+- **CodeMirror performance:** Lazy-load the editor and language support, retain bounded per-document editing sessions across pane switches, and use a reduced feature set for large files to limit memory and processing overhead. ([fd34b9c])
+
+### Fixed
+
+- **Built-in file editor:** Restore visible code and gutter spacing, keep editor state stable after saves, update highlighting when the theme changes, and publish cursor and save state through the shared status bar. ([fd34b9c])
+
 ## [2.33.2] - 2026-09-27
 
 This release includes the changes recorded below for 2.33.0 and 2.33.1, whose releases remained drafts, together with the following fixes.
@@ -1710,3 +1722,4 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [feed932]: https://github.com/zync-sh/zync/commit/feed932040da773f83f1d69c79b1a8c6e8aaf613
 [cc010f6]: https://github.com/zync-sh/zync/commit/cc010f6
 [c1b57d2]: https://github.com/zync-sh/zync/commit/c1b57d2
+[fd34b9c]: https://github.com/zync-sh/zync/commit/fd34b9c

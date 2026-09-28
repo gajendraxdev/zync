@@ -16,6 +16,7 @@ import {
 } from '../.tmp-agent-tests/src/components/editor/providers.js';
 import { formatCodeMirrorStatus } from '../.tmp-agent-tests/src/components/editor/codemirror/status.js';
 import { resolveCodeMirrorPerformanceMode } from '../.tmp-agent-tests/src/components/editor/codemirror/performance.js';
+import { resolveSavedBaseline } from '../.tmp-agent-tests/src/components/editor/codemirror/saveState.js';
 import { CodeMirrorSessionCache } from '../.tmp-agent-tests/src/components/editor/codemirror/sessionCache.js';
 
 function runTest(name, fn) {
@@ -142,6 +143,15 @@ runTest('uses large-file mode only after configured document limits', () => {
   assert.equal(resolveCodeMirrorPerformanceMode('small', limits).kind, 'full');
   assert.equal(resolveCodeMirrorPerformanceMode('01234567890', limits).reason, 'character-limit');
   assert.equal(resolveCodeMirrorPerformanceMode('a\nb\nc\nd', limits).reason, 'line-limit');
+});
+
+runTest('keeps a newer saved baseline when it changes during an async save', () => {
+  const original = { value: 'original' };
+  const saved = { value: 'saved' };
+  const external = { value: 'external' };
+
+  assert.equal(resolveSavedBaseline(original, original, saved), saved);
+  assert.equal(resolveSavedBaseline(original, external, saved), external);
 });
 
 runTest('bounds cached editor sessions by recency and size', () => {

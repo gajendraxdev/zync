@@ -3,22 +3,23 @@ import { isUsageFeatureId } from './catalog.js';
 import { submitUsage } from './client.js';
 import { isUsageEnabled } from './enabled.js';
 import { getOrCreateInstallId } from './identity.js';
+import { fitUsagePayload } from './payload.js';
 import {
+  checkpointUsage,
   dropPendingDay,
   loadQueue,
   markCurrentFlushed,
   saveQueue,
   type UsageDayQueue,
+  type UsageQueueState,
 } from './queue.js';
-import { dayOpenSeconds, ensureUsageSession, sessionPayload } from './session.js';
-import type { UsagePayload } from './types.js';
+import type { UsageApiResult, UsagePayload } from './types.js';
 
 const FLUSH_INTERVAL_MS = 15 * 60 * 1000;
 
-let flushing = false;
 let cachedVersion = '';
 
-async function toPayload(day: UsageDayQueue, now = new Date()): Promise<UsagePayload> {
+async function toPayload(day: UsageDayQueue): Promise<UsagePayload> {
   if (!cachedVersion) {
     cachedVersion = await resolveAppVersion();
   }
@@ -26,51 +27,111 @@ async function toPayload(day: UsageDayQueue, now = new Date()): Promise<UsagePay
     if (!isUsageFeatureId(id) || !count) return [];
     return [{ id, count }];
   });
-  const payload: UsagePayload = {
+  return fitUsagePayload({
     schemaVersion: 1,
     installId: getOrCreateInstallId(),
     day: day.day,
     appVersion: cachedVersion || undefined,
     platform: resolveSurveyPlatform(),
     arch: resolveSurveyArch(),
+    openSeconds: day.openSeconds,
     features,
+    sessions: day.sessions,
+  });
+}
+
+export interface UsageFlushDependencies {
+  isEnabled: () => boolean;
+  now: () => Date;
+  load: (now?: Date) => UsageQueueState;
+  save: (state: UsageQueueState) => void;
+  submit: (payload: UsagePayload) => Promise<UsageApiResult>;
+  makePayload: (day: UsageDayQueue) => Promise<UsagePayload>;
+}
+
+export function createUsageFlusher(dependencies: UsageFlushDependencies) {
+  let activeFlush: Promise<void> | null = null;
+  let forceRequested = false;
+
+  const checkpoint = (): UsageQueueState => {
+    const now = dependencies.now();
+    const state = checkpointUsage(dependencies.load(now), now);
+    dependencies.save(state);
+    return state;
   };
-  if (day.day === now.toISOString().slice(0, 10)) {
-    const session = ensureUsageSession(now);
-    payload.openSeconds = dayOpenSeconds(session, day.day, now);
-    payload.sessions = [sessionPayload(session, day.day, now)];
-  } else if (day.sessions?.length || day.openSeconds != null) {
-    payload.openSeconds = day.openSeconds;
-    payload.sessions = day.sessions;
-  }
-  return payload;
-}
 
-export async function flushUsage(forceCurrent = false): Promise<void> {
-  if (!isUsageEnabled() || flushing) return;
-  flushing = true;
-  try {
-    const snapshot = loadQueue();
-    for (const pending of snapshot.pending) {
-      if (!pending.dirty) continue;
-      await submitUsage(await toPayload(pending));
-      saveQueue(dropPendingDay(loadQueue(), pending.day));
-      if (!isUsageEnabled()) return;
+  const flushOnce = async (forceCurrent: boolean): Promise<void> => {
+    try {
+      const attemptedPendingDays = new Set<string>();
+
+      while (dependencies.isEnabled()) {
+        const snapshot = checkpoint();
+        const pending = snapshot.pending.find(
+          (day) => day.dirty && !attemptedPendingDays.has(day.day),
+        );
+        if (!pending) break;
+
+        attemptedPendingDays.add(pending.day);
+        await dependencies.submit(await dependencies.makePayload(pending));
+        const now = dependencies.now();
+        dependencies.save(dropPendingDay(dependencies.load(now), pending.day, now.getTime()));
+      }
+
+      if (!dependencies.isEnabled()) return;
+      const snapshot = checkpoint();
+      const due = forceCurrent
+        || snapshot.current.dirty
+        || snapshot.lastFlushAt == null
+        || (dependencies.now().getTime() - snapshot.lastFlushAt) >= FLUSH_INTERVAL_MS;
+      if (!due) return;
+
+      const sent = snapshot.current;
+      await dependencies.submit(await dependencies.makePayload(sent));
+      if (!dependencies.isEnabled()) return;
+      const now = dependencies.now();
+      dependencies.save(markCurrentFlushed(dependencies.load(now), sent, now.getTime()));
+    } catch {
+      // The checkpoint remains dirty and will be retried on the next trigger.
     }
-    if (!isUsageEnabled()) return;
-    const due = forceCurrent
-      || snapshot.current.dirty
-      || snapshot.lastFlushAt == null
-      || (Date.now() - snapshot.lastFlushAt) >= FLUSH_INTERVAL_MS;
-    if (!due) return;
-    const sent = snapshot.current;
-    await submitUsage(await toPayload(sent));
-    saveQueue(markCurrentFlushed(loadQueue(), sent));
-  } catch {
-    // Keep dirty flags; retry on next open / interval / close.
-  } finally {
-    flushing = false;
-  }
+  };
+
+  return (forceCurrent = false): Promise<void> => {
+    if (!dependencies.isEnabled()) return Promise.resolve();
+    if (forceCurrent) {
+      forceRequested = true;
+      // Closing cannot wait indefinitely for an in-flight request. Persist the
+      // latest timing synchronously so a restart can retry it even if shutdown
+      // wins the network race.
+      checkpoint();
+    }
+    if (activeFlush) return activeFlush;
+
+    activeFlush = (async () => {
+      let firstRun = true;
+      try {
+        while (dependencies.isEnabled() && (firstRun || forceRequested)) {
+          const forceThisRun = forceRequested;
+          forceRequested = false;
+          firstRun = false;
+          await flushOnce(forceThisRun);
+        }
+      } finally {
+        activeFlush = null;
+        if (!dependencies.isEnabled()) forceRequested = false;
+      }
+    })();
+
+    return activeFlush;
+  };
 }
 
-export { FLUSH_INTERVAL_MS };
+const flushUsage = createUsageFlusher({
+  isEnabled: isUsageEnabled,
+  now: () => new Date(),
+  load: loadQueue,
+  save: saveQueue,
+  submit: submitUsage,
+  makePayload: toPayload,
+});
+
+export { FLUSH_INTERVAL_MS, flushUsage };

@@ -13,6 +13,7 @@ import { GoToLinePanel } from './editor/codemirror/GoToLinePanel';
 import { isCommentShortcut } from './editor/codemirror/keymap';
 import { loadCodeMirrorLanguage } from './editor/codemirror/language';
 import { resolveCodeMirrorPerformanceMode } from './editor/codemirror/performance';
+import { resolveSavedBaseline } from './editor/codemirror/saveState';
 import {
   deleteCodeMirrorSession,
   saveCodeMirrorSession,
@@ -144,10 +145,17 @@ export function CodeMirrorFileEditor({
     setIsSaving(true);
 
     const savedDocument = view.state.doc;
+    const baselineAtSaveStart = savedDocRef.current;
     try {
       await onSave(savedDocument.toString());
-      savedDocRef.current = savedDocument;
-      updateDirtyState(!view.state.doc.eq(savedDocument));
+      savedDocRef.current = resolveSavedBaseline(
+        baselineAtSaveStart,
+        savedDocRef.current,
+        savedDocument,
+      );
+      updateDirtyState(
+        savedDocRef.current === null || !view.state.doc.eq(savedDocRef.current),
+      );
       publishStatus(view.state);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to save file';
