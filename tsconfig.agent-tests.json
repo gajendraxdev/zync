@@ -46,6 +46,7 @@
         "src/components/editor/codemirror/theme.ts",
         "src/components/editor/pluginSaveState.ts",
         "src/components/editor/providers.ts",
+        "src/components/file-manager/editorReadPolicy.ts",
         "src/components/settings/tabs/vaultFocus.ts",
         "src/components/layout/sidebar/vaultNavState.ts",
         "src/components/ui/Button.tsx",

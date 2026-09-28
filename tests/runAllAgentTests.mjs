@@ -55,6 +55,7 @@ const tests = [
   'tests/hostKeyVerification.test.mjs',
   'tests/editorPluginFrameIsolation.test.mjs',
   'tests/editorPluginSaveState.test.mjs',
+  'tests/editorReadPolicy.test.mjs',
   'tests/pluginPanelSshConfirmation.test.mjs',
   'tests/pluginCommandBridge.test.mjs',
   'tests/pluginShortcuts.test.mjs',

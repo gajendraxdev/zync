@@ -8,6 +8,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Fixed
 
+- **File editor memory safety:** Refuse files over 8 MiB before opening and bound the actual local or SSH read, including when listing sizes are stale or unavailable. The editor never receives a truncated file.
 - **Installed CodeMirror layout:** Apply the release build's style nonce to
   CodeMirror's generated CSS so file content remains beside the gutter after
   installation or update.

@@ -39,6 +39,7 @@ import { filePathLeafLabel, inferHomePath, isFilePathEqual, normalizeFilePath } 
 import { fileMatchesQuery, fileMatchesSearchType } from './file-manager/fileSearchFilter';
 import type { FileSearchTypeFilter } from './file-manager/FileQueryEditor';
 import type { FileEntry } from './file-manager/types';
+import { EDITOR_READ_LIMIT_MESSAGE, exceedsEditorReadLimit, isEditorReadLimitError, MAX_EDITOR_FILE_BYTES } from './file-manager/editorReadPolicy';
 import { PropertiesPanel } from './file-manager/PropertiesPanel';
 import { useFileClipboard } from './file-manager/useFileClipboard';
 import { isFileManagerPanelShown, useFileKeyboard } from './file-manager/useFileKeyboard';
@@ -825,27 +826,37 @@ export const FileManager = memo(function FileManager({
 
 
   const handleOpenFile = useCallback(async (file: FileEntry, providerOverride?: string) => {
-    if (!activeConnectionId) return;
+    if (!activeConnectionId) return false;
+    if (exceedsEditorReadLimit(file.size)) {
+      showToast('error', EDITOR_READ_LIMIT_MESSAGE);
+      return false;
+    }
     setIsFileLoading(true);
     try {
       const fullPath = currentPath === '/' ? `/${file.name}` : `${currentPath}/${file.name}`;
       const content = await window.ipcRenderer.invoke('fs_read_file', {
         connectionId: activeConnectionId,
         path: fullPath,
+        maxBytes: MAX_EDITOR_FILE_BYTES,
       });
       setEditorProviderOverride(providerOverride ?? null);
       setEditorContent(content);
       setEditingFile(file);
+      return true;
     } catch (error: any) {
-      if (handleConnectionError(activeConnectionId, error)) return;
-      showToast('error', `Failed to open file: ${error.message || String(error)}`);
+      if (!handleConnectionError(activeConnectionId, error)) {
+        showToast('error', isEditorReadLimitError(error)
+          ? EDITOR_READ_LIMIT_MESSAGE
+          : `Failed to open file: ${error.message || String(error)}`);
+      }
+      return false;
     } finally {
       setIsFileLoading(false);
     }
   }, [activeConnectionId, currentPath, handleConnectionError, showToast]);
 
   const handleOpenFileWithProvider = useCallback(async (file: FileEntry, providerId: string) => {
-    await handleOpenFile(file, providerId);
+    if (!await handleOpenFile(file, providerId)) return;
     const providerLabel = editorProviderOptions.find((option) => option.value === providerId)?.label ?? providerId;
     showToast('info', `Opening ${file.name} with ${providerLabel}`);
   }, [editorProviderOptions, handleOpenFile, showToast]);

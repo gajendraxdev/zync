@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+use std::io::Read;
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 use std::time::UNIX_EPOCH;
@@ -106,6 +107,17 @@ fn local_home_dir() -> String {
 }
 
 pub struct FileSystem;
+
+fn editor_file_too_large(max_bytes: u64) -> anyhow::Error {
+    anyhow!("FILE_TOO_LARGE: File exceeds the editor's {max_bytes}-byte limit")
+}
+
+fn limited_text(content: Vec<u8>, max_bytes: u64) -> Result<String> {
+    if content.len() as u64 > max_bytes {
+        return Err(editor_file_too_large(max_bytes));
+    }
+    Ok(String::from_utf8_lossy(&content).to_string())
+}
 
 impl FileSystem {
     pub fn new() -> Self {
@@ -292,6 +304,16 @@ impl FileSystem {
         Ok(String::from_utf8_lossy(&content).to_string())
     }
 
+    pub fn read_local_limited(&self, path: &str, max_bytes: u64) -> Result<String> {
+        let file = fs::File::open(path).map_err(|e| anyhow!("Failed to open file: {}", e))?;
+        if file.metadata()?.len() > max_bytes {
+            return Err(editor_file_too_large(max_bytes));
+        }
+        let mut content = Vec::new();
+        file.take(max_bytes + 1).read_to_end(&mut content)?;
+        limited_text(content, max_bytes)
+    }
+
     pub async fn write_file(&self, connection_id: &str, path: &str, content: &str) -> Result<()> {
         if connection_id == "local" {
             fs::write(path, content).map_err(|e| anyhow!("Failed to write file: {}", e))
@@ -378,6 +400,25 @@ impl FileSystem {
             .await
             .map_err(|e| anyhow!("Failed to read remote file: {}", e))?;
         Ok(String::from_utf8_lossy(&content).to_string())
+    }
+
+    pub async fn read_remote_limited(
+        &self,
+        sftp: &russh_sftp::client::SftpSession,
+        path: &str,
+        max_bytes: u64,
+    ) -> Result<String> {
+        use russh_sftp::protocol::OpenFlags;
+        use tokio::io::AsyncReadExt;
+
+        if sftp.metadata(path).await?.size.is_some_and(|size| size > max_bytes) {
+            return Err(editor_file_too_large(max_bytes));
+        }
+        let file = sftp.open_with_flags(path, OpenFlags::READ).await
+            .map_err(|e| anyhow!("Failed to open remote file: {}", e))?;
+        let mut content = Vec::new();
+        file.take(max_bytes + 1).read_to_end(&mut content).await?;
+        limited_text(content, max_bytes)
     }
 
     pub async fn write_remote(
@@ -729,5 +770,27 @@ mod tests {
         assert_eq!(identity_label(None, Some(1000), &map), "gajen");
         assert_eq!(identity_label(None, Some(42), &map), "42");
         assert_eq!(identity_label(None, None, &map), "");
+    }
+
+    #[test]
+    fn limited_text_accepts_boundary_and_rejects_growth() {
+        assert_eq!(limited_text(b"abcd".to_vec(), 4).unwrap(), "abcd");
+        assert!(limited_text(b"abcde".to_vec(), 4).unwrap_err().to_string().starts_with("FILE_TOO_LARGE:"));
+    }
+
+    #[test]
+    fn local_editor_read_checks_current_file_size() {
+        let path = std::env::temp_dir().join(format!("zync-editor-read-{}", uuid::Uuid::new_v4()));
+        let result = (|| {
+            fs::write(&path, b"abcd")?;
+            let reader = FileSystem::new();
+            assert_eq!(reader.read_local_limited(path.to_str().unwrap(), 4)?, "abcd");
+            fs::write(&path, b"abcde")?;
+            assert!(reader.read_local_limited(path.to_str().unwrap(), 4)
+                .unwrap_err().to_string().starts_with("FILE_TOO_LARGE:"));
+            Ok::<(), anyhow::Error>(())
+        })();
+        let _ = fs::remove_file(&path);
+        result.unwrap();
     }
 }
