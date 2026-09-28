@@ -106,6 +106,8 @@ const saveBtn = document.getElementById('saveBtn');
 const closeBtn = document.getElementById('closeBtn');
 let currentDoc = null;
 let initialContent = '';
+let nextSaveRequestId = 0;
+const pendingSaves = new Map();
 
 function updateMeta() {
   if (!currentDoc) {
@@ -115,7 +117,7 @@ function updateMeta() {
   const dirty = editor.value !== initialContent;
   const lineCount = editor.value.length === 0 ? 1 : editor.value.split('\n').length;
   meta.textContent = `${currentDoc.filename} · ${lineCount} lines${dirty ? ' · Modified' : ''}`;
-  window.zyncEditor.emitDirtyChange(dirty);
+  window.zyncEditor.emitDirtyChange(dirty, currentDoc.docId);
 }
 
 editor.addEventListener('input', () => {
@@ -124,9 +126,10 @@ editor.addEventListener('input', () => {
 });
 
 saveBtn.addEventListener('click', () => {
-  window.zyncEditor.requestSave(editor.value);
-  initialContent = editor.value;
-  updateMeta();
+  if (!currentDoc) return;
+  const requestId = ++nextSaveRequestId;
+  pendingSaves.set(requestId, editor.value);
+  window.zyncEditor.requestSave(editor.value, { docId: currentDoc.docId, requestId });
 });
 
 closeBtn.addEventListener('click', () => {
@@ -137,6 +140,7 @@ window.zyncEditor.onMessage((message) => {
   const { type, payload } = message || {};
   if (type === 'zync:editor:open-document') {
     currentDoc = payload;
+    pendingSaves.clear();
     initialContent = payload.content || '';
     editor.value = initialContent;
     updateMeta();
@@ -147,6 +151,15 @@ window.zyncEditor.onMessage((message) => {
     initialContent = payload.content || '';
     editor.value = initialContent;
     updateMeta();
+  }
+
+  if (type === 'zync:editor:save-result' && payload?.docId === currentDoc?.docId) {
+    const submittedContent = pendingSaves.get(payload.requestId);
+    if (submittedContent !== undefined) {
+      pendingSaves.delete(payload.requestId);
+      if (payload.ok) initialContent = submittedContent;
+      updateMeta();
+    }
   }
 
   if (type === 'zync:editor:set-theme') {

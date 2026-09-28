@@ -14,6 +14,7 @@ interface EditorPluginFrameProps {
   initialContent: string;
   onSave: (content: string) => Promise<void>;
   onClose: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
   hideToolbar?: boolean;
   onFatalError?: (reason: string) => void;
 }
@@ -61,6 +62,7 @@ export function EditorPluginFrame({
   initialContent,
   onSave,
   onClose,
+  onDirtyChange,
   hideToolbar = false,
   onFatalError,
 }: EditorPluginFrameProps) {
@@ -80,7 +82,8 @@ export function EditorPluginFrame({
   const setEditorDirty = useCallback((value: boolean) => {
     saveStateRef.current.dirty = value;
     setDirty(value);
-  }, []);
+    onDirtyChange?.(value);
+  }, [onDirtyChange]);
 
   const doc = useMemo<EditorDocumentPayload>(() => ({
     docId: `file-editor:${documentId ?? filename}`,
@@ -135,11 +138,11 @@ export function EditorPluginFrame({
 
   useEffect(() => {
     saveStateRef.current.reset(initialContent);
-    setDirty(false);
+    setEditorDirty(false);
     setSaveError(null);
     // A content refresh for the same file must not clear in-flight edits.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc.docId]);
+  }, [doc.docId, setEditorDirty]);
 
   useEffect(() => {
     saveStateRef.current.refreshIfClean(initialContent);

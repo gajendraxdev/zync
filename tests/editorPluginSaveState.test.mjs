@@ -6,10 +6,12 @@ import { PluginSaveState } from '../.tmp-agent-tests/src/components/editor/plugi
 
 const state = new PluginSaveState('saved');
 assert.equal(state.change(undefined), true, 'contentless changes must not look clean');
-assert.equal(state.providerDirtyChange(false), false, 'an explicit clean report wins');
+assert.equal(state.providerDirtyChange(false), true, 'a clean report cannot clear unknown edits');
 assert.equal(state.change('edited'), true);
+assert.equal(state.providerDirtyChange(false), true, 'a clean report cannot clear content that differs from the saved baseline');
 state.refreshIfClean('external');
 assert.equal(state.savedContent, 'saved', 'dirty text must survive a host refresh');
+assert.equal(state.change('saved'), false, 'a matching content snapshot restores the clean state');
 
 state.reset('saved');
 const unreportedSave = state.requestSave('edited');
@@ -30,7 +32,18 @@ state.reset('saved');
 const pending = state.requestSave('edited');
 state.change(undefined);
 assert.equal(state.saveSucceeded(pending, false), true, 'unknown edits after a request stay dirty');
-assert.equal(state.providerDirtyChange(false), false);
+assert.equal(state.providerDirtyChange(false), true, 'a clean report cannot clear unknown edits after a save');
+
+state.reset('saved');
+const prematureClean = state.requestSave('edited');
+assert.equal(state.providerDirtyChange(false), true, 'an optimistic clean report must not preempt the host write');
+assert.equal(state.saveSucceeded(prematureClean, false), false, 'a successful host write updates the saved baseline');
+
+state.reset('saved');
+const failedAfterClean = state.requestSave('edited');
+assert.equal(state.providerDirtyChange(false), true);
+assert.equal(state.saveFailed(failedAfterClean), true,
+  'a failed write remains dirty even after a provider clean report');
 
 state.reset('saved');
 const acknowledged = state.requestSave('edited');
@@ -46,5 +59,13 @@ assert.match(frame, /if \(!isSameDoc \|\| !saveStateRef\.current\.dirty\)/,
   'do not send update-document over dirty text');
 assert.match(frame, /if \(docId === currentDocIdRef\.current\) \{\s*setSaveError\(message\);\s*setEditorDirty\(saveStateRef\.current\.saveFailed\(content\)\);/,
   'a stale failed save must not change the new document state');
+
+const builtin = fs.readFileSync(path.join(process.cwd(), 'src-tauri/src/plugins/builtins/editors.rs'), 'utf8');
+assert.match(builtin, /requestSave\(editor\.value, \{ docId: currentDoc\.docId, requestId \}\)/,
+  'the bundled provider must request an acknowledged save');
+assert.match(builtin, /if \(type === 'zync:editor:save-result'[\s\S]*?if \(payload\.ok\) initialContent = submittedContent;/,
+  'the bundled provider must update its baseline only after a successful write');
+assert.doesNotMatch(builtin, /requestSave\(editor\.value[^\n]*\);\s*initialContent = editor\.value;/,
+  'requesting a save must not optimistically mark content saved');
 
 console.log('Editor plugin save-state test passed.');

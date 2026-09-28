@@ -34,11 +34,11 @@ export class PluginSaveState {
   }
 
   providerDirtyChange(dirty: boolean): boolean {
-    // A dirty-only event may be the first notice of an edit. A clean event
-    // is authoritative even when the provider did not send its content.
+    // A provider can report clean before the host has committed a save.
+    // Only a matching content snapshot or an updated save baseline can prove
+    // that the host has no unsaved changes.
     if (dirty && !this.dirty) this.contentUnknown = true;
-    if (!dirty) this.contentUnknown = false;
-    this.dirty = dirty;
+    this.dirty = dirty || this.contentUnknown || this.lastContent !== this.savedContent;
     return this.dirty;
   }
 
