@@ -1,4 +1,45 @@
+import { HighlightStyle } from '@codemirror/language';
 import { EditorView } from '@codemirror/view';
+import { tags } from '@lezer/highlight';
+
+export function createCodeMirrorHighlightStyle(theme: 'light' | 'dark') {
+  const palette = theme === 'light'
+    ? {
+        comment: '#6b7280',
+        keyword: '#7c3aed',
+        string: '#047857',
+        number: '#b45309',
+        type: '#0369a1',
+        function: '#1d4ed8',
+        property: '#0e7490',
+        invalid: '#dc2626',
+      }
+    : {
+        comment: '#7f8a9a',
+        keyword: '#c792ea',
+        string: '#a6e3a1',
+        number: '#f9c97c',
+        type: '#89dceb',
+        function: '#82aaff',
+        property: '#89ddff',
+        invalid: '#ff6b81',
+      };
+
+  return HighlightStyle.define([
+    { tag: tags.comment, color: palette.comment, fontStyle: 'italic' },
+    { tag: [tags.keyword, tags.modifier, tags.operatorKeyword], color: palette.keyword },
+    { tag: [tags.string, tags.special(tags.string), tags.regexp], color: palette.string },
+    { tag: [tags.number, tags.bool, tags.null], color: palette.number },
+    { tag: [tags.typeName, tags.className, tags.namespace], color: palette.type },
+    { tag: [tags.function(tags.variableName), tags.function(tags.propertyName)], color: palette.function },
+    { tag: [tags.propertyName, tags.attributeName], color: palette.property },
+    { tag: [tags.variableName, tags.name], color: 'var(--color-app-text)' },
+    { tag: [tags.heading, tags.strong], color: palette.keyword, fontWeight: '600' },
+    { tag: tags.emphasis, fontStyle: 'italic' },
+    { tag: [tags.link, tags.url], color: palette.function, textDecoration: 'underline' },
+    { tag: tags.invalid, color: palette.invalid, textDecoration: 'underline wavy' },
+  ]);
+}
 
 export function createCodeMirrorTheme(theme: 'light' | 'dark') {
   return EditorView.theme({
@@ -15,6 +56,9 @@ export function createCodeMirrorTheme(theme: 'light' | 'dark') {
     },
     '.cm-content': {
       caretColor: 'var(--color-app-accent)',
+      color: 'var(--color-app-text)',
+      paddingLeft: '8px',
+      paddingRight: '8px',
     },
     '&.cm-focused': {
       outline: 'none',
@@ -26,6 +70,13 @@ export function createCodeMirrorTheme(theme: 'light' | 'dark') {
       backgroundColor: 'var(--color-app-surface)',
       color: 'var(--color-app-muted)',
       borderRight: '1px solid var(--color-app-border)',
+      paddingLeft: '6px',
+      paddingRight: '2px',
+    },
+    '.cm-lineNumbers .cm-gutterElement': {
+      minWidth: '28px',
+      paddingLeft: '4px',
+      paddingRight: '8px',
     },
     '.cm-activeLine, .cm-activeLineGutter': {
       backgroundColor: theme === 'light'

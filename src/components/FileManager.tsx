@@ -2026,6 +2026,7 @@ export const FileManager = memo(function FileManager({
       {/* File Editor Overlay */}
       {editingFile && (
         <FileEditor
+          documentId={`${activeConnectionId}:${currentPath === '/' ? `/${editingFile.name}` : `${currentPath}/${editingFile.name}`}`}
           filename={editingFile.name}
           initialContent={editorContent}
           preferredProviderId={editorProviderOverride ?? undefined}

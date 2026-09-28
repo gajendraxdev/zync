@@ -15,6 +15,8 @@ import {
   sortEditorProviders,
 } from '../.tmp-agent-tests/src/components/editor/providers.js';
 import { formatCodeMirrorStatus } from '../.tmp-agent-tests/src/components/editor/codemirror/status.js';
+import { resolveCodeMirrorPerformanceMode } from '../.tmp-agent-tests/src/components/editor/codemirror/performance.js';
+import { CodeMirrorSessionCache } from '../.tmp-agent-tests/src/components/editor/codemirror/sessionCache.js';
 
 function runTest(name, fn) {
   try {
@@ -116,7 +118,52 @@ runTest('recognizes slash comment shortcuts across common key variants', () => {
 });
 
 runTest('keeps shortcut hint metadata stable', () => {
-  assert.deepEqual([...CODEMIRROR_SHORTCUT_HINTS], ['Ctrl/Cmd+S', 'Ctrl/Cmd+W', 'Ctrl/Cmd+G', 'Ctrl/Cmd+/']);
+  assert.deepEqual(
+    [...CODEMIRROR_SHORTCUT_HINTS],
+    [
+      'Ctrl/Cmd+S',
+      'Ctrl/Cmd+F',
+      'Ctrl/Cmd+G',
+      'Ctrl/Cmd+/',
+      'Ctrl/Cmd+W',
+      'Ctrl/Cmd+Z',
+      'Ctrl/Cmd+Shift+Z',
+      'Esc',
+    ],
+  );
+});
+
+runTest('uses large-file mode only after configured document limits', () => {
+  const limits = {
+    maxCharactersForRichEditing: 10,
+    maxLinesForRichEditing: 3,
+  };
+
+  assert.equal(resolveCodeMirrorPerformanceMode('small', limits).kind, 'full');
+  assert.equal(resolveCodeMirrorPerformanceMode('01234567890', limits).reason, 'character-limit');
+  assert.equal(resolveCodeMirrorPerformanceMode('a\nb\nc\nd', limits).reason, 'line-limit');
+});
+
+runTest('bounds cached editor sessions by recency and size', () => {
+  const cache = new CodeMirrorSessionCache({
+    maxEntries: 2,
+    maxEntryCharacters: 50,
+    maxTotalCharacters: 60,
+  });
+  const snapshot = (value) => ({
+    savedContent: value,
+    scrollLeft: 0,
+    scrollTop: 0,
+    state: { doc: value },
+  });
+
+  assert.equal(cache.save('a', snapshot('alpha')), true);
+  assert.equal(cache.save('b', snapshot('bravo')), true);
+  assert.equal(cache.save('c', snapshot('charlie')), true);
+  assert.equal(cache.size, 2);
+  assert.equal(cache.take('a'), null);
+  assert.equal(cache.take('c')?.savedContent, 'charlie');
+  assert.equal(cache.save('large', snapshot('x'.repeat(60))), false);
 });
 
 console.log('CodeMirror helper tests passed.');

@@ -3,6 +3,11 @@ import { Search, Save } from 'lucide-react';
 
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
+import {
+  clearEditorStatus,
+  createEditorStatusSource,
+  publishEditorStatus,
+} from '../features/editor/editorStatus';
 import { useAppStore } from '../store/useAppStore';
 
 interface PlainFileEditorProps {
@@ -37,6 +42,7 @@ export function PlainFileEditor({
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const statusSourceRef = useRef(createEditorStatusSource(`plain-editor:${filename}`));
   const showConfirmDialog = useAppStore((state) => state.showConfirmDialog);
   const showToast = useAppStore((state) => state.showToast);
 
@@ -174,15 +180,13 @@ export function PlainFileEditor({
   }, [handleClose, handleSave, showSearch]);
 
   useEffect(() => {
-    const el = document.getElementById('global-editor-status');
-    if (!el) return;
-    el.textContent = `${filename}  UTF-8  ${languageLabel}${isDirty ? '  • Modified' : ''}`;
-    return () => {
-      if (el.textContent === `${filename}  UTF-8  ${languageLabel}${isDirty ? '  • Modified' : ''}`) {
-        el.textContent = '';
-      }
-    };
+    publishEditorStatus(
+      statusSourceRef.current,
+      `${filename}  UTF-8  ${languageLabel}${isDirty ? '  • Modified' : ''}`,
+    );
   }, [filename, isDirty, languageLabel]);
+
+  useEffect(() => () => clearEditorStatus(statusSourceRef.current), []);
 
   return (
       <div className="absolute inset-0 z-[70] flex min-h-0 flex-col bg-app-panel">
