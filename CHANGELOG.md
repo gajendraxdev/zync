@@ -4,6 +4,12 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.33.6] - 2026-09-29
+
+### Fixed
+
+- **File editor saves:** Keep the editor and its unsaved changes open when a save fails because the connection drops. The disconnected state and save error still appear; other connection errors retain their existing behavior.
+
 ## [2.33.5] - 2026-09-28
 
 ### Fixed
@@ -1583,7 +1589,8 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [d3f4060]: https://github.com/zync-sh/zync/commit/d3f4060
 [840afc2]: https://github.com/zync-sh/zync/commit/840afc2
 [193f568]: https://github.com/zync-sh/zync/commit/193f568
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.33.5...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.33.6...HEAD
+[2.33.6]: https://github.com/zync-sh/zync/compare/v2.33.5...v2.33.6
 [2.33.5]: https://github.com/zync-sh/zync/compare/v2.33.4...v2.33.5
 [2.33.4]: https://github.com/zync-sh/zync/compare/v2.33.3...v2.33.4
 [2.33.3]: https://github.com/zync-sh/zync/compare/v2.33.2...v2.33.3

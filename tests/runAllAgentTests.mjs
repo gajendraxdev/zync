@@ -56,6 +56,7 @@ const tests = [
   'tests/editorPluginFrameIsolation.test.mjs',
   'tests/editorPluginSaveState.test.mjs',
   'tests/editorReadPolicy.test.mjs',
+  'tests/fileManagerDisconnectedSave.test.mjs',
   'tests/pluginPanelSshConfirmation.test.mjs',
   'tests/pluginCommandBridge.test.mjs',
   'tests/pluginShortcuts.test.mjs',

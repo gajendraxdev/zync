@@ -358,7 +358,7 @@ export const FileManager = memo(function FileManager({
     instanceId,
   });
 
-  const handleConnectionError = useCallback((connectionId: string, err: any) => {
+  const handleConnectionError = useCallback((connectionId: string, err: any, preserveEditor = false) => {
     const msg = err.message || String(err);
     if (msg.includes('DISCONNECTED:')) {
       const key = filesStoreKey(connectionId, instanceId);
@@ -368,7 +368,7 @@ export const FileManager = memo(function FileManager({
       // Close any open modals to show the overlay clearly
       setIsEditingPath(false);
       setIsRenameModalOpen(false);
-      setEditingFile(null);
+      if (!preserveEditor) setEditingFile(null);
       setIsCopyModalOpen(false);
       setIsPropertiesOpen(false);
       setIsDeleteModalOpen(false);
@@ -914,7 +914,7 @@ export const FileManager = memo(function FileManager({
       setEditorContent(content);
       showToast('success', 'File saved');
     } catch (error: any) {
-      if (!handleConnectionError(activeConnectionId, error)) {
+      if (!handleConnectionError(activeConnectionId, error, true)) {
         showToast('error', `Failed to save file: ${error.message || String(error)}`);
       }
       throw error;
