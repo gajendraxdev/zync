@@ -18,8 +18,9 @@ All notable changes to Zync are documented in this file. The format is based on 
   underneath the fixed gutter after a tab or layout transition.
 - **Plugin editor startup:** Recover editor-provider handshakes when an iframe's
   first ready event arrives before the host listener, ignore duplicate ready
-  events for an active document, and allow package-only blob workers without
-  granting editor frames general network access.
+  events for an active document, preserve reload compatibility for providers
+  that do not implement the bootstrap message, and allow package-only blob
+  workers without granting editor frames general network access.
 
 ## [2.33.3] - 2026-09-28
 

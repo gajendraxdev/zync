@@ -31,5 +31,10 @@ assert.match(
   /onLoad=\{\(\) => \{[\s\S]*?setIsReady\(false\);[\s\S]*?readyForDocRef\.current = false;[\s\S]*?currentDocIdRef\.current = null;[\s\S]*?zync:editor:bootstrap/,
   'each iframe document load must reset its handshake before requesting bootstrap',
 );
+assert.match(
+  source,
+  /event\.source === window\.parent && message\?\.type === 'zync:editor:bootstrap'[\s\S]*?emitReady\(\{ supports: supportedCapabilities \}\)/,
+  'the host bridge must re-advertise readiness for providers that do not handle bootstrap themselves',
+);
 
 console.log('Editor plugin iframe isolation test passed.');

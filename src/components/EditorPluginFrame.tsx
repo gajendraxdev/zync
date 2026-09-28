@@ -259,6 +259,9 @@ export function EditorPluginFrame({
 
   const shimScript = useMemo(() => {
     const jsUrlLiteral = JSON.stringify(editorAssetUrls?.jsUrl ?? '');
+    const supportedCapabilitiesLiteral = JSON.stringify(
+      plugin.manifest.editor?.supports ?? [],
+    ).replace(/</g, '\\u003c');
 
     // In Tauri, convertFileSrc() can yield URLs where "directory joining" via URL('./', ...)
     // isn't reliable (for example when the real filesystem path is encoded in query params).
@@ -322,6 +325,7 @@ export function EditorPluginFrame({
   ${resolverScript}
 
   const listeners = new Set();
+  const supportedCapabilities = ${supportedCapabilitiesLiteral};
   window.zyncEditor = {
     onMessage(callback) {
       listeners.add(callback);
@@ -349,6 +353,9 @@ export function EditorPluginFrame({
 
   window.addEventListener('message', (event) => {
     const message = event.data;
+    if (event.source === window.parent && message?.type === 'zync:editor:bootstrap') {
+      window.zyncEditor.emitReady({ supports: supportedCapabilities });
+    }
     listeners.forEach((listener) => {
       try { listener(message); } catch (error) { console.error(error); }
     });
@@ -357,7 +364,7 @@ export function EditorPluginFrame({
 })();
 </script>
 `;
-  }, [editorAssetUrls?.jsUrl]);
+  }, [editorAssetUrls?.jsUrl, plugin.manifest.editor?.supports]);
 
   const fullHtml = (plugin.editorHtml || plugin.style || plugin.script)
     ? (() => {
