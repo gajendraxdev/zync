@@ -154,3 +154,22 @@ test('legacy completed settings remain completed after normalization', () => {
   assert.equal(normalized.firstObservedVersion, '');
   assert.equal(normalized.existingInstallAtFirstObservation, false);
 });
+
+test('release dismissal takes precedence over legacy install completion', () => {
+  const normalized = normalizeSurveySettings({
+    installCompleted: true,
+    lifecycleState: 'dismissed',
+    promptKind: 'release',
+    promptVersion: '2.26.1',
+    releaseSeenVersion: '2.26.1',
+  });
+
+  assert.equal(normalized.installCompleted, true);
+  assert.equal(normalized.lifecycleState, 'dismissed');
+  assert.deepEqual(resolveSurveyExperience(normalized, '2.26.1', '2.25.0'), {
+    kind: 'release',
+    version: '2.26.1',
+    shouldPrompt: false,
+    showReminder: true,
+  });
+});

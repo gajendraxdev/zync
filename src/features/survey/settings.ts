@@ -20,10 +20,13 @@ export function normalizeSurveySettings(
   raw?: Partial<SurveySettings> | null,
 ): SurveySettings {
   const installCompleted = raw?.installCompleted === true;
-  const lifecycleState = installCompleted
-    ? 'completed'
-    : raw?.lifecycleState === 'dismissed' || raw?.lifecycleState === 'completed'
-      ? raw.lifecycleState
+  const savedLifecycleState = raw?.lifecycleState;
+  const lifecycleState = savedLifecycleState === 'pending'
+    || savedLifecycleState === 'dismissed'
+    || savedLifecycleState === 'completed'
+    ? savedLifecycleState
+    : installCompleted
+      ? 'completed'
       : 'pending';
   const promptKind = raw?.promptKind === 'install' || raw?.promptKind === 'release'
     ? raw.promptKind
