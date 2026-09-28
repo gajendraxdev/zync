@@ -1,5 +1,11 @@
 import type { SelectOption } from '../../components/ui/Select';
-import type { FeedbackCategory } from './types.js';
+import type {
+  FeedbackCategory,
+  SurveyImprovementPriority,
+  SurveyPrimaryUse,
+} from './types.js';
+
+export const EXPERIENCE_DETAILS_MAX_LENGTH = 500;
 
 export const ROLE_OPTIONS: SelectOption[] = [
   { value: 'developer', label: 'Developer' },
@@ -37,6 +43,35 @@ export const RECOMMEND_OPTIONS: SelectOption[] = [
   { value: 'somewhat', label: 'Somewhat' },
   { value: 'no', label: 'Not yet' },
 ];
+
+export const PRIMARY_USE_OPTIONS: Array<SelectOption & { value: SurveyPrimaryUse }> = [
+  { value: 'server_access', label: 'SSH and server access' },
+  { value: 'file_management', label: 'Remote file management' },
+  { value: 'port_forwarding', label: 'Port forwarding' },
+  { value: 'containers_processes', label: 'Containers and processes' },
+  { value: 'remote_editing', label: 'Remote code editing' },
+  { value: 'mixed', label: 'A mix of workflows' },
+  { value: 'other', label: 'Other' },
+];
+
+export const IMPROVEMENT_PRIORITY_OPTIONS: Array<SelectOption & { value: SurveyImprovementPriority }> = [
+  { value: 'terminal', label: 'Terminal experience' },
+  { value: 'files', label: 'File management' },
+  { value: 'connections', label: 'Connections' },
+  { value: 'tunnels', label: 'Port forwarding' },
+  { value: 'plugins', label: 'Plugins' },
+  { value: 'vault_sync', label: 'Vault and sync' },
+  { value: 'performance', label: 'Performance and reliability' },
+  { value: 'other', label: 'Something else' },
+];
+
+export function isSurveyPrimaryUse(value: string): value is SurveyPrimaryUse {
+  return PRIMARY_USE_OPTIONS.some((option) => option.value === value);
+}
+
+export function isSurveyImprovementPriority(value: string): value is SurveyImprovementPriority {
+  return IMPROVEMENT_PRIORITY_OPTIONS.some((option) => option.value === value);
+}
 
 export const FEEDBACK_CATEGORY_OPTIONS: Array<SelectOption & { value: FeedbackCategory }> = [
   { value: 'bug', label: 'Bug report' },

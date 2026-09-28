@@ -12,7 +12,9 @@ import { getLanguageLabel, getLineCommentToken } from './editor/codemirror/fileT
 import { GoToLinePanel } from './editor/codemirror/GoToLinePanel';
 import { isCommentShortcut } from './editor/codemirror/keymap';
 import { loadCodeMirrorLanguage } from './editor/codemirror/language';
+import { observeCodeMirrorLayout } from './editor/codemirror/layout';
 import { resolveCodeMirrorPerformanceMode } from './editor/codemirror/performance';
+import { resolveSavedBaseline } from './editor/codemirror/saveState';
 import {
   deleteCodeMirrorSession,
   saveCodeMirrorSession,
@@ -144,10 +146,17 @@ export function CodeMirrorFileEditor({
     setIsSaving(true);
 
     const savedDocument = view.state.doc;
+    const baselineAtSaveStart = savedDocRef.current;
     try {
       await onSave(savedDocument.toString());
-      savedDocRef.current = savedDocument;
-      updateDirtyState(!view.state.doc.eq(savedDocument));
+      savedDocRef.current = resolveSavedBaseline(
+        baselineAtSaveStart,
+        savedDocRef.current,
+        savedDocument,
+      );
+      updateDirtyState(
+        savedDocRef.current === null || !view.state.doc.eq(savedDocRef.current),
+      );
       publishStatus(view.state);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to save file';
@@ -329,6 +338,7 @@ export function CodeMirrorFileEditor({
       state,
       parent: container,
     });
+    const stopObservingLayout = observeCodeMirrorLayout(container, view);
 
     viewRef.current = view;
     savedDocRef.current = view.state.toText(restoredSession?.savedContent ?? initialContent);
@@ -359,6 +369,7 @@ export function CodeMirrorFileEditor({
         });
       }
 
+      stopObservingLayout();
       view.destroy();
       viewRef.current = null;
       savedDocRef.current = null;

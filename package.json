@@ -1,7 +1,7 @@
 {
   "name": "zync",
   "private": true,
-  "version": "2.33.2",
+  "version": "2.33.4",
   "type": "module",
   "repository": {
     "type": "git",
@@ -49,6 +49,7 @@
     "test:ghost-helpers": "npm run compile:agent-tests && node tests/ghostSuggestionsHelpers.test.mjs",
     "test:release-notes-markdown": "npm run compile:agent-tests && node tests/releaseNotesMarkdown.test.mjs",
     "test:session-persistence": "npm run compile:agent-tests && node tests/sessionPersistence.test.mjs",
+    "test:usage": "npm run compile:agent-tests && node tests/usageSession.test.mjs && node tests/usageQueue.test.mjs && node tests/usageFlush.test.mjs",
     "test:terminal-renderer-policy": "npm run compile:agent-tests && node tests/terminalRendererPolicy.test.mjs",
     "test:terminal-renderer": "npm run compile:agent-tests && node tests/runTerminalRendererTests.mjs",
     "test:terminal-image": "npm run compile:agent-tests && node tests/terminalImage.test.mjs",

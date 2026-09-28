@@ -30,6 +30,18 @@ run('session payload does not recount time from the previous day', () => {
   assert.equal(payload.openSeconds, 60 * 60);
 });
 
+run('one launch gets stable, distinct session IDs on each UTC day', () => {
+  const session = createUsageSession(new Date('2026-09-24T23:50:00.000Z'), '11111111-1111-4111-8111-111111111111');
+  const first = sessionPayload(session, '2026-09-24', new Date('2026-09-25T00:10:00.000Z'));
+  const second = sessionPayload(session, '2026-09-25', new Date('2026-09-25T00:05:00.000Z'));
+  const secondRetry = sessionPayload(session, '2026-09-25', new Date('2026-09-25T00:10:00.000Z'));
+  assert.equal(first.id, session.id);
+  assert.notEqual(second.id, first.id);
+  assert.equal(secondRetry.id, second.id);
+  assert.equal(first.openSeconds, 10 * 60);
+  assert.equal(second.openSeconds, 5 * 60);
+});
+
 run('session payload records close time and timezone offset', () => {
   const opened = new Date('2026-09-24T04:00:00.000Z');
   const session = {

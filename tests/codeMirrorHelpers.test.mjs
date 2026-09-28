@@ -16,7 +16,9 @@ import {
 } from '../.tmp-agent-tests/src/components/editor/providers.js';
 import { formatCodeMirrorStatus } from '../.tmp-agent-tests/src/components/editor/codemirror/status.js';
 import { resolveCodeMirrorPerformanceMode } from '../.tmp-agent-tests/src/components/editor/codemirror/performance.js';
+import { resolveSavedBaseline } from '../.tmp-agent-tests/src/components/editor/codemirror/saveState.js';
 import { CodeMirrorSessionCache } from '../.tmp-agent-tests/src/components/editor/codemirror/sessionCache.js';
+import { observeCodeMirrorLayout } from '../.tmp-agent-tests/src/components/editor/codemirror/layout.js';
 
 function runTest(name, fn) {
   try {
@@ -144,6 +146,15 @@ runTest('uses large-file mode only after configured document limits', () => {
   assert.equal(resolveCodeMirrorPerformanceMode('a\nb\nc\nd', limits).reason, 'line-limit');
 });
 
+runTest('keeps a newer saved baseline when it changes during an async save', () => {
+  const original = { value: 'original' };
+  const saved = { value: 'saved' };
+  const external = { value: 'external' };
+
+  assert.equal(resolveSavedBaseline(original, original, saved), saved);
+  assert.equal(resolveSavedBaseline(original, external, saved), external);
+});
+
 runTest('bounds cached editor sessions by recency and size', () => {
   const cache = new CodeMirrorSessionCache({
     maxEntries: 2,
@@ -164,6 +175,63 @@ runTest('bounds cached editor sessions by recency and size', () => {
   assert.equal(cache.take('a'), null);
   assert.equal(cache.take('c')?.savedContent, 'charlie');
   assert.equal(cache.save('large', snapshot('x'.repeat(60))), false);
+});
+
+runTest('remeasures a retained editor after it becomes visible again', () => {
+  const originalResizeObserver = globalThis.ResizeObserver;
+  const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
+  const originalCancelAnimationFrame = globalThis.cancelAnimationFrame;
+  const originalDocument = globalThis.document;
+  const frames = new Map();
+  let nextFrame = 1;
+  let resizeCallback;
+  let measurements = 0;
+
+  globalThis.requestAnimationFrame = (callback) => {
+    const id = nextFrame++;
+    frames.set(id, callback);
+    return id;
+  };
+  globalThis.cancelAnimationFrame = (id) => frames.delete(id);
+  globalThis.ResizeObserver = class {
+    constructor(callback) {
+      resizeCallback = callback;
+    }
+    observe() {}
+    disconnect() {}
+  };
+  globalThis.document = {
+    hidden: false,
+    addEventListener() {},
+    removeEventListener() {},
+  };
+
+  const flushFrames = () => {
+    const pending = [...frames.values()];
+    frames.clear();
+    pending.forEach((callback) => callback(0));
+  };
+
+  try {
+    const container = { clientWidth: 900, clientHeight: 600 };
+    const view = {
+      dom: { isConnected: true },
+      requestMeasure: () => { measurements += 1; },
+    };
+    const dispose = observeCodeMirrorLayout(container, view);
+
+    resizeCallback([{ contentRect: { width: 0, height: 0 } }]);
+    resizeCallback([{ contentRect: { width: 900, height: 600 } }]);
+    flushFrames();
+
+    assert.equal(measurements, 1);
+    dispose();
+  } finally {
+    globalThis.ResizeObserver = originalResizeObserver;
+    globalThis.requestAnimationFrame = originalRequestAnimationFrame;
+    globalThis.cancelAnimationFrame = originalCancelAnimationFrame;
+    globalThis.document = originalDocument;
+  }
 });
 
 console.log('CodeMirror helper tests passed.');

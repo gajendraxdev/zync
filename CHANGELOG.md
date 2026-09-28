@@ -4,6 +4,43 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.33.4] - 2026-09-28
+
+### Changed
+
+- **Plugin editor chrome:** Use a compact Zync-styled filename, provider,
+  readiness, save-state and close header for third-party editor providers.
+
+### Fixed
+
+- **CodeMirror visibility:** Re-measure retained editor instances when their pane
+  becomes visible or changes size, preventing file contents from rendering
+  underneath the fixed gutter after a tab or layout transition.
+- **Plugin editor startup:** Recover editor-provider handshakes when an iframe's
+  first ready event arrives before the host listener, ignore duplicate ready
+  events for an active document, preserve reload compatibility for providers
+  that do not implement the bootstrap message, and allow package-only blob
+  workers without granting editor frames general network access.
+
+## [2.33.3] - 2026-09-28
+
+### Added
+
+- **File editor controls:** Added mouse-accessible Save, Go to Line, Find/Replace and Close actions, Zync-styled tooltips, and a shortcuts dialog. ([fd34b9c])
+- **Returning-user feedback:** Added a one-time post-upgrade survey with workflow and improvement questions plus a persistent, non-blocking reminder when the user chooses **Skip for now**. ([611d6be])
+
+### Changed
+
+- **CodeMirror performance:** Lazy-load the editor and language support, retain bounded per-document editing sessions across pane switches, and use a reduced feature set for large files to limit memory and processing overhead. ([fd34b9c])
+- **Survey lifecycle and privacy:** Completed returning-user surveys never appear again, successful submissions persist completion before the thank-you delay, and survey responses include the same pseudonymous installation ID used by usage reporting so repeated responses can be identified without overwriting them. ([611d6be])
+- **Usage reporting:** Keep a cumulative UTC-day open-time total across launches, retain distinct session records across midnight and restarts, preserve the server's 14-day backfill window, and fit reports within the 8 KiB and 64-session limits. ([4b0fdbd])
+
+### Fixed
+
+- **Built-in file editor:** Restore visible code and gutter spacing, keep editor state stable after saves, preserve newer content that arrives during an asynchronous save, update highlighting when the theme changes, and publish cursor and save state through the shared status bar. ([fd34b9c], [4b0fdbd])
+- **Survey reminder persistence:** Preserve a dismissed returning-user survey when the installation survey was already completed, so the floating reminder remains available after restarting Zync. ([a898355])
+- **Usage recovery:** Preserve timing while feature counters change, retry dirty reports safely, remove accepted expired reports, checkpoint app-close data, and avoid double-counting legacy or multi-day session segments. ([4b0fdbd])
+
 ## [2.33.2] - 2026-09-27
 
 This release includes the changes recorded below for 2.33.0 and 2.33.1, whose releases remained drafts, together with the following fixes.
@@ -1532,7 +1569,9 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [d3f4060]: https://github.com/zync-sh/zync/commit/d3f4060
 [840afc2]: https://github.com/zync-sh/zync/commit/840afc2
 [193f568]: https://github.com/zync-sh/zync/commit/193f568
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.33.2...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.33.4...HEAD
+[2.33.4]: https://github.com/zync-sh/zync/compare/v2.33.3...v2.33.4
+[2.33.3]: https://github.com/zync-sh/zync/compare/v2.33.2...v2.33.3
 [2.33.2]: https://github.com/zync-sh/zync/compare/v2.33.1...v2.33.2
 [2.33.1]: https://github.com/zync-sh/zync/compare/v2.33.0...v2.33.1
 [2.33.0]: https://github.com/zync-sh/zync/compare/v2.32.2...v2.33.0
@@ -1710,3 +1749,7 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [feed932]: https://github.com/zync-sh/zync/commit/feed932040da773f83f1d69c79b1a8c6e8aaf613
 [cc010f6]: https://github.com/zync-sh/zync/commit/cc010f6
 [c1b57d2]: https://github.com/zync-sh/zync/commit/c1b57d2
+[fd34b9c]: https://github.com/zync-sh/zync/commit/fd34b9c
+[4b0fdbd]: https://github.com/zync-sh/zync/commit/4b0fdbd
+[611d6be]: https://github.com/zync-sh/zync/commit/611d6be
+[a898355]: https://github.com/zync-sh/zync/commit/a898355

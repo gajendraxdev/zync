@@ -2,21 +2,57 @@ export type SurveyId = 'install' | `release:${string}`;
 
 export type SurveyPromptKind = 'install' | 'release';
 
+export type SurveyLifecycleState = 'pending' | 'dismissed' | 'completed';
+
+export type SurveyPrimaryUse =
+  | 'server_access'
+  | 'file_management'
+  | 'port_forwarding'
+  | 'containers_processes'
+  | 'remote_editing'
+  | 'mixed'
+  | 'other';
+
+export type SurveyImprovementPriority =
+  | 'terminal'
+  | 'files'
+  | 'connections'
+  | 'tunnels'
+  | 'plugins'
+  | 'vault_sync'
+  | 'performance'
+  | 'other';
+
 export type FeedbackCategory = 'bug' | 'improvement' | 'feature' | 'praise' | 'other';
 
 export interface SurveySettings {
-  /** True after install survey is submitted or skipped. */
+  /** Legacy-compatible install survey completion flag. Release check-ins are version-scoped. */
   installCompleted: boolean;
-  /** App version for which the release check-in was submitted or skipped. */
+  /** Current reminder lifecycle. Legacy completed settings normalize to `completed`. */
+  lifecycleState: SurveyLifecycleState;
+  /** Survey context retained when the user chooses "Skip for now". */
+  promptKind: SurveyPromptKind | null;
+  promptVersion: string;
+  /** App version for which the one-time release check-in was submitted or dismissed. */
   releaseSeenVersion: string;
+  /** First version observed after installation identity tracking was introduced. */
+  firstObservedVersion: string;
+  /** ISO timestamp for the first observation; not sent to analytics. */
+  firstObservedAt: string;
+  /** True when settings already proved Zync had been used before the first observation. */
+  existingInstallAtFirstObservation: boolean;
   /** Last submitted answers for release prefill. */
   lastRole: string;
   lastWorkContext: string;
   lastDiscoverySource: string;
+  lastPrimaryUse: string;
+  lastImprovementPriority: string;
 }
 
 export interface SurveyPayload {
   schemaVersion: number;
+  /** Pseudonymous ID shared with anonymous usage reports for response correlation. */
+  installId: string;
   surveyId: SurveyId;
   appVersion: string;
   platform: string;
@@ -26,6 +62,9 @@ export interface SurveyPayload {
   discoverySource?: string;
   discoveryOther?: string;
   wouldRecommend?: 'yes' | 'somewhat' | 'no';
+  primaryUse?: SurveyPrimaryUse;
+  improvementPriority?: SurveyImprovementPriority;
+  experienceDetails?: string;
   locale?: string;
   email?: string;
   /** Opt-in for product updates; only meaningful with email. */
@@ -62,4 +101,6 @@ export interface SurveyPrefill {
   lastRole?: string;
   lastWorkContext?: string;
   lastDiscoverySource?: string;
+  lastPrimaryUse?: string;
+  lastImprovementPriority?: string;
 }
