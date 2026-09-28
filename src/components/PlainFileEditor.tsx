@@ -9,12 +9,15 @@ import {
   publishEditorStatus,
 } from '../features/editor/editorStatus';
 import { useAppStore } from '../store/useAppStore';
+import { markPlainDocumentSaved, reconcilePlainDocument } from './editor/plainDocumentState';
 
 interface PlainFileEditorProps {
+  documentId?: string;
   filename: string;
   initialContent: string;
   onSave: (content: string) => Promise<void>;
   onClose: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
   /**
    * Hides the built-in header toolbar (Save, Close, Find toggle and shortcut chips).
    *
@@ -26,15 +29,21 @@ interface PlainFileEditorProps {
 }
 
 export function PlainFileEditor({
+  documentId,
   filename,
   initialContent,
   onSave,
   onClose,
+  onDirtyChange,
   hideToolbar = false,
 }: PlainFileEditorProps) {
-  const [content, setContent] = useState(initialContent);
-  // Track saved baseline separately so save does not reset edit history semantics.
-  const [savedContent, setSavedContent] = useState(initialContent);
+  const documentKey = documentId ?? filename;
+  const [documentState, setDocumentState] = useState(() => ({
+    documentId: documentKey,
+    content: initialContent,
+    savedContent: initialContent,
+  }));
+  const { content, savedContent } = documentState;
   const [searchText, setSearchText] = useState('');
   const [matchIndex, setMatchIndex] = useState(-1);
   const [isSaving, setIsSaving] = useState(false);
@@ -47,14 +56,17 @@ export function PlainFileEditor({
   const showToast = useAppStore((state) => state.showToast);
 
   useEffect(() => {
-    setContent(initialContent);
-    setSavedContent(initialContent);
+    setDocumentState((current) => reconcilePlainDocument(current, documentKey, initialContent));
+  }, [documentKey, initialContent]);
+
+  useEffect(() => {
     setSearchText('');
     setMatchIndex(-1);
     setShowSearch(false);
-  }, [filename, initialContent]);
+  }, [documentKey]);
 
   const isDirty = content !== savedContent;
+  useEffect(() => onDirtyChange?.(isDirty), [isDirty, onDirtyChange]);
   const languageLabel = useMemo(() => {
     const ext = filename.split('.').pop()?.toUpperCase() ?? 'TEXT';
     return ext || 'TEXT';
@@ -104,14 +116,14 @@ export function PlainFileEditor({
     setIsSaving(true);
     try {
       await onSave(content);
-      setSavedContent(content);
+      setDocumentState((current) => markPlainDocumentSaved(current, documentKey, content));
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to save file';
       showToast('error', message);
     } finally {
       setIsSaving(false);
     }
-  }, [content, isSaving, onSave, showToast]);
+  }, [content, documentKey, isSaving, onSave, showToast]);
 
   const handleClose = useCallback(async () => {
     if (!isDirty) {
@@ -247,7 +259,10 @@ export function PlainFileEditor({
         <textarea
           ref={textareaRef}
           value={content}
-          onChange={(event) => setContent(event.target.value)}
+          onChange={(event) => {
+            const nextContent = event.target.value;
+            setDocumentState((current) => ({ ...current, content: nextContent }));
+          }}
           spellCheck={false}
           className="min-h-0 flex-1 resize-none border-0 bg-app-bg px-4 py-3 font-mono text-sm leading-6 text-app-text outline-none ring-0 placeholder:text-app-muted"
           aria-label={`Fallback editor for ${filename}`}

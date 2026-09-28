@@ -35,6 +35,7 @@ interface CodeMirrorFileEditorProps {
   initialContent: string;
   onSave: (content: string) => Promise<void>;
   onClose: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
   hideToolbar?: boolean;
 }
 
@@ -78,6 +79,7 @@ export function CodeMirrorFileEditor({
   initialContent,
   onSave,
   onClose,
+  onDirtyChange,
   hideToolbar = false,
 }: CodeMirrorFileEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -111,7 +113,8 @@ export function CodeMirrorFileEditor({
   const updateDirtyState = useCallback((dirty: boolean) => {
     isDirtyRef.current = dirty;
     setIsDirty((current) => current === dirty ? current : dirty);
-  }, []);
+    onDirtyChange?.(dirty);
+  }, [onDirtyChange]);
 
   const publishStatus = useCallback((state: EditorState) => {
     if (statusFrameRef.current !== null) {

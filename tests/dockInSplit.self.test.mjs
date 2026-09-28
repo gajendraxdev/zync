@@ -244,12 +244,12 @@ assert.match(
 );
 assert.match(
   mainLayoutSource,
-  /closedFeatureInstances[\s\S]*?setFeatureTabs\(remainingFeatureTabs\)[\s\S]*?store\.closePaneGroup/,
-  'closing a Split tab must remove all of its feature-pane inventory entries',
+  /closedFeatureInstances[\s\S]*?if \(!store\.closePaneGroup\(tab\.connectionId, owner\)\) return;[\s\S]*?setFeatureTabs\(remainingFeatureTabs\)/,
+  'closing a Split tab must remove its inventory only after its pane closes',
 );
 assert.match(
   mainLayoutSource,
-  /store\.closePaneGroup\(tab\.connectionId, owner\);[\s\S]*?const groupsAfterClose = useAppStore\.getState\(\)\.paneLayouts\[tab\.connectionId\]/,
+  /if \(!store\.closePaneGroup\(tab\.connectionId, owner\)\) return;[\s\S]*?const groupsAfterClose = useAppStore\.getState\(\)\.paneLayouts\[tab\.connectionId\]/,
   'split-close fallback lookup must use pane layouts after the close mutation',
 );
 

@@ -636,9 +636,9 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
                 ));
                 if (owner && pane) {
                     if (isSplitLayout(layout)) {
-                        store.closePaneInSplit(tab.connectionId, pane.id);
+                        if (!store.closePaneInSplit(tab.connectionId, pane.id)) return;
                     } else {
-                        store.closePaneGroup(tab.connectionId, owner);
+                        if (!store.closePaneGroup(tab.connectionId, owner)) return;
                     }
                 }
             }
@@ -691,9 +691,9 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
             || !closedPlugins.has(featureId.slice('plugin:'.length))
         ));
 
+        if (!store.closePaneGroup(tab.connectionId, owner)) return;
         setFeatureTabs(remainingFeatureTabs);
         setOpenFeatures(remainingPlugins);
-        store.closePaneGroup(tab.connectionId, owner);
         const groupsAfterClose = useAppStore.getState().paneLayouts[tab.connectionId];
 
         const fallbackFeatureIndex = firstClosedFeatureIndex < 0

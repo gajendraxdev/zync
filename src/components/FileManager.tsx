@@ -18,7 +18,7 @@ import {
   Pin,
 } from 'lucide-react';
 import { ConfirmModal } from './ui/ConfirmModal';
-import { memo, useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef } from 'react';
 import { useAppStore, Connection } from '../store/useAppStore';
 
 import { cn } from '../lib/utils';
@@ -57,6 +57,7 @@ import { clearEditorOverlayOpen, markEditorOverlayOpen } from './editor/overlayS
 import { TerminalDisconnectedView } from './terminal/TerminalDisconnectedView';
 import { collectLeaves, isFeatureContent, layoutForCanvas, layoutForFeatureInstance } from '../lib/paneLayout';
 import { filesStoreKey } from '../store/fileSystemSlice';
+import { paneCloseScope, registerPaneCloseBlocker } from '../lib/paneCloseBlockers';
 import type { AppStore } from '../store/useAppStore';
 import { canSplitBesideFiles, isUnconfirmedHomeToken, isUnresolvedFilesPath, openHerePlacementItems, openTerminalHere, pickFilesHomePath } from './layout/tabDock';
 
@@ -264,13 +265,28 @@ export const FileManager = memo(function FileManager({
 
   // Editor State
   const [editingFile, setEditingFile] = useState<FileEntry | null>(null);
+  const [editingFilePath, setEditingFilePath] = useState<string | null>(null);
+  const [editorDirty, setEditorDirty] = useState(false);
+  const editorCloseToken = useRef({});
   const [editorContent, setEditorContent] = useState('');
   const [editorProviderOverride, setEditorProviderOverride] = useState<string | null>(null);
   useEffect(() => {
     setEditingFile(null);
+    setEditingFilePath(null);
+    setEditorDirty(false);
     setEditorContent('');
     setEditorProviderOverride(null);
   }, [activeConnectionId]);
+
+  useLayoutEffect(() => {
+    if (surface !== 'pane' || !editingFile || !editorDirty || !activeConnectionId) return;
+    const scope = paneCloseScope(activeConnectionId, {
+      kind: 'feature',
+      featureId: 'files',
+      instanceId,
+    });
+    return scope ? registerPaneCloseBlocker(scope, editorCloseToken.current) : undefined;
+  }, [activeConnectionId, editorDirty, editingFile, instanceId, surface]);
 
   // Modal States
   const [isNewFolderModalOpen, setIsNewFolderModalOpen] = useState(false);
@@ -841,6 +857,7 @@ export const FileManager = memo(function FileManager({
       });
       setEditorProviderOverride(providerOverride ?? null);
       setEditorContent(content);
+      setEditingFilePath(fullPath);
       setEditingFile(file);
       return true;
     } catch (error: any) {
@@ -901,14 +918,13 @@ export const FileManager = memo(function FileManager({
   }, [editorProviderOptions, settings.editor, showToast, updateSettings]);
 
   const handleSaveFile = useCallback(async (content: string) => {
-    if (!activeConnectionId || !editingFile) {
+    if (!activeConnectionId || !editingFile || !editingFilePath) {
       throw new Error('The file or its connection is no longer available');
     }
     try {
-      const fullPath = currentPath === '/' ? `/${editingFile.name}` : `${currentPath}/${editingFile.name}`;
       await window.ipcRenderer.invoke('fs_write_file', {
         connectionId: activeConnectionId,
-        path: fullPath,
+        path: editingFilePath,
         content,
       });
       setEditorContent(content);
@@ -919,7 +935,7 @@ export const FileManager = memo(function FileManager({
       }
       throw error;
     }
-  }, [activeConnectionId, editingFile, currentPath, handleConnectionError, showToast]);
+  }, [activeConnectionId, editingFile, editingFilePath, handleConnectionError, showToast]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent, file?: FileEntry) => {
     e.preventDefault();
@@ -2038,15 +2054,18 @@ export const FileManager = memo(function FileManager({
       />
 
       {/* File Editor Overlay */}
-      {editingFile && (
+      {editingFile && editingFilePath && (
         <FileEditor
-          documentId={`${activeConnectionId}:${currentPath === '/' ? `/${editingFile.name}` : `${currentPath}/${editingFile.name}`}`}
+          documentId={`${activeConnectionId}:${editingFilePath}`}
           filename={editingFile.name}
           initialContent={editorContent}
           preferredProviderId={editorProviderOverride ?? undefined}
           onSave={handleSaveFile}
+          onDirtyChange={setEditorDirty}
           onClose={() => {
             setEditingFile(null);
+            setEditingFilePath(null);
+            setEditorDirty(false);
             setEditorProviderOverride(null);
           }}
         />

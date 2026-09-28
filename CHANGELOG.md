@@ -4,6 +4,12 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Plugin editor saves:** Keep the host's modified state until a matching content snapshot or successful save proves the file is clean. The bundled plugin editor now waits for the save result before updating its own saved baseline.
+- **Fallback editor saves:** Preserve edits typed while an earlier save is in progress, keep save completions from changing a different document, and save to the originally opened path even if file navigation changes.
+- **Unsaved Files panes:** Block pane, feature-tab, group and connection-tab closure while a file editor has unsaved changes. Close the editor first to review or discard those changes.
+
 ## [2.33.6] - 2026-09-29
 
 ### Fixed
