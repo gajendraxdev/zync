@@ -111,7 +111,7 @@ The Public URLs feature is **not** SSH port forwarding (`-L` / `-R` / `-D`). It 
 - Treat an active Public URL as **internet exposure of that loopback port** via Zync’s relay.
 - Do not share ports that bind privileged or sensitive local services unless you intend that exposure.
 - Stop/delete the share when finished. Signing out of Zync ends the local agent session; revoke GitHub/Google app access if you want the account unlinked at the provider.
-- Survey / Settings → Feedback POSTs (when used) go to a Zync-operated survey API. They are optional and do not include vault secrets, SSH keys, or terminal contents.
+- Survey / Settings → Feedback POSTs (when used) go to a Zync-operated survey API. They are optional. Survey submissions include the same random installation ID used for pseudonymous usage reports, allowing responses from one installation to be correlated and repeated submissions to be identified; each submission remains a separate response. Returning-user surveys may include selected workflow priorities and up to 500 characters of user-entered experience feedback; the form warns against entering hostnames, paths, commands, credentials, terminal output, or other sensitive information. Contact email is sent only when the user enters it, and update consent is enabled only by an explicit checkbox.
 
 ### Backups and restore
 

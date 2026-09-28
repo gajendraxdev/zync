@@ -2,7 +2,7 @@ import { resolveAppVersion, resolveSurveyArch, resolveSurveyPlatform } from '../
 import { isUsageFeatureId } from './catalog.js';
 import { submitUsage } from './client.js';
 import { isUsageEnabled } from './enabled.js';
-import { getOrCreateInstallId } from './identity.js';
+import { getOrCreateInstallId } from '../installation/identity.js';
 import { fitUsagePayload } from './payload.js';
 import {
   checkpointUsage,

@@ -26,9 +26,11 @@ import { Button } from '../ui/Button';
 import { ShieldAlert, Loader2 } from 'lucide-react';
 import { ConnectStagePanel, PanelLoader, useConnectionStageOverlay } from '../loaders';
 import { SurveyPromptModal } from '../survey/SurveyPromptModal';
+import { SurveyReminderButton } from '../survey/SurveyReminderButton';
 import {
     normalizeSurveySettings,
-    resolveSurveyPromptKind,
+    initializeSurveyIdentity,
+    resolveSurveyExperience,
     type SurveyPromptKind,
 } from '../../features/survey';
 import { getDebugSurveyPromptKind, isDebugSurveyPromptEnabled } from '../../lib/debugFlags';
@@ -990,7 +992,9 @@ export function MainLayout({ children }: { children: ReactNode }) {
     const updateSettings = useAppStore(state => state.updateSettings);
     const updateSurveySettings = useAppStore(state => state.updateSurveySettings);
     const setSidebarCollapsedLocal = useAppStore(state => state.setSidebarCollapsedLocal);
-    const [surveyPrompt, setSurveyPrompt] = useState<{ kind: SurveyPromptKind; version: string } | null>(null);
+    const [surveyContext, setSurveyContext] = useState<{ kind: SurveyPromptKind; version: string } | null>(null);
+    const [isSurveyPromptOpen, setIsSurveyPromptOpen] = useState(false);
+    const [isSurveyReminderVisible, setIsSurveyReminderVisible] = useState(false);
     const surveyChecked = useRef(false);
     /** Pre-update lastSeenVersion captured before release-notes boot rewrites it. */
     const surveyPreviousVersionRef = useRef<string | null>(null);
@@ -1119,7 +1123,7 @@ export function MainLayout({ children }: { children: ReactNode }) {
         checkVersionAndShowNotes();
     }, [isLoadingSettings, openReleaseNotesTab, updateSettings]);
 
-    // Profile survey: one-shot only (new install, or first upgrade into a survey-enabled build).
+    // Profile survey: prompt once, then keep an app-level reminder until submission.
     useEffect(() => {
         if (isLoadingSettings || !sessionLoaded || surveyChecked.current) return;
         surveyChecked.current = true;
@@ -1135,13 +1139,61 @@ export function MainLayout({ children }: { children: ReactNode }) {
                 const currentVersion = await window.ipcRenderer?.invoke('app:getVersion');
                 if (!currentVersion || typeof currentVersion !== 'string') return;
 
+                const identifiedSurvey = initializeSurveyIdentity(
+                    survey,
+                    currentVersion,
+                    previousSeenVersion,
+                    new Date().toISOString(),
+                );
+                if (
+                    identifiedSurvey.firstObservedVersion !== survey.firstObservedVersion
+                    || identifiedSurvey.firstObservedAt !== survey.firstObservedAt
+                    || identifiedSurvey.existingInstallAtFirstObservation
+                        !== survey.existingInstallAtFirstObservation
+                ) {
+                    void updateSurveySettings({
+                        firstObservedVersion: identifiedSurvey.firstObservedVersion,
+                        firstObservedAt: identifiedSurvey.firstObservedAt,
+                        existingInstallAtFirstObservation:
+                            identifiedSurvey.existingInstallAtFirstObservation,
+                    }).catch((err) => {
+                        console.error('Failed to persist survey installation identity', err);
+                    });
+                }
+
                 const debugKind = isDebugSurveyPromptEnabled()
                     ? (getDebugSurveyPromptKind() ?? 'install')
                     : null;
-                const kind = debugKind ?? resolveSurveyPromptKind(survey, currentVersion, previousSeenVersion);
-                if (!kind) return;
+                const experience = debugKind
+                    ? {
+                        kind: debugKind,
+                        version: currentVersion,
+                        shouldPrompt: true,
+                        showReminder: false,
+                    }
+                    : resolveSurveyExperience(identifiedSurvey, currentVersion, previousSeenVersion);
+                if (!experience) return;
 
-                if (kind === 'release' && !debugKind) {
+                const context = { kind: experience.kind, version: experience.version };
+                setSurveyContext(context);
+                setIsSurveyReminderVisible(experience.showReminder);
+
+                if (!experience.shouldPrompt) return;
+
+                if (!debugKind) {
+                    void updateSurveySettings({
+                        installCompleted: context.kind === 'install'
+                            ? false
+                            : identifiedSurvey.installCompleted,
+                        lifecycleState: 'pending',
+                        promptKind: context.kind,
+                        promptVersion: context.version,
+                    }).catch((err) => {
+                        console.error('Failed to persist pending survey state', err);
+                    });
+                }
+
+                if (context.kind === 'release' && !debugKind) {
                     // Prefer showing after What's New is closed (max ~8s).
                     const started = Date.now();
                     await new Promise<void>((resolve) => {
@@ -1161,40 +1213,73 @@ export function MainLayout({ children }: { children: ReactNode }) {
                     await new Promise((resolve) => window.setTimeout(resolve, 900));
                 }
 
-                setSurveyPrompt({ kind, version: currentVersion });
+                setIsSurveyPromptOpen(true);
             } catch (err) {
                 console.error('Failed to resolve survey prompt', err);
             }
         };
 
         void maybeShowSurvey();
-    }, [isLoadingSettings, sessionLoaded]);
+    }, [isLoadingSettings, sessionLoaded, updateSurveySettings]);
 
-    const handleSurveyCompleted = useCallback(async (
-        result: 'submitted' | 'skipped',
-        prefs?: { lastRole?: string; lastWorkContext?: string; lastDiscoverySource?: string },
+    const persistSurveyResult = useCallback(async (
+        submitted: boolean,
+        prefs?: {
+            lastRole?: string;
+            lastWorkContext?: string;
+            lastDiscoverySource?: string;
+            lastPrimaryUse?: string;
+            lastImprovementPriority?: string;
+        },
     ) => {
-        const prompt = surveyPrompt;
-        setSurveyPrompt(null);
-        if (!prompt) return;
-        try {
-            const prefPatch = result === 'submitted'
-                ? {
-                    lastRole: prefs?.lastRole ?? '',
-                    lastWorkContext: prefs?.lastWorkContext ?? '',
-                    lastDiscoverySource: prefs?.lastDiscoverySource ?? '',
-                }
-                : {};
-            // Always mark installCompleted so later releases never re-prompt.
-            await updateSurveySettings({
-                installCompleted: true,
-                releaseSeenVersion: prompt.version,
-                ...prefPatch,
-            });
-        } catch (err) {
-            console.error(`Failed to persist survey ${result} state`, err);
-        }
-    }, [surveyPrompt, updateSurveySettings]);
+        const context = surveyContext;
+        if (!context) return;
+
+        const currentSurvey = normalizeSurveySettings(useAppStore.getState().settings.survey);
+        const prefPatch = submitted
+            ? {
+                lastRole: prefs?.lastRole ?? '',
+                lastWorkContext: prefs?.lastWorkContext ?? '',
+                lastDiscoverySource: prefs?.lastDiscoverySource ?? '',
+                lastPrimaryUse: prefs?.lastPrimaryUse ?? '',
+                lastImprovementPriority: prefs?.lastImprovementPriority ?? '',
+            }
+            : {};
+        await updateSurveySettings({
+            installCompleted: context.kind === 'install'
+                ? submitted
+                : currentSurvey.installCompleted,
+            lifecycleState: submitted ? 'completed' : 'dismissed',
+            promptKind: context.kind,
+            promptVersion: context.version,
+            releaseSeenVersion: context.version,
+            ...prefPatch,
+        });
+    }, [surveyContext, updateSurveySettings]);
+
+    const handleSurveySubmitted = useCallback(async (prefs: {
+        lastRole?: string;
+        lastWorkContext?: string;
+        lastDiscoverySource?: string;
+        lastPrimaryUse?: string;
+        lastImprovementPriority?: string;
+    }) => {
+        await persistSurveyResult(true, prefs);
+        setIsSurveyReminderVisible(false);
+    }, [persistSurveyResult]);
+
+    const handleSurveyDismissed = useCallback(() => {
+        setIsSurveyPromptOpen(false);
+        setIsSurveyReminderVisible(true);
+        void persistSurveyResult(false).catch((err) => {
+            console.error('Failed to persist dismissed survey state', err);
+        });
+    }, [persistSurveyResult]);
+
+    const handleSurveyFinished = useCallback(() => {
+        setIsSurveyPromptOpen(false);
+        setSurveyContext(null);
+    }, []);
 
     // Theme Application Effect
     const theme = useAppStore(state => state.settings.theme);
@@ -1413,6 +1498,14 @@ export function MainLayout({ children }: { children: ReactNode }) {
             {/* Bottom Unified Status Bar (Full Width) */}
             <StatusBar />
 
+            <SurveyReminderButton
+                visible={isSurveyReminderVisible && !isSurveyPromptOpen}
+                onClick={() => {
+                    setIsSurveyReminderVisible(false);
+                    setIsSurveyPromptOpen(true);
+                }}
+            />
+
             <ConfirmCloseModal
                 isOpen={isShutdownModalOpen}
                 onClose={() => setIsShutdownModalOpen(false)}
@@ -1424,11 +1517,13 @@ export function MainLayout({ children }: { children: ReactNode }) {
             <div id="modal-portal-root" className="absolute inset-0 pointer-events-none z-[9999]" />
 
             <SurveyPromptModal
-                open={Boolean(surveyPrompt)}
-                kind={surveyPrompt?.kind ?? 'install'}
-                appVersion={surveyPrompt?.version ?? ''}
+                open={isSurveyPromptOpen && Boolean(surveyContext)}
+                kind={surveyContext?.kind ?? 'install'}
+                appVersion={surveyContext?.version ?? ''}
                 prefill={normalizeSurveySettings(settings.survey)}
-                onCompleted={(result, prefs) => { void handleSurveyCompleted(result, prefs); }}
+                onSubmitted={handleSurveySubmitted}
+                onDismissed={handleSurveyDismissed}
+                onFinished={handleSurveyFinished}
             />
         </div >
     );
