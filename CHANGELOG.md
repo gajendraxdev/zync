@@ -11,10 +11,12 @@ All notable changes to Zync are documented in this file. The format is based on 
 ### Changed
 
 - **CodeMirror performance:** Lazy-load the editor and language support, retain bounded per-document editing sessions across pane switches, and use a reduced feature set for large files to limit memory and processing overhead. ([fd34b9c])
+- **Usage reporting:** Keep a cumulative UTC-day open-time total across launches, retain distinct session records across midnight and restarts, preserve the server's 14-day backfill window, and fit reports within the 8 KiB and 64-session limits. ([4b0fdbd])
 
 ### Fixed
 
-- **Built-in file editor:** Restore visible code and gutter spacing, keep editor state stable after saves, update highlighting when the theme changes, and publish cursor and save state through the shared status bar. ([fd34b9c])
+- **Built-in file editor:** Restore visible code and gutter spacing, keep editor state stable after saves, preserve newer content that arrives during an asynchronous save, update highlighting when the theme changes, and publish cursor and save state through the shared status bar. ([fd34b9c], [4b0fdbd])
+- **Usage recovery:** Preserve timing while feature counters change, retry dirty reports safely, remove accepted expired reports, checkpoint app-close data, and avoid double-counting legacy or multi-day session segments. ([4b0fdbd])
 
 ## [2.33.2] - 2026-09-27
 
@@ -1723,3 +1725,4 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [cc010f6]: https://github.com/zync-sh/zync/commit/cc010f6
 [c1b57d2]: https://github.com/zync-sh/zync/commit/c1b57d2
 [fd34b9c]: https://github.com/zync-sh/zync/commit/fd34b9c
+[4b0fdbd]: https://github.com/zync-sh/zync/commit/4b0fdbd
