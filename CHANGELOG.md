@@ -7,10 +7,12 @@ All notable changes to Zync are documented in this file. The format is based on 
 ### Added
 
 - **File editor controls:** Added mouse-accessible Save, Go to Line, Find/Replace and Close actions, Zync-styled tooltips, and a shortcuts dialog. ([fd34b9c])
+- **Returning-user feedback:** Added a one-time post-upgrade survey with workflow and improvement questions plus a persistent, non-blocking reminder when the user chooses **Skip for now**. ([611d6be])
 
 ### Changed
 
 - **CodeMirror performance:** Lazy-load the editor and language support, retain bounded per-document editing sessions across pane switches, and use a reduced feature set for large files to limit memory and processing overhead. ([fd34b9c])
+- **Survey lifecycle and privacy:** Completed returning-user surveys never appear again, successful submissions persist completion before the thank-you delay, and survey responses include the same pseudonymous installation ID used by usage reporting so repeated responses can be identified without overwriting them. ([611d6be])
 - **Usage reporting:** Keep a cumulative UTC-day open-time total across launches, retain distinct session records across midnight and restarts, preserve the server's 14-day backfill window, and fit reports within the 8 KiB and 64-session limits. ([4b0fdbd])
 
 ### Fixed
@@ -1726,3 +1728,4 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [c1b57d2]: https://github.com/zync-sh/zync/commit/c1b57d2
 [fd34b9c]: https://github.com/zync-sh/zync/commit/fd34b9c
 [4b0fdbd]: https://github.com/zync-sh/zync/commit/4b0fdbd
+[611d6be]: https://github.com/zync-sh/zync/commit/611d6be
