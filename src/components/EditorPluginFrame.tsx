@@ -163,6 +163,10 @@ export function EditorPluginFrame({
 
         switch (type) {
           case 'zync:editor:ready': {
+            if (readyForDocRef.current) {
+              sendTheme();
+              break;
+            }
             setIsReady(true);
             readyForDocRef.current = true;
             const themePayload = getThemePayload();
@@ -358,7 +362,7 @@ export function EditorPluginFrame({
   const fullHtml = (plugin.editorHtml || plugin.style || plugin.script)
     ? (() => {
         let html = plugin.editorHtml || '<html><head></head><body></body></html>';
-        const securityMeta = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' asset: http://asset.localhost; style-src 'unsafe-inline' asset: http://asset.localhost; img-src data: blob: asset: http://asset.localhost; connect-src 'none'; font-src data: asset: http://asset.localhost; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">`;
+        const securityMeta = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' asset: http://asset.localhost; style-src 'unsafe-inline' asset: http://asset.localhost; img-src data: blob: asset: http://asset.localhost; connect-src asset: http://asset.localhost; worker-src blob:; font-src data: asset: http://asset.localhost; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">`;
         const headInjection = `${securityMeta}${shimScript}${plugin.style ? `<style>${plugin.style}</style>` : ''}${plugin.script ? `<script>${plugin.script}</script>` : ''}`;
 
         // Hardening: rewrite common relative asset tags into file-backed asset URLs.
@@ -382,17 +386,29 @@ export function EditorPluginFrame({
   return (
       <div className="absolute inset-0 z-[70] flex min-h-0 flex-col bg-app-panel">
         {!hideToolbar && (
-          <div className="flex h-10 items-center justify-between border-b border-app-border px-3">
-            <h3 className="truncate text-base font-semibold text-app-text">
-              {filename} · {plugin.manifest.editor?.displayName || plugin.manifest.name}
-            </h3>
-            <div className="flex items-center gap-3 text-xs text-app-muted">
-              <span>{isReady ? 'Connected' : 'Connecting…'}</span>
-              <span>{dirty ? 'Modified' : 'Saved'}</span>
+          <div className="flex h-9 items-center justify-between border-b border-app-border bg-app-panel px-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <h3 className="truncate text-sm font-medium text-app-text">{filename}</h3>
+              <span aria-hidden="true" className="text-app-muted/50">·</span>
+              <span className="truncate text-xs text-app-muted">
+                {plugin.manifest.editor?.displayName || plugin.manifest.name}
+              </span>
+            </div>
+            <div className="flex shrink-0 items-center gap-3 text-[11px] text-app-muted">
+              <span className="inline-flex items-center gap-1.5">
+                <span
+                  aria-hidden="true"
+                  className={`h-1.5 w-1.5 rounded-full ${isReady ? 'bg-emerald-400' : 'bg-amber-400'}`}
+                />
+                {isReady ? 'Ready' : 'Connecting'}
+              </span>
+              <span className={dirty ? 'text-app-text' : 'text-app-muted'}>
+                {dirty ? 'Modified' : 'Saved'}
+              </span>
               <button
                 type="button"
                 onClick={() => { void requestClose(); }}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-app-muted transition-colors hover:bg-app-surface hover:text-app-text"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-base text-app-muted transition-colors hover:bg-app-surface hover:text-app-text"
                 aria-label="Close editor"
               >
                 ×
@@ -416,6 +432,9 @@ export function EditorPluginFrame({
             ref={iframeRef}
             srcDoc={fullHtml}
             onLoad={() => {
+              setIsReady(false);
+              readyForDocRef.current = false;
+              currentDocIdRef.current = null;
               postToFrame({ type: 'zync:editor:bootstrap', payload: {} });
             }}
             // Keep plugin scripts running while giving srcDoc an opaque origin.

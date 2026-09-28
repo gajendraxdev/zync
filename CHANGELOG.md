@@ -4,6 +4,23 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.33.4] - 2026-09-28
+
+### Changed
+
+- **Plugin editor chrome:** Use a compact Zync-styled filename, provider,
+  readiness, save-state and close header for third-party editor providers.
+
+### Fixed
+
+- **CodeMirror visibility:** Re-measure retained editor instances when their pane
+  becomes visible or changes size, preventing file contents from rendering
+  underneath the fixed gutter after a tab or layout transition.
+- **Plugin editor startup:** Recover editor-provider handshakes when an iframe's
+  first ready event arrives before the host listener, ignore duplicate ready
+  events for an active document, and allow package-only blob workers without
+  granting editor frames general network access.
+
 ## [2.33.3] - 2026-09-28
 
 ### Added
@@ -1551,7 +1568,8 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [d3f4060]: https://github.com/zync-sh/zync/commit/d3f4060
 [840afc2]: https://github.com/zync-sh/zync/commit/840afc2
 [193f568]: https://github.com/zync-sh/zync/commit/193f568
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.33.3...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.33.4...HEAD
+[2.33.4]: https://github.com/zync-sh/zync/compare/v2.33.3...v2.33.4
 [2.33.3]: https://github.com/zync-sh/zync/compare/v2.33.2...v2.33.3
 [2.33.2]: https://github.com/zync-sh/zync/compare/v2.33.1...v2.33.2
 [2.33.1]: https://github.com/zync-sh/zync/compare/v2.33.0...v2.33.1
