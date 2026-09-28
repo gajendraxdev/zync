@@ -4,6 +4,19 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.33.5] - 2026-09-28
+
+### Fixed
+
+- **Installed CodeMirror layout:** Apply the release build's style nonce to
+  CodeMirror's generated CSS so file content remains beside the gutter after
+  installation or update.
+- **Plugin editor saves:** Confirm saves to editor providers only after the
+  file write succeeds, preserving unsaved state when a save fails or more
+  changes are made while it is in progress. Keep same-named files in different
+  locations distinct. Report disconnected writes as failures instead of
+  marking them saved. Older providers remain compatible.
+
 ## [2.33.4] - 2026-09-28
 
 ### Changed
@@ -1569,7 +1582,8 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [d3f4060]: https://github.com/zync-sh/zync/commit/d3f4060
 [840afc2]: https://github.com/zync-sh/zync/commit/840afc2
 [193f568]: https://github.com/zync-sh/zync/commit/193f568
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.33.4...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.33.5...HEAD
+[2.33.5]: https://github.com/zync-sh/zync/compare/v2.33.4...v2.33.5
 [2.33.4]: https://github.com/zync-sh/zync/compare/v2.33.3...v2.33.4
 [2.33.3]: https://github.com/zync-sh/zync/compare/v2.33.2...v2.33.3
 [2.33.2]: https://github.com/zync-sh/zync/compare/v2.33.1...v2.33.2

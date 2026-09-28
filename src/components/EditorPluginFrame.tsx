@@ -5,9 +5,11 @@ import { useAppStore } from '../store/useAppStore';
 import type { Plugin } from '../context/PluginContext';
 import { getZyncThemePayload } from '../lib/themePayload';
 import { isDebugThemePayloadEnabled } from '../lib/debugFlags';
+import { PluginSaveState } from './editor/pluginSaveState';
 
 interface EditorPluginFrameProps {
   plugin: Plugin;
+  documentId?: string;
   filename: string;
   initialContent: string;
   onSave: (content: string) => Promise<void>;
@@ -54,6 +56,7 @@ function detectLanguage(filename: string): string {
 
 export function EditorPluginFrame({
   plugin,
+  documentId,
   filename,
   initialContent,
   onSave,
@@ -70,22 +73,26 @@ export function EditorPluginFrame({
   const accentColor = useAppStore((state) => state.settings.accentColor);
   const showToast = useAppStore((state) => state.showToast);
   const showConfirmDialog = useAppStore((state) => state.showConfirmDialog);
-  const lastContentRef = useRef(initialContent);
-  const savedContentRef = useRef(initialContent);
+  const saveStateRef = useRef(new PluginSaveState(initialContent));
   const readyForDocRef = useRef(false);
   const currentDocIdRef = useRef<string | null>(null);
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const setEditorDirty = useCallback((value: boolean) => {
+    saveStateRef.current.dirty = value;
+    setDirty(value);
+  }, []);
 
   const doc = useMemo<EditorDocumentPayload>(() => ({
-    docId: `file-editor:${filename}`,
+    docId: `file-editor:${documentId ?? filename}`,
     path: filename,
     filename,
     language: detectLanguage(filename),
     content: initialContent,
     readOnly: false,
-  }), [filename, initialContent]);
+  }), [documentId, filename, initialContent]);
 
   const requestClose = useCallback(async () => {
-    if (!dirty) {
+    if (!saveStateRef.current.dirty) {
       onClose();
       return;
     }
@@ -99,7 +106,7 @@ export function EditorPluginFrame({
     })) {
       onClose();
     }
-  }, [dirty, filename, onClose, plugin.manifest.name, showConfirmDialog]);
+  }, [filename, onClose, plugin.manifest.name, showConfirmDialog]);
 
   const postToFrame = useCallback((message: unknown) => {
     iframeRef.current?.contentWindow?.postMessage(message, '*');
@@ -127,20 +134,27 @@ export function EditorPluginFrame({
   }, [isReady, sendTheme]);
 
   useEffect(() => {
-    savedContentRef.current = initialContent;
-    lastContentRef.current = initialContent;
+    saveStateRef.current.reset(initialContent);
     setDirty(false);
     setSaveError(null);
-  }, [doc.docId, initialContent]);
+    // A content refresh for the same file must not clear in-flight edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc.docId]);
+
+  useEffect(() => {
+    saveStateRef.current.refreshIfClean(initialContent);
+  }, [initialContent]);
 
   useEffect(() => {
     if (!isReady || !readyForDocRef.current) return;
 
     const isSameDoc = currentDocIdRef.current === doc.docId;
-    postToFrame({
-      type: isSameDoc ? 'zync:editor:update-document' : 'zync:editor:open-document',
-      payload: isSameDoc ? { docId: doc.docId, content: doc.content } : doc,
-    });
+    if (!isSameDoc || !saveStateRef.current.dirty) {
+      postToFrame({
+        type: isSameDoc ? 'zync:editor:update-document' : 'zync:editor:open-document',
+        payload: isSameDoc ? { docId: doc.docId, content: doc.content } : doc,
+      });
+    }
     postToFrame({
       type: 'zync:editor:set-readonly',
       payload: {
@@ -174,7 +188,8 @@ export function EditorPluginFrame({
               type: 'zync:editor:init',
               payload: {
                 pluginId: plugin.manifest.id,
-                sessionId: `editor-session:${filename}`,
+                saveResults: true,
+                sessionId: `editor-session:${doc.docId}`,
                 capabilitiesRequested: plugin.manifest.editor?.supports ?? [],
                 theme: themePayload,
               },
@@ -184,31 +199,49 @@ export function EditorPluginFrame({
             break;
           }
           case 'zync:editor:change': {
-            const next = typeof payload?.content === 'string'
-              ? payload.content
-              : lastContentRef.current;
-            lastContentRef.current = next;
-            setDirty(next !== savedContentRef.current);
+            if (payload?.docId && payload.docId !== currentDocIdRef.current) break;
+            setEditorDirty(saveStateRef.current.change(payload?.content));
             break;
           }
           case 'zync:editor:dirty-change':
-            setDirty(Boolean(payload?.dirty));
+            if (payload?.docId && payload.docId !== currentDocIdRef.current) break;
+            setEditorDirty(saveStateRef.current.providerDirtyChange(Boolean(payload?.dirty)));
             break;
           case 'zync:editor:save-request':
-            try {
-              setSaveError(null);
-              const content = typeof payload?.content === 'string'
-                ? payload.content
-                : lastContentRef.current;
-              await onSave(content);
-              savedContentRef.current = content;
-              lastContentRef.current = content;
-              setDirty(false);
-              showToast('success', `${plugin.manifest.name} saved ${filename}`);
-            } catch (error: unknown) {
-              const message = error instanceof Error ? error.message : String(error);
-              setSaveError(message);
-              showToast('error', `Plugin editor save failed: ${message}`);
+            if (payload?.docId && payload.docId !== currentDocIdRef.current) break;
+            {
+              const content = saveStateRef.current.requestSave(payload?.content);
+              setEditorDirty(saveStateRef.current.dirty);
+              const requestId = typeof payload?.requestId === 'number' ? payload.requestId : undefined;
+              const docId = currentDocIdRef.current;
+              const save = async () => {
+                try {
+                  if (docId === currentDocIdRef.current) setSaveError(null);
+                  await onSave(content);
+                  if (docId === currentDocIdRef.current) {
+                    setEditorDirty(saveStateRef.current.saveSucceeded(content, requestId !== undefined));
+                    showToast('success', `${plugin.manifest.name} saved ${filename}`);
+                  }
+                  if (requestId !== undefined) postToFrame({
+                    type: 'zync:editor:save-result',
+                    payload: { docId, requestId, ok: true },
+                  });
+                } catch (error: unknown) {
+                  const message = error instanceof Error ? error.message : String(error);
+                  if (docId === currentDocIdRef.current) {
+                    setSaveError(message);
+                    setEditorDirty(saveStateRef.current.saveFailed(content));
+                  }
+                  showToast('error', `Plugin editor save failed: ${message}`);
+                  if (requestId !== undefined) postToFrame({
+                    type: 'zync:editor:save-result',
+                    payload: { docId, requestId, ok: false },
+                  });
+                }
+              };
+              const queuedSave = saveQueueRef.current.then(save, save);
+              saveQueueRef.current = queuedSave;
+              await queuedSave;
             }
             break;
           case 'zync:editor:request-close':
@@ -233,7 +266,7 @@ export function EditorPluginFrame({
 
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
-  }, [filename, onFatalError, onSave, plugin.manifest.editor?.supports, plugin.manifest.id, plugin.manifest.name, postToFrame, requestClose, sendTheme, showToast]);
+  }, [doc.docId, filename, onFatalError, onSave, plugin.manifest.editor?.supports, plugin.manifest.id, plugin.manifest.name, postToFrame, requestClose, sendTheme, setEditorDirty, showToast]);
 
   useEffect(() => {
     return () => {
@@ -337,11 +370,11 @@ export function EditorPluginFrame({
     emitChange(payload = {}) {
       window.parent.postMessage({ type: 'zync:editor:change', payload }, '*');
     },
-    emitDirtyChange(dirty) {
-      window.parent.postMessage({ type: 'zync:editor:dirty-change', payload: { dirty } }, '*');
+    emitDirtyChange(dirty, docId) {
+      window.parent.postMessage({ type: 'zync:editor:dirty-change', payload: { dirty, docId } }, '*');
     },
-    requestSave(content) {
-      window.parent.postMessage({ type: 'zync:editor:save-request', payload: { content } }, '*');
+    requestSave(content, request) {
+      window.parent.postMessage({ type: 'zync:editor:save-request', payload: { content, ...request } }, '*');
     },
     requestClose() {
       window.parent.postMessage({ type: 'zync:editor:request-close', payload: {} }, '*');

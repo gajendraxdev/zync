@@ -890,7 +890,9 @@ export const FileManager = memo(function FileManager({
   }, [editorProviderOptions, settings.editor, showToast, updateSettings]);
 
   const handleSaveFile = useCallback(async (content: string) => {
-    if (!activeConnectionId || !editingFile) return;
+    if (!activeConnectionId || !editingFile) {
+      throw new Error('The file or its connection is no longer available');
+    }
     try {
       const fullPath = currentPath === '/' ? `/${editingFile.name}` : `${currentPath}/${editingFile.name}`;
       await window.ipcRenderer.invoke('fs_write_file', {
@@ -901,8 +903,9 @@ export const FileManager = memo(function FileManager({
       setEditorContent(content);
       showToast('success', 'File saved');
     } catch (error: any) {
-      if (handleConnectionError(activeConnectionId, error)) return;
-      showToast('error', `Failed to save file: ${error.message || String(error)}`);
+      if (!handleConnectionError(activeConnectionId, error)) {
+        showToast('error', `Failed to save file: ${error.message || String(error)}`);
+      }
       throw error;
     }
   }, [activeConnectionId, editingFile, currentPath, handleConnectionError, showToast]);

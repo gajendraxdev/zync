@@ -281,7 +281,11 @@ export function CodeMirrorFileEditor({
       },
     ];
 
+    // Tauri nonces the bundled <style> in release builds. CodeMirror mounts
+    // its layout CSS later, so its generated <style> needs that same nonce.
+    const styleNonce = document.querySelector<HTMLStyleElement>('head style[nonce]')?.nonce;
     const extensions: Extension[] = [
+      ...(styleNonce ? [EditorView.cspNonce.of(styleNonce)] : []),
       ...createCodeMirrorExtensions({
         keyBindings,
         richEditing: performanceMode.kind === 'full',
