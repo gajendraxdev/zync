@@ -4,6 +4,8 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.33.3] - 2026-09-28
+
 ### Added
 
 - **File editor controls:** Added mouse-accessible Save, Go to Line, Find/Replace and Close actions, Zync-styled tooltips, and a shortcuts dialog. ([fd34b9c])
@@ -1549,7 +1551,8 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [d3f4060]: https://github.com/zync-sh/zync/commit/d3f4060
 [840afc2]: https://github.com/zync-sh/zync/commit/840afc2
 [193f568]: https://github.com/zync-sh/zync/commit/193f568
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.33.2...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.33.3...HEAD
+[2.33.3]: https://github.com/zync-sh/zync/compare/v2.33.2...v2.33.3
 [2.33.2]: https://github.com/zync-sh/zync/compare/v2.33.1...v2.33.2
 [2.33.1]: https://github.com/zync-sh/zync/compare/v2.33.0...v2.33.1
 [2.33.0]: https://github.com/zync-sh/zync/compare/v2.32.2...v2.33.0
