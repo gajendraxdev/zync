@@ -37,6 +37,10 @@ function normalizeEmittedImports(directory) {
 normalizeEmittedImports(path.resolve('.tmp-agent-tests'));
 
 const tests = [
+  'tests/pluginPaneClose.test.mjs',
+  'tests/paneSurfaces.test.mjs',
+  'tests/pluginFallbacks.test.mjs',
+  'tests/paneDropClick.test.mjs',
   'tests/agentRunStore.partialize.test.mjs',
   'tests/aiSidebarResize.test.mjs',
   'tests/codeMirrorHelpers.test.mjs',
@@ -54,6 +58,8 @@ const tests = [
   'tests/pluginCommandBridge.test.mjs',
   'tests/pluginShortcuts.test.mjs',
   'tests/pluginManifestTypes.test.mjs',
+  'tests/pluginIconPath.test.mjs',
+  'tests/pluginPaneRetention.test.mjs',
   'tests/pluginDeveloperMode.test.mjs',
   'tests/pluginBrokerBoundary.test.mjs',
   'tests/pluginSshCommand.test.mjs',
@@ -63,6 +69,7 @@ const tests = [
   'tests/pluginMessageRateLimiter.test.mjs',
   'tests/pluginMessageEnvelope.test.mjs',
   'tests/pluginReloadQueue.test.mjs',
+  'tests/pluginRecoveryStartup.test.mjs',
   'tests/pluginOptionalPermission.test.mjs',
   'tests/shellDiscoveryGate.test.mjs',
   'tests/pluginRuntimeSupervisor.test.mjs',
@@ -132,6 +139,7 @@ const tests = [
   'tests/surveyEligibility.test.mjs',
   'tests/tunnelAutoStartService.test.mjs',
   'tests/tunnelReconnectService.test.mjs',
+  'tests/tunnelIpcArguments.test.mjs',
   'tests/syncPassphrase.test.mjs',
   'tests/connectionsRestore.test.mjs',
   'tests/vaultUnlockPrompt.test.mjs',

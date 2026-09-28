@@ -41,6 +41,7 @@ pub struct RegistryPayload {
     pub metadata_type: String,
     pub version: u64,
     pub issued_at_ms: u64,
+    /// Zero is an explicitly signed non-expiring registry.
     pub expires_at_ms: u64,
     pub plugins: Vec<TrustedRegistryPlugin>,
     #[serde(default)]
@@ -262,12 +263,14 @@ fn validate_payload(payload: &RegistryPayload, minimum_version: u64, now: u64) -
     if payload.version < minimum_version {
         return Err(anyhow!("Plugin marketplace metadata rollback was rejected"));
     }
-    if payload.issued_at_ms > now.saturating_add(MAX_CLOCK_SKEW_MS) {
+    if payload.issued_at_ms == 0 || payload.issued_at_ms > now.saturating_add(MAX_CLOCK_SKEW_MS) {
         return Err(anyhow!(
             "Plugin marketplace metadata is dated in the future"
         ));
     }
-    if payload.expires_at_ms <= now || payload.expires_at_ms <= payload.issued_at_ms {
+    if payload.expires_at_ms != 0
+        && (payload.expires_at_ms <= now || payload.expires_at_ms <= payload.issued_at_ms)
+    {
         return Err(anyhow!("Plugin marketplace metadata has expired"));
     }
     if payload.plugins.len() > MAX_REGISTRY_PLUGINS {

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Database, History, LockKeyhole, RefreshCw, ShieldCheck, Trash2, X } from 'lucide-react';
+import { Database, History, LockKeyhole, RefreshCw, Trash2, X } from 'lucide-react';
+import { IconResolver } from '../../common/IconResolver';
 import {
     getPluginManagementDetails,
     type PluginManagementDetails,
@@ -109,7 +110,7 @@ export function PluginDetailsDialog({
             <div className="flex max-h-[min(760px,92vh)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-[var(--color-app-border)] bg-[var(--color-app-bg)] shadow-2xl">
                 <div className="flex items-start gap-3 border-b border-[var(--color-app-border)]/60 p-5">
                     <div className="rounded-lg bg-[var(--color-app-accent)]/10 p-2 text-[var(--color-app-accent)]">
-                        <ShieldCheck size={19} />
+                        <IconResolver name={plugin.manifest.icon} path={plugin.path} size={19} />
                     </div>
                     <div className="min-w-0 flex-1">
                         <h3 id="plugin-details-title" className="text-sm font-semibold text-[var(--color-app-text)]">

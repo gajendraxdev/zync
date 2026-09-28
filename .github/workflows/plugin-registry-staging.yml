@@ -68,7 +68,7 @@ jobs:
           ZYNC_PLUGIN_REGISTRY_URL: ${{ env.REGISTRY_URL }}
           ZYNC_PLUGIN_REGISTRY_ROOT_KEYS: ${{ env.REGISTRY_ROOT_KEYS }}
         working-directory: src-tauri
-        run: cargo test --no-default-features plugins::registry::
+        run: 'cargo test --no-default-features plugins::registry::'
 
       - name: Build the frontend
         env:

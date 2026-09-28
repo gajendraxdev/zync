@@ -1,13 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 
-import { CodeMirrorFileEditor } from './CodeMirrorFileEditor';
 import { EditorPluginFrame } from './EditorPluginFrame';
 import { BUILTIN_PLAIN_EDITOR_ID, CODEMIRROR_EDITOR_ID } from './editor/providers';
 import { PlainFileEditor } from './PlainFileEditor';
 import { usePlugins } from '../context/PluginContext';
 import { useAppStore } from '../store/useAppStore';
 
+const CodeMirrorFileEditor = lazy(async () => {
+  const module = await import('./CodeMirrorFileEditor');
+  return { default: module.CodeMirrorFileEditor };
+});
+
 interface FileEditorHostProps {
+  documentId?: string;
   filename: string;
   initialContent: string;
   onSave: (content: string) => Promise<void>;
@@ -84,7 +89,17 @@ export function FileEditorHost(props: FileEditorHostProps) {
   }
 
   if (selectedProvider?.manifest.id === CODEMIRROR_EDITOR_ID) {
-    return <CodeMirrorFileEditor {...props} />;
+    return (
+      <Suspense
+        fallback={(
+          <div className="absolute inset-0 z-[70] flex items-center justify-center bg-app-panel text-sm text-app-muted">
+            Loading built-in editor…
+          </div>
+        )}
+      >
+        <CodeMirrorFileEditor {...props} />
+      </Suspense>
+    );
   }
 
   if (selectedProvider?.editorHtml) {

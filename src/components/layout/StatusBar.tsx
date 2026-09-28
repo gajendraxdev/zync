@@ -1,5 +1,6 @@
 import { CircleAlert, Monitor, PanelLeft, Sparkles, Wifi, WifiOff } from 'lucide-react';
 import { LOCAL_TERMINAL_CONNECTION_ID } from '../../features/connections/application/tabService';
+import { useEditorStatus } from '../../features/editor/editorStatus';
 import { formatShortcutLabel } from '../../lib/shortcuts';
 import { useAppStore } from '../../store/useAppStore';
 import { cn } from '../../lib/utils';
@@ -15,6 +16,11 @@ import {
 
 const statusToggleBtnClass =
   'h-6 w-6 shrink-0 rounded-md text-app-muted hover:text-app-text hover:bg-app-surface border border-transparent hover:border-app-border/40 transition-colors flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-accent/60 focus-visible:ring-offset-0';
+
+function EditorStatusText() {
+  const editorStatus = useEditorStatus();
+  return <span className="text-app-muted font-mono text-[11px] tracking-wide">{editorStatus}</span>;
+}
 
 export function StatusBar() {
   const activeConnectionId = useAppStore(state => state.activeConnectionId);
@@ -149,8 +155,7 @@ export function StatusBar() {
 
       {/* Bottom-right: status bits + AI toggle */}
       <div className="flex items-center gap-3 shrink-0">
-        {/* High-performance container for Editor cursor status (no React re-renders) */}
-        <span id="global-editor-status" className="text-app-muted font-mono text-[11px] tracking-wide" />
+        <EditorStatusText />
         {editorDiagnosticsCount > 0 && (
           <button
             type="button"

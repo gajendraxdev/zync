@@ -135,6 +135,27 @@ fn rejects_expired_and_rolled_back_metadata() {
 }
 
 #[test]
+fn accepts_explicit_non_expiring_metadata_without_disabling_rollback_checks() {
+    let (bytes, root_key) = signed_registry(4, 0);
+    let snapshot = verify_registry(&bytes, &root_key, 4, NOW + 365 * 86_400_000)
+        .expect("signed non-expiring registry");
+    assert_eq!(snapshot.expires_at_ms, 0);
+    assert!(verify_registry(&bytes, &root_key, 5, NOW)
+        .unwrap_err()
+        .to_string()
+        .contains("rollback"));
+
+    let mut forged: Value = serde_json::from_slice(&bytes).unwrap();
+    forged["signed"]["version"] = json!(6);
+    assert!(
+        verify_registry(&serde_json::to_vec(&forged).unwrap(), &root_key, 4, NOW)
+            .unwrap_err()
+            .to_string()
+            .contains("signature")
+    );
+}
+
+#[test]
 fn rejects_publisher_namespace_or_key_mismatch() {
     let (bytes, root_key) = signed_registry(1, NOW + 60_000);
     let mut envelope: Value = serde_json::from_slice(&bytes).unwrap();

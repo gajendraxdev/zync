@@ -216,8 +216,6 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         reloadPlugins,
         retryPluginRuntime,
         runtimeHealth,
-        pluginSafeMode,
-        exitPluginSafeMode,
     } = usePlugins();
     const showConfirmDialog = useAppStore(state => state.showConfirmDialog);
     const isWindows = window.navigator.userAgent.indexOf('Windows') !== -1;
@@ -445,7 +443,6 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         <PluginsInstalledTab
             plugins={plugins}
             runtimeHealth={runtimeHealth}
-            pluginSafeMode={pluginSafeMode}
             registry={selectedRegistry}
             isLoadingPlugins={isLoadingPlugins}
             processingId={processingId}
@@ -457,7 +454,6 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             onUpdatePlugin={handleUpdatePlugin}
             onUninstallPlugin={handleUninstallPlugin}
             onRetryPluginRuntime={retryPluginRuntime}
-            onExitPluginSafeMode={exitPluginSafeMode}
             onSaveOptionalPermissions={handleSetOptionalPluginPermissions}
             onClearPluginData={handleClearPluginData}
             onRollbackPlugin={handleRollbackPlugin}

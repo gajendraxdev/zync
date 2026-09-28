@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent } from 'react';
 import type { DockEdge, DockPayload } from '../../../lib/paneLayout';
 import { dockTargetFromPointer } from './hit';
+import { suppressDropClick } from './suppressDropClick';
 import { patchTabDockTarget, startTabDock, stopTabDock } from './session';
 
 const DRAG_THRESHOLD_PX = 8;
@@ -60,6 +61,7 @@ export function useDockTabPointer(handlers: DockTabPointerHandlers | undefined) 
         const pointerId = event.pointerId;
         const target = event.currentTarget;
         let started = false;
+        let dragSurface: HTMLElement | null = null;
 
         const targetAt = (clientX: number, clientY: number) => {
             const surface = handlersRef.current?.getSurface() ?? null;
@@ -74,6 +76,8 @@ export function useDockTabPointer(handlers: DockTabPointerHandlers | undefined) 
                     return;
                 }
                 started = true;
+                dragSurface = live.getSurface();
+                dragSurface?.setAttribute('data-pane-docking', 'true');
                 skipClickRef.current = true;
                 if (target instanceof HTMLElement) {
                     try {
@@ -90,6 +94,8 @@ export function useDockTabPointer(handlers: DockTabPointerHandlers | undefined) 
         };
 
         const cleanup = () => {
+            dragSurface?.removeAttribute('data-pane-docking');
+            dragSurface = null;
             window.removeEventListener('pointermove', onMove);
             window.removeEventListener('pointerup', stop);
             window.removeEventListener('pointercancel', stop);
@@ -121,6 +127,7 @@ export function useDockTabPointer(handlers: DockTabPointerHandlers | undefined) 
                 return;
             }
             clearSkipClickSoon();
+            suppressDropClick();
             live.onDragEnd(payload, hit?.edge ?? null, hit?.paneId ?? null);
         };
 

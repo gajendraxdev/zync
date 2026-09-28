@@ -66,6 +66,7 @@ try {
   const verified = verifySignedRegistry(registryPath, rootKeyPath, issuedAtMs + 1);
   assert.deepEqual(verified, {
     version: 7,
+    issuedAtMs,
     expiresAtMs,
     pluginCount: 1,
     revocationCount: 0,

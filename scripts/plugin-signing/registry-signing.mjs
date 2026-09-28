@@ -9,6 +9,7 @@ import {
 import fs from 'node:fs';
 import path from 'node:path';
 import { verifySignedPlugin } from './package-signing.mjs';
+import { readKeyText, readPemKey } from '../../packages/plugin-sdk/bin/pem-key.mjs';
 
 const REGISTRY_TYPE = 'zync.plugin-registry';
 const REGISTRY_DOMAIN = 'zync-plugin-registry-v1\n';
@@ -83,7 +84,11 @@ function canonicalJson(value) {
   throw new Error('Registry metadata contains an unsupported value');
 }
 
-function loadRootKey(keyPath, requirePrivate) {
+function loadRootKey(keyPath, requirePrivate, passphrase) {
+  const text = readKeyText(path.resolve(keyPath));
+  if (text.trimStart().startsWith('-----BEGIN ')) {
+    return readPemKey(text, { requirePrivate, passphrase });
+  }
   const key = readJson(path.resolve(keyPath), 'Registry root key');
   if (key.version !== 1 || key.algorithm !== 'ed25519' || key.purpose !== ROOT_KEY_PURPOSE) {
     throw new Error('Unsupported registry root key format');
@@ -99,6 +104,7 @@ function loadRootKey(keyPath, requirePrivate) {
 }
 
 function privateKeyFromRecord(key) {
+  if (key.keyObject) return key.keyObject;
   return createPrivateKey({
     key: {
       kty: 'OKP',
@@ -361,6 +367,7 @@ export function buildSignedRegistry({
   revocations = [],
   baseDirectory = process.cwd(),
   keyPath,
+  passphrase,
   outputPath,
   version,
   issuedAtMs = Date.now(),
@@ -368,8 +375,10 @@ export function buildSignedRegistry({
 }) {
   assertSafeInteger(version, 'Registry version');
   assertSafeInteger(issuedAtMs, 'Registry issue time');
-  assertSafeInteger(expiresAtMs, 'Registry expiry time');
-  if (expiresAtMs <= issuedAtMs) throw new Error('Registry expiry must be after its issue time');
+  if (expiresAtMs !== 0) {
+    assertSafeInteger(expiresAtMs, 'Registry expiry time');
+    if (expiresAtMs <= issuedAtMs) throw new Error('Registry expiry must be after its issue time');
+  }
   if (!Array.isArray(releases) || releases.length > 10_000) {
     throw new Error('Registry releases must contain no more than 10,000 entries');
   }
@@ -404,7 +413,7 @@ export function buildSignedRegistry({
     Buffer.from(canonicalJson(right)),
   ));
 
-  const key = loadRootKey(keyPath, true);
+  const key = loadRootKey(keyPath, true, passphrase);
   const signed = {
     _type: REGISTRY_TYPE,
     version,
@@ -451,8 +460,9 @@ export function verifySignedRegistry(
   registryPath,
   rootKeyPath,
   currentTimeMs = Date.now(),
+  options = {},
 ) {
-  const key = loadRootKey(rootKeyPath, false);
+  const key = loadRootKey(rootKeyPath, false, options.passphrase);
   const resolved = path.resolve(registryPath);
   const stat = fs.lstatSync(resolved);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('Signed registry must be a regular file');
@@ -495,9 +505,10 @@ export function verifySignedRegistryBytes(
   if (!payload || payload._type !== REGISTRY_TYPE) throw new Error('Unsupported registry metadata');
   assertSafeInteger(payload.version, 'Registry version');
   assertSafeInteger(payload.issuedAtMs, 'Registry issue time');
-  assertSafeInteger(payload.expiresAtMs, 'Registry expiry time');
+  if (payload.expiresAtMs !== 0) assertSafeInteger(payload.expiresAtMs, 'Registry expiry time');
   if (payload.issuedAtMs > currentTimeMs + 5 * 60 * 1_000) throw new Error('Registry is dated in the future');
-  if (payload.expiresAtMs <= currentTimeMs || payload.expiresAtMs <= payload.issuedAtMs) {
+  if (payload.expiresAtMs !== 0
+    && (payload.expiresAtMs <= currentTimeMs || payload.expiresAtMs <= payload.issuedAtMs)) {
     throw new Error('Registry has expired');
   }
   if (!Array.isArray(payload.plugins) || payload.plugins.length > 10_000) {
@@ -528,6 +539,7 @@ export function verifySignedRegistryBytes(
   }
   return {
     version: payload.version,
+    issuedAtMs: payload.issuedAtMs,
     expiresAtMs: payload.expiresAtMs,
     pluginCount: payload.plugins.length,
     revocationCount: revocations.length,

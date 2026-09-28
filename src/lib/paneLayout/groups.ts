@@ -20,6 +20,19 @@ export type PaneLayoutGroups = Record<string, PaneLayout>;
 /** Layout owner when there is no shell (Files-only / mixed feature splits). */
 export const WORKSPACE_PANE_OWNER = 'workspace';
 
+/** Retain an owner only while its content remains in the canvas. */
+export function ownerForLayout(layout: PaneLayout, preferred?: string): string {
+    const owners = collectLeaves(layout.root).map(({ content }) => {
+        if (isTermContent(content)) return content.termId;
+        if (isPluginContent(content)) return content.instanceId ?? content.pluginId;
+        return content.instanceId;
+    }).filter((owner): owner is string => Boolean(owner));
+
+    return preferred && owners.includes(preferred)
+        ? preferred
+        : owners[0] ?? WORKSPACE_PANE_OWNER;
+}
+
 export function sameSplitGroup(
     groups: PaneLayoutGroups | null | undefined,
     termA: string,
@@ -29,14 +42,16 @@ export function sameSplitGroup(
     return (findLayoutOwner(groups, termA) ?? termA) === (findLayoutOwner(groups, termB) ?? termB);
 }
 
-/** Whether the dragged shell is already visible in this exact pane layout. */
+/** Standalone shells own their canvas even before a split tree exists. */
 export function sameGroupTermDock(
     groups: PaneLayoutGroups | null | undefined,
     owner: string,
     termId: string,
 ): 'self' | null {
     const layout = groups?.[owner];
-    return layout && visibleTermIds(layout).includes(termId) ? 'self' : null;
+    return (layout ? visibleTermIds(layout).includes(termId) : owner === termId)
+        ? 'self'
+        : null;
 }
 
 export function findLayoutOwner(
@@ -90,6 +105,17 @@ export function layoutForFeatureInstance(
     return undefined;
 }
 
+/** Plugin tabs and split panes resolve through the same persisted canvas inventory. */
+export function layoutForPlugin(
+    groups: PaneLayoutGroups | null | undefined,
+    pluginId: string | null | undefined,
+): PaneLayout | undefined {
+    if (!groups || !pluginId) return undefined;
+    return Object.values(groups).find(layout => collectLeaves(layout.root).some(leaf =>
+        isPluginContent(leaf.content) && leaf.content.pluginId === pluginId,
+    ));
+}
+
 /** Prefer the layout's focused leaf over a stale active-terminal id after restore. */
 export function focusedTermIdForRestore(
     groups: PaneLayoutGroups | null | undefined,
@@ -135,15 +161,7 @@ export function detachTermFromGroups(
     const remainingIds = dropped ? visibleTermIds(dropped).filter((id) => id !== termId) : [];
 
     if (dropped && (isSplitLayout(dropped) || (isPaneLeaf(dropped.root) && !isTermContent(dropped.root.content)))) {
-        let nextOwner = remainingIds.includes(owner) ? owner : remainingIds[0] ?? null;
-        if (!nextOwner) {
-            const featureLeaf = collectLeaves(dropped.root).find((leaf) => (
-                isFeatureContent(leaf.content) && leaf.content.instanceId
-            ));
-            nextOwner = (featureLeaf && isFeatureContent(featureLeaf.content) && featureLeaf.content.instanceId)
-                ? featureLeaf.content.instanceId
-                : WORKSPACE_PANE_OWNER;
-        }
+        const nextOwner = ownerForLayout(dropped, owner);
         next[nextOwner] = dropped;
         return { next, remainingIds, nextOwner };
     }
@@ -173,11 +191,11 @@ function hasValidGroupOwner(
     if (knownTermIds.has(owner)) return termIds.includes(owner);
     return collectLeaves(layout.root).some((leaf) => (
         (isFeatureContent(leaf.content) && leaf.content.instanceId === owner)
-        || (isPluginContent(leaf.content) && leaf.content.pluginId === owner)
+        || (isPluginContent(leaf.content) && (leaf.content.pluginId === owner || leaf.content.instanceId === owner))
     ));
 }
 
-function isKeepableRemainder(layout: PaneLayout | null | undefined): layout is PaneLayout {
+export function isKeepableRemainder(layout: PaneLayout | null | undefined): layout is PaneLayout {
     if (!layout) return false;
     if (isSplitLayout(layout)) return true;
     return isPaneLeaf(layout.root) && !isTermContent(layout.root.content);

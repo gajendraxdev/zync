@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import { getZyncThemePayload } from '../../lib/themePayload';
 import { isDebugThemePayloadEnabled } from '../../lib/debugFlags';
@@ -9,7 +9,7 @@ import { usePlugins } from '../../context/PluginContext';
 import { isPluginShortcutCommandAllowed, matchPluginShortcut, pluginShortcutBindings, pluginShortcutBridgeScript } from '../../features/shortcuts/pluginShortcuts';
 import { runShortcutCommand } from '../../features/shortcuts/actions';
 import { TerminalDisconnectedView } from '../terminal/TerminalDisconnectedView';
-import { findNode, layoutForCanvas } from '../../lib/paneLayout';
+import { findNode, layoutForCanvas, layoutForPlugin } from '../../lib/paneLayout';
 
 interface PluginPanelProps {
     html: string;
@@ -18,6 +18,7 @@ interface PluginPanelProps {
     connectionId: string | null;
     legacyAccess: boolean;
     paneInstanceId: string;
+    visible: boolean;
 }
 
 /**
@@ -33,9 +34,10 @@ export function PluginPanel(props: PluginPanelProps) {
     const isSurfaceActive = useAppStore(s => {
         const tab = s.tabs.find(t => t.id === s.activeTabId);
         if (!props.connectionId || tab?.connectionId !== props.connectionId) return false;
-        if (props.paneInstanceId.startsWith('overlay:')) return tab.view === `plugin:${props.panelId}`;
-        if (tab.view.startsWith('plugin:')) return false;
-        const layout = layoutForCanvas(s.paneLayouts[props.connectionId], s.activeTerminalIds[props.connectionId], s.activePaneGroupOwner[props.connectionId]);
+        const groups = s.paneLayouts[props.connectionId];
+        const layout = tab.view.startsWith('plugin:')
+            ? layoutForPlugin(groups, tab.view.slice('plugin:'.length))
+            : layoutForCanvas(groups, s.activeTerminalIds[props.connectionId], s.activePaneGroupOwner[props.connectionId]);
         const focused = layout && findNode(layout.root, layout.activePaneId);
         return focused?.type === 'pane' && focused.content.kind === 'plugin' && focused.content.instanceId === props.paneInstanceId;
     });
@@ -54,12 +56,28 @@ export function PluginPanel(props: PluginPanelProps) {
             onEditHost={() => editHost(props.connectionId)}
         />;
     }
-    return <PluginPanelFrame {...props} />;
+    const frameKey = `${props.connectionId ?? 'local'}:${props.pluginId}:${props.panelId}:${props.paneInstanceId}:${props.legacyAccess}`;
+    return <PluginPanelFrame key={frameKey} {...props} />;
 }
 
-function PluginPanelFrame({ html, panelId, pluginId, connectionId, legacyAccess, paneInstanceId }: PluginPanelProps) {
+function PluginPanelFrame({ html, panelId, pluginId, connectionId, legacyAccess, paneInstanceId, visible }: PluginPanelProps) {
     const iframeRef = useRef<HTMLIFrameElement>(null);
     const frameGenerationRef = useRef(0);
+    const visibleRef = useRef(visible);
+    useLayoutEffect(() => {
+        visibleRef.current = visible;
+    }, [visible]);
+    const sendVisibility = useCallback(() => {
+        iframeRef.current?.contentWindow?.postMessage({
+            type: 'zync:pane:visibility',
+            visible: visibleRef.current && !document.hidden,
+        }, '*');
+    }, []);
+    useEffect(() => {
+        sendVisibility();
+        document.addEventListener('visibilitychange', sendVisibility);
+        return () => document.removeEventListener('visibilitychange', sendVisibility);
+    }, [visible, sendVisibility]);
     const theme = useAppStore(s => s.settings.theme);
     const accentColor = useAppStore(s => s.settings.accentColor);
     const keybindings = useAppStore(s => s.settings.keybindings);
@@ -257,8 +275,25 @@ window.zync = {
 </script>
 ` : `
 <script>
+let paneVisible = false;
+const visibilityListeners = new Set();
+window.addEventListener('message', function(event) {
+    if (event.source !== window.parent) return;
+    const data = event.data;
+    if (!data || data.type !== 'zync:pane:visibility' || typeof data.visible !== 'boolean') return;
+    if (paneVisible === data.visible) return;
+    paneVisible = data.visible;
+    visibilityListeners.forEach(function(callback) { callback(paneVisible); });
+});
 window.zync = Object.freeze({
     pane: Object.freeze({
+        isVisible: function() { return paneVisible; },
+        onVisibilityChange: function(callback) {
+            if (typeof callback !== 'function') return function() {};
+            visibilityListeners.add(callback);
+            callback(paneVisible);
+            return function() { visibilityListeners.delete(callback); };
+        },
         postMessage: function(message) {
             window.parent.postMessage({ type: 'zync:pane:message', payload: message }, '*');
         },
@@ -293,6 +328,7 @@ window.zync = Object.freeze({
                 srcDoc={fullHtml}
                 onLoad={() => {
                     frameGenerationRef.current += 1;
+                    sendVisibility();
                     sendTheme();
                     sendShortcuts();
                 }}

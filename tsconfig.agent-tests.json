@@ -38,6 +38,8 @@
         "src/components/editor/codemirror/comments.ts",
         "src/components/editor/codemirror/fileTypes.ts",
         "src/components/editor/codemirror/keymap.ts",
+        "src/components/editor/codemirror/performance.ts",
+        "src/components/editor/codemirror/sessionCache.ts",
         "src/components/editor/codemirror/status.ts",
         "src/components/editor/codemirror/theme.ts",
         "src/components/editor/providers.ts",

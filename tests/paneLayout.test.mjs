@@ -25,6 +25,8 @@ import {
   openFeatureInLayout,
   singleFeaturePane,
   singlePluginPane,
+  layoutForPlugin,
+  ownerForLayout,
   parsePaneLayout,
   parsePaneLayoutGroups,
   focusedTermIdForRestore,
@@ -63,6 +65,54 @@ function runTest(name, fn) {
     throw error;
   }
 }
+
+runTest('plugin instance owners survive session round trips', () => {
+  const layout = singlePluginPane('example.panel', 'plugin-pane', 'plugin-instance');
+  const groups = { 'plugin-instance': layout };
+  const snapshot = snapshotPaneLayoutGroups({ host: groups }, { host: [] });
+  const restored = parsePaneLayoutGroups(snapshot.host, new Set());
+  assert.equal(restored['plugin-instance'].root.content.instanceId, 'plugin-instance');
+  assert.equal(layoutForPlugin(restored, 'example.panel'), restored['plugin-instance']);
+  assert.equal(ownerForLayout(layout, 'stale-owner'), 'plugin-instance');
+});
+
+runTest('detaching the last shell preserves its plugin sibling', () => {
+  const split = splitPane(singlePane('shell', 'shell-pane'), 'shell-pane', 'horizontal', {
+    kind: 'plugin', pluginId: 'example.panel', instanceId: 'plugin-instance',
+  });
+  assert.equal(split.ok, true);
+  const detached = detachTermFromGroups({ shell: split.layout }, 'shell');
+  assert.equal(detached.nextOwner, 'plugin-instance');
+  assert.equal(detached.next['plugin-instance'].root.content.pluginId, 'example.panel');
+  assert.ok(parsePaneLayoutGroups(detached.next, new Set())['plugin-instance']);
+});
+
+runTest('owner promotion follows surviving feature or plugin identity', () => {
+  const layout = singlePluginPane('example.panel', 'plugin-pane', 'plugin-instance');
+  assert.equal(ownerForLayout(layout, 'plugin-instance'), 'plugin-instance');
+  assert.equal(ownerForLayout(singleFeaturePane('dashboard', 'feature-pane', 'feature-instance'), 'removed'), 'feature-instance');
+});
+
+runTest('same-canvas moves preserve every pane and content identity', () => {
+  for (const content of [
+    { kind: 'term', termId: 'shell-b' },
+    { kind: 'feature', featureId: 'files', instanceId: 'files-b' },
+    { kind: 'plugin', pluginId: 'example.panel', instanceId: 'plugin-b' },
+  ]) {
+    for (const edge of ['left', 'right', 'top', 'bottom']) {
+      const split = splitPane(singlePane('shell-a', 'pane-a'), 'pane-a', 'horizontal', content);
+      assert.equal(split.ok, true);
+      const sourceId = split.newPaneId;
+      const remainder = unsplitPane(split.layout, sourceId);
+      const moved = dockIntoLayout(remainder, content, edge, undefined, 'pane-a', sourceId);
+      assert.equal(moved.ok, true);
+      assert.equal(moved.paneId, sourceId);
+      assert.equal(leafCount(moved.layout.root), 2);
+      assert.equal(moved.layout.activePaneId, sourceId);
+      assert.deepEqual(visibleTermIds(moved.layout).sort(), content.kind === 'term' ? ['shell-a', 'shell-b'] : ['shell-a']);
+    }
+  }
+});
 
 runTest('single pane is not a split', () => {
   const layout = singlePane('term-a', 'pane-a');
@@ -497,7 +547,7 @@ runTest('detachTermFromGroups keeps Files panes when the last shell exits', () =
   assert.deepEqual(visibleTermIds(remaining), []);
 });
 
-runTest('detachTermFromGroups rekeys a plugin-only remainder to workspace', () => {
+runTest('detachTermFromGroups rekeys a legacy plugin-only remainder to its plugin', () => {
   const mixed = dockIntoLayout(
     singlePane('term-a', 'pane-a'),
     { kind: 'plugin', pluginId: 'plug-1' },
@@ -506,8 +556,8 @@ runTest('detachTermFromGroups rekeys a plugin-only remainder to workspace', () =
   assert.equal(mixed.ok, true);
   if (!mixed.ok) return;
   const gone = detachTermFromGroups({ 'term-a': mixed.layout }, 'term-a');
-  assert.equal(gone.nextOwner, WORKSPACE_PANE_OWNER);
-  const remaining = gone.next?.[WORKSPACE_PANE_OWNER];
+  assert.equal(gone.nextOwner, 'plug-1');
+  const remaining = gone.next?.['plug-1'];
   assert.ok(remaining);
   assert.equal(layoutHasPlugin(remaining, 'plug-1'), true);
   assert.deepEqual(visibleTermIds(remaining), []);
@@ -856,9 +906,9 @@ runTest('sameSplitGroup treats a single tab as its own group', () => {
   assert.equal(sameSplitGroup(groups, 'term-a', 'term-z'), false);
 });
 
-runTest('same-group term dock only matches shells already visible in that layout', () => {
-  assert.equal(sameGroupTermDock(undefined, 'term-a', 'term-a'), null);
-  assert.equal(sameGroupTermDock({}, 'term-a', 'term-a'), null);
+runTest('same-group term dock recognizes standalone owners and existing pane members', () => {
+  assert.equal(sameGroupTermDock(undefined, 'term-a', 'term-a'), 'self');
+  assert.equal(sameGroupTermDock({}, 'term-a', 'term-a'), 'self');
   assert.equal(sameGroupTermDock({}, 'term-a', 'term-b'), null);
   const split = splitPane(singlePane('term-a', 'pane-a'), 'pane-a', 'horizontal', { kind: 'term', termId: 'term-b' });
   assert.equal(split.ok, true);

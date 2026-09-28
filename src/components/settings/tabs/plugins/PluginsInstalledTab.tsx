@@ -1,5 +1,5 @@
 import { useState, type ComponentType, type Dispatch, type SetStateAction } from 'react';
-import { Info, Monitor, MoreVertical, Package, Pause, Play, RefreshCw, ShieldAlert, Trash2 } from 'lucide-react';
+import { Info, Monitor, MoreVertical, Package, Pause, Play, RefreshCw, Trash2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { RegistryPlugin } from '../../hooks/useSettingsPlugins';
 import type { InstalledPlugin } from '../../../../features/plugins/types';
@@ -11,7 +11,6 @@ import { PluginDetailsDialog } from './PluginDetailsDialog';
 interface PluginsInstalledTabProps {
     plugins: InstalledPlugin[];
     runtimeHealth: PluginRuntimeHealth[];
-    pluginSafeMode: boolean;
     registry: RegistryPlugin[];
     isLoadingPlugins: boolean;
     processingId: string | null;
@@ -23,7 +22,6 @@ interface PluginsInstalledTabProps {
     onUpdatePlugin: (plugin: RegistryPlugin) => Promise<void>;
     onUninstallPlugin: (plugin: InstalledPlugin, deleteData: boolean) => Promise<void>;
     onRetryPluginRuntime: (id: string) => Promise<boolean>;
-    onExitPluginSafeMode: () => Promise<boolean>;
     onSaveOptionalPermissions: (id: string, permissionIds: string[]) => Promise<boolean>;
     onClearPluginData: (plugin: InstalledPlugin) => Promise<boolean>;
     onRollbackPlugin: (plugin: InstalledPlugin, version: string) => Promise<boolean>;
@@ -74,7 +72,6 @@ function compareSemver(a: string, b: string): number {
 export function PluginsInstalledTab({
     plugins,
     runtimeHealth,
-    pluginSafeMode,
     registry,
     isLoadingPlugins,
     processingId,
@@ -86,7 +83,6 @@ export function PluginsInstalledTab({
     onUpdatePlugin,
     onUninstallPlugin,
     onRetryPluginRuntime,
-    onExitPluginSafeMode,
     onSaveOptionalPermissions,
     onClearPluginData,
     onRollbackPlugin,
@@ -106,25 +102,6 @@ export function PluginsInstalledTab({
 
     return (
         <div className="space-y-4">
-            {pluginSafeMode && (
-                <div className="p-3 rounded-lg border border-amber-500/30 bg-amber-500/10 flex items-start justify-between gap-3">
-                    <div className="flex items-start gap-2.5 min-w-0">
-                        <ShieldAlert size={16} className="text-amber-500 shrink-0 mt-0.5" />
-                        <div>
-                            <h4 className="text-xs font-medium text-[var(--color-app-text)]">Plugin safe mode</h4>
-                            <p className="text-[10px] text-[var(--color-app-muted)] mt-1">
-                                Third-party plugins are paused because the previous app session ended unexpectedly.
-                            </p>
-                        </div>
-                    </div>
-                    <button
-                        onClick={() => { void onExitPluginSafeMode(); }}
-                        className="px-2.5 py-1.5 rounded-md bg-amber-500 text-black text-[10px] font-medium hover:bg-amber-400 transition-colors shrink-0"
-                    >
-                        Try plugins
-                    </button>
-                </div>
-            )}
             <div className="flex flex-col gap-3">
                 <div className="p-3 bg-[var(--color-app-surface)]/50 rounded-lg border border-[var(--color-app-border)]/50 flex items-center justify-between">
                     <div className="flex items-center gap-3">

@@ -4,6 +4,47 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.33.2] - 2026-09-27
+
+This release includes the changes recorded below for 2.33.0 and 2.33.1, whose releases remained drafts, together with the following fixes.
+
+### Fixed
+
+- **Plugin close ownership:** Preserve surviving canvases when promoted owner keys collide, including groups processed later, and retain the correct active selection. ([feed932])
+- **Structural pane retention:** Keep content hosts and their DOM order stable across splits, moves, owner changes and collapse, preserving iframe documents and pane state. Split geometry and resize observations are separate from content lifecycle; closed content is disposed and hidden terminals remain inactive. ([feed932])
+- **Plugin fallbacks:** Keep valid marketplace thumbnails when installed plugins have no icon or their local image fails to load, preserve registry icon fallbacks, and show a loading state while a plugin canvas is being prepared instead of a blank view. ([7b7ac50])
+- **Plugin visibility:** Publish only committed pane visibility so interrupted renders cannot change background polling state. ([7b7ac50])
+- **Standalone shell self-drop:** Recognize an unsplit shell as its own canvas so dragging its tab onto itself creates a sibling shell instead of hiding the original tab. ([7b7ac50])
+- **Same-canvas pane dragging:** Preserve moved pane IDs and suppress the browser's trailing drop click so rearranging panes cannot activate a close button after the layout changes. ([7b7ac50])
+- **Shared plugin canvases:** Render standalone plugins through the shared pane layout instead of terminal overlays, keep the destination selected during tab docking, preserve pane identities and surviving canvases after moves/close, and keep host drag events outside sandboxed frames. ([7b7ac50])
+- **Plugin icons:** Load package-relative image assets dynamically in workspace menus, pane headers, installed-plugin settings, and details. Marketplace cards use installed icons or HTTPS thumbnails, with safe-path validation and generic fallbacks. ([76b045b])
+- **Plugin tab lifecycle:** Preserve visited plugin frames across workspace and pane-tab switches, signal visibility to pause background reads, and dispose closed or disconnected panes without plugin-specific layout branches. ([e58e875])
+- **Retained-tab correctness:** Start plugin visibility as hidden until confirmed by the host, and retain visited connection-free tabs through the same live inventory as connection tabs. ([e58e875])
+- **Release documentation:** Correct the 2.33.1 changelog comparison links and clarify that production registry metadata must expire within seven days; zero-expiry metadata is supported only for historical verification. ([dc9f7f9])
+
+### Changed
+
+- **Icon regression coverage:** Exercise independent thumbnail and local-asset error handlers and verify their state-driven fallbacks. ([c1b57d2])
+
+## [2.33.1] - 2026-09-27
+
+### Fixed
+
+- **Failed plugin reload cleanup:** Remove commands, panels, and pane routing as soon as their workers stop, even when recovery-status loading fails. ([cc010f6])
+- **Plugin startup recovery:** Ordinary app restarts no longer globally pause third-party plugins. Per-plugin crash-loop quarantine is retained, and unavailable or corrupt recovery history blocks activation without overwriting the original history. ([57b9c5e])
+- **Tunnel reconciliation:** Send the required `connectionId` argument to Tauri for positional and object calls, retaining compatibility with legacy `connection_id` callers. ([57b9c5e])
+- **SDK signing guidance:** Use operation-neutral passphrase errors and accurately describe published versus upcoming CLI commands and unattended signing requirements. ([cef8c21])
+- **Plugin staging workflow:** Quote the native registry test command so YAML parses correctly and GitHub can start the manually triggered staging checks. ([cb3e9a9])
+
+### Changed
+
+- **Plugin security guidance:** Clarify Manifest v2 isolation, powerful remote-command permissions, optional Allow/Deny grants, sensitive log exports, legacy Developer Mode limits, and publisher-signature guarantees. ([cb3e9a9])
+
+### Security
+
+- **Production registry release gate:** Reject non-expiring metadata and signed validity periods longer than seven days, independently of the publication pipeline. ([cc010f6])
+- **Registry freshness guidance:** Production registry publication uses a maximum seven-day expiry with daily automated refreshes. The next desktop release must raise its minimum registry version to reject historical non-expiring metadata; signing workflow and input protection remain required operational controls. ([cef8c21])
+
 ## [2.33.0] - 2026-09-26
 
 ### Added
@@ -1491,7 +1532,9 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [d3f4060]: https://github.com/zync-sh/zync/commit/d3f4060
 [840afc2]: https://github.com/zync-sh/zync/commit/840afc2
 [193f568]: https://github.com/zync-sh/zync/commit/193f568
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.33.0...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.33.2...HEAD
+[2.33.2]: https://github.com/zync-sh/zync/compare/v2.33.1...v2.33.2
+[2.33.1]: https://github.com/zync-sh/zync/compare/v2.33.0...v2.33.1
 [2.33.0]: https://github.com/zync-sh/zync/compare/v2.32.2...v2.33.0
 [2.32.2]: https://github.com/zync-sh/zync/compare/v2.32.1...v2.32.2
 [2.32.1]: https://github.com/zync-sh/zync/compare/v2.32.0...v2.32.1
@@ -1657,3 +1700,13 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [c20e841]: https://github.com/zync-sh/zync/commit/c20e841
 [41eaaa2]: https://github.com/zync-sh/zync/commit/41eaaa2
 [da6ac74]: https://github.com/zync-sh/zync/commit/da6ac74
+[cb3e9a9]: https://github.com/zync-sh/zync/commit/cb3e9a9
+[cef8c21]: https://github.com/zync-sh/zync/commit/cef8c21
+[57b9c5e]: https://github.com/zync-sh/zync/commit/57b9c5e
+[7b7ac50]: https://github.com/zync-sh/zync/commit/7b7ac50cda7fd1a4a73cf94ae4756754efdc8d25
+[76b045b]: https://github.com/zync-sh/zync/commit/76b045b
+[e58e875]: https://github.com/zync-sh/zync/commit/e58e875
+[dc9f7f9]: https://github.com/zync-sh/zync/commit/dc9f7f9
+[feed932]: https://github.com/zync-sh/zync/commit/feed932040da773f83f1d69c79b1a8c6e8aaf613
+[cc010f6]: https://github.com/zync-sh/zync/commit/cc010f6
+[c1b57d2]: https://github.com/zync-sh/zync/commit/c1b57d2

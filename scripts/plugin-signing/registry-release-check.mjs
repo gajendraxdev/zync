@@ -53,6 +53,12 @@ export async function checkPublishedRegistry({
   if (verified.version < minimumVersion) {
     throw new Error(`Registry version ${verified.version} is below required version ${minimumVersion}`);
   }
+  if (verified.expiresAtMs === 0) {
+    throw new Error('Release registry must expire; non-expiring metadata is not allowed');
+  }
+  if (verified.expiresAtMs - verified.issuedAtMs > 7 * 24 * 60 * 60 * 1_000) {
+    throw new Error('Release registry validity must not exceed seven days');
+  }
   if (verified.expiresAtMs - currentTimeMs < minimumValidityMs) {
     throw new Error('Registry expires before the required release validation window');
   }

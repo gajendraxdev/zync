@@ -540,6 +540,11 @@ export const PluginProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             runtimeSupervisor.current.stopAll(pluginId => {
                 rejectPendingPluginNotifyActionsForPlugin(pluginId, 'Plugin reloaded');
             });
+            // Registrations and routing belong to the Workers just stopped, even if reload fails.
+            setCommands([]);
+            setPanels([]);
+            paneMessageTargets.current.clear();
+            paneBindingQueue.current.clear();
             await resetNativePluginRuntimes();
             if (!isCurrent()) return false;
             if (healthCheckPluginId) {
@@ -554,13 +559,15 @@ export const PluginProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             try {
                 recovery = await getNativePluginRecoveryStatus();
             } catch (error) {
-                // If recovery state cannot be trusted, keep third-party code stopped while
-                // leaving built-in plugins available so the user can still repair the app.
-                console.error('[Plugins] Failed to read runtime recovery state:', error);
-                recovery = { safeMode: true, diagnostics: [] };
+                // Unknown history cannot safely authorize a new Worker generation.
+                // Preserve supervisor quarantine and let an explicit reload retry status.
+                console.warn('[Plugins] Recovery history is unavailable:', error);
+                throw new Error('Plugin startup blocked: recovery history is unavailable.');
             }
             if (!isCurrent()) return false;
-            setPluginSafeMode(recovery.safeMode);
+            // Ignore the retired global flag from older hosts and saved state.
+            recovery.safeMode = false;
+            setPluginSafeMode(false);
             recovery.diagnostics.forEach(diagnostic => {
                 runtimeSupervisor.current.restoreFailures(
                     diagnostic.pluginId,
@@ -618,13 +625,6 @@ export const PluginProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             registerThemePluginModes(enabledPlugins);
             window.dispatchEvent(new CustomEvent('zync:theme-registry-ready'));
             setPlugins(loadedPlugins);
-            // Commands and panes belong to a Worker generation. Keeping registrations from the
-            // previous generation makes removed commands look alive after an update.
-            setCommands([]);
-            setPanels([]);
-            paneMessageTargets.current.clear();
-            paneBindingQueue.current.clear();
-
             // Initialize Workers
             for (const plugin of runnablePlugins) {
                 if (!runtimeSupervisor.current.beginStart(plugin.manifest.id)) continue;

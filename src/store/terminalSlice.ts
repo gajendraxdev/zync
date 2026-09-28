@@ -32,6 +32,9 @@ import {
     layoutHasFeature,
     layoutForCanvas,
     layoutForFeatureInstance,
+    layoutForPlugin,
+    ownerForLayout,
+    isKeepableRemainder,
     dropSplitIntro,
     neighborPaneId,
     parsePaneLayoutGroups,
@@ -158,6 +161,8 @@ export interface TerminalSlice {
     splitFeaturePane: (connectionId: string, featureId: SplitFeatureId, direction?: SplitDirection, instanceId?: string) => DockResult;
     /** Ungrouped Files/Dashboard/… is a real pane, not an overlay. */
     ensureFeaturePane: (connectionId: string, featureId: SplitFeatureId, instanceId: string) => void;
+    ensurePluginPane: (connectionId: string, pluginId: string) => void;
+    closePluginPanes: (connectionId: string, pluginId: string) => void;
     unsplitPanes: (connectionId: string) => void;
     togglePanes: (connectionId: string) => void;
     resizePanes: (connectionId: string, splitId: string, sizes: [number, number], persist?: boolean) => void;
@@ -828,6 +833,64 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
         scheduleSaveSession(() => get().saveSession());
     },
 
+    ensurePluginPane: (connectionId, pluginId) => {
+        const state = get();
+        const groups = state.paneLayouts[connectionId];
+        if (layoutForPlugin(groups, pluginId)) return;
+        const content = pluginPaneContent(pluginId);
+        const owner = content.instanceId!;
+        set({
+            paneLayouts: {
+                ...state.paneLayouts,
+                [connectionId]: {
+                    ...(groups ?? {}),
+                    [owner]: singlePluginPane(pluginId, undefined, owner),
+                },
+            },
+        });
+        scheduleSaveSession(() => get().saveSession());
+    },
+
+    closePluginPanes: (connectionId, pluginId) => {
+        set(state => {
+            const groups = state.paneLayouts[connectionId];
+            if (!groups) return state;
+            const next: PaneLayoutGroups = {};
+            const releasedTerms = new Set<string>();
+            let activeOwner = state.activePaneGroupOwner[connectionId] ?? null;
+            for (const [owner, layout] of Object.entries(groups)) {
+                const remaining = dropPlugin(layout, pluginId);
+                if (isKeepableRemainder(remaining)) {
+                    const candidateOwner = ownerForLayout(remaining, owner);
+                    // Reserve original keys too: a later group must not overwrite
+                    // a remainder that was promoted into its owner slot.
+                    const occupied = Object.prototype.hasOwnProperty.call(next, candidateOwner)
+                        || (candidateOwner !== owner && Object.prototype.hasOwnProperty.call(groups, candidateOwner));
+                    const nextOwner = occupied ? owner : candidateOwner;
+                    next[nextOwner] = remaining;
+                    if (activeOwner === owner) activeOwner = nextOwner;
+                } else {
+                    for (const termId of remaining ? visibleTermIds(remaining) : []) releasedTerms.add(termId);
+                    if (activeOwner === owner) activeOwner = null;
+                }
+            }
+            return {
+                terminals: {
+                    ...state.terminals,
+                    [connectionId]: (state.terminals[connectionId] ?? []).map(tab =>
+                        releasedTerms.has(tab.id) ? { ...tab, tabVisible: true } : tab,
+                    ),
+                },
+                paneLayouts: writeConnectionGroups(state.paneLayouts, connectionId, next),
+                activePaneGroupOwner: {
+                    ...state.activePaneGroupOwner,
+                    [connectionId]: activeOwner,
+                },
+            };
+        });
+        scheduleSaveSession(() => get().saveSession());
+    },
+
     activatePaneGroup: (connectionId, owner) => {
         set(state => {
             const layout = state.paneLayouts[connectionId]?.[owner];
@@ -1134,27 +1197,16 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                     }
                 }
                 if (!targetLayout) return 'no-target';
-                const moved = dockIntoLayout(targetLayout, sourceNode.content, edge, undefined, paneId);
+                const moved = dockIntoLayout(targetLayout, sourceNode.content, edge, undefined, paneId, sourcePaneId);
                 if (!moved.ok) {
                     return moved.reason === 'cap' ? 'refused-cap' : 'no-target';
                 }
 
                 if (sourceOwner !== owner) {
                     const remainingTerms = withoutSource ? visibleTermIds(withoutSource) : [];
-                    const keepSourceGroup = Boolean(withoutSource && isSplitLayout(withoutSource));
-                    const remainingFeatureOwner = withoutSource
-                        ? collectLeaves(withoutSource.root).find((leaf) => (
-                            isFeatureContent(leaf.content) && leaf.content.instanceId
-                        ))
-                        : undefined;
-                    const nextSourceOwner = keepSourceGroup
-                        ? (remainingTerms.includes(sourceOwner)
-                            ? sourceOwner
-                            : remainingTerms[0]
-                                ?? (remainingFeatureOwner && isFeatureContent(remainingFeatureOwner.content)
-                                    ? remainingFeatureOwner.content.instanceId
-                                    : undefined)
-                                ?? WORKSPACE_PANE_OWNER)
+                    const keepSourceGroup = isKeepableRemainder(withoutSource);
+                    const nextSourceOwner = keepSourceGroup && withoutSource
+                        ? ownerForLayout(withoutSource, sourceOwner)
                         : null;
                     const nextGroups: PaneLayoutGroups = {};
                     for (const [groupOwner, groupLayout] of Object.entries(groups ?? {})) {
@@ -1426,11 +1478,20 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
             if (dropped === layout) return state;
             const nextGroups: PaneLayoutGroups = { ...(groups ?? {}) };
             delete nextGroups[owner];
-            if (dropped && isSplitLayout(dropped)) {
-                nextGroups[owner] = dropped;
+            let nextOwner: string | null = null;
+            if (isKeepableRemainder(dropped)) {
+                nextOwner = ownerForLayout(dropped, owner);
+                nextGroups[nextOwner] = dropped;
             }
             const remainingTerm = dropped ? layoutActiveTermId(dropped) : activeId;
             return {
+                activePaneGroupOwner: { ...state.activePaneGroupOwner, [connectionId]: nextOwner },
+                terminals: {
+                    ...state.terminals,
+                    [connectionId]: (state.terminals[connectionId] ?? []).map(tab =>
+                        !nextOwner && tab.id === remainingTerm ? { ...tab, tabVisible: true } : tab,
+                    ),
+                },
                 paneLayouts: writeConnectionGroups(
                     state.paneLayouts,
                     connectionId,
@@ -1460,11 +1521,20 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
             if (dropped === layout) return state;
             const nextGroups: PaneLayoutGroups = { ...(groups ?? {}) };
             delete nextGroups[owner];
-            if (dropped && isSplitLayout(dropped)) {
-                nextGroups[owner] = dropped;
+            let nextOwner: string | null = null;
+            if (isKeepableRemainder(dropped)) {
+                nextOwner = ownerForLayout(dropped, owner);
+                nextGroups[nextOwner] = dropped;
             }
             const remainingTerm = dropped ? layoutActiveTermId(dropped) : activeId;
             return {
+                activePaneGroupOwner: { ...state.activePaneGroupOwner, [connectionId]: nextOwner },
+                terminals: {
+                    ...state.terminals,
+                    [connectionId]: (state.terminals[connectionId] ?? []).map(tab =>
+                        !nextOwner && tab.id === remainingTerm ? { ...tab, tabVisible: true } : tab,
+                    ),
+                },
                 paneLayouts: writeConnectionGroups(
                     state.paneLayouts,
                     connectionId,
@@ -1524,17 +1594,16 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
             let nextLayoutOwner: string | null = null;
             if (isSplitLayout(dropped)) {
                 const remainingTerms = visibleTermIds(dropped);
-                const nextOwner = remainingTerms.includes(owner)
-                    ? owner
-                    : remainingTerms[0] ?? owner;
+                const nextOwner = ownerForLayout(dropped, owner);
                 nextGroups[nextOwner] = dropped;
                 nextLayoutOwner = nextOwner;
                 if (remainingTerms.length > 0 && (!nextActiveTermId || !remainingTerms.includes(nextActiveTermId))) {
                     nextActiveTermId = remainingTerms[0];
                 }
             } else if (dropped && isPaneLeaf(dropped.root) && !isTermContent(dropped.root.content)) {
-                nextGroups[owner] = dropped;
-                nextLayoutOwner = owner;
+                const nextOwner = ownerForLayout(dropped, owner);
+                nextGroups[nextOwner] = dropped;
+                nextLayoutOwner = nextOwner;
             }
             return {
                 terminals: { ...state.terminals, [connectionId]: nextTabs },

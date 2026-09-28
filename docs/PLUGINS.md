@@ -38,7 +38,7 @@ The Sandbox MVP is complete on `feature/plugin-sandbox-v2` for locally reviewed 
 - Manifest v2 pane registration resolves the declared title and HTML entry from the verified package in native code; pane ids are host-namespaced, frames use opaque origins and a restrictive CSP, and the legacy panel bridge is not exposed;
 - every mounted plugin pane has a host-generated instance id and a bounded JSON message channel to its own Worker; Worker replies are routed only to a live pane instance owned by that plugin;
 - the frontend runtime supervisor owns Worker generations, monitors responsiveness without treating host sleep as a failure, exposes runtime health in plugin management, removes contributions after a crash or heartbeat timeout, and quarantines a plugin after three failures within one minute;
-- native recovery state retains bounded failure classifications and an unclean-shutdown marker; after an unexpected exit Zync starts with third-party plugins paused until the user chooses **Try plugins**;
+- native recovery state retains bounded failure classifications and an unclean-shutdown marker; unclean exits do not globally pause third-party plugins. Crash-loop quarantine is restored per plugin before activation. If recovery history cannot be read, startup is blocked until it is available rather than treating unknown history as empty;
 - installed plugin details are resolved from the native package and grant stores, show publisher/source/digest/runtime/storage information, allow optional permissions to be changed against the exact approved package, and clear only that plugin's private device store after revoking its live native runtime;
 - uninstall now revokes the runtime and grants immediately, keeps private plugin data by default, and offers a separate confirmed **Uninstall and delete data** action; a data-deletion failure is reported without pretending the already-removed package is still installed;
 - raw compatibility Worker APIs for filesystem paths, external windows, theme mutation, status mutation, plugin inventory, and terminal input are broker-blocked for Manifest v2 packages;
@@ -520,7 +520,7 @@ Developers can manually exercise this flow with `npm run plugin:keygen`, `npm ru
 
 ### 10.3 Registry resilience
 
-Use signed, versioned registry metadata with separated root, targets, snapshot, and timestamp responsibilities. This protects against stale metadata, rollback, mix-and-match releases, and compromise of a single online key. Clients retain a last-known-good index and enforce metadata expiry without deleting already installed plugins.
+The current registry uses one root signature, not separate TUF targets/snapshot/timestamp roles. Clients retain version floors and cumulative revocations. Positive `expiresAtMs` timestamps enforce expiry without deleting installed plugins; zero explicitly means no expiry in the next compatible build. Non-expiring metadata does not protect fresh installations or cleared trust state against an old signed registry missing newer revocations.
 
 Marketplace installation accepts only the signed download target and digest from registry metadata—not an arbitrary URL supplied by presentation data.
 
@@ -567,7 +567,7 @@ Each release may set `"channel": "stable"` (the default) or `"channel": "beta"`.
 }
 ```
 
-Keep `registry-root-key.json` offline and backed up. Never put it in the repository or CI. Configure releases with the public `ZYNC_PLUGIN_REGISTRY_ROOT_KEYS`, increase the registry version for every publication, use a short expiry appropriate to the hosting operation, and upload the generated `registry.json` only after `plugin:registry-verify` succeeds. Follow the operations runbook for two-person recovery drills and staged root rotation.
+Keep root keys private and backed up. Local signing or protected registry-release CI signing is permitted; private roots must never enter desktop build jobs, package artifacts, or logs. Configure desktop releases with public `ZYNC_PLUGIN_REGISTRY_ROOT_KEYS`, increase the version for every publication, and publish only after verification against those roots. `expiresAtMs: 0` supports non-expiring metadata in compatible builds; previously released verifiers reject it. Follow the operations runbook for recovery, solo-maintainer self-review, and staged root rotation.
 
 Published metadata can be checked without the private root key using `npm run plugin:registry-check`. The manual **Plugin registry staging** workflow verifies a protected staging environment, and the desktop **Release** workflow validates any configured production registry before creating a draft. URL and roots must be configured together; setting `ZYNC_PLUGIN_REGISTRY_REQUIRED=true` additionally prohibits marketplace-disabled releases. A configured registry must be reachable, correctly signed, at or above its version floor, no larger than 2 MiB, and valid for at least another 24 hours. Redirects are followed only while every hop remains HTTPS. See [PLUGIN_REGISTRY_OPERATIONS.md](./PLUGIN_REGISTRY_OPERATIONS.md) for environment setup and the manual install/revocation smoke checklist.
 
@@ -767,7 +767,7 @@ The plugin platform requires automated tests at every boundary.
 - plugin pane open, split, self-split, dock, close, unsplit, restore, and missing-plugin placeholder;
 - independent state for multiple pane instances;
 - live disable/reload without unrelated pane or terminal changes;
-- update rollback and safe-mode startup;
+- update rollback and normal plugin startup after app restarts;
 - uninstall with keep-data and delete-data choices;
 - accessibility, keyboard navigation, reduced motion, and theme contrast.
 
@@ -809,7 +809,7 @@ The current Web Worker and sandboxed-frame implementation is a useful compatibil
 
 ### Phase 4 — supervisor and management
 
-- Add lazy activation, live disable/reload, quotas, health state, crash quarantine, safe mode, diagnostics, and data controls.
+- Add lazy activation, live disable/reload, quotas, health state, per-plugin crash quarantine, diagnostics, and data controls. App restarts must not globally pause unrelated plugins.
 - Add plugin details, grants, publisher, source, storage, logs, rollback, and security-state UI.
 
 ### Phase 5 — ecosystem SDK
@@ -878,7 +878,7 @@ Zync may describe standard plugins as sandboxed when all of these are true:
 - UI frames use strict sandboxing, CSP, schema validation, and host-owned security UI;
 - updates show permission changes and support atomic rollback;
 - users can inspect and revoke every meaningful grant;
-- crash quarantine and third-party-plugin safe mode work before normal workspace startup;
+- per-plugin crash quarantine restores before normal workspace startup; previous unclean app exits must not globally pause third-party plugins;
 - official plugins pass conformance, malicious-package, and permission-bypass suites;
 - the legacy unrestricted bridge is disabled for marketplace packages.
 
