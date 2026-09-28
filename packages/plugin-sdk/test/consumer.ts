@@ -1,6 +1,7 @@
 import { defineManifest, type ManifestV2 } from '@zync-sh/plugin-sdk';
 import type { ZyncWorkerApi } from '@zync-sh/plugin-sdk/worker';
 import type { ZyncPaneApi } from '@zync-sh/plugin-sdk/pane';
+import type { ZyncEditorBridge } from '@zync-sh/plugin-sdk/editor';
 import { validateManifest, type ValidationIssue } from '@zync-sh/plugin-sdk/validate';
 
 const manifest: ManifestV2 = defineManifest({
@@ -19,6 +20,11 @@ const manifest: ManifestV2 = defineManifest({
 
 declare const worker: ZyncWorkerApi;
 declare const pane: ZyncPaneApi;
+declare const editor: ZyncEditorBridge;
+
+editor.reportStatus({ docId: 'document-one', line: 1, column: 1, language: 'typescript' });
+// @ts-expect-error cursor coordinates are numeric
+editor.reportStatus({ docId: 'document-one', line: '1', column: 1 });
 
 worker.on('ready', async () => {
   await worker.panel.register(manifest.contributes?.paneKinds?.[0].id ?? 'hello.pane');

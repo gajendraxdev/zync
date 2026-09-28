@@ -10,6 +10,8 @@ import {
 } from '../features/editor/editorStatus';
 import { useAppStore } from '../store/useAppStore';
 import { markPlainDocumentSaved, reconcilePlainDocument } from './editor/plainDocumentState';
+import { plainCursorPosition } from './editor/editorStatusReport';
+import { formatCodeMirrorStatus } from './editor/codemirror/status';
 
 interface PlainFileEditorProps {
   documentId?: string;
@@ -48,6 +50,7 @@ export function PlainFileEditor({
   const [matchIndex, setMatchIndex] = useState(-1);
   const [isSaving, setIsSaving] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+  const [selectionStart, setSelectionStart] = useState(0);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -63,6 +66,7 @@ export function PlainFileEditor({
     setSearchText('');
     setMatchIndex(-1);
     setShowSearch(false);
+    setSelectionStart(0);
   }, [documentKey]);
 
   const isDirty = content !== savedContent;
@@ -192,11 +196,12 @@ export function PlainFileEditor({
   }, [handleClose, handleSave, showSearch]);
 
   useEffect(() => {
+    const { line, column } = plainCursorPosition(content, selectionStart);
     publishEditorStatus(
       statusSourceRef.current,
-      `${filename}  UTF-8  ${languageLabel}${isDirty ? '  • Modified' : ''}`,
+      formatCodeMirrorStatus(filename, line, column, languageLabel, isDirty),
     );
-  }, [filename, isDirty, languageLabel]);
+  }, [content, filename, isDirty, languageLabel, selectionStart]);
 
   useEffect(() => () => clearEditorStatus(statusSourceRef.current), []);
 
@@ -262,7 +267,9 @@ export function PlainFileEditor({
           onChange={(event) => {
             const nextContent = event.target.value;
             setDocumentState((current) => ({ ...current, content: nextContent }));
+            setSelectionStart(event.target.selectionStart);
           }}
+          onSelect={(event) => setSelectionStart(event.currentTarget.selectionStart)}
           spellCheck={false}
           className="min-h-0 flex-1 resize-none border-0 bg-app-bg px-4 py-3 font-mono text-sm leading-6 text-app-text outline-none ring-0 placeholder:text-app-muted"
           aria-label={`Fallback editor for ${filename}`}

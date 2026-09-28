@@ -6,6 +6,9 @@ import type { Plugin } from '../context/PluginContext';
 import { getZyncThemePayload } from '../lib/themePayload';
 import { isDebugThemePayloadEnabled } from '../lib/debugFlags';
 import { PluginSaveState } from './editor/pluginSaveState';
+import { parseEditorStatusReport, type EditorStatusReport } from './editor/editorStatusReport';
+import { clearEditorStatus, createEditorStatusSource, publishEditorStatus } from '../features/editor/editorStatus';
+import { formatCodeMirrorStatus } from './editor/codemirror/status';
 
 interface EditorPluginFrameProps {
   plugin: Plugin;
@@ -71,6 +74,8 @@ export function EditorPluginFrame({
   const [dirty, setDirty] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
+  const [statusReport, setStatusReport] = useState<EditorStatusReport | null>(null);
+  const statusSourceRef = useRef(createEditorStatusSource(`plugin-editor:${plugin.manifest.id}`));
   const theme = useAppStore((state) => state.settings.theme);
   const accentColor = useAppStore((state) => state.settings.accentColor);
   const showToast = useAppStore((state) => state.showToast);
@@ -93,6 +98,18 @@ export function EditorPluginFrame({
     content: initialContent,
     readOnly: false,
   }), [documentId, filename, initialContent]);
+
+  useEffect(() => {
+    const report = statusReport?.docId === doc.docId ? statusReport : null;
+    publishEditorStatus(
+      statusSourceRef.current,
+      report
+        ? formatCodeMirrorStatus(filename, report.line, report.column, report.language ?? doc.language, dirty)
+        : `${filename}  UTF-8  ${doc.language}${dirty ? '  • Modified' : ''}`,
+    );
+  }, [dirty, doc.docId, doc.language, filename, statusReport]);
+
+  useEffect(() => () => clearEditorStatus(statusSourceRef.current), []);
 
   const requestClose = useCallback(async () => {
     if (!saveStateRef.current.dirty) {
@@ -210,6 +227,16 @@ export function EditorPluginFrame({
             if (payload?.docId && payload.docId !== currentDocIdRef.current) break;
             setEditorDirty(saveStateRef.current.providerDirtyChange(Boolean(payload?.dirty)));
             break;
+          case 'zync:editor:status': {
+            if (!currentDocIdRef.current) break;
+            const report = parseEditorStatusReport(payload, currentDocIdRef.current);
+            if (report) setStatusReport((current) => (
+              current?.docId === report.docId && current.line === report.line &&
+              current.column === report.column && current.language === report.language
+                ? current : report
+            ));
+            break;
+          }
           case 'zync:editor:save-request':
             if (payload?.docId && payload.docId !== currentDocIdRef.current) break;
             {
@@ -376,6 +403,9 @@ export function EditorPluginFrame({
     emitDirtyChange(dirty, docId) {
       window.parent.postMessage({ type: 'zync:editor:dirty-change', payload: { dirty, docId } }, '*');
     },
+    reportStatus(status) {
+      window.parent.postMessage({ type: 'zync:editor:status', payload: status }, '*');
+    },
     requestSave(content, request) {
       window.parent.postMessage({ type: 'zync:editor:save-request', payload: { content, ...request } }, '*');
     },
@@ -476,6 +506,7 @@ export function EditorPluginFrame({
             srcDoc={fullHtml}
             onLoad={() => {
               setIsReady(false);
+              setStatusReport(null);
               readyForDocRef.current = false;
               currentDocIdRef.current = null;
               postToFrame({ type: 'zync:editor:bootstrap', payload: {} });

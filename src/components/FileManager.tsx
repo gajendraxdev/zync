@@ -58,6 +58,7 @@ import { TerminalDisconnectedView } from './terminal/TerminalDisconnectedView';
 import { collectLeaves, isFeatureContent, layoutForCanvas, layoutForFeatureInstance } from '../lib/paneLayout';
 import { filesStoreKey } from '../store/fileSystemSlice';
 import { paneCloseScope, registerPaneCloseBlocker } from '../lib/paneCloseBlockers';
+import { isCurrentEditorRead, type EditorFileTarget } from './file-manager/editorReadIdentity';
 import type { AppStore } from '../store/useAppStore';
 import { canSplitBesideFiles, isUnconfirmedHomeToken, isUnresolvedFilesPath, openHerePlacementItems, openTerminalHere, pickFilesHomePath } from './layout/tabDock';
 
@@ -265,17 +266,25 @@ export const FileManager = memo(function FileManager({
 
   // Editor State
   const [editingFile, setEditingFile] = useState<FileEntry | null>(null);
-  const [editingFilePath, setEditingFilePath] = useState<string | null>(null);
+  const [editingFileTarget, setEditingFileTarget] = useState<EditorFileTarget | null>(null);
+  const editorTargetRef = useRef<EditorFileTarget | null>(null);
+  const editorReadRequestRef = useRef(0);
+  const editorConnectionRef = useRef(activeConnectionId);
+  const [isFileLoading, setIsFileLoading] = useState(false);
   const [editorDirty, setEditorDirty] = useState(false);
   const editorCloseToken = useRef({});
   const [editorContent, setEditorContent] = useState('');
   const [editorProviderOverride, setEditorProviderOverride] = useState<string | null>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
+    editorConnectionRef.current = activeConnectionId;
+    editorReadRequestRef.current += 1;
+    editorTargetRef.current = null;
     setEditingFile(null);
-    setEditingFilePath(null);
+    setEditingFileTarget(null);
     setEditorDirty(false);
     setEditorContent('');
     setEditorProviderOverride(null);
+    setIsFileLoading(false);
   }, [activeConnectionId]);
 
   useLayoutEffect(() => {
@@ -330,7 +339,6 @@ export const FileManager = memo(function FileManager({
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [isZipping, setIsZipping] = useState(false);
-  const [isFileLoading, setIsFileLoading] = useState(false);
   const [isNarrow, setIsNarrow] = useState(() => window.innerWidth < FILE_CHROME_NARROW_MAX);
   const editorProviderOptions = useMemo(() => buildEditorProviderOptions(editorProviders), [editorProviders]);
 
@@ -384,7 +392,11 @@ export const FileManager = memo(function FileManager({
       // Close any open modals to show the overlay clearly
       setIsEditingPath(false);
       setIsRenameModalOpen(false);
-      if (!preserveEditor) setEditingFile(null);
+      if (!preserveEditor) {
+        editorTargetRef.current = null;
+        setEditingFile(null);
+        setEditingFileTarget(null);
+      }
       setIsCopyModalOpen(false);
       setIsPropertiesOpen(false);
       setIsDeleteModalOpen(false);
@@ -847,28 +859,34 @@ export const FileManager = memo(function FileManager({
       showToast('error', EDITOR_READ_LIMIT_MESSAGE);
       return false;
     }
+    const sourceConnectionId = activeConnectionId;
+    const requestId = ++editorReadRequestRef.current;
     setIsFileLoading(true);
     try {
       const fullPath = currentPath === '/' ? `/${file.name}` : `${currentPath}/${file.name}`;
       const content = await window.ipcRenderer.invoke('fs_read_file', {
-        connectionId: activeConnectionId,
+        connectionId: sourceConnectionId,
         path: fullPath,
         maxBytes: MAX_EDITOR_FILE_BYTES,
       });
+      if (!isCurrentEditorRead(sourceConnectionId, editorConnectionRef.current, requestId, editorReadRequestRef.current)) return false;
+      const target = { connectionId: sourceConnectionId, path: fullPath };
+      editorTargetRef.current = target;
       setEditorProviderOverride(providerOverride ?? null);
       setEditorContent(content);
-      setEditingFilePath(fullPath);
+      setEditingFileTarget(target);
       setEditingFile(file);
       return true;
     } catch (error: any) {
-      if (!handleConnectionError(activeConnectionId, error)) {
+      if (!isCurrentEditorRead(sourceConnectionId, editorConnectionRef.current, requestId, editorReadRequestRef.current)) return false;
+      if (!handleConnectionError(sourceConnectionId, error)) {
         showToast('error', isEditorReadLimitError(error)
           ? EDITOR_READ_LIMIT_MESSAGE
           : `Failed to open file: ${error.message || String(error)}`);
       }
       return false;
     } finally {
-      setIsFileLoading(false);
+      if (requestId === editorReadRequestRef.current) setIsFileLoading(false);
     }
   }, [activeConnectionId, currentPath, handleConnectionError, showToast]);
 
@@ -918,24 +936,27 @@ export const FileManager = memo(function FileManager({
   }, [editorProviderOptions, settings.editor, showToast, updateSettings]);
 
   const handleSaveFile = useCallback(async (content: string) => {
-    if (!activeConnectionId || !editingFile || !editingFilePath) {
+    const target = editingFileTarget;
+    if (!editingFile || !target || editorTargetRef.current !== target) {
       throw new Error('The file or its connection is no longer available');
     }
     try {
       await window.ipcRenderer.invoke('fs_write_file', {
-        connectionId: activeConnectionId,
-        path: editingFilePath,
+        connectionId: target.connectionId,
+        path: target.path,
         content,
       });
-      setEditorContent(content);
-      showToast('success', 'File saved');
+      if (editorTargetRef.current === target) {
+        setEditorContent(content);
+        showToast('success', 'File saved');
+      }
     } catch (error: any) {
-      if (!handleConnectionError(activeConnectionId, error, true)) {
+      if (editorTargetRef.current === target && !handleConnectionError(target.connectionId, error, true)) {
         showToast('error', `Failed to save file: ${error.message || String(error)}`);
       }
       throw error;
     }
-  }, [activeConnectionId, editingFile, editingFilePath, handleConnectionError, showToast]);
+  }, [editingFile, editingFileTarget, handleConnectionError, showToast]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent, file?: FileEntry) => {
     e.preventDefault();
@@ -2054,17 +2075,18 @@ export const FileManager = memo(function FileManager({
       />
 
       {/* File Editor Overlay */}
-      {editingFile && editingFilePath && (
+      {editingFile && editingFileTarget && (
         <FileEditor
-          documentId={`${activeConnectionId}:${editingFilePath}`}
+          documentId={`${editingFileTarget.connectionId}:${editingFileTarget.path}`}
           filename={editingFile.name}
           initialContent={editorContent}
           preferredProviderId={editorProviderOverride ?? undefined}
           onSave={handleSaveFile}
           onDirtyChange={setEditorDirty}
           onClose={() => {
+            editorTargetRef.current = null;
             setEditingFile(null);
-            setEditingFilePath(null);
+            setEditingFileTarget(null);
             setEditorDirty(false);
             setEditorProviderOverride(null);
           }}

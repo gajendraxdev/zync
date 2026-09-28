@@ -18,6 +18,20 @@ npm install --save-dev @zync-sh/plugin-sdk@beta
 
 Zync supplies the `zync` object when it starts a plugin worker or pane. Do not bundle an SDK runtime into the plugin.
 
+## Editor status (desktop host)
+
+Editor-provider iframes receive a separate `zyncEditor` bridge. After `zync:editor:open-document`, a provider can report its one-based cursor position and optional short language label to Zync's bottom status bar:
+
+```ts
+import type { ZyncEditorBridge } from '@zync-sh/plugin-sdk/editor';
+
+declare const zyncEditor: ZyncEditorBridge;
+
+zyncEditor.reportStatus({ docId: currentDocument.docId, line: 12, column: 4, language: 'typescript' });
+```
+
+Report on cursor or selection changes, not on a timer. The `docId` must match the current document; stale, invalid, or oversized values are ignored. Zync supplies the filename, encoding, and modified state itself. Older desktop hosts ignore this optional message. This declaration is available in this source checkout; do not assume it exists in a previously published SDK package until that package has been released.
+
 ## Manifest
 
 `defineManifest` gives TypeScript a Manifest v2 contract and returns the same object. It does **not** validate a package or grant permissions; the Zync host is the final authority.
