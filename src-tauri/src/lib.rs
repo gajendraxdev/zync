@@ -92,10 +92,15 @@ pub fn run() {
             Ok(())
         })
         .on_page_load(|webview, payload| {
-            if webview.label() == "main"
-                && matches!(payload.event(), tauri::webview::PageLoadEvent::Finished)
-            {
-                let _ = webview.window().show();
+            if webview.label() == "main" {
+                match payload.event() {
+                    tauri::webview::PageLoadEvent::Started => {
+                        plugins::pane_document::clear_all(webview.app_handle());
+                    }
+                    tauri::webview::PageLoadEvent::Finished => {
+                        let _ = webview.window().show();
+                    }
+                }
             }
         })
         .on_window_event(|window, event| {
@@ -120,6 +125,11 @@ pub fn run() {
                         }
                         api.prevent_close();
                         let _ = window.emit("app:request-close", ());
+                    }
+                }
+                tauri::WindowEvent::Destroyed => {
+                    if window.label() == "main" {
+                        plugins::pane_document::clear_all(window.app_handle());
                     }
                 }
                 tauri::WindowEvent::DragDrop(drag_event) => match drag_event {

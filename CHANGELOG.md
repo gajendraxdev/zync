@@ -4,18 +4,27 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.33.9] - 2026-09-30
+
 ### Changed
 
 - **Editor provider startup:** Scan and verify editor packages on a blocking
-  worker so opening an editor cannot stall the desktop UI thread.
+  worker so opening an editor cannot stall the desktop UI thread. ([dc40757])
+- **Editor provider toolbar:** Give external editors the same compact save,
+  shortcut, go-to-line and find/replace controls as the built-in editor, and
+  use inline save state instead of repetitive success notifications. Saving
+  remains accurate across queued requests and provider reloads.
 
 ### Fixed
 
 - **Packaged plugin styling:** Apply the release CSP nonce to dynamically
-  installed built-in theme styles, matching development and packaged builds.
+  installed built-in theme styles, matching development and packaged builds. ([1bdd4a6])
 - **Packaged editor providers:** Load manifest-declared editor CSS, scripts,
   fonts and workers through the isolated plugin resource route instead of
-  direct filesystem asset URLs, while retaining permission and package-integrity checks.
+  direct filesystem asset URLs, while retaining permission and package-integrity checks. ([dc40757])
+- **Editor provider lifecycle:** Release document registrations and their
+  isolated runtimes when the main webview reloads or is destroyed, including
+  when browser-side cleanup cannot run.
 
 ## [2.33.8] - 2026-09-29
 
@@ -1628,7 +1637,8 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [d3f4060]: https://github.com/zync-sh/zync/commit/d3f4060
 [840afc2]: https://github.com/zync-sh/zync/commit/840afc2
 [193f568]: https://github.com/zync-sh/zync/commit/193f568
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.33.8...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.33.9...HEAD
+[2.33.9]: https://github.com/zync-sh/zync/compare/v2.33.8...v2.33.9
 [2.33.8]: https://github.com/zync-sh/zync/compare/v2.33.7...v2.33.8
 [2.33.7]: https://github.com/zync-sh/zync/compare/v2.33.6...v2.33.7
 [2.33.6]: https://github.com/zync-sh/zync/compare/v2.33.5...v2.33.6
@@ -1820,3 +1830,5 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [309aa26]: https://github.com/zync-sh/zync/commit/309aa26
 [5283448]: https://github.com/zync-sh/zync/commit/5283448
 [ca4162a]: https://github.com/zync-sh/zync/commit/ca4162a
+[1bdd4a6]: https://github.com/zync-sh/zync/commit/1bdd4a6
+[dc40757]: https://github.com/zync-sh/zync/commit/dc40757

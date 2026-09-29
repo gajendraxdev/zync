@@ -89,6 +89,20 @@ impl PaneDocuments {
         None
     }
 
+    fn clear(&self) -> Vec<PaneAssetBinding> {
+        let Ok(mut documents) = self.inner.lock() else {
+            return Vec::new();
+        };
+        let bindings = documents
+            .entries
+            .values()
+            .filter_map(|entry| entry.asset_binding.clone())
+            .collect();
+        documents.entries.clear();
+        documents.total_bytes = 0;
+        bindings
+    }
+
     /// The generated id scopes every route. Asset reads are delegated to the
     /// live broker, which rechecks the permission and package before opening.
     pub(crate) fn respond(
@@ -278,6 +292,19 @@ pub(crate) fn respond_with_broker(
     })
 }
 
+/// Release documents whose browser-side unregister callbacks can no longer run.
+pub(crate) fn clear_all(app: &AppHandle) {
+    let Some(documents) = app.try_state::<PaneDocuments>() else {
+        return;
+    };
+    let bindings = documents.clear();
+    if let Some(broker) = app.try_state::<PluginBrokerState>() {
+        for binding in bindings {
+            broker.release_asset_binding(&binding);
+        }
+    }
+}
+
 #[tauri::command]
 pub(crate) fn plugins_pane_document_unregister(
     state: State<'_, PaneDocuments>,
@@ -364,6 +391,35 @@ mod tests {
         assert!(store.register("x".to_string(), None).is_err());
         let _ = store.unregister(&entries[0].id);
         assert!(store.register("x".to_string(), None).is_ok());
+    }
+
+    #[test]
+    fn clear_removes_documents_and_returns_runtime_bindings() {
+        let store = PaneDocuments::default();
+        let binding = PaneAssetBinding {
+            runtime_instance_id: "editor-runtime".to_string(),
+            package_root: PathBuf::new(),
+            entry_route: "ui/index.html".to_string(),
+            owns_runtime: true,
+        };
+        let entry = store
+            .register("<html></html>".to_string(), Some(binding))
+            .unwrap();
+
+        let bindings = store.clear();
+
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(bindings[0].runtime_instance_id, "editor-runtime");
+        assert!(bindings[0].owns_runtime);
+        assert_eq!(
+            store
+                .respond(&request(&format!("/{}/ui/index.html", entry.id)), |_, _| {
+                    None
+                })
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+        assert!(store.register("x".repeat(MAX_DOCUMENT_BYTES), None).is_ok());
     }
 
     #[test]

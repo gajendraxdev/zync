@@ -948,7 +948,6 @@ export const FileManager = memo(function FileManager({
       });
       if (editorTargetRef.current === target) {
         setEditorContent(content);
-        showToast('success', 'File saved');
       }
     } catch (error: any) {
       if (editorTargetRef.current === target && !handleConnectionError(target.connectionId, error, true)) {

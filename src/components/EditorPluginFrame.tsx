@@ -10,6 +10,7 @@ import { parseEditorStatusReport, type EditorStatusReport } from './editor/edito
 import { clearEditorStatus, createEditorStatusSource, publishEditorStatus } from '../features/editor/editorStatus';
 import { formatCodeMirrorStatus } from './editor/codemirror/status';
 import { usePluginEditorDocument } from '../features/plugins/usePluginPaneDocument';
+import { PluginEditorToolbar, type PluginEditorCommand } from './editor/PluginEditorToolbar';
 
 interface EditorPluginFrameProps {
   plugin: Plugin;
@@ -30,6 +31,10 @@ interface EditorDocumentPayload {
   language: string;
   content: string;
   readOnly: boolean;
+}
+
+function pendingSaveKey(generation: number, docId: string): string {
+  return `${generation}:${docId}`;
 }
 
 function detectLanguage(filename: string): string {
@@ -73,6 +78,7 @@ export function EditorPluginFrame({
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [isReady, setIsReady] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
   const [statusReport, setStatusReport] = useState<EditorStatusReport | null>(null);
@@ -84,6 +90,8 @@ export function EditorPluginFrame({
   const saveStateRef = useRef(new PluginSaveState(initialContent));
   const readyForDocRef = useRef(false);
   const currentDocIdRef = useRef<string | null>(null);
+  const frameGenerationRef = useRef(0);
+  const pendingSaveCountsRef = useRef(new Map<string, number>());
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const setEditorDirty = useCallback((value: boolean) => {
     saveStateRef.current.dirty = value;
@@ -133,6 +141,39 @@ export function EditorPluginFrame({
     iframeRef.current?.contentWindow?.postMessage(message, '*');
   }, []);
 
+  const markSavePending = useCallback((generation: number, docId: string) => {
+    const key = pendingSaveKey(generation, docId);
+    const pending = pendingSaveCountsRef.current;
+    pending.set(key, (pending.get(key) ?? 0) + 1);
+    if (generation === frameGenerationRef.current && docId === currentDocIdRef.current) {
+      setIsSaving(true);
+      setSaveError(null);
+    }
+  }, []);
+
+  const finishSavePending = useCallback((generation: number, docId: string) => {
+    const key = pendingSaveKey(generation, docId);
+    const pending = pendingSaveCountsRef.current;
+    const remaining = Math.max(0, (pending.get(key) ?? 1) - 1);
+    if (remaining > 0) pending.set(key, remaining);
+    else pending.delete(key);
+    if (
+      remaining === 0 &&
+      generation === frameGenerationRef.current &&
+      docId === currentDocIdRef.current
+    ) {
+      setIsSaving(false);
+    }
+  }, []);
+
+  const sendEditorCommand = useCallback((command: PluginEditorCommand) => {
+    if (!isReady || !currentDocIdRef.current) return;
+    postToFrame({
+      type: 'zync:editor:command',
+      payload: { command, docId: currentDocIdRef.current },
+    });
+  }, [isReady, postToFrame]);
+
   // Always compute the current theme payload at send-time so we don't
   // accidentally capture stale CSS variable values.
   const getThemePayload = useCallback(() => getZyncThemePayload(theme), [theme, accentColor]);
@@ -157,6 +198,7 @@ export function EditorPluginFrame({
   useEffect(() => {
     saveStateRef.current.reset(initialContent);
     setEditorDirty(false);
+    setIsSaving(false);
     setSaveError(null);
     // A content refresh for the same file must not clear in-flight edits.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -241,33 +283,52 @@ export function EditorPluginFrame({
           case 'zync:editor:save-request':
             if (payload?.docId && payload.docId !== currentDocIdRef.current) break;
             {
+              const docId = currentDocIdRef.current;
+              if (!docId) break;
               const content = saveStateRef.current.requestSave(payload?.content);
               setEditorDirty(saveStateRef.current.dirty);
               const requestId = typeof payload?.requestId === 'number' ? payload.requestId : undefined;
-              const docId = currentDocIdRef.current;
+              const frameGeneration = frameGenerationRef.current;
+              markSavePending(frameGeneration, docId);
               const save = async () => {
                 try {
-                  if (docId === currentDocIdRef.current) setSaveError(null);
                   await onSave(content);
-                  if (docId === currentDocIdRef.current) {
+                  if (
+                    frameGeneration === frameGenerationRef.current &&
+                    docId === currentDocIdRef.current
+                  ) {
                     setEditorDirty(saveStateRef.current.saveSucceeded(content, requestId !== undefined));
-                    showToast('success', `${plugin.manifest.name} saved ${filename}`);
                   }
-                  if (requestId !== undefined) postToFrame({
-                    type: 'zync:editor:save-result',
-                    payload: { docId, requestId, ok: true },
-                  });
+                  if (
+                    requestId !== undefined &&
+                    frameGeneration === frameGenerationRef.current
+                  ) {
+                    postToFrame({
+                      type: 'zync:editor:save-result',
+                      payload: { docId, requestId, ok: true },
+                    });
+                  }
                 } catch (error: unknown) {
                   const message = error instanceof Error ? error.message : String(error);
-                  if (docId === currentDocIdRef.current) {
+                  if (
+                    frameGeneration === frameGenerationRef.current &&
+                    docId === currentDocIdRef.current
+                  ) {
                     setSaveError(message);
                     setEditorDirty(saveStateRef.current.saveFailed(content));
                   }
                   showToast('error', `Plugin editor save failed: ${message}`);
-                  if (requestId !== undefined) postToFrame({
-                    type: 'zync:editor:save-result',
-                    payload: { docId, requestId, ok: false },
-                  });
+                  if (
+                    requestId !== undefined &&
+                    frameGeneration === frameGenerationRef.current
+                  ) {
+                    postToFrame({
+                      type: 'zync:editor:save-result',
+                      payload: { docId, requestId, ok: false },
+                    });
+                  }
+                } finally {
+                  finishSavePending(frameGeneration, docId);
                 }
               };
               const queuedSave = saveQueueRef.current.then(save, save);
@@ -297,7 +358,7 @@ export function EditorPluginFrame({
 
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
-  }, [doc.docId, filename, onFatalError, onSave, plugin.manifest.editor?.supports, plugin.manifest.id, plugin.manifest.name, postToFrame, requestClose, sendTheme, setEditorDirty, showToast]);
+  }, [doc.docId, filename, finishSavePending, getThemePayload, markSavePending, onFatalError, onSave, plugin.manifest.editor?.supports, plugin.manifest.id, plugin.manifest.name, postToFrame, requestClose, sendTheme, setEditorDirty, showToast]);
 
   useEffect(() => {
     return () => {
@@ -401,35 +462,16 @@ export function EditorPluginFrame({
   return (
       <div className="absolute inset-0 z-[70] flex min-h-0 flex-col bg-app-panel">
         {!hideToolbar && (
-          <div className="flex h-9 items-center justify-between border-b border-app-border bg-app-panel px-3">
-            <div className="flex min-w-0 items-center gap-2">
-              <h3 className="truncate text-sm font-medium text-app-text">{filename}</h3>
-              <span aria-hidden="true" className="text-app-muted/50">·</span>
-              <span className="truncate text-xs text-app-muted">
-                {plugin.manifest.editor?.displayName || plugin.manifest.name}
-              </span>
-            </div>
-            <div className="flex shrink-0 items-center gap-3 text-[11px] text-app-muted">
-              <span className="inline-flex items-center gap-1.5">
-                <span
-                  aria-hidden="true"
-                  className={`h-1.5 w-1.5 rounded-full ${isReady ? 'bg-emerald-400' : 'bg-amber-400'}`}
-                />
-                {isReady ? 'Ready' : 'Connecting'}
-              </span>
-              <span className={dirty ? 'text-app-text' : 'text-app-muted'}>
-                {dirty ? 'Modified' : 'Saved'}
-              </span>
-              <button
-                type="button"
-                onClick={() => { void requestClose(); }}
-                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-base text-app-muted transition-colors hover:bg-app-surface hover:text-app-text"
-                aria-label="Close editor"
-              >
-                ×
-              </button>
-            </div>
-          </div>
+          <PluginEditorToolbar
+            dirty={dirty}
+            filename={filename}
+            isReady={isReady}
+            isSaving={isSaving}
+            onClose={() => { void requestClose(); }}
+            onCommand={sendEditorCommand}
+            providerName={plugin.manifest.editor?.displayName || plugin.manifest.name}
+            supports={plugin.manifest.editor?.supports}
+          />
         )}
         <div className="flex min-h-0 flex-1 flex-col">
         {saveError && (
@@ -456,7 +498,10 @@ export function EditorPluginFrame({
             src={editorDocument.native && editorDocument.state.status === 'ready' ? editorDocument.state.url : undefined}
             srcDoc={editorDocument.native ? undefined : fullHtml}
             onLoad={() => {
+              frameGenerationRef.current += 1;
+              pendingSaveCountsRef.current.clear();
               setIsReady(false);
+              setIsSaving(false);
               setStatusReport(null);
               readyForDocRef.current = false;
               currentDocIdRef.current = null;
