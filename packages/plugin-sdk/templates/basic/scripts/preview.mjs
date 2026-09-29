@@ -65,9 +65,13 @@ export async function startPreview(root = path.join(project, 'dist')) {
     if (isDocument) {
       const html = content.toString('utf8');
       const shim = '<script src="/__zync_preview_shim.js"></script>';
+      const doctype = /^(?:\uFEFF)?(?:\s|<!--[\s\S]*?-->)*<!doctype[^>]*>/i.exec(html);
+      const withoutHead = doctype
+        ? `${doctype[0]}${shim}${html.slice(doctype[0].length)}`
+        : `${shim}${html}`;
       content = Buffer.from(/<head(?:\s[^>]*)?>/i.test(html)
         ? html.replace(/<head(?:\s[^>]*)?>/i, match => `${match}${shim}`)
-        : `${shim}${html}`);
+        : withoutHead);
       response.setHeader('Content-Security-Policy', previewCsp);
     }
     response.writeHead(200, { 'Content-Type': contentType });

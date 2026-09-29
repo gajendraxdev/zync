@@ -41,13 +41,24 @@ try {
     const page = await fetch(`${base}/ui/index.html`);
     assert.equal(page.status, 200);
     assert.match(page.headers.get('content-security-policy'), /script-src 'self'/);
-    assert.match(await page.text(), /__zync_preview_shim\.js/);
+    const pageHtml = await page.text();
+    assert.ok(pageHtml.indexOf('<head>') < pageHtml.indexOf('/__zync_preview_shim.js'));
+    assert.ok(pageHtml.indexOf('/__zync_preview_shim.js') < pageHtml.indexOf('</head>'));
     assert.equal((await fetch(`${base}/ui/pane.css`)).status, 200);
     assert.equal((await fetch(`${base}/ui/pane.js`)).status, 200);
     assert.equal((await fetch(`${base}/manifest.json`)).status, 404);
     assert.equal((await fetch(`${base}/ui/pane.js`, { method: 'POST' })).status, 405);
   } finally {
     await new Promise(resolve => server.close(resolve));
+  }
+  fs.writeFileSync(path.join(output, 'ui', 'index.html'), '<!doctype html><html><body>Headless pane</body></html>');
+  const headlessServer = await preview(output);
+  try {
+    const page = await fetch(`http://127.0.0.1:${headlessServer.address().port}/ui/index.html`);
+    assert.equal(page.status, 200);
+    assert.match(await page.text(), /^<!doctype html><script src="\/__zync_preview_shim\.js"><\/script><html>/i);
+  } finally {
+    await new Promise(resolve => headlessServer.close(resolve));
   }
 } finally {
   if (project.startsWith(os.tmpdir())) fs.rmSync(project, { recursive: true, force: true });
