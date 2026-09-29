@@ -8,6 +8,7 @@ pub(crate) mod management;
 mod manifest;
 pub(crate) mod network;
 mod package;
+pub(crate) mod pane_document;
 pub(crate) mod recovery;
 pub(crate) mod registry;
 pub(crate) mod rollback;

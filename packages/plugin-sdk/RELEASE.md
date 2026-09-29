@@ -6,12 +6,21 @@ Manifest v2 engine ranges use semantic-version comparators such as `^2.0.0`, `>=
 
 Before a beta npm SDK release:
 
+The starter now uses package-relative pane CSS and JavaScript. An integration-
+only SDK beta may precede the desktop release so plugin authors can prepare
+their sources. Keep `externalPaneAssetsMinZyncVersion` conservative and verify
+it against the first **published** desktop build with the isolated resource
+route before releasing migrated plugins to users. Do not offer the new starter
+to older Zync versions; previously signed inline-pane packages remain untouched.
+
 1. Run `npm run sdk:release-check` from the Zync repository root. It checks type contracts, validator cases, the starter build, and the exact npm package contents.
 2. Run the native plugin tests and the full agent regression suite.
 3. Run `node check.mjs` in the sibling `zync-plugin-channel-examples` project to validate, sign, and verify stable and beta builds in a disposable registry.
 4. Review the exact SDK tarball, production dependency audit, license, and documentation. Publish the prerelease with the `beta` npm tag and install it in a clean project to verify the CLI and exported types. Check the actual registry tags after publishing; npm initialized `latest` to the beta on this package's first release despite `--tag beta` and rejected removal of `latest`. Do not describe `latest` as stable until a stable release replaces that tag.
 
 `@zync-sh/plugin-sdk@2.0.0-beta.1` was published under `beta` on 2026-09-25. A clean npm install verified the CLI and exported runtime helpers. npm also currently resolves `latest` to this first beta; install `@beta` explicitly until stable promotion.
+
+`@zync-sh/plugin-sdk@2.1.0-beta.2` was published under `beta` on 2026-09-29 for plugin integration testing. The SDK release checks, native plugin tests, app agent regression suite, example registry signing check, and production dependency audit passed. A clean install validated a sample plugin with the published CLI. The `latest` tag remains at `2.0.0-beta.1`. External pane assets still require a packaged Zync desktop release that supports the isolated resource route; do not distribute migrated plugin builds to older hosts.
 
 The SDK beta is an authoring tool, not a production marketplace launch. Before promoting it to `latest` or calling the marketplace production-ready, deploy the signed test builds to a protected HTTPS staging registry. Manually verify marketplace listing, opt-in beta update, switch back to stable, permission review, and retained-version rollback in the desktop app. Record the tested Zync build, SDK version, registry version, and package digests; complete the external-plugin smoke test and independent security review. Local signing tests do not substitute for these checks.
 

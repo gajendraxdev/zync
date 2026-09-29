@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
+import { isTauri } from '@tauri-apps/api/core';
 import { useAppStore } from '../../store/useAppStore';
 import { getZyncThemePayload } from '../../lib/themePayload';
 import { isDebugThemePayloadEnabled } from '../../lib/debugFlags';
 import { confirmPluginTerminalAction } from '../../features/plugins/confirmPluginTerminalAction';
 import { handlePanelPluginCommand } from '../../features/plugins/pluginCommandBridge';
 import { parsePluginPaneMessage } from '../../features/plugins/runtime/paneMessages';
+import { usePluginPaneDocument } from '../../features/plugins/usePluginPaneDocument';
 import { usePlugins } from '../../context/PluginContext';
 import { isPluginShortcutCommandAllowed, matchPluginShortcut, pluginShortcutBindings, pluginShortcutBridgeScript } from '../../features/shortcuts/pluginShortcuts';
 import { runShortcutCommand } from '../../features/shortcuts/actions';
@@ -312,7 +314,9 @@ window.zync = Object.freeze({
 </script>
 `;
 
-    const securityMeta = `
+    // Native panes receive their CSP as a protocol response header. Keep the
+    // meta policy only for browser previews, where there is no native response.
+    const securityMeta = isTauri() ? '' : `
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; font-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
 `;
 
@@ -320,12 +324,22 @@ window.zync = Object.freeze({
     const fullHtml = /<head(?:\s[^>]*)?>/i.test(html)
         ? html.replace(/<head(?:\s[^>]*)?>/i, match => `${match}\n${injection}`)
         : `<html><head>${injection}</head><body>${html}</body></html>`;
+    const paneDocument = usePluginPaneDocument(fullHtml, pluginId, panelId, legacyAccess);
 
     return (
         <div className="absolute inset-0 z-10 bg-app-bg flex flex-col">
-            <iframe
+            {paneDocument.native && paneDocument.state.status === 'error' ? (
+                <div role="alert" className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
+                    Plugin pane could not load. Close and reopen this pane to try again.
+                </div>
+            ) : paneDocument.native && paneDocument.state.status === 'loading' ? (
+                <div role="status" className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
+                    Loading plugin pane…
+                </div>
+            ) : <iframe
                 ref={iframeRef}
-                srcDoc={fullHtml}
+                src={paneDocument.native && paneDocument.state.status === 'ready' ? paneDocument.state.url : undefined}
+                srcDoc={paneDocument.native ? undefined : fullHtml}
                 onLoad={() => {
                     frameGenerationRef.current += 1;
                     sendVisibility();
@@ -335,7 +349,7 @@ window.zync = Object.freeze({
                 sandbox={legacyAccess ? 'allow-scripts allow-modals' : 'allow-scripts'}
                 className="flex-1 w-full border-0 bg-transparent"
                 title={`Plugin Panel: ${panelId}`}
-            />
+            />}
         </div>
     );
 }

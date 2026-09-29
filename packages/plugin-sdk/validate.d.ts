@@ -11,6 +11,10 @@ export interface ValidationResult {
 
 export declare const knownPermissionIds: readonly string[];
 export declare const pluginApiVersion: string;
+/** Minimum desktop release planned for package-relative pane resources. */
+export declare const externalPaneAssetsMinZyncVersion: string;
+/** Asset response types supported by isolated pane documents. */
+export declare const paneAssetMimeTypes: Readonly<Record<string, string>>;
 
 export interface CompatibilityTarget {
   zyncVersion?: string;

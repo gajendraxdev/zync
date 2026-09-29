@@ -55,6 +55,9 @@ pub fn run() {
     };
 
     builder
+        .register_uri_scheme_protocol(plugins::pane_document::SCHEME, |context, request| {
+            plugins::pane_document::respond_with_broker(context.app_handle(), &request)
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
@@ -74,6 +77,7 @@ pub fn run() {
             let app_state = AppState::new(data_dir.clone(), app_handle.clone());
             app.manage(app_state);
             app.manage(plugins::broker::PluginBrokerState::new());
+            app.manage(plugins::pane_document::PaneDocuments::default());
             app.manage(plugins::filesystem::PluginFilesystemState::new());
             app.manage(plugins::storage::PluginStorageState::new());
             app.manage(plugins::recovery::PluginRecoveryState::load_and_begin(
@@ -251,6 +255,8 @@ pub fn run() {
             commands::plugins_runtime_authorize,
             commands::plugins_runtime_register_command,
             commands::plugins_runtime_register_pane,
+            plugins::pane_document::plugins_pane_document_register,
+            plugins::pane_document::plugins_pane_document_unregister,
             commands::plugins_storage_get,
             commands::plugins_storage_keys,
             commands::plugins_storage_set,

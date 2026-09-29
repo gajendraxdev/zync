@@ -33,7 +33,9 @@ try {
     'LICENSE', 'README.md', 'RELEASE.md', 'bin/keygen.mjs', 'bin/pem-key.mjs', 'bin/zync-plugin.mjs', 'editor.d.ts', 'index.d.ts', 'index.js', 'package.json',
     'pane.d.ts', 'signing.js', 'templates/basic/README.md', 'templates/basic/manifest.mjs',
     'templates/basic/package.json', 'templates/basic/scripts/build.mjs',
-    'templates/basic/src/ui/index.html', 'templates/basic/src/worker.js',
+    'templates/basic/scripts/preview.mjs',
+    'templates/basic/src/ui/index.html', 'templates/basic/src/ui/pane.css',
+    'templates/basic/src/ui/pane.js', 'templates/basic/src/worker.js',
     'validate.d.ts', 'validate.js', 'worker.d.ts',
   ]);
 } finally {

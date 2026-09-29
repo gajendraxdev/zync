@@ -1,4 +1,5 @@
 import { defineManifest } from '@zync-sh/plugin-sdk';
+import { externalPaneAssetsMinZyncVersion } from '@zync-sh/plugin-sdk/validate';
 
 export default defineManifest({
   manifestVersion: 2,
@@ -7,7 +8,7 @@ export default defineManifest({
   version: '1.0.0',
   publisher: 'dev.example',
   description: 'A minimal isolated Zync pane.',
-  engines: { zync: '>=2.32.2', pluginApi: '^2.0.0' },
+  engines: { zync: `>=${externalPaneAssetsMinZyncVersion}`, pluginApi: '^2.0.0' },
   runtime: { entry: 'worker.js' },
   contributes: {
     paneKinds: [{ id: 'starter.main', title: 'Starter Pane', entry: 'ui/index.html', allowMultiple: true }],
