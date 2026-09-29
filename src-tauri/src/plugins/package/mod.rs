@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 pub const MAX_PACKAGE_DOWNLOAD_BYTES: u64 = 25 * 1024 * 1024;
 const MAX_PACKAGE_EXPANDED_BYTES: u64 = 100 * 1024 * 1024;
-const MAX_PACKAGE_FILE_BYTES: u64 = 20 * 1024 * 1024;
+pub(crate) const MAX_PACKAGE_FILE_BYTES: u64 = 20 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 256 * 1024;
 const MAX_PACKAGE_ENTRIES: usize = 2_048;
 const MAX_PACKAGE_PATH_BYTES: usize = 512;

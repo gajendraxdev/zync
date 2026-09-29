@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { convertFileSrc } from '@tauri-apps/api/core';
+import { isTauri } from '@tauri-apps/api/core';
 
 import { useAppStore } from '../store/useAppStore';
 import type { Plugin } from '../context/PluginContext';
@@ -9,6 +9,7 @@ import { PluginSaveState } from './editor/pluginSaveState';
 import { parseEditorStatusReport, type EditorStatusReport } from './editor/editorStatusReport';
 import { clearEditorStatus, createEditorStatusSource, publishEditorStatus } from '../features/editor/editorStatus';
 import { formatCodeMirrorStatus } from './editor/codemirror/status';
+import { usePluginEditorDocument } from '../features/plugins/usePluginPaneDocument';
 
 interface EditorPluginFrameProps {
   plugin: Plugin;
@@ -311,74 +312,21 @@ export function EditorPluginFrame({
     };
   }, [postToFrame]);
 
-  const editorAssetUrls = useMemo(() => {
-    if (plugin.path.startsWith('builtin://')) return null;
-    // We intentionally resolve known assets directly from disk paths.
-    // This avoids relying on <base href> behavior inside about:srcdoc iframes.
-    const cssUrl = convertFileSrc(`${plugin.path}/dist/editor.css`.replace(/\\/g, '/'));
-    const jsUrl = convertFileSrc(`${plugin.path}/dist/editor.js`.replace(/\\/g, '/'));
-    return { cssUrl, jsUrl };
-  }, [plugin.path]);
-
   const shimScript = useMemo(() => {
-    const jsUrlLiteral = JSON.stringify(editorAssetUrls?.jsUrl ?? '');
     const supportedCapabilitiesLiteral = JSON.stringify(
       plugin.manifest.editor?.supports ?? [],
     ).replace(/</g, '\\u003c');
 
-    // In Tauri, convertFileSrc() can yield URLs where "directory joining" via URL('./', ...)
-    // isn't reliable (for example when the real filesystem path is encoded in query params).
-    // We inject a tiny resolver so the plugin can always derive pack URLs from the same
-    // mechanism used to load dist/editor.js.
     const resolverScript = `
   (function () {
-    const __editorJsUrl = ${jsUrlLiteral};
-    function __resolveViaUrlJoin(relativePath) {
-      try {
-        // If the pathname ends with editor.js, normal URL joining works.
-        const u = new URL(__editorJsUrl);
-        if (/\\/dist\\/editor\\.js$/i.test(u.pathname)) {
-          const dir = new URL('./', __editorJsUrl).toString();
-          return new URL(relativePath, dir).toString();
-        }
-      } catch { /* ignore */ }
-      return null;
-    }
-
-    function __resolveViaSearchParam(relativePath) {
-      try {
-        const u = new URL(__editorJsUrl);
-        for (const [key, value] of u.searchParams.entries()) {
-          if (!/editor\\.js$/i.test(value)) continue;
-          const baseValue = value.replace(/editor\\.js$/i, '');
-          u.searchParams.set(key, baseValue + relativePath);
-          return u.toString();
-        }
-      } catch { /* ignore */ }
-      return null;
-    }
-
-    function __resolveViaStringReplace(relativePath) {
-      if (!__editorJsUrl) return null;
-      const idx = __editorJsUrl.toLowerCase().lastIndexOf('editor.js');
-      if (idx < 0) return null;
-      return __editorJsUrl.slice(0, idx) + relativePath + __editorJsUrl.slice(idx + 'editor.js'.length);
-    }
-
     window.__zyncResolveEditorAsset = function (relativePath) {
-      const rel = String(relativePath || '');
-      return (
-        __resolveViaUrlJoin(rel) ||
-        __resolveViaSearchParam(rel) ||
-        __resolveViaStringReplace(rel) ||
-        rel
-      );
+      const value = String(relativePath || '');
+      try {
+        return new URL(value, document.baseURI).toString();
+      } catch {
+        return value;
+      }
     };
-
-    // Back-compat: base used by older plugin builds. This should resolve to the dist/ directory.
-    // (We intentionally compute it via the resolver so it works with query-param URL forms.)
-    const base = window.__zyncResolveEditorAsset('');
-    window.__zyncEditorAssetBase = (typeof base === 'string' && base && !base.endsWith('/')) ? (base + '/') : base;
   })();
     `;
 
@@ -430,21 +378,14 @@ export function EditorPluginFrame({
 })();
 </script>
 `;
-  }, [editorAssetUrls?.jsUrl, plugin.manifest.editor?.supports]);
+  }, [plugin.manifest.editor?.supports]);
 
+  const nativeEditorDocument = isTauri() && !plugin.path.startsWith('builtin://');
   const fullHtml = (plugin.editorHtml || plugin.style || plugin.script)
     ? (() => {
         let html = plugin.editorHtml || '<html><head></head><body></body></html>';
-        const securityMeta = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' asset: http://asset.localhost; style-src 'unsafe-inline' asset: http://asset.localhost; img-src data: blob: asset: http://asset.localhost; connect-src asset: http://asset.localhost; worker-src blob:; font-src data: asset: http://asset.localhost; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">`;
+        const securityMeta = nativeEditorDocument ? '' : `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; worker-src blob:; font-src data:; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">`;
         const headInjection = `${securityMeta}${shimScript}${plugin.style ? `<style>${plugin.style}</style>` : ''}${plugin.script ? `<script>${plugin.script}</script>` : ''}`;
-
-        // Hardening: rewrite common relative asset tags into file-backed asset URLs.
-        // This avoids 404s when the iframe is loaded via srcDoc (about:srcdoc).
-        if (editorAssetUrls) {
-          html = html
-            .replace(/href=(["'])\.?\/?dist\/editor\.css\1/gi, (_match, quote: string) => `href=${quote}${editorAssetUrls.cssUrl}${quote}`)
-            .replace(/src=(["'])\.?\/?dist\/editor\.js\1/gi, (_match, quote: string) => `src=${quote}${editorAssetUrls.jsUrl}${quote}`);
-        }
 
         if (/<head\b[^>]*>/i.test(html)) {
           return html.replace(/<head\b[^>]*>/i, (match) => `${match}${headInjection}`);
@@ -455,6 +396,7 @@ export function EditorPluginFrame({
         return `<html><head>${headInjection}</head><body>${html}</body></html>`;
       })()
     : `<html><head>${shimScript}</head><body style="font-family: sans-serif; background: #111827; color: white; display:flex; align-items:center; justify-content:center; min-height:100vh;">No editor entry found.</body></html>`;
+  const editorDocument = usePluginEditorDocument(fullHtml, plugin.manifest.id, nativeEditorDocument);
 
   return (
       <div className="absolute inset-0 z-[70] flex min-h-0 flex-col bg-app-panel">
@@ -501,9 +443,18 @@ export function EditorPluginFrame({
           </div>
         )}
         <div className="min-h-0 flex-1 overflow-hidden bg-app-bg">
-          <iframe
+          {editorDocument.native && editorDocument.state.status === 'error' ? (
+            <div role="alert" className="flex h-full items-center justify-center px-4 text-sm text-app-muted">
+              Editor provider assets could not load. Close and reopen the file to try again.
+            </div>
+          ) : editorDocument.native && editorDocument.state.status === 'loading' ? (
+            <div role="status" className="flex h-full items-center justify-center text-sm text-app-muted">
+              Loading editor provider…
+            </div>
+          ) : <iframe
             ref={iframeRef}
-            srcDoc={fullHtml}
+            src={editorDocument.native && editorDocument.state.status === 'ready' ? editorDocument.state.url : undefined}
+            srcDoc={editorDocument.native ? undefined : fullHtml}
             onLoad={() => {
               setIsReady(false);
               setStatusReport(null);
@@ -516,7 +467,7 @@ export function EditorPluginFrame({
             sandbox="allow-scripts"
             className="h-full w-full border-0 bg-transparent"
             title={`Editor Provider: ${plugin.manifest.id}`}
-          />
+          />}
         </div>
       </div>
     </div>

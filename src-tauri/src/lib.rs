@@ -256,6 +256,7 @@ pub fn run() {
             commands::plugins_runtime_register_command,
             commands::plugins_runtime_register_pane,
             plugins::pane_document::plugins_pane_document_register,
+            plugins::pane_document::plugins_editor_document_register,
             plugins::pane_document::plugins_pane_document_unregister,
             commands::plugins_storage_get,
             commands::plugins_storage_keys,

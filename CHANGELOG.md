@@ -4,10 +4,18 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Changed
+
+- **Editor provider startup:** Scan and verify editor packages on a blocking
+  worker so opening an editor cannot stall the desktop UI thread.
+
 ### Fixed
 
 - **Packaged plugin styling:** Apply the release CSP nonce to dynamically
   installed built-in theme styles, matching development and packaged builds.
+- **Packaged editor providers:** Load manifest-declared editor CSS, scripts,
+  fonts and workers through the isolated plugin resource route instead of
+  direct filesystem asset URLs, while retaining permission and package-integrity checks.
 
 ## [2.33.8] - 2026-09-29
 
