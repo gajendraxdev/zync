@@ -2,19 +2,24 @@
 
 Public authoring types for Manifest v2 plugins. This package lives in the Zync repository but has its own npm version and release lifecycle.
 
-The published SDK targets API **2.1** (`2.1.0-beta.1`). It adds `sshCommand.execute(paneInstanceId, { program, args, expectedConnectionToken? })`, requiring `ssh.command.execute` and `engines.pluginApi: "^2.1.0"`. The returned `connectionToken` must be carried into commands following a confirmation so reconnect/rebind cannot silently change their destination. Commands use the SSH account's full authority; this is not a read-only or PM2-only permission. API 2.0 hosts reject plugins requiring this addition.
+This SDK targets API **2.1**. It adds `sshCommand.execute(paneInstanceId, { program, args, expectedConnectionToken? })`, requiring `ssh.command.execute` and `engines.pluginApi: "^2.1.0"`. The returned `connectionToken` must be carried into commands following a confirmation so reconnect/rebind cannot silently change their destination. Commands use the SSH account's full authority; this is not a read-only or PM2-only permission. API 2.0 hosts reject plugins requiring this addition.
 
-To test unpublished CLI additions, install the local SDK as a development dependency:
+To test changes from a local checkout, install the SDK as a development dependency:
 
 ```sh
 npm install --save-dev /path/to/zync/packages/plugin-sdk
 ```
 
-The published `@beta` release is currently **2.1.0-beta.1** and includes the 2.1 SSH command API. Install it with:
+Install this prerelease explicitly with:
 
 ```sh
 npm install --save-dev @zync-sh/plugin-sdk@beta
 ```
+
+The starter's external pane assets require Zync `>=2.33.8`. This SDK beta is
+for updating and testing plugin source; it does not make external assets work
+in Zync 2.33.7 or older. Do not publish migrated plugin builds to users until
+the compatible desktop release has passed packaged-app testing.
 
 Zync supplies the `zync` object when it starts a plugin worker or pane. Do not bundle an SDK runtime into the plugin.
 
@@ -30,7 +35,7 @@ declare const zyncEditor: ZyncEditorBridge;
 zyncEditor.reportStatus({ docId: currentDocument.docId, line: 12, column: 4, language: 'typescript' });
 ```
 
-Report on cursor or selection changes, not on a timer. The `docId` must match the current document; stale, invalid, or oversized values are ignored. Zync supplies the filename, encoding, and modified state itself. Older desktop hosts ignore this optional message. This declaration is available in this source checkout; do not assume it exists in a previously published SDK package until that package has been released.
+Report on cursor or selection changes, not on a timer. The `docId` must match the current document; stale, invalid, or oversized values are ignored. Zync supplies the filename, encoding, and modified state itself. Older desktop hosts ignore this optional message.
 
 ## Manifest
 
@@ -62,13 +67,13 @@ Write the resulting object to `manifest.json` during your build. Zync installs t
 
 ### Generate a publisher key using OpenSSL
 
-The published `2.1.0-beta.1` package does not include `keygen` or the `zync-sdk` executable. These are implemented locally and require a new SDK version published and tagged `beta`. After that release, use the official scoped package explicitly:
+This prerelease includes `keygen` and the `zync-sdk` executable. Use the official scoped package explicitly:
 
 ```powershell
 npx --package=@zync-sh/plugin-sdk@beta zync-sdk keygen --out C:\ZyncSigningKeys\publisher-v1
 ```
 
-Do not use `npx zync-sdk`: that can resolve an unrelated unscoped npm package. In a project with this SDK installed, `npx --no-install zync-sdk keygen --out <new-directory>` runs its installed executable. Before publication, developers working in this source checkout can test it with `node packages/plugin-sdk/bin/zync-plugin.mjs keygen --out <new-directory>`.
+Do not use `npx zync-sdk`: that can resolve an unrelated unscoped npm package. In a project with this SDK installed, `npx --no-install zync-sdk keygen --out <new-directory>` runs its installed executable. Developers working in this source checkout can test it with `node packages/plugin-sdk/bin/zync-plugin.mjs keygen --out <new-directory>`.
 
 Install OpenSSL first, or supply `--openssl <executable-path>`. Git for Windows' bundled OpenSSL is detected automatically. The command invokes OpenSSL directly without a shell; Node.js does not generate keys. The SDK prompts with hidden input: **press Enter to skip encryption**, or enter and confirm a passphrase to encrypt the private key. Nonempty passphrases go to OpenSSL through stdin, never command arguments. Use a long unique passphrase and keep it in your password manager. An interactive terminal is required; Ctrl+C cancels. Passphrases briefly exist in process memory.
 
@@ -83,7 +88,7 @@ npx --package=@zync-sh/plugin-sdk@beta zync-sdk sign --source ./dist/my-plugin -
 npx --package=@zync-sh/plugin-sdk@beta zync-sdk verify --source ./signed/my-plugin
 ```
 
-These commands belong to the same unpublished SDK update. The signer accepts Ed25519 private PEM keys (encrypted or unencrypted) and existing JSON publisher keys. Encrypted PEM keys prompt once using hidden input. The PEM publisher identity comes from the manifest; trusted marketplace metadata must separately authorize that public key for the publisher. Verification checks package integrity and its signature, not publisher authorization, behavior safety, or registry trust. Signed output must be new and outside the source directory; the private key must also be outside the source. Never include private keys in build output. Keep the signed folder's contents at the ZIP root, including `integrity.json` and `signature.json`.
+The signer accepts Ed25519 private PEM keys (encrypted or unencrypted) and existing JSON publisher keys. Encrypted PEM keys prompt once using hidden input. The PEM publisher identity comes from the manifest; trusted marketplace metadata must separately authorize that public key for the publisher. Verification checks package integrity and its signature, not publisher authorization, behavior safety, or registry trust. Signed output must be new and outside the source directory; the private key must also be outside the source. Never include private keys in build output. Keep the signed folder's contents at the ZIP root, including `integrity.json` and `signature.json`.
 
 Run the packaged CLI against the **built plugin directory** (the one containing `manifest.json` and its referenced assets):
 
