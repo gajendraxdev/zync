@@ -11,6 +11,12 @@ const tabs = read('src/components/layout/WorkspaceTabBar.tsx');
 
 assert.match(manager, /registerPaneCloseBlocker\(scope, editorCloseToken\.current\)/,
   'a dirty file editor must register a close blocker for its pane');
+const terminalGroupClose = store.match(/closeTerminalGroup: \(connectionId, termId\) => \{[\s\S]*?\n    \},/)?.[0];
+assert.ok(terminalGroupClose, 'terminal group close handler must exist');
+assert.match(terminalGroupClose, /if \(owned && isPaneLayoutCloseBlocked\(connectionId, owned\)\) \{[\s\S]*?showToast\('warning', 'Close the unsaved editor before closing this pane\.'\);[\s\S]*?return;/,
+  'closing a terminal group must stop when its layout contains an unsaved editor');
+assert.ok(terminalGroupClose.indexOf('isPaneLayoutCloseBlocked(connectionId, owned)') < terminalGroupClose.indexOf("ipc.send('terminal:kill'"),
+  'the guard must run before any terminal is killed');
 assert.match(store, /closePaneGroup:[\s\S]*?isPaneLayoutCloseBlocked\(connectionId, layout\)/,
   'closing a group must respect every contained pane blocker');
 assert.match(store, /closePaneInSplit:[\s\S]*?isPaneCloseBlocked\(paneCloseScope\(connectionId, node\.content\)\)/,

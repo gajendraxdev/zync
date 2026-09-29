@@ -4,6 +4,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Unsaved Files in terminal groups:** Closing a shell-owned pane group no longer bypasses the unsaved-editor guard and kills its terminals before the editor can be reviewed.
+
 ## [2.33.7] - 2026-09-29
 
 ### Added

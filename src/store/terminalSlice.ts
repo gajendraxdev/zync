@@ -358,6 +358,10 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
     closeTerminalGroup: (connectionId, termId) => {
         const owner = findLayoutOwner(get().paneLayouts[connectionId], termId) ?? termId;
         const owned = get().paneLayouts[connectionId]?.[owner];
+        if (owned && isPaneLayoutCloseBlocked(connectionId, owned)) {
+            get().showToast('warning', 'Close the unsaved editor before closing this pane.');
+            return;
+        }
         const extraIds = owned
             ? visibleTermIds(owned).filter((id) => id !== owner)
             : [];
