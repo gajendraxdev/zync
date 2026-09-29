@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { knownPermissionIds, pluginApiVersion, validateManifest, validatePackageDirectory } from '../packages/plugin-sdk/validate.js';
+import { externalPaneAssetsMinZyncVersion, knownPermissionIds, pluginApiVersion, validateManifest, validatePackageDirectory } from '../packages/plugin-sdk/validate.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const demo = path.join(root, 'tests', 'fixtures', 'plugins', 'manifest-v2-demo');
@@ -74,6 +74,35 @@ try {
   fs.mkdirSync(path.join(fixture, 'ui'));
   fs.writeFileSync(path.join(fixture, 'ui', 'counter.html'), '<p>Counter</p>');
   fs.writeFileSync(path.join(fixture, 'worker.js'), '');
+  result = validatePackageDirectory(fixture);
+  assert.equal(result.valid, true, messages(result));
+
+  const externalManifest = clone(base);
+  externalManifest.engines.zync = `>=${externalPaneAssetsMinZyncVersion}`;
+  fs.writeFileSync(path.join(fixture, 'manifest.json'), JSON.stringify(externalManifest));
+  fs.writeFileSync(path.join(fixture, 'ui', 'counter.html'), '<link rel="stylesheet" href="./pane.css"><script src="../worker.js"></script>');
+  fs.writeFileSync(path.join(fixture, 'ui', 'pane.css'), 'body{}');
+  result = validatePackageDirectory(fixture);
+  assert.equal(result.valid, true, messages(result));
+  externalManifest.engines.zync = '>=2.32.2';
+  fs.writeFileSync(path.join(fixture, 'manifest.json'), JSON.stringify(externalManifest));
+  result = validatePackageDirectory(fixture);
+  assert.equal(result.valid, false);
+  assert.ok(result.issues.some(issue => issue.path === 'engines.zync' && issue.message.includes('External pane assets')));
+  externalManifest.engines.zync = `>=${externalPaneAssetsMinZyncVersion}`;
+  fs.writeFileSync(path.join(fixture, 'manifest.json'), JSON.stringify(externalManifest));
+  fs.writeFileSync(path.join(fixture, 'ui', 'counter.html'), '<script src="../../outside.js"></script>');
+  result = validatePackageDirectory(fixture);
+  assert.equal(result.valid, false);
+  assert.ok(result.issues.some(issue => issue.message.includes('escapes the package')));
+  fs.writeFileSync(path.join(fixture, 'ui', 'counter.html'), '<link rel="stylesheet" href="./pane.css">');
+  fs.truncateSync(path.join(fixture, 'ui', 'pane.css'), 2 * 1024 * 1024 + 1);
+  result = validatePackageDirectory(fixture);
+  assert.equal(result.valid, false);
+  assert.ok(result.issues.some(issue => issue.message.includes('exceeds 2 MiB')));
+  fs.rmSync(path.join(fixture, 'ui', 'pane.css'));
+  fs.writeFileSync(path.join(fixture, 'ui', 'counter.html'), '<script data-src="https://example.test/not-loaded.js"></script><p>Counter</p>');
+  fs.writeFileSync(path.join(fixture, 'manifest.json'), JSON.stringify(base));
   result = validatePackageDirectory(fixture);
   assert.equal(result.valid, true, messages(result));
 

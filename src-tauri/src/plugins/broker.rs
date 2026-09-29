@@ -4,7 +4,8 @@ use anyhow::{anyhow, Context, Result};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -85,6 +86,13 @@ pub struct PluginPaneRegistration {
     pub html: String,
     pub allow_multiple: bool,
     pub legacy: bool,
+}
+
+#[derive(Clone)]
+pub struct PaneAssetBinding {
+    pub(crate) runtime_instance_id: String,
+    pub(crate) package_root: PathBuf,
+    pub(crate) entry_route: String,
 }
 
 impl PluginBrokerState {
@@ -474,6 +482,90 @@ impl PluginBrokerState {
         }))
     }
 
+    /// Bind relative pane resources to the declared entry of the live package.
+    /// Legacy panes have no manifest entry and remain self-contained.
+    pub fn pane_asset_binding(
+        &self,
+        app: &AppHandle,
+        plugin_id: &str,
+        panel_id: &str,
+        legacy_access: bool,
+    ) -> Result<Option<PaneAssetBinding>> {
+        let (runtime_id, plugin_path, entry) = {
+            let runtimes = self
+                .runtimes
+                .lock()
+                .map_err(|_| anyhow!("Plugin broker state is unavailable"))?;
+            let (runtime_id, runtime) = runtimes
+                .iter()
+                .find(|(_, runtime)| runtime.plugin_id == plugin_id)
+                .ok_or_else(|| anyhow!("Plugin runtime is no longer active"))?;
+            if runtime.manifest.manifest_version() < 2 {
+                return if legacy_access {
+                    Ok(None)
+                } else {
+                    Err(anyhow!("Plugin pane manifest version changed"))
+                };
+            }
+            if legacy_access {
+                return Err(anyhow!("Plugin pane manifest version changed"));
+            }
+            let contribution_id = panel_id
+                .strip_prefix(&format!("{plugin_id}:"))
+                .ok_or_else(|| anyhow!("Plugin pane kind belongs to another plugin"))?;
+            let contribution = runtime
+                .manifest
+                .extensions
+                .contributes
+                .as_ref()
+                .and_then(|contributions| {
+                    contributions
+                        .pane_kinds
+                        .iter()
+                        .find(|pane| pane.id == contribution_id)
+                })
+                .ok_or_else(|| anyhow!("Plugin pane kind is not declared"))?;
+            (
+                runtime_id.clone(),
+                runtime.plugin_path.clone(),
+                contribution.entry.clone(),
+            )
+        };
+        self.authorize_internal(app, &runtime_id, "ui.pane.register", false)?;
+        let canonical_root =
+            fs::canonicalize(&plugin_path).context("Failed to resolve plugin root")?;
+        let canonical_entry = fs::canonicalize(canonical_root.join(entry))
+            .context("Failed to resolve plugin pane entry")?;
+        if !canonical_entry.starts_with(&canonical_root) || !canonical_entry.is_file() {
+            return Err(anyhow!("Plugin pane entry escapes the package"));
+        }
+        let entry_route = canonical_entry
+            .strip_prefix(&canonical_root)
+            .map_err(|_| anyhow!("Plugin pane entry escapes the package"))?
+            .components()
+            .map(|part| part.as_os_str().to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join("/");
+        Ok(Some(PaneAssetBinding {
+            runtime_instance_id: runtime_id,
+            package_root: canonical_root,
+            entry_route,
+        }))
+    }
+
+    /// Recheck runtime permission for every asset; the broker also rechecks
+    /// package integrity on its bounded cadence. Keep paths in that package.
+    pub fn read_pane_asset(
+        &self,
+        app: &AppHandle,
+        binding: &PaneAssetBinding,
+        relative_path: &Path,
+        max_bytes: u64,
+    ) -> Result<Vec<u8>> {
+        self.authorize_internal(app, &binding.runtime_instance_id, "ui.pane.register", false)?;
+        read_bounded_pane_asset(&binding.package_root, relative_path, max_bytes)
+    }
+
     pub fn bind_pane_connection(
         &self,
         runtime_instance_id: &str,
@@ -583,6 +675,31 @@ impl PluginBrokerState {
 }
 
 const MAX_PANE_HTML_BYTES: u64 = 512 * 1024;
+
+fn read_bounded_pane_asset(
+    package_root: &Path,
+    relative_path: &Path,
+    max_bytes: u64,
+) -> Result<Vec<u8>> {
+    let path = fs::canonicalize(package_root.join(relative_path))
+        .context("Failed to resolve plugin pane asset")?;
+    if !path.starts_with(package_root) {
+        return Err(anyhow!("Plugin pane asset escapes the package"));
+    }
+    let metadata = fs::metadata(&path).context("Failed to inspect plugin pane asset")?;
+    if !metadata.is_file() || metadata.len() > max_bytes {
+        return Err(anyhow!("Plugin pane asset is missing or too large"));
+    }
+    let file = fs::File::open(path).context("Failed to open plugin pane asset")?;
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take(max_bytes + 1)
+        .read_to_end(&mut bytes)
+        .context("Failed to read plugin pane asset")?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(anyhow!("Plugin pane asset grew beyond the size limit"));
+    }
+    Ok(bytes)
+}
 
 fn read_pane_entry(plugin_root: &Path, entry: &str) -> Result<String> {
     let canonical_root = fs::canonicalize(plugin_root).context("Failed to resolve plugin root")?;
@@ -852,8 +969,8 @@ mod tests {
 
     #[test]
     fn pane_entry_is_loaded_from_the_package_not_the_worker_message() {
-        let plugin_root =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/plugins/manifest-v2-demo");
+        let plugin_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../tests/fixtures/plugins/manifest-v2-demo");
         let html = read_pane_entry(&plugin_root, "ui/counter.html").expect("read pane entry");
         assert!(html.contains("Isolated plugin pane"));
         assert!(read_pane_entry(&plugin_root, "../manifest.json").is_err());
@@ -875,5 +992,28 @@ mod tests {
             read_pane_entry(&plugin_root, "pane.html").expect_err("oversized pane must fail");
         assert!(error.to_string().contains("too large"));
         fs::remove_dir_all(plugin_root).expect("remove plugin root");
+    }
+
+    #[test]
+    fn pane_assets_stay_under_the_package_and_obey_size_limit() {
+        let plugin_root = std::env::temp_dir().join(format!(
+            "zync-plugin-pane-assets-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let entry_dir = plugin_root.join("ui");
+        fs::create_dir_all(&entry_dir).expect("create pane directory");
+        fs::write(entry_dir.join("pane.css"), b"body{} ").expect("write pane asset");
+        let outside = plugin_root.with_extension("outside.css");
+        fs::write(&outside, b"secret").expect("write adjacent asset");
+        let canonical_root = fs::canonicalize(&plugin_root).expect("canonical package root");
+        assert_eq!(
+            read_bounded_pane_asset(&canonical_root, Path::new("ui/pane.css"), 7).unwrap(),
+            b"body{} "
+        );
+        assert!(read_bounded_pane_asset(&canonical_root, Path::new("ui/pane.css"), 6).is_err());
+        let escape = PathBuf::from("..").join(outside.file_name().unwrap());
+        assert!(read_bounded_pane_asset(&canonical_root, &escape, 100).is_err());
+        fs::remove_dir_all(plugin_root).expect("remove plugin root");
+        fs::remove_file(outside).expect("remove adjacent asset");
     }
 }

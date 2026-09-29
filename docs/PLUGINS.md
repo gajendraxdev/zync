@@ -1,12 +1,63 @@
 # Zync plugins — security, runtime, permissions, and marketplace architecture
 
-**Last updated:** 2026-09-25
+**Last updated:** 2026-09-29
 **Status:** The local Manifest v2 Sandbox MVP is implemented. Signed marketplace install review, permission-diff review, publisher-key rotation, monotonic revocation, retained-version rollback, and repeated-crash automatic recovery are implemented. Production registry deployment and independent security review remain operational beta work.
 **Related:** [SECURITY.md](./SECURITY.md), [WORKSPACE.md](./WORKSPACE.md), [TERMINAL.md](./TERMINAL.md), [VAULT.md](./VAULT.md)
 
 ---
 
 ## Implementation status
+
+### Pane document isolation migration (in progress)
+
+Packaged Zync currently renders plugin panes through `iframe.srcDoc`. That
+document inherits the main webview's Content Security Policy (CSP). Tauri adds
+style nonces/hashes to the packaged app's policy, so a plugin's otherwise valid
+inline stylesheet can be blocked even though its JavaScript and brokered data
+continue to work. Development mode is not a sufficient release test.
+
+The target is a separately served, sandboxed plugin document with its own
+restrictive CSP. The main webview must retain its existing style policy; do not
+disable Tauri's app-wide `style-src` modification to repair plugin styling.
+On Windows, the custom-scheme origin check requires Tauri 2.11.1 or newer;
+the migration locks a patched Tauri version before enabling the new path.
+The plugin document may load only its own bounded, verified package resources
+and must communicate through the existing pane message bridge. It must not
+gain the host DOM, ambient Tauri IPC, filesystem, network, or another plugin's
+resources. Keep the workspace layout and pane-kind registry unchanged.
+
+Migration sequence and release gates:
+
+1. Add a scoped document/resource serving boundary and tests for traversal,
+   cross-plugin access, MIME types, size limits, CSP headers, and lifecycle
+   cleanup. Do not switch existing panes yet.
+2. Move the host-owned pane bootstrap and message bridge to the new document
+   path. Preserve Manifest v1 compatibility and Manifest v2 instance, worker,
+   connection, theme, shortcut, and visibility semantics. Fail closed if the
+   isolated document cannot load; never silently fall back to a less isolated
+   frame in a packaged app.
+3. Make the SDK/build tooling emit external CSS and JavaScript for new plugin
+   packages. Provide a bounded compatibility path for already-installed,
+   signed packages that contain inline styles; do not mutate those packages or
+   invalidate their signatures.
+4. Verify PM2 Monitor, Docker Manager, and each built-in pane/editor in a
+   packaged Windows build, then run Linux/macOS smoke checks. Test light/dark
+   themes, suspend/resume, pane restore, tab close, plugin disable/revoke, and
+   permission prompts. Only remove the old path after these gates pass.
+
+This worktree has a bounded in-memory document endpoint and a native pane
+loader for existing self-contained HTML packages. The document URL mirrors its
+declared path within the package, so relative CSS, JavaScript, image, and font
+references resolve under the same opaque route. Asset reads recheck the live
+runtime grant, use the broker's periodic package-digest check, and enforce
+canonical confinement, file type, and response size. Browser-only app previews
+still use `srcDoc`; the SDK starter now offers a separate localhost visual
+preview that serves its packaged assets without simulating Worker actions. The
+starter emits external CSS/JavaScript and validates static resource links and
+the minimum host version. Align that planned minimum with the actual desktop
+release before publishing either update. Packaged asset smoke tests and
+cross-platform packaged checks remain release gates. Do not publish the
+migration until those gates pass.
 
 ### API 2.1 SSH commands (local, unpublished)
 

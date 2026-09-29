@@ -6,6 +6,12 @@ Manifest v2 engine ranges use semantic-version comparators such as `^2.0.0`, `>=
 
 Before a beta npm SDK release:
 
+The starter now uses package-relative pane CSS and JavaScript. Confirm that
+`externalPaneAssetsMinZyncVersion` names the first **published** desktop build
+with the isolated resource route before publishing this SDK update. Do not
+offer the new starter to older Zync versions; previously signed inline-pane
+packages must remain untouched.
+
 1. Run `npm run sdk:release-check` from the Zync repository root. It checks type contracts, validator cases, the starter build, and the exact npm package contents.
 2. Run the native plugin tests and the full agent regression suite.
 3. Run `node check.mjs` in the sibling `zync-plugin-channel-examples` project to validate, sign, and verify stable and beta builds in a disposable registry.

@@ -19,6 +19,18 @@ export const knownPermissionIds = Object.freeze([
 
 const knownPermissions = new Set(knownPermissionIds);
 export const pluginApiVersion = '2.1.0';
+// First desktop version planned to serve package-relative pane assets. Keep
+// this gate aligned with the desktop release before publishing this SDK update.
+export const externalPaneAssetsMinZyncVersion = '2.33.8';
+export const paneAssetMimeTypes = Object.freeze({
+  '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8', '.png': 'image/png',
+  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
+  '.webp': 'image/webp', '.svg': 'image/svg+xml', '.woff': 'font/woff',
+  '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.otf': 'font/otf',
+});
+const paneAssetExtensions = new Set(Object.keys(paneAssetMimeTypes));
+const maxPaneAssetBytes = 2 * 1024 * 1024;
 const identifierPattern = /^[A-Za-z0-9_.-]+$/;
 const semverPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
 const contributionPermissions = {
@@ -62,6 +74,61 @@ function assetPath(issues, value, location, required = false) {
     return false;
   }
   return true;
+}
+
+function htmlAttribute(tag, name) {
+  const match = new RegExp(`(?:^|[\\s<])${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i').exec(tag);
+  return match?.[1] ?? match?.[2] ?? match?.[3];
+}
+
+/** Check static pane resource links before signing; native routing is authoritative. */
+function validatePaneResources(root, manifest, issues) {
+  const panes = manifest?.contributes?.paneKinds;
+  if (!Array.isArray(panes)) return;
+  let hasExternalAssets = false;
+  for (const [index, pane] of panes.entries()) {
+    const entry = pane?.entry;
+    if (typeof entry !== 'string' || entry.startsWith('/') || entry.includes('\\') || entry.includes(':') || entry.split('/').some(part => !part || part === '.' || part === '..')) continue;
+    const entryFile = path.join(root, ...entry.split('/'));
+    let html;
+    try {
+      if (fs.lstatSync(entryFile).size > 512 * 1024) continue;
+      html = new TextDecoder('utf-8', { fatal: true }).decode(fs.readFileSync(entryFile));
+    } catch { continue; } // Missing/invalid entries are reported by package validation.
+    for (const match of html.matchAll(/<(script|link|img|source)\b[^>]*>/gi)) {
+      const tag = match[1].toLowerCase();
+      const reference = htmlAttribute(match[0], tag === 'link' ? 'href' : 'src');
+      if (!reference || (tag === 'img' && reference.startsWith('data:'))) continue;
+      hasExternalAssets = true;
+      const location = `contributes.paneKinds[${index}].entry`;
+      const rawPath = reference.split(/[?#]/, 1)[0];
+      let decoded;
+      try { decoded = decodeURIComponent(rawPath); } catch { decoded = ''; }
+      if (!decoded || decoded.startsWith('/') || /[\\:?#\u0000-\u001f\u007f]/.test(decoded) || decoded.split('/').some(part => !part)) {
+        record(issues, location, `Pane asset must use a relative package path: ${reference}`);
+        continue;
+      }
+      const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(entry), decoded));
+      if (resolved === '..' || resolved.startsWith('../') || !paneAssetExtensions.has(path.posix.extname(resolved).toLowerCase())) {
+        record(issues, location, `Pane asset escapes the package or has an unsupported type: ${reference}`);
+        continue;
+      }
+      const assetFile = path.join(root, ...resolved.split('/'));
+      try {
+        const stat = fs.lstatSync(assetFile);
+        if (!stat.isFile() || stat.isSymbolicLink() || stat.size > maxPaneAssetBytes) throw new Error();
+      } catch {
+        record(issues, location, `Pane asset is missing, linked, or exceeds 2 MiB: ${reference}`);
+      }
+    }
+  }
+  if (hasExternalAssets) {
+    const range = semver.validRange(manifest?.engines?.zync);
+    const minimum = range ? semver.minVersion(range) : null;
+    if (!minimum || semver.lt(minimum, externalPaneAssetsMinZyncVersion)) {
+      record(issues, 'engines.zync', `External pane assets require Zync >=${externalPaneAssetsMinZyncVersion}`);
+    }
+  }
 }
 
 function httpsUrl(issues, value, location) {
@@ -294,6 +361,7 @@ export function validatePackageDirectory(directory, options = {}) {
     }
     if (valid && !fs.lstatSync(current).isFile()) record(issues, asset.location, `Referenced path is not a file: ${asset.path}`);
   }
+  validatePaneResources(root, manifest, issues);
   const pending = [root];
   let entries = 0;
   let totalBytes = 0;

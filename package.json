@@ -84,7 +84,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@enjoys/context-engine": "file:./context-engine",
     "@radix-ui/react-tooltip": "^1.2.8",
-    "@tauri-apps/api": "^2",
+    "@tauri-apps/api": "2.12.0",
     "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
     "@tauri-apps/plugin-dialog": "^2.6.0",
     "@tauri-apps/plugin-opener": "^2",
@@ -118,7 +118,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.18",
-    "@tauri-apps/cli": "^2",
+    "@tauri-apps/cli": "2.12.0",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@types/react-syntax-highlighter": "^15.5.13",
