@@ -181,7 +181,7 @@ export const WorkspaceTabBar = memo(function WorkspaceTabBar({
         if (!focused || !isPaneLeaf(focused)) return;
         const released = focused.content;
 
-        closePaneInSplit(connectionId, focused.id);
+        if (!closePaneInSplit(connectionId, focused.id)) return;
 
         if (isFeatureContent(released)) {
             onFeaturePaneOpened?.(released.featureId);

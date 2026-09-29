@@ -1,6 +1,7 @@
 import { StateCreator } from 'zustand';
 import type { AppStore } from './useAppStore';
 import { scheduleSaveSession } from './sessionSlice';
+import { isPaneLayoutCloseBlocked } from '../lib/paneCloseBlockers';
 import type { Connection, CoreTabView, Folder, Tab } from '../features/connections/domain/types.js';
 import {
     addFolderToState,
@@ -1107,6 +1108,12 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
     closeTab: (tabId) => {
         const state = get();
         const tab = state.tabs.find(t => t.id === tabId);
+        const connectionId = tab?.connectionId;
+        if (connectionId && Object.values(state.paneLayouts[connectionId] ?? {})
+            .some((layout) => isPaneLayoutCloseBlocked(connectionId, layout))) {
+            get().showToast('warning', 'Close the unsaved editor before closing this tab.');
+            return;
+        }
 
         const preActions = getCloseTabPreActions(tab, state.tabs, state.connections);
         if (preActions.disconnectConnectionId) {

@@ -3596,11 +3596,18 @@ pub(crate) async fn read_remote_connection_file(
     connection_id: &str,
     path: &str,
     timeout_secs: u64,
+    max_bytes: Option<u64>,
 ) -> Result<String, String> {
     let sftp = get_sftp_or_reconnect(state, connection_id).await?;
     let timeout_duration = std::time::Duration::from_secs(timeout_secs);
 
-    match tokio::time::timeout(timeout_duration, state.file_system.read_remote(&sftp, path)).await {
+    let read = async {
+        match max_bytes {
+            Some(limit) => state.file_system.read_remote_limited(&sftp, path, limit).await,
+            None => state.file_system.read_remote(&sftp, path).await,
+        }
+    };
+    match tokio::time::timeout(timeout_duration, read).await {
         Ok(Ok(res)) => Ok(res),
         Ok(Err(e)) if sftp_error_is_dead_session(&e) => {
             println!("[FS] SFTP session closed during read, retrying...");
@@ -3611,7 +3618,13 @@ pub(crate) async fn read_remote_connection_file(
                 }
             }
             let sftp = get_sftp_or_reconnect(state, connection_id).await?;
-            match tokio::time::timeout(timeout_duration, state.file_system.read_remote(&sftp, path))
+            let retry = async {
+                match max_bytes {
+                    Some(limit) => state.file_system.read_remote_limited(&sftp, path, limit).await,
+                    None => state.file_system.read_remote(&sftp, path).await,
+                }
+            };
+            match tokio::time::timeout(timeout_duration, retry)
                 .await
             {
                 Ok(Ok(res)) => Ok(res),
@@ -3634,16 +3647,20 @@ pub(crate) async fn read_remote_connection_file(
 pub async fn fs_read_file(
     connection_id: String,
     path: String,
+    max_bytes: Option<u64>,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
+    // Only bounded editor reads opt in. Other existing consumers retain their behavior.
+    if max_bytes.is_some_and(|limit| limit == 0 || limit > 16 * 1024 * 1024) {
+        return Err("Invalid editor read limit".into());
+    }
     if connection_id == "local" {
-        state
-            .file_system
-            .read_file(&connection_id, &path)
-            .await
-            .map_err(|e| e.to_string())
+        match max_bytes {
+            Some(limit) => state.file_system.read_local_limited(&path, limit).map_err(|e| e.to_string()),
+            None => state.file_system.read_file(&connection_id, &path).await.map_err(|e| e.to_string()),
+        }
     } else {
-        read_remote_connection_file(&state, &connection_id, &path, 10).await
+        read_remote_connection_file(&state, &connection_id, &path, 10, max_bytes).await
     }
 }
 
@@ -7700,7 +7717,7 @@ pub async fn plugins_ssh_filesystem_read_text(
             "Server file exceeds the {MAX_PLUGIN_SSH_TEXT_BYTES}-byte text limit"
         ));
     }
-    let text = read_remote_connection_file(&state, &connection_id, &resolved_path, 10).await?;
+    let text = read_remote_connection_file(&state, &connection_id, &resolved_path, 10, None).await?;
     if text.len() > MAX_PLUGIN_SSH_TEXT_BYTES as usize {
         return Err(format!(
             "Server file exceeds the {MAX_PLUGIN_SSH_TEXT_BYTES}-byte text limit"

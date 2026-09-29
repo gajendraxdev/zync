@@ -4,6 +4,7 @@ import { track } from '../features/usage';
 import { terminalService } from '../lib/terminal';
 import type { TerminalTabSnapshot } from './sessionPersistence';
 import { scheduleSaveSession } from './sessionSlice';
+import { isPaneCloseBlocked, isPaneLayoutCloseBlocked, paneCloseScope } from '../lib/paneCloseBlockers';
 import {
     canSplit,
     collectLeaves,
@@ -121,7 +122,7 @@ export interface TerminalSlice {
      */
     setActiveTerminal: (connectionId: string, termId: string) => void;
     activatePaneGroup: (connectionId: string, owner: string) => void;
-    closePaneGroup: (connectionId: string, owner: string) => void;
+    closePaneGroup: (connectionId: string, owner: string) => boolean;
 
     /**
      * Clears all terminal tabs for a specific connection and prunes all associated AI history.
@@ -185,7 +186,7 @@ export interface TerminalSlice {
     /** Remove a plugin leaf; leftover shells stay. */
     closePluginInSplit: (connectionId: string, pluginId: string) => void;
     /** Close one split pane by id (feature, plugin, or extra shell). */
-    closePaneInSplit: (connectionId: string, paneId: string) => void;
+    closePaneInSplit: (connectionId: string, paneId: string) => boolean;
 
     /**
      * Clears the pendingRestore flag on all terminal tabs for a connection.
@@ -357,6 +358,10 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
     closeTerminalGroup: (connectionId, termId) => {
         const owner = findLayoutOwner(get().paneLayouts[connectionId], termId) ?? termId;
         const owned = get().paneLayouts[connectionId]?.[owner];
+        if (owned && isPaneLayoutCloseBlocked(connectionId, owned)) {
+            get().showToast('warning', 'Close the unsaved editor before closing this pane.');
+            return;
+        }
         const extraIds = owned
             ? visibleTermIds(owned).filter((id) => id !== owner)
             : [];
@@ -910,7 +915,11 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
 
     closePaneGroup: (connectionId, owner) => {
         const layout = get().paneLayouts[connectionId]?.[owner];
-        if (!layout) return;
+        if (!layout) return false;
+        if (isPaneLayoutCloseBlocked(connectionId, layout)) {
+            get().showToast('warning', 'Close the unsaved editor before closing this pane.');
+            return false;
+        }
         const closedTermIds = visibleTermIds(layout);
         for (const termId of closedTermIds) {
             ipc.send('terminal:kill', { termId });
@@ -968,6 +977,7 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
             };
         });
         scheduleSaveSession(() => get().saveSession());
+        return true;
     },
 
     splitFeaturePane: (connectionId, featureId, direction = 'horizontal', instanceId) => {
@@ -1549,6 +1559,16 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
     },
 
     closePaneInSplit: (connectionId, paneId) => {
+        const state = get();
+        const groups = state.paneLayouts[connectionId];
+        const owner = resolveDockOwner(groups, state.activeTerminalIds[connectionId], paneId);
+        const layout = owner ? groups?.[owner] : undefined;
+        const node = layout ? findNode(layout.root, paneId) : null;
+        if (!layout || !node || !isPaneLeaf(node)) return false;
+        if (isPaneCloseBlocked(paneCloseScope(connectionId, node.content))) {
+            get().showToast('warning', 'Close the unsaved editor before closing this pane.');
+            return false;
+        }
         set(state => {
             const groups = state.paneLayouts[connectionId];
             const owner = resolveDockOwner(groups, state.activeTerminalIds[connectionId], paneId);
@@ -1621,5 +1641,6 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
             };
         });
         scheduleSaveSession(() => get().saveSession());
+        return true;
     },
 });

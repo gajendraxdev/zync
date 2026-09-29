@@ -17,6 +17,7 @@ interface FileEditorHostProps {
   initialContent: string;
   onSave: (content: string) => Promise<void>;
   onClose: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
   preferredProviderId?: string;
   /**
    * When true, hides provider toolbar/header chrome.

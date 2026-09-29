@@ -128,6 +128,7 @@ async fn read_remote_file(
         connection_id,
         path,
         REMOTE_READ_TIMEOUT_SECS,
+        None,
     )
     .await
 }

@@ -4,6 +4,43 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Unsaved Files in terminal groups:** Closing a shell-owned pane group no longer bypasses the unsaved-editor guard and kills its terminals before the editor can be reviewed.
+
+## [2.33.7] - 2026-09-29
+
+### Added
+
+- **Editor status API:** Editor providers can report their cursor position and language in Zync's bottom status bar. The plain fallback editor now shows line and column there too.
+
+### Fixed
+
+- **File editor target identity:** Ignore stale file reads after a connection switch or newer open, and bind saves to the connection and path from the original read.
+- **Plugin editor saves:** Keep the host's modified state until a matching content snapshot or successful save proves the file is clean. The bundled plugin editor now waits for the save result before updating its own saved baseline.
+- **Fallback editor saves:** Preserve edits typed while an earlier save is in progress, keep save completions from changing a different document, and save to the originally opened path even if file navigation changes.
+- **Unsaved Files panes:** Block pane, feature-tab, group and connection-tab closure while a file editor has unsaved changes. Close the editor first to review or discard those changes.
+
+## [2.33.6] - 2026-09-29
+
+### Fixed
+
+- **File editor saves:** Keep the editor and its unsaved changes open when a save fails because the connection drops. The disconnected state and save error still appear; other connection errors retain their existing behavior.
+
+## [2.33.5] - 2026-09-28
+
+### Fixed
+
+- **File editor memory safety:** Refuse files over 8 MiB before opening and bound the actual local or SSH read, including when listing sizes are stale or unavailable. The editor never receives a truncated file.
+- **Installed CodeMirror layout:** Apply the release build's style nonce to
+  CodeMirror's generated CSS so file content remains beside the gutter after
+  installation or update.
+- **Plugin editor saves:** Confirm saves to editor providers only after the
+  file write succeeds, preserving unsaved state when a save fails or more
+  changes are made while it is in progress. Keep same-named files in different
+  locations distinct. Report disconnected writes as failures instead of
+  marking them saved. Older providers remain compatible.
+
 ## [2.33.4] - 2026-09-28
 
 ### Changed
@@ -1569,7 +1606,10 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [d3f4060]: https://github.com/zync-sh/zync/commit/d3f4060
 [840afc2]: https://github.com/zync-sh/zync/commit/840afc2
 [193f568]: https://github.com/zync-sh/zync/commit/193f568
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.33.4...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.33.7...HEAD
+[2.33.7]: https://github.com/zync-sh/zync/compare/v2.33.6...v2.33.7
+[2.33.6]: https://github.com/zync-sh/zync/compare/v2.33.5...v2.33.6
+[2.33.5]: https://github.com/zync-sh/zync/compare/v2.33.4...v2.33.5
 [2.33.4]: https://github.com/zync-sh/zync/compare/v2.33.3...v2.33.4
 [2.33.3]: https://github.com/zync-sh/zync/compare/v2.33.2...v2.33.3
 [2.33.2]: https://github.com/zync-sh/zync/compare/v2.33.1...v2.33.2
