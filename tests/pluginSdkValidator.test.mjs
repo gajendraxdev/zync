@@ -84,6 +84,16 @@ try {
   fs.writeFileSync(path.join(fixture, 'ui', 'pane.css'), 'body{}');
   result = validatePackageDirectory(fixture);
   assert.equal(result.valid, true, messages(result));
+  fs.writeFileSync(path.join(fixture, 'ui', 'counter.html'), '<!-- <script src="../../ignored.js"></script> --><script>const ignored = "<img src=\'../../ignored.png\'>";</script><link rel="canonical" href="https://example.test/page"><link rel="stylesheet" href="./pane.css">');
+  result = validatePackageDirectory(fixture);
+  assert.equal(result.valid, true, `Only real resource elements should be checked: ${messages(result)}`);
+  fs.writeFileSync(path.join(fixture, 'ui', 'pane.png'), 'image');
+  fs.writeFileSync(path.join(fixture, 'ui', 'counter.html'), '<img src="./pane.png" srcset="data:image/png;base64,AA== 1x, ../../escape.png 2x"><source srcset="./pane.png 1x, ./missing.png 2x">');
+  result = validatePackageDirectory(fixture);
+  assert.equal(result.valid, false);
+  assert.ok(result.issues.some(issue => issue.message.includes('escapes the package')), messages(result));
+  assert.ok(result.issues.some(issue => issue.message.includes('missing.png')), messages(result));
+  fs.writeFileSync(path.join(fixture, 'ui', 'counter.html'), '<link rel="stylesheet" href="./pane.css"><script src="../worker.js"></script>');
   externalManifest.engines.zync = '>=2.32.2';
   fs.writeFileSync(path.join(fixture, 'manifest.json'), JSON.stringify(externalManifest));
   result = validatePackageDirectory(fixture);

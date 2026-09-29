@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { isIP } from 'node:net';
+import { parse } from 'parse5';
 import semver from 'semver';
 
 // This preflight mirrors author-facing manifest rules. Installation still relies on
@@ -19,8 +20,8 @@ export const knownPermissionIds = Object.freeze([
 
 const knownPermissions = new Set(knownPermissionIds);
 export const pluginApiVersion = '2.1.0';
-// First desktop version planned to serve package-relative pane assets. Keep
-// this gate aligned with the desktop release before publishing this SDK update.
+// First desktop version planned to serve package-relative pane assets. Align
+// this gate with the desktop release before distributing migrated plugins.
 export const externalPaneAssetsMinZyncVersion = '2.33.8';
 export const paneAssetMimeTypes = Object.freeze({
   '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
@@ -31,6 +32,7 @@ export const paneAssetMimeTypes = Object.freeze({
 });
 const paneAssetExtensions = new Set(Object.keys(paneAssetMimeTypes));
 const maxPaneAssetBytes = 2 * 1024 * 1024;
+const resourceLinkRels = new Set(['stylesheet', 'icon', 'preload', 'modulepreload', 'prefetch', 'apple-touch-icon', 'mask-icon', 'manifest']);
 const identifierPattern = /^[A-Za-z0-9_.-]+$/;
 const semverPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
 const contributionPermissions = {
@@ -76,9 +78,57 @@ function assetPath(issues, value, location, required = false) {
   return true;
 }
 
-function htmlAttribute(tag, name) {
-  const match = new RegExp(`(?:^|[\\s<])${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i').exec(tag);
-  return match?.[1] ?? match?.[2] ?? match?.[3];
+function htmlAttribute(node, name) {
+  return node.attrs?.find(attribute => attribute.name === name)?.value;
+}
+
+/** Extract candidate URLs without splitting commas inside data URLs. */
+function* srcsetUrls(value) {
+  const whitespace = /[\t\n\f\r ]/;
+  let position = 0;
+  while (position < value.length) {
+    while (position < value.length && (whitespace.test(value[position]) || value[position] === ',')) position++;
+    const start = position;
+    while (position < value.length && !whitespace.test(value[position])) position++;
+    let url = value.slice(start, position);
+    if (!url) break;
+    if (url.endsWith(',')) {
+      url = url.replace(/,+$/, '');
+      if (url) yield url;
+      continue;
+    }
+    yield url;
+    let parentheses = 0;
+    while (position < value.length) {
+      const character = value[position++];
+      if (character === '(') parentheses++;
+      else if (character === ')' && parentheses) parentheses--;
+      else if (character === ',' && !parentheses) break;
+    }
+  }
+}
+
+/** Visit only real resource-loading elements, not comments or script text. */
+function* paneResourceReferences(html) {
+  const nodes = [parse(html)];
+  while (nodes.length) {
+    const node = nodes.pop();
+    if (node.childNodes) nodes.push(...node.childNodes);
+    if (node.tagName === 'script') {
+      yield [htmlAttribute(node, 'src'), false];
+    } else if (node.tagName === 'link') {
+      const rel = htmlAttribute(node, 'rel')?.toLowerCase().split(/\s+/) ?? [];
+      if (rel.some(value => resourceLinkRels.has(value))) {
+        yield [htmlAttribute(node, 'href'), false];
+        if (rel.includes('preload') && htmlAttribute(node, 'as')?.toLowerCase() === 'image') {
+          for (const url of srcsetUrls(htmlAttribute(node, 'imagesrcset') ?? '')) yield [url, true];
+        }
+      }
+    } else if (node.tagName === 'img' || node.tagName === 'source') {
+      yield [htmlAttribute(node, 'src'), node.tagName === 'img'];
+      for (const url of srcsetUrls(htmlAttribute(node, 'srcset') ?? '')) yield [url, true];
+    }
+  }
 }
 
 /** Check static pane resource links before signing; native routing is authoritative. */
@@ -95,10 +145,8 @@ function validatePaneResources(root, manifest, issues) {
       if (fs.lstatSync(entryFile).size > 512 * 1024) continue;
       html = new TextDecoder('utf-8', { fatal: true }).decode(fs.readFileSync(entryFile));
     } catch { continue; } // Missing/invalid entries are reported by package validation.
-    for (const match of html.matchAll(/<(script|link|img|source)\b[^>]*>/gi)) {
-      const tag = match[1].toLowerCase();
-      const reference = htmlAttribute(match[0], tag === 'link' ? 'href' : 'src');
-      if (!reference || (tag === 'img' && reference.startsWith('data:'))) continue;
+    for (const [reference, allowData] of paneResourceReferences(html)) {
+      if (!reference || (allowData && reference.startsWith('data:'))) continue;
       hasExternalAssets = true;
       const location = `contributes.paneKinds[${index}].entry`;
       const rawPath = reference.split(/[?#]/, 1)[0];
