@@ -4,9 +4,18 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.33.8] - 2026-09-29
+
+### Added
+
+- **Isolated plugin panes:** Serve plugin pane documents and package assets through an isolated resource route, with SDK starter assets and validation for compatible desktop builds. ([ca4162a])
+
 ### Fixed
 
-- **Unsaved Files in terminal groups:** Closing a shell-owned pane group no longer bypasses the unsaved-editor guard and kills its terminals before the editor can be reviewed.
+- **Unsaved Files in terminal groups:** Closing a shell-owned pane group no longer bypasses the unsaved-editor guard and kills its terminals before the editor can be reviewed. ([6e90c71])
+- **SDK pane preview:** Inject the preview shim after a document's doctype when no `<head>` is present, so the preview remains valid HTML. ([309aa26])
+- **SDK pane resource validation:** Inspect parsed resource elements instead of matching HTML text, avoiding false positives in comments and scripts while checking `srcset` references. ([5283448])
+- **Plugin pane asset loading:** Allow sandboxed panes to load isolated package assets with the asset response's CORS header, without changing the existing content type, cache-control, or `nosniff` headers. ([ca4162a])
 
 ## [2.33.7] - 2026-09-29
 
@@ -1606,7 +1615,8 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [d3f4060]: https://github.com/zync-sh/zync/commit/d3f4060
 [840afc2]: https://github.com/zync-sh/zync/commit/840afc2
 [193f568]: https://github.com/zync-sh/zync/commit/193f568
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.33.7...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.33.8...HEAD
+[2.33.8]: https://github.com/zync-sh/zync/compare/v2.33.7...v2.33.8
 [2.33.7]: https://github.com/zync-sh/zync/compare/v2.33.6...v2.33.7
 [2.33.6]: https://github.com/zync-sh/zync/compare/v2.33.5...v2.33.6
 [2.33.5]: https://github.com/zync-sh/zync/compare/v2.33.4...v2.33.5
@@ -1793,3 +1803,7 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [4b0fdbd]: https://github.com/zync-sh/zync/commit/4b0fdbd
 [611d6be]: https://github.com/zync-sh/zync/commit/611d6be
 [a898355]: https://github.com/zync-sh/zync/commit/a898355
+[6e90c71]: https://github.com/zync-sh/zync/commit/6e90c71
+[309aa26]: https://github.com/zync-sh/zync/commit/309aa26
+[5283448]: https://github.com/zync-sh/zync/commit/5283448
+[ca4162a]: https://github.com/zync-sh/zync/commit/ca4162a
