@@ -45,6 +45,7 @@
         "src/components/editor/codemirror/status.ts",
         "src/components/editor/editorStatusReport.ts",
         "src/components/editor/codemirror/theme.ts",
+        "src/lib/cspStyleNonce.ts",
         "src/components/editor/plainDocumentState.ts",
         "src/components/editor/pluginSaveState.ts",
         "src/components/file-manager/editorReadIdentity.ts",

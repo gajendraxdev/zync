@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { historyField } from '@codemirror/commands';
 import { Compartment, EditorSelection, EditorState, Transaction, type Extension, type Text } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
+import { getCspStyleNonce } from '../lib/cspStyleNonce';
 import { openSearchPanel } from '@codemirror/search';
 import { syntaxHighlighting } from '@codemirror/language';
 
@@ -286,7 +287,7 @@ export function CodeMirrorFileEditor({
 
     // Tauri nonces the bundled <style> in release builds. CodeMirror mounts
     // its layout CSS later, so its generated <style> needs that same nonce.
-    const styleNonce = document.querySelector<HTMLStyleElement>('head style[nonce]')?.nonce;
+    const styleNonce = getCspStyleNonce();
     const extensions: Extension[] = [
       ...(styleNonce ? [EditorView.cspNonce.of(styleNonce)] : []),
       ...createCodeMirrorExtensions({

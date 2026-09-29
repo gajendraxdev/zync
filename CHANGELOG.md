@@ -4,6 +4,11 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Packaged plugin styling:** Apply the release CSP nonce to dynamically
+  installed built-in theme styles, matching development and packaged builds.
+
 ## [2.33.8] - 2026-09-29
 
 ### Added

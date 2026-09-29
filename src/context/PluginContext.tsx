@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { ipcRenderer } from '../lib/tauri-ipc';
 import { registerThemePluginModes } from '../lib/themeModeRegistry';
+import { applyCspStyleNonce } from '../lib/cspStyleNonce';
 import { notify } from '../features/notifications';
 import {
     rejectAllPendingPluginNotifyActions,
@@ -615,6 +616,7 @@ export const PluginProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             enabledPlugins.forEach(plugin => {
                 if (!isTrustedBuiltinTheme(plugin) || !plugin.style) return;
                 const style = document.createElement('style');
+                applyCspStyleNonce(style);
                 style.dataset.zyncBuiltinTheme = plugin.manifest.id;
                 style.textContent = plugin.style;
                 document.head.appendChild(style);
