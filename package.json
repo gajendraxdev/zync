@@ -55,6 +55,7 @@
     "test:terminal-image": "npm run compile:agent-tests && node tests/terminalImage.test.mjs",
     "test:update-notification": "node tests/updateNotificationAutoUpdateFlow.test.mjs",
     "test:updater-flow": "node tests/updaterFlow.test.mjs",
+    "test:plugin-terminal-foundation": "npm run compile:agent-tests && node --test tests/pluginTerminalFoundation.test.mjs",
     "test:all-agent": "npm run compile:agent-tests && node tests/runAllAgentTests.mjs",
     "plugin:keygen": "node scripts/plugin-signing/cli.mjs keygen",
     "plugin:sign": "node scripts/plugin-signing/cli.mjs sign",

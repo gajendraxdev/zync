@@ -2,6 +2,7 @@ import { defineManifest, type ManifestV2 } from '@zync-sh/plugin-sdk';
 import type { ZyncWorkerApi } from '@zync-sh/plugin-sdk/worker';
 import type { ZyncPaneApi } from '@zync-sh/plugin-sdk/pane';
 import type { ZyncEditorBridge } from '@zync-sh/plugin-sdk/editor';
+import { mountTerminalSurface } from '@zync-sh/plugin-sdk/terminal';
 import { validateManifest, type ValidationIssue } from '@zync-sh/plugin-sdk/validate';
 
 const manifest: ManifestV2 = defineManifest({
@@ -45,6 +46,20 @@ worker.sshCommand.execute('pane-instance', { program: 'pm2', args: ['jlist'] }).
 worker.sshCommand.execute('pane-instance', { program: 'pm2', args: [], connectionId: 'other-server' });
 
 const issue: ValidationIssue | undefined = validateManifest(manifest).issues[0];
+const terminalSurface = mountTerminalSurface(document.createElement('div'), 'public-offer');
+terminalSurface.ready satisfies Promise<boolean>;
+terminalSurface.refresh();
+terminalSurface.dispose();
+if (worker.sshTerminal) {
+  const api = worker.sshTerminal;
+  api.context('pane').then(({ connectionToken }) => api.prepare('pane', {
+    program: 'tool', args: ['interactive'], expectedConnectionToken: connectionToken,
+  }));
+  // @ts-expect-error terminal proposals cannot choose another connection
+  api.prepare('pane', { program: 'tool', args: [], expectedConnectionToken: 'token', connectionId: 'other' });
+  // @ts-expect-error plugins cannot type into a host terminal
+  api.write('pane', 'command');
+}
 if (issue) issue.severity satisfies 'error' | 'warning';
 
 // @ts-expect-error legacy, unbrokered filesystem access is not part of Manifest v2

@@ -34,6 +34,11 @@ export interface PluginNotification {
 }
 
 export interface ZyncWorkerApi {
+  /** Optional on older hosts. Permission allows proposals, not silent launches. */
+  sshTerminal?: {
+    context(paneInstanceId: string): Promise<{ connectionToken: string }>;
+    prepare(paneInstanceId: string, request: { program: string; args: readonly string[]; expectedConnectionToken: string }): Promise<{ offerId: string; expiresInMs: number }>;
+  };
   on(event: 'ready', callback: () => void | Promise<void>): () => void;
   ui: {
     notify(options: PluginNotification): Promise<{ ok: true }>;

@@ -18,6 +18,37 @@ assert.deepEqual([...retained], ['two'], 'Reopening an inactive item does not re
 assert.deepEqual([...retainLiveItems([], retained, null)], []);
 
 const frame = readFileSync('src/components/plugins/PluginPanel.tsx', 'utf8');
+// Execute the actual registration effect so cleanup cannot leave a terminal owner.
+const frameAst = ts.createSourceFile('PluginPanel.tsx', frame, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+let registrationEffect;
+const findRegistrationEffect = node => {
+    if (ts.isCallExpression(node) && node.expression.getText(frameAst) === 'useEffect'
+        && node.arguments[0]?.getText(frameAst).includes('const unregister = registerPaneMessageTarget(')) {
+        registrationEffect = node.arguments[0].getText(frameAst);
+    }
+    ts.forEachChild(node, findRegistrationEffect);
+};
+findRegistrationEffect(frameAst);
+assert.ok(registrationEffect, 'Pane registration owns explicit cleanup');
+const owners = [];
+let unregistered = 0;
+const mountRegistration = runInNewContext(`(${registrationEffect})`, {
+    pluginId: 'plugin', panelId: 'panel', paneInstanceId: 'pane', connectionId: 'server',
+    iframeRef: { current: null },
+    setTerminalRuntime: runtime => owners.push(runtime),
+    registerPaneMessageTarget: (_plugin, _panel, _pane, _connection, _post, onBound) => {
+        onBound(`runtime-${unregistered}`);
+        return () => { unregistered++; };
+    },
+});
+const firstCleanup = mountRegistration();
+firstCleanup();
+assert.equal(unregistered, 1, 'Unregister on dependency change');
+assert.deepEqual(owners, ['runtime-0', null], 'Clear the previous terminal runtime');
+const secondCleanup = mountRegistration();
+secondCleanup();
+assert.equal(unregistered, 2, 'Unregister on unmount');
+assert.deepEqual(owners, ['runtime-0', null, 'runtime-1', null]);
 assert.match(frame, /useLayoutEffect\(\(\) => \{\s+visibleRef.current = visible;\s+\}, \[visible\]\)/, 'Visibility refs update only after commit');
 assert.equal(frame.match(/visibleRef.current = visible/g)?.length, 1);
 const layout = readFileSync('src/components/layout/MainLayout.tsx', 'utf8');

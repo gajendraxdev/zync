@@ -25,3 +25,18 @@ to older Zync versions; previously signed inline-pane packages remain untouched.
 The SDK beta is an authoring tool, not a production marketplace launch. Before promoting it to `latest` or calling the marketplace production-ready, deploy the signed test builds to a protected HTTPS staging registry. Manually verify marketplace listing, opt-in beta update, switch back to stable, permission review, and retained-version rollback in the desktop app. Record the tested Zync build, SDK version, registry version, and package digests; complete the external-plugin smoke test and independent security review. Local signing tests do not substitute for these checks.
 
 The automatic checks are not a security audit. Do not publish the package merely because they pass.
+
+## 2.1.0-beta.3 candidate — not published
+
+Adds optional worker `sshTerminal.context/prepare` authoring types and the bundled
+`@zync-sh/plugin-sdk/terminal` geometry helper. Existing exports and legacy host
+terminal APIs are unchanged. Older hosts must use the confirmed command-runner
+fallback. This candidate is for integration with the updated desktop checkout;
+it is not compatible with older desktop builds merely because plugin API 2.1
+matches. Test capability detection and the actual desktop build before rollout.
+
+Automatic SDK checks include host/surface transport regressions and the exact npm
+file inventory. Local packing is not publishing. Before a beta publish, review
+the pending changes and smoke-test the host-owned surface; before stable promotion,
+complete packaged desktop and real-SSH lifecycle/flood tests and resolve the native
+channel-open/cancellation limitation recorded in `docs/PLUGIN_TERMINALS.md`.

@@ -71,6 +71,7 @@ interface PluginContextType {
         paneInstanceId: string,
         connectionId: string,
         post: (message: unknown) => void,
+        onBound?: (runtime: string) => void,
     ) => () => void;
 }
 
@@ -275,6 +276,10 @@ const zync = {
             paneInstanceId,
             request,
         }),
+    },
+    sshTerminal: {
+        context: paneInstanceId => zync.request('api:terminal:context', { paneInstanceId }),
+        prepare: (paneInstanceId, request) => zync.request('api:terminal:prepare', { paneInstanceId, request }),
     },
     
     theme: {
@@ -981,6 +986,7 @@ export const PluginProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         paneInstanceId: string,
         connectionId: string,
         post: (message: unknown) => void,
+        onBound?: (runtime: string) => void,
     ) => {
         const key = `${pluginId}\0${paneInstanceId}`;
         const target = { panelId, post, ready: Promise.resolve() };
@@ -996,6 +1002,8 @@ export const PluginProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                         paneInstanceId,
                         connectionId,
                     );
+                    if (paneMessageTargets.current.get(key) === target
+                        && runtimeSupervisor.current.isCurrentRuntime(pluginId, runtimeInstanceId)) onBound?.(runtimeInstanceId);
                 } catch (error) {
                     if (runtimeSupervisor.current.isCurrentRuntime(pluginId, runtimeInstanceId)) throw error;
                 }

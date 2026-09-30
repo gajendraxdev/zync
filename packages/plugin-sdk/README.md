@@ -123,3 +123,42 @@ For an isolated pane, use `import type { ZyncPaneApi } from '@zync-sh/plugin-sdk
 The typed worker interface covers the Manifest v2 broker APIs only. Legacy plugin APIs are deliberately absent. Every host operation is still checked against the installed manifest, current grant, runtime identity, and applicable scope. The SDK version does not replace the manifest's `engines.pluginApi` compatibility declaration.
 
 See the [plugin architecture](https://github.com/zync-sh/zync/blob/main/docs/PLUGINS.md) and [basic starter template](templates/basic/README.md) for package format, permissions, signing, and manual testing.
+
+## Experimental host-owned terminals (beta.3 candidate)
+
+Declare `ssh.terminal.open` with a clear remote-execution permission reason. The
+worker can propose a launch, but cannot start it silently, send input or read PTY
+output. The pane mounts only a rectangular slot; Zync owns xterm and its controls.
+
+```js
+// Worker: check for older hosts before requesting a proposal.
+if (!zync.sshTerminal) return; // Retain your old confirmed command-runner fallback.
+const { connectionToken } = await zync.sshTerminal.context(paneInstanceId);
+const offer = await zync.sshTerminal.prepare(paneInstanceId, {
+  program: 'example-tool', args: ['interactive'],
+  expectedConnectionToken: connectionToken,
+});
+await zync.panel.postMessage(paneInstanceId, { kind: 'terminal-offer', ...offer });
+```
+
+```js
+// Pane: bundle this helper into the plugin package; never load it from a CDN.
+import { mountTerminalSurface } from '@zync-sh/plugin-sdk/terminal';
+const surface = mountTerminalSurface(slotElement, message.offerId);
+if (!await surface.ready) { /* Host does not support this surface; show fallback. */ }
+// On pane UI teardown or replacing the slot:
+surface.dispose();
+```
+
+Use an axis-aligned slot at least 240×100 CSS pixels, without transforms or elements
+layered over it. Call `refresh()` after custom layout changes. Scroll, resize and
+ancestor style changes are coalesced; fully clipped or hidden slots remain hidden.
+Offers expire after 60 seconds and are specific to a pane/document/connection.
+After natural exit, close the surface and explicitly request a fresh offer; there
+is no automatic restart. Zync's foreground **Open terminal** button and confirmation
+are required once per session, not per command typed afterward.
+
+This beta is for integration against a matching updated desktop build, **not a
+stable marketplace rollout**. Published older desktop versions lack these routes.
+Packaged WebView2 testing, real-server profiling and the SSH library cancellation/
+buffering limitations documented in `docs/PLUGIN_TERMINALS.md` remain release gates.

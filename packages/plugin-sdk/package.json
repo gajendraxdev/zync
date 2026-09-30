@@ -1,6 +1,6 @@
 {
   "name": "@zync-sh/plugin-sdk",
-  "version": "2.1.0-beta.2",
+  "version": "2.1.0-beta.3",
   "description": "Manifest v2 authoring types and preflight validation for Zync plugins",
   "type": "module",
   "dependencies": { "parse5": "^7.3.0", "semver": "^7.0.0" },
@@ -12,13 +12,14 @@
   },
   "engines": { "node": ">=20" },
   "sideEffects": false,
-  "files": ["index.js", "index.d.ts", "worker.d.ts", "pane.d.ts", "editor.d.ts", "validate.js", "validate.d.ts", "signing.js", "bin", "templates/basic", "README.md", "RELEASE.md", "LICENSE"],
+  "files": ["index.js", "index.d.ts", "worker.d.ts", "pane.d.ts", "editor.d.ts", "terminal.js", "terminal.d.ts", "validate.js", "validate.d.ts", "signing.js", "bin", "templates/basic", "README.md", "RELEASE.md", "LICENSE"],
   "exports": {
     ".": { "types": "./index.d.ts", "default": "./index.js" },
     "./validate": { "types": "./validate.d.ts", "default": "./validate.js" },
     "./worker": { "types": "./worker.d.ts" },
     "./pane": { "types": "./pane.d.ts" },
-    "./editor": { "types": "./editor.d.ts" }
+    "./editor": { "types": "./editor.d.ts" },
+    "./terminal": { "types": "./terminal.d.ts", "default": "./terminal.js" }
   },
   "bin": { "zync-plugin": "bin/zync-plugin.mjs", "zync-sdk": "bin/zync-plugin.mjs" },
   "types": "./index.d.ts",
