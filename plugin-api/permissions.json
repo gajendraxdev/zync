@@ -144,6 +144,12 @@
     "description": "Replace clipboard text after a foreground user action."
   },
   {
+    "id": "ssh.terminal.open",
+    "risk": "command-execution",
+    "title": "Open an interactive server terminal",
+    "description": "Launch a user-approved interactive command on the pane's SSH connection in a Zync-owned terminal. This permits remote code execution, not just read-only inspection."
+  },
+  {
     "id": "plugins.metadata.read",
     "risk": "low",
     "title": "Read plugin inventory",

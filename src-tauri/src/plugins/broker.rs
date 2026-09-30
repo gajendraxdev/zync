@@ -185,6 +185,54 @@ impl PluginBrokerState {
         self.authorize_internal(app, runtime_instance_id, capability, true)
     }
 
+    /// Revalidate a long-lived host terminal without charging every input byte.
+    /// Legacy developer-mode runtimes must never inherit this new capability.
+    pub fn authorize_terminal(
+        &self,
+        app: &AppHandle,
+        runtime_id: &str,
+        charge: bool,
+    ) -> Result<()> {
+        {
+            let runtimes = self
+                .runtimes
+                .lock()
+                .map_err(|_| anyhow!("Plugin broker state is unavailable"))?;
+            let runtime = runtimes
+                .get(runtime_id)
+                .ok_or_else(|| anyhow!("Plugin runtime is no longer active"))?;
+            if runtime.kind != RuntimeKind::Worker || runtime.manifest.manifest_version() < 2 {
+                return Err(anyhow!(
+                    "Interactive terminals require a Manifest v2 worker"
+                ));
+            }
+        }
+        self.authorize_internal(app, runtime_id, "ssh.terminal.open", charge)
+    }
+
+    /// Resolve terminal ownership from the live pane, never from request argv.
+    pub fn terminal_binding(
+        &self,
+        app: &AppHandle,
+        runtime_id: &str,
+        pane_id: &str,
+    ) -> Result<(String, String, Arc<AtomicBool>)> {
+        self.authorize_terminal(app, runtime_id, true)?;
+        let runtimes = self
+            .runtimes
+            .lock()
+            .map_err(|_| anyhow!("Plugin broker state is unavailable"))?;
+        let binding = runtimes
+            .get(runtime_id)
+            .and_then(|runtime| runtime.pane_connections.get(pane_id))
+            .ok_or_else(|| anyhow!("Plugin pane is not bound to a live connection"))?;
+        Ok((
+            binding.connection_id.clone(),
+            binding.token.clone(),
+            binding.active.clone(),
+        ))
+    }
+
     fn authorize_internal(
         &self,
         app: &AppHandle,

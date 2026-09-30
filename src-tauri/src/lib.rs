@@ -78,6 +78,8 @@ pub fn run() {
             app.manage(app_state);
             app.manage(plugins::broker::PluginBrokerState::new());
             app.manage(plugins::pane_document::PaneDocuments::default());
+            app.manage(plugins::terminal::PluginTerminals::default());
+            plugins::terminal::initialize(&app_handle);
             app.manage(plugins::filesystem::PluginFilesystemState::new());
             app.manage(plugins::storage::PluginStorageState::new());
             app.manage(plugins::recovery::PluginRecoveryState::load_and_begin(
@@ -96,6 +98,7 @@ pub fn run() {
                 match payload.event() {
                     tauri::webview::PageLoadEvent::Started => {
                         plugins::pane_document::clear_all(webview.app_handle());
+                        plugins::terminal::clear_all(webview.app_handle());
                     }
                     tauri::webview::PageLoadEvent::Finished => {
                         let _ = webview.window().show();
@@ -130,6 +133,7 @@ pub fn run() {
                 tauri::WindowEvent::Destroyed => {
                     if window.label() == "main" {
                         plugins::pane_document::clear_all(window.app_handle());
+                        plugins::terminal::clear_all(window.app_handle());
                     }
                 }
                 tauri::WindowEvent::DragDrop(drag_event) => match drag_event {
@@ -281,6 +285,15 @@ pub fn run() {
             commands::plugins_runtime_unbind_pane,
             commands::plugins_ssh_filesystem_list,
             plugins::ssh_command::plugins_ssh_command_execute,
+            plugins::terminal::plugins_terminal_document_register,
+            plugins::terminal::plugins_terminal_document_dispose,
+            plugins::terminal::plugins_terminal_prepare,
+            plugins::terminal::plugins_terminal_approve,
+            plugins::terminal::plugins_terminal_start,
+            plugins::terminal::plugins_terminal_write,
+            plugins::terminal::plugins_terminal_resize,
+            plugins::terminal::plugins_terminal_ack,
+            plugins::terminal::plugins_terminal_close,
             commands::plugins_ssh_filesystem_read_text,
             commands::plugins_runtime_stop,
             commands::plugins_runtime_reset,
