@@ -4,6 +4,23 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Changed
+
+- **Plugin terminal groundwork:** Document the generic embedded-terminal design
+  and add tested launch validation, pane-bounded geometry and host session
+  lifecycle helpers. Existing plugins and workspace terminals are unchanged.
+  ([3969740])
+- **Native plugin terminals:** Add a separate SSH PTY service with a Manifest v2
+  terminal permission, document-bound one-use approvals, connection checks,
+  bounded input/output, resize coalescing and cancellation-safe cleanup.
+  ([e020d15])
+- **Experimental plugin terminal integration:** The host surface and optional
+  SDK worker/surface helpers are wired for experimental
+  testing in SDK 2.1.0-beta.3. Docker adoption, packaged UI validation and SSH
+  resource profiling remain pending; this is not a stable terminal API release.
+  Clear terminal runtime ownership when pane message registration is disposed.
+  ([3969740])
+
 ## [2.33.9] - 2026-09-30
 
 ### Changed
@@ -1832,3 +1849,5 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [ca4162a]: https://github.com/zync-sh/zync/commit/ca4162a
 [1bdd4a6]: https://github.com/zync-sh/zync/commit/1bdd4a6
 [dc40757]: https://github.com/zync-sh/zync/commit/dc40757
+[e020d15]: https://github.com/zync-sh/zync/commit/e020d15
+[3969740]: https://github.com/zync-sh/zync/commit/3969740
