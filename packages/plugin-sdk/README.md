@@ -1,5 +1,18 @@
 # Zync plugin SDK (beta)
 
+## Terminal overlays (2.1.0-beta.4)
+
+`registerTerminalOverlay(popupElement)` from `@zync-sh/plugin-sdk/terminal`
+registers an open rectangular popup above embedded host terminal content.
+Call the returned `dispose()` when the popup closes or unmounts; use `refresh()`
+after layout changes not observable through resize/style/scroll events.
+Registration is limited to eight concurrent elements per SDK instance.
+The host validates all geometry and clips only actual popup rectangles, including
+over the header. Separate host approval dialogs remain protected. Older hosts
+hide the surface for any registered popup; no new fields are sent to old parsers.
+No terminal I/O, approval authority, DOM access or arbitrary z-index is exposed.
+Install `@zync-sh/plugin-sdk@2.1.0-beta.4` explicitly for overlay integration.
+
 Public authoring types for Manifest v2 plugins. This package lives in the Zync repository but has its own npm version and release lifecycle.
 
 This SDK targets API **2.1**. It adds `sshCommand.execute(paneInstanceId, { program, args, expectedConnectionToken? })`, requiring `ssh.command.execute` and `engines.pluginApi: "^2.1.0"`. The returned `connectionToken` must be carried into commands following a confirmation so reconnect/rebind cannot silently change their destination. Commands use the SSH account's full authority; this is not a read-only or PM2-only permission. API 2.0 hosts reject plugins requiring this addition.
