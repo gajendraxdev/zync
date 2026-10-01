@@ -304,7 +304,7 @@ the underlying library limitation before advertising robust interactive terminal
 
 No terminal content, input, argv or session handles enter telemetry or persistence.
 Existing plugins need no changes. The SDK permission validator recognizes the
-new capability. The beta.3 SDK is published for integration testing; the operator
+new capability. The beta.4 SDK is published for integration testing; the operator
 chose to defer the pre-publish host-surface smoke test. That test remains pending.
 
 ### Host/SDK integration validation (2026-10-01)

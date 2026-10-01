@@ -137,7 +137,7 @@ The typed worker interface covers the Manifest v2 broker APIs only. Legacy plugi
 
 See the [plugin architecture](https://github.com/zync-sh/zync/blob/main/docs/PLUGINS.md) and [basic starter template](templates/basic/README.md) for package format, permissions, signing, and manual testing.
 
-## Experimental host-owned terminals (beta.3 candidate)
+## Experimental host-owned terminals (2.1.0-beta.4)
 
 Declare `ssh.terminal.open` with a clear remote-execution permission reason. The
 worker can propose a launch, but cannot start it silently, send input or read PTY
