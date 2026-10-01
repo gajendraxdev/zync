@@ -40,11 +40,55 @@ function sdkHarness() {
     requestAnimationFrame: fn => {frames.set(++id,fn);return id;}, cancelAnimationFrame: id => frames.delete(id),
     setTimeout: fn => {timers.set(++id,fn);return id;}, clearTimeout: id => timers.delete(id),
   };
-  vm.runInNewContext(readFileSync(new URL('../packages/plugin-sdk/terminal.js',import.meta.url),'utf8').replace('export function','function')+'\nglobalThis.mount = mountTerminalSurface;',context);
+  vm.runInNewContext(readFileSync(new URL('../packages/plugin-sdk/terminal.js',import.meta.url),'utf8').replaceAll('export function','function')+'\nglobalThis.mount = mountTerminalSurface; globalThis.overlay = registerTerminalOverlay;',context);
   const dispatch = (data,source=parent) => {for(const fn of listeners.get('message')??[])fn({source,data});};
   const flush = () => {const scheduled=[...frames.values()];frames.clear();scheduled.forEach(fn=>fn());};
   return {context,slot:new Element(),posts,observers,listeners,frames,timers,dispatch,flush};
 }
+
+test('overlay capability preserves geometry, legacy hosts hide safely, and cleanup restores it', async () => {
+  for (const supported of [false, true]) {
+    const h = sdkHarness(), surface = h.context.mount(h.slot, 'offer');
+    h.dispatch({type:'zync:terminal:host', version:1, nonce:'doc', overlays:supported});
+    await surface.ready; h.flush();
+    const original = h.posts.at(-1).rect;
+    const overlay = h.context.overlay(new h.context.HTMLElement()); h.flush();
+    if (supported) {
+      assert.deepEqual(h.posts.at(-1).rect, original);
+      assert.equal(h.posts.at(-1).overlays.length, 1);
+    } else {
+      assert.equal(h.posts.at(-1).rect, null);
+      assert.equal('overlays' in h.posts.at(-1), false);
+    }
+    assert.equal(h.posts.at(-1).dispose, false);
+    overlay.dispose(); overlay.dispose(); h.flush();
+    assert.deepEqual(h.posts.at(-1).rect, original);
+    surface.dispose();
+    assert.ok(h.observers.every(observer => observer.disconnected));
+  }
+});
+
+test('overlay protocol rejects oversized, malformed and authority-bearing rectangles', () => {
+  const rect = {x:0,y:50,width:100,height:20};
+  const message = {type:'zync:terminal:surface',nonce:'doc',offerId:'offer',revision:1,dispose:false,rect};
+  assert.equal(parseTerminalSurfaceMessage({...message,overlays:[rect]},'doc','offer',0).overlays.length,1);
+  for (const overlays of [[...Array(9)].map(()=>rect), [null], [{...rect,width:Infinity}], [{...rect,command:'ls'}], {}])
+    assert.equal(parseTerminalSurfaceMessage({...message,overlays},'doc','offer',0),null);
+});
+
+test('occlusion preserves uncovered header and bounds overlapping popup cutouts', async () => {
+  const result=await build({entryPoints:['src/features/plugins/terminal/surfaceOcclusion.ts'],bundle:true,write:false,format:'esm',platform:'node'});
+  const {terminalOcclusion}=await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
+  const slot={x:10,y:20,width:400,height:300};
+  assert.deepEqual(terminalOcclusion(slot,[]),{hidden:false});
+  const headerOverlap = terminalOcclusion(slot,[{x:20,y:25,width:100,height:60}]);
+  assert.equal(headerOverlap.hidden,false);
+  assert.ok(headerOverlap.clipPath);
+  const cut=terminalOcclusion(slot,[{x:20,y:80,width:100,height:60},{x:30,y:90,width:100,height:60}]);
+  assert.equal(cut.hidden,false);
+  assert.match(cut.clipPath,/^path\('/);
+  assert.deepEqual(terminalOcclusion(slot,[{x:500,y:80,width:100,height:60}]),{hidden:false});
+});
 
 test('SDK handshakes only with parent, coalesces geometry and cleans observers', async () => {
   const h=sdkHarness();const surface=h.context.mount(h.slot,'offer');
@@ -77,6 +121,86 @@ const bundle=await build({entryPoints:['src/features/plugins/terminal/nativeTran
 }]});
 const {NativeTerminalTransport,NativeTerminalPane}=await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
+
+test('handshake bursts receive a trailing reply, respect rate limits and cancel on cleanup', async () => {
+  const compiled = await build({entryPoints:['src/features/plugins/terminal/handshakeReply.ts'],bundle:true,write:false,format:'iife',globalName:'handshake'});
+  let now = 0, id = 0;
+  const timers = new Map(), replies = [];
+  const context = {
+    performance: {now: () => now},
+    setTimeout: (callback, delay) => { timers.set(++id, {callback, due: now + delay}); return id; },
+    clearTimeout: id => timers.delete(id),
+  };
+  vm.runInNewContext(compiled.outputFiles[0].text, context);
+  const hello = context.handshake.createTerminalHandshakeReply(() => replies.push(now));
+  hello.request();
+  assert.deepEqual(replies, [0]);
+  now = 10;
+  for (let i = 0; i < 100; i++) hello.request();
+  assert.equal(timers.size, 1);
+  assert.equal([...timers.values()][0].due, 100);
+  // An early timer wakeup must reschedule, not violate the minimum interval.
+  const fire = () => { const [id, timer] = [...timers][0]; timers.delete(id); timer.callback(); };
+  now = 99; fire();
+  assert.deepEqual(replies, [0]);
+  now = 100; fire();
+  assert.deepEqual(replies, [0, 100]);
+  now = 101; hello.request();
+  const staleCallback = [...timers.values()][0].callback;
+  hello.dispose(); hello.dispose();
+  assert.equal(timers.size, 0);
+  now = 200; staleCallback(); hello.request();
+  assert.deepEqual(replies, [0, 100]);
+  const replacement = context.handshake.createTerminalHandshakeReply(() => replies.push(now));
+  replacement.request();
+  assert.deepEqual(replies, [0, 100, 200]);
+  replacement.dispose();
+});
+
+test('automatic confirmation waits for a usable focused surface and prompts once per proposal', async () => {
+  const compiled = await build({entryPoints:['src/features/plugins/terminal/promptGate.ts'],bundle:true,write:false,format:'esm',platform:'node'});
+  const {TerminalPromptGate} = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
+  const gate=new TerminalPromptGate(), offer={};
+  const state={active:true,focused:true,closed:false,busy:false,rect:{x:0,y:0,width:300,height:200},viewport:{width:500,height:400}};
+  for(const override of [{active:false},{focused:false},{closed:true},{busy:true},{rect:null},{rect:{x:400,y:0,width:300,height:200}}])
+    assert.equal(gate.take(offer,{...state,...override}),false);
+  assert.equal(gate.take(offer,state),true);
+  assert.equal(gate.take(offer,{...state,active:false}),false);
+  assert.equal(gate.take(offer,state),false, 'returning from confirmation or resizing must not prompt again');
+  assert.equal(gate.take({},state),true, 'a new explicit proposal may request confirmation');
+});
+
+test('failed startup releases native authority and distinguishes failure from close', async () => {
+  const changes=[],calls=[];
+  globalThis.terminalInvoke=async(name,args)=>{
+    calls.push({name,args});
+    if(name.endsWith('_register'))return {documentId:'doc',connectionToken:'token'};
+    if(name==='plugins_terminal_start')throw new Error('Startup rejected');
+    return 'native-offer';
+  };
+  const pane=new NativeTerminalPane('runtime','pane',(offer,reason)=>changes.push({offer,reason}));
+  await pane.prepare('runtime',{program:'tool',args:[],expectedConnectionToken:'token'});
+  await assert.rejects(pane.start(changes[0].offer,{cols:80,rows:24},{write:()=>{}},()=>{},()=>{}),/Startup rejected/);
+  await tick();
+  assert.deepEqual(changes.at(-1),{offer:null,reason:'failed'});
+  assert.ok(calls.some(call=>call.name==='plugins_terminal_document_dispose'));
+  await pane.close();
+  assert.deepEqual(changes.at(-1),{offer:null,reason:'closed'});
+});
+
+test('expired proposals report expiry while releasing their native lease', async () => {
+  const changes=[];
+  globalThis.terminalInvoke=async(name)=>name.endsWith('_register')?{documentId:'doc',connectionToken:'token'}:'native-offer';
+  const original=globalThis.setTimeout;
+  let expire;
+  globalThis.setTimeout=callback=>{expire=callback;return undefined;};
+  const pane=new NativeTerminalPane('runtime','pane',(offer,reason)=>changes.push({offer,reason}));
+  try {
+    await pane.prepare('runtime',{program:'tool',args:[],expectedConnectionToken:'token'});
+    expire();await tick();
+    assert.deepEqual(changes.at(-1),{offer:null,reason:'expired'});
+  } finally {globalThis.setTimeout=original;pane.dispose();await tick();}
+});
 
 test('closing a preparing pane cannot resurrect an offer and a later request gets a new document', async () => {
   const changes=[], calls=[];let resolveOffer, registration=0;

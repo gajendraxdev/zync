@@ -13,6 +13,7 @@ export interface TerminalOffer {
 export interface TerminalSink {
     write(bytes: Uint8Array, done: () => void): void;
 }
+export type TerminalCloseReason = 'closed' | 'expired' | 'failed' | 'cancelled';
 /** A host-only native document lease. None of its IDs or transports leave Zync. */
 export class NativeTerminalPane {
     private binding?: Promise<DocumentBinding>;
@@ -22,7 +23,7 @@ export class NativeTerminalPane {
     private nativeOffer?: string;
     private publicOffer?: TerminalOffer;
     private expiry?: ReturnType<typeof setTimeout>;
-    constructor(private readonly runtime: string, private readonly pane: string, private readonly changed: (offer: TerminalOffer | null) => void) { }
+    constructor(private readonly runtime: string, private readonly pane: string, private readonly changed: (offer: TerminalOffer | null, reason?: TerminalCloseReason) => void) { }
     private async document(runtime: string): Promise<DocumentBinding> {
         if (this.disposed || runtime !== this.runtime)
             throw new Error('Terminal pane owner changed');
@@ -62,7 +63,7 @@ export class NativeTerminalPane {
             }
             this.nativeOffer = id;
             this.publicOffer = Object.freeze({ offerId: crypto.randomUUID(), launch });
-            this.expiry = setTimeout(() => { void this.close().catch(() => { }); }, 60000);
+            this.expiry = setTimeout(() => { void this.close('expired').catch(() => { }); }, 60000);
             this.changed(this.publicOffer);
             return { offerId: this.publicOffer.offerId, expiresInMs: 60000 };
         }
@@ -95,11 +96,12 @@ export class NativeTerminalPane {
         }
         catch (error) {
             transport.detach();
-            void this.close().catch(() => { });
+            if (this.publicOffer === offer)
+                void this.close('failed').catch(() => { });
             throw error;
         }
     }
-    async close(): Promise<void> {
+    async close(reason: TerminalCloseReason = 'closed'): Promise<void> {
         this.generation++;
         clearTimeout(this.expiry);
         const id = this.nativeOffer;
@@ -107,7 +109,7 @@ export class NativeTerminalPane {
         this.binding = undefined;
         this.nativeOffer = undefined;
         this.publicOffer = undefined;
-        this.changed(null);
+        this.changed(null, reason);
         if (binding) {
             const { documentId } = await binding;
             await invoke('plugins_terminal_document_dispose', { documentId });

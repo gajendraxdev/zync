@@ -1,10 +1,15 @@
-import { useEffect, useRef, useState, type RefObject, type MouseEvent } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { Terminal } from '@xterm/xterm';
 import type { FitAddon } from '@xterm/addon-fit';
+import '@xterm/xterm/css/xterm.css';
+import './pluginTerminal.css';
 import { NativeTerminalPane, type NativeTerminalTransport, type TerminalOffer } from '../../features/plugins/terminal/nativeTransport';
 import { registerTerminalPane } from '../../features/plugins/terminal/paneBridge';
 import { allocateTerminalSurface, type TerminalSurfaceRect } from '../../features/plugins/terminal/surfaceGeometry';
 import { parseTerminalSurfaceMessage } from '../../features/plugins/terminal/surfaceProtocol';
+import { TerminalPromptGate } from '../../features/plugins/terminal/promptGate';
+import { createTerminalHandshakeReply } from '../../features/plugins/terminal/handshakeReply';
+import { terminalOcclusion, TERMINAL_HEADER_HEIGHT } from '../../features/plugins/terminal/surfaceOcclusion';
 import { useAppStore } from '../../store/useAppStore';
 import { buildXtermOptions } from '../../lib/terminal/xtermOptions';
 import { resolveXtermTheme } from '../terminal/terminalTheme';
@@ -20,10 +25,12 @@ export function PluginTerminalLayer({ iframe, runtime, pane, plugin, pluginName,
 }) {
     const [offer, setOffer] = useState<TerminalOffer | null>(null);
     const [rect, setRect] = useState<TerminalSurfaceRect | null>(null);
+    const [overlays, setOverlays] = useState<TerminalSurfaceRect[]>([]);
     const [viewport, setViewport] = useState({ width: 0, height: 0 });
     const [status, setStatus] = useState('Ready to open');
     const [busy, setBusy] = useState(false);
     const [running, setRunning] = useState(false);
+    const [closed, setClosed] = useState(false);
     const [suppressed, setSuppressed] = useState(false);
     const controller = useRef<NativeTerminalPane | null>(null);
     const terminal = useRef<Terminal | null>(null);
@@ -31,9 +38,13 @@ export function PluginTerminalLayer({ iframe, runtime, pane, plugin, pluginName,
     const transport = useRef<NativeTerminalTransport | null>(null);
     const host = useRef<HTMLDivElement>(null);
     const alive = useRef(true);
+    const promptGate = useRef(new TerminalPromptGate());
+    const opening = useRef(false);
     const blocked = useAppStore(s => Boolean(s.confirmDialog || s.isSettingsOpen || s.isAddConnectionModalOpen));
     const settings = useAppStore(s => s.settings);
-    const active = visible && !document.hidden && !blocked && !suppressed && Boolean(rect);
+    const allocation = rect && allocateTerminalSurface(rect, viewport);
+    const occlusion = allocation ? terminalOcclusion(allocation.clip, overlays) : { hidden: false };
+    const active = visible && !document.hidden && !blocked && !suppressed && Boolean(rect) && !occlusion.hidden;
     const activeRef = useRef(active);
     activeRef.current = active;
     const visibleRef = useRef(visible);
@@ -45,30 +56,42 @@ export function PluginTerminalLayer({ iframe, runtime, pane, plugin, pluginName,
         const nonce = crypto.randomUUID();
         let revision = 0;
         let geometryFrame = 0;
-        let nextRect: TerminalSurfaceRect | null = null;
-        let lastHello = -Infinity;
         let latestOffer: TerminalOffer | null = null;
-        const target = new NativeTerminalPane(runtime, pane, value => {
+        const target = new NativeTerminalPane(runtime, pane, (value, reason) => {
+            // Release native authority immediately, but keep failure feedback visible
+            // until the user closes the slot or the plugin proposes a new session.
+            if (!value && reason && reason !== 'closed') {
+                if (alive.current) {
+                    setClosed(true);
+                    setRunning(false);
+                    setStatus(reason === 'expired'
+                        ? 'Proposal expired; close this shell and request a new one'
+                        : reason === 'cancelled'
+                            ? 'Launch cancelled; close this shell and request a new one'
+                            : 'Terminal could not open; close this shell and retry');
+                }
+                return;
+            }
             cancelAnimationFrame(geometryFrame);
-            nextRect = null;
             latestOffer = value;
             revision = 0;
             if (alive.current) {
                 setOffer(value);
                 setRect(null);
+                setOverlays([]);
+                setClosed(false);
+                setRunning(false);
+                setStatus('Ready to open');
             }
         });
         controller.current = target;
         const unregister = registerTerminalPane(plugin, pane, target);
-        const hello = () => iframe.current?.contentWindow?.postMessage({ type: 'zync:terminal:host', version: 1, nonce }, '*');
+        const hello = createTerminalHandshakeReply(() => iframe.current?.contentWindow?.postMessage({ type: 'zync:terminal:host', version: 1, nonce, overlays: true }, '*'));
         const message = (event: MessageEvent) => {
             if (event.source !== iframe.current?.contentWindow)
                 return;
             if (event.data?.type === 'zync:terminal:hello') {
-                if (performance.now() - lastHello >= 100) {
-                    lastHello = performance.now();
-                    hello();
-                }
+                hello.request();
                 return;
             }
             if (!latestOffer)
@@ -81,9 +104,14 @@ export function PluginTerminalLayer({ iframe, runtime, pane, plugin, pluginName,
                 void target.close().catch(() => { });
                 return;
             }
-            nextRect = value.rect;
             cancelAnimationFrame(geometryFrame);
-            geometryFrame = requestAnimationFrame(() => setRect(nextRect));
+            geometryFrame = requestAnimationFrame(() => {
+                const next = value.rect;
+                // Popup-only changes must not trigger terminal fitting or PTY resize.
+                setRect(previous => previous?.x === next?.x && previous?.y === next?.y
+                    && previous?.width === next?.width && previous?.height === next?.height ? previous : next);
+                setOverlays(value.overlays);
+            });
         };
         let frame = 0;
         const measure = () => {
@@ -105,10 +133,11 @@ export function PluginTerminalLayer({ iframe, runtime, pane, plugin, pluginName,
         document.addEventListener('visibilitychange', visibility);
         window.addEventListener('zync:pane-resize-end', measure);
         window.addEventListener('message', message);
-        hello();
+        hello.request();
         measure();
         return () => {
             alive.current = false;
+            hello.dispose();
             unregister();
             target.dispose();
             transport.current?.detach();
@@ -129,8 +158,9 @@ export function PluginTerminalLayer({ iframe, runtime, pane, plugin, pluginName,
         if (!active || !terminal.current || !fit.current)
             return;
         const frame = requestAnimationFrame(() => {
+            const before = terminal.current && { cols: terminal.current.cols, rows: terminal.current.rows };
             fit.current?.fit();
-            if (terminal.current && transport.current)
+            if (terminal.current && transport.current && (before?.cols !== terminal.current.cols || before?.rows !== terminal.current.rows))
                 void transport.current.resize(terminal.current.cols, terminal.current.rows).catch(() => { setStatus('Terminal resize failed'); });
         });
         return () => cancelAnimationFrame(frame);
@@ -152,13 +182,14 @@ export function PluginTerminalLayer({ iframe, runtime, pane, plugin, pluginName,
         update();
         return () => observer.disconnect();
     }, [settings]);
-    const open = async (event: MouseEvent<HTMLButtonElement>) => {
-        if (!event.nativeEvent.isTrusted || !document.hasFocus() || !activeRef.current || busy || !offer)
+    const open = async () => {
+        if (!document.hasFocus() || !activeRef.current || opening.current || busy || closed || !offer)
             return;
         const proposal = offer;
         const owner = controller.current;
         if (!owner)
             return;
+        opening.current = true;
         setBusy(true);
         setStatus('Awaiting approval');
         try {
@@ -168,7 +199,8 @@ export function PluginTerminalLayer({ iframe, runtime, pane, plugin, pluginName,
                 confirmText: 'Open terminal', cancelText: 'Cancel', variant: 'danger',
             });
             if (!approved) {
-                await owner.close();
+                if (alive.current && offerRef.current === proposal)
+                    await owner.close('cancelled');
                 return;
             }
             if (!alive.current || offerRef.current !== proposal || !visibleRef.current || document.hidden)
@@ -207,14 +239,24 @@ export function PluginTerminalLayer({ iframe, runtime, pane, plugin, pluginName,
                 instance.focus();
         }
         catch (error) {
+            if (!alive.current || offerRef.current !== proposal)
+                return;
+            await owner.close('failed').catch(() => { });
             if (alive.current)
                 setStatus(error instanceof Error ? error.message : 'Terminal could not open');
         }
         finally {
+            opening.current = false;
             if (alive.current)
                 setBusy(false);
         }
     };
+    // A visible mounted proposal requests confirmation once. Only the trusted
+    // confirmation result can reach native approval/start; rendering never approves.
+    useEffect(() => {
+        if (promptGate.current.take(offer, { active, focused: document.hasFocus(), closed, busy: busy || opening.current, rect, viewport }))
+            void open();
+    });
     const close = () => {
         transport.current?.detach();
         transport.current = null;
@@ -226,18 +268,17 @@ export function PluginTerminalLayer({ iframe, runtime, pane, plugin, pluginName,
     };
     if (!offer)
         return null;
-    const allocation = rect && allocateTerminalSurface(rect, viewport);
     const slot = allocation?.terminal ?? rect ?? { x: 0, y: 0, width: 0, height: 0 };
     const clip = allocation?.clip;
-    return <div className="absolute z-20 overflow-hidden" style={{ display: active && clip && slot.width >= 240 && slot.height >= 100 ? undefined : 'none', left: clip?.x ?? 0, top: clip?.y ?? 0, width: clip?.width ?? 0, height: clip?.height ?? 0 }}>
-        <section className="absolute flex flex-col bg-app-bg border border-app-border" style={{ left: allocation?.offset.x ?? 0, top: allocation?.offset.y ?? 0, width: slot.width, height: slot.height }} aria-label={`${pluginName} terminal on ${serverName}`}>
-            <header className="h-8 shrink-0 flex items-center gap-2 px-2 bg-app-panel text-xs border-b border-app-border">
+    return <div className="absolute z-20 overflow-hidden" style={{ clipPath: occlusion.clipPath, visibility: occlusion.hidden ? 'hidden' : undefined, display: visible && !document.hidden && !blocked && !suppressed && clip && slot.width >= 240 && slot.height >= 100 ? undefined : 'none', left: clip?.x ?? 0, top: clip?.y ?? 0, width: clip?.width ?? 0, height: clip?.height ?? 0 }}>
+        <section className="plugin-terminal-surface absolute flex flex-col bg-app-bg border border-app-border" style={{ left: allocation?.offset.x ?? 0, top: allocation?.offset.y ?? 0, width: slot.width, height: slot.height }} aria-label={`${pluginName} terminal on ${serverName}`}>
+            <header style={{ height: TERMINAL_HEADER_HEIGHT }} className="shrink-0 flex items-center gap-2 px-2 bg-app-panel text-xs border-b border-app-border">
                 <span className="truncate">Zync terminal · {pluginName} · {serverName}</span>
                 <span role="status" className="truncate text-muted-foreground" title={status}>{status}</span>
-                {!running && <button className="ml-auto shrink-0 text-app-accent" disabled={busy || Boolean(terminal.current)} onClick={event => { void open(event); }}>Open terminal</button>}
+                {!running && !closed && !busy && <button className="ml-auto shrink-0 text-app-accent" disabled={Boolean(terminal.current)} onClick={event => { if (event.nativeEvent.isTrusted) void open(); }}>Review launch</button>}
                 <button className="ml-auto shrink-0" aria-label="Close terminal" onClick={close}>×</button>
             </header>
-            <div ref={host} className="flex-1 min-h-0 overflow-hidden p-1"/>
+            <div ref={host} className="plugin-terminal-content terminal-container flex-1 min-h-0 overflow-hidden"/>
         </section>
     </div>;
 }

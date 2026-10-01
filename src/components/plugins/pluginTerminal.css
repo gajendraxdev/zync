@@ -1,0 +1,24 @@
+/* Shared host presentation, independent of whether a workspace terminal loaded. */
+.plugin-terminal-surface {
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.plugin-terminal-surface > header {
+    font-family: var(--font-sans, system-ui, sans-serif);
+    font-size: 11px;
+}
+
+.plugin-terminal-surface > header button {
+    padding: 3px 6px;
+    border-radius: 4px;
+}
+
+.plugin-terminal-content {
+    padding: 8px;
+}
+
+.plugin-terminal-content .xterm {
+    height: 100%;
+    width: 100%;
+}
