@@ -7743,7 +7743,7 @@ pub async fn plugins_runtime_reset(
     filesystem: State<'_, crate::plugins::filesystem::PluginFilesystemState>,
 ) -> Result<(), String> {
     filesystem.reset();
-    state.reset();
+    state.reset_worker_runtimes();
     Ok(())
 }
 

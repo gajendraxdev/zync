@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { convertFileSrc } from '@tauri-apps/api/core';
+import { isTauri } from '@tauri-apps/api/core';
 
 import { useAppStore } from '../store/useAppStore';
 import type { Plugin } from '../context/PluginContext';
@@ -9,6 +9,8 @@ import { PluginSaveState } from './editor/pluginSaveState';
 import { parseEditorStatusReport, type EditorStatusReport } from './editor/editorStatusReport';
 import { clearEditorStatus, createEditorStatusSource, publishEditorStatus } from '../features/editor/editorStatus';
 import { formatCodeMirrorStatus } from './editor/codemirror/status';
+import { usePluginEditorDocument } from '../features/plugins/usePluginPaneDocument';
+import { PluginEditorToolbar, type PluginEditorCommand } from './editor/PluginEditorToolbar';
 
 interface EditorPluginFrameProps {
   plugin: Plugin;
@@ -29,6 +31,10 @@ interface EditorDocumentPayload {
   language: string;
   content: string;
   readOnly: boolean;
+}
+
+function pendingSaveKey(generation: number, docId: string): string {
+  return `${generation}:${docId}`;
 }
 
 function detectLanguage(filename: string): string {
@@ -72,6 +78,7 @@ export function EditorPluginFrame({
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [isReady, setIsReady] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
   const [statusReport, setStatusReport] = useState<EditorStatusReport | null>(null);
@@ -83,6 +90,8 @@ export function EditorPluginFrame({
   const saveStateRef = useRef(new PluginSaveState(initialContent));
   const readyForDocRef = useRef(false);
   const currentDocIdRef = useRef<string | null>(null);
+  const frameGenerationRef = useRef(0);
+  const pendingSaveCountsRef = useRef(new Map<string, number>());
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const setEditorDirty = useCallback((value: boolean) => {
     saveStateRef.current.dirty = value;
@@ -132,6 +141,39 @@ export function EditorPluginFrame({
     iframeRef.current?.contentWindow?.postMessage(message, '*');
   }, []);
 
+  const markSavePending = useCallback((generation: number, docId: string) => {
+    const key = pendingSaveKey(generation, docId);
+    const pending = pendingSaveCountsRef.current;
+    pending.set(key, (pending.get(key) ?? 0) + 1);
+    if (generation === frameGenerationRef.current && docId === currentDocIdRef.current) {
+      setIsSaving(true);
+      setSaveError(null);
+    }
+  }, []);
+
+  const finishSavePending = useCallback((generation: number, docId: string) => {
+    const key = pendingSaveKey(generation, docId);
+    const pending = pendingSaveCountsRef.current;
+    const remaining = Math.max(0, (pending.get(key) ?? 1) - 1);
+    if (remaining > 0) pending.set(key, remaining);
+    else pending.delete(key);
+    if (
+      remaining === 0 &&
+      generation === frameGenerationRef.current &&
+      docId === currentDocIdRef.current
+    ) {
+      setIsSaving(false);
+    }
+  }, []);
+
+  const sendEditorCommand = useCallback((command: PluginEditorCommand) => {
+    if (!isReady || !currentDocIdRef.current) return;
+    postToFrame({
+      type: 'zync:editor:command',
+      payload: { command, docId: currentDocIdRef.current },
+    });
+  }, [isReady, postToFrame]);
+
   // Always compute the current theme payload at send-time so we don't
   // accidentally capture stale CSS variable values.
   const getThemePayload = useCallback(() => getZyncThemePayload(theme), [theme, accentColor]);
@@ -156,6 +198,7 @@ export function EditorPluginFrame({
   useEffect(() => {
     saveStateRef.current.reset(initialContent);
     setEditorDirty(false);
+    setIsSaving(false);
     setSaveError(null);
     // A content refresh for the same file must not clear in-flight edits.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -240,33 +283,52 @@ export function EditorPluginFrame({
           case 'zync:editor:save-request':
             if (payload?.docId && payload.docId !== currentDocIdRef.current) break;
             {
+              const docId = currentDocIdRef.current;
+              if (!docId) break;
               const content = saveStateRef.current.requestSave(payload?.content);
               setEditorDirty(saveStateRef.current.dirty);
               const requestId = typeof payload?.requestId === 'number' ? payload.requestId : undefined;
-              const docId = currentDocIdRef.current;
+              const frameGeneration = frameGenerationRef.current;
+              markSavePending(frameGeneration, docId);
               const save = async () => {
                 try {
-                  if (docId === currentDocIdRef.current) setSaveError(null);
                   await onSave(content);
-                  if (docId === currentDocIdRef.current) {
+                  if (
+                    frameGeneration === frameGenerationRef.current &&
+                    docId === currentDocIdRef.current
+                  ) {
                     setEditorDirty(saveStateRef.current.saveSucceeded(content, requestId !== undefined));
-                    showToast('success', `${plugin.manifest.name} saved ${filename}`);
                   }
-                  if (requestId !== undefined) postToFrame({
-                    type: 'zync:editor:save-result',
-                    payload: { docId, requestId, ok: true },
-                  });
+                  if (
+                    requestId !== undefined &&
+                    frameGeneration === frameGenerationRef.current
+                  ) {
+                    postToFrame({
+                      type: 'zync:editor:save-result',
+                      payload: { docId, requestId, ok: true },
+                    });
+                  }
                 } catch (error: unknown) {
                   const message = error instanceof Error ? error.message : String(error);
-                  if (docId === currentDocIdRef.current) {
+                  if (
+                    frameGeneration === frameGenerationRef.current &&
+                    docId === currentDocIdRef.current
+                  ) {
                     setSaveError(message);
                     setEditorDirty(saveStateRef.current.saveFailed(content));
                   }
                   showToast('error', `Plugin editor save failed: ${message}`);
-                  if (requestId !== undefined) postToFrame({
-                    type: 'zync:editor:save-result',
-                    payload: { docId, requestId, ok: false },
-                  });
+                  if (
+                    requestId !== undefined &&
+                    frameGeneration === frameGenerationRef.current
+                  ) {
+                    postToFrame({
+                      type: 'zync:editor:save-result',
+                      payload: { docId, requestId, ok: false },
+                    });
+                  }
+                } finally {
+                  finishSavePending(frameGeneration, docId);
                 }
               };
               const queuedSave = saveQueueRef.current.then(save, save);
@@ -296,7 +358,7 @@ export function EditorPluginFrame({
 
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
-  }, [doc.docId, filename, onFatalError, onSave, plugin.manifest.editor?.supports, plugin.manifest.id, plugin.manifest.name, postToFrame, requestClose, sendTheme, setEditorDirty, showToast]);
+  }, [doc.docId, filename, finishSavePending, getThemePayload, markSavePending, onFatalError, onSave, plugin.manifest.editor?.supports, plugin.manifest.id, plugin.manifest.name, postToFrame, requestClose, sendTheme, setEditorDirty, showToast]);
 
   useEffect(() => {
     return () => {
@@ -311,74 +373,21 @@ export function EditorPluginFrame({
     };
   }, [postToFrame]);
 
-  const editorAssetUrls = useMemo(() => {
-    if (plugin.path.startsWith('builtin://')) return null;
-    // We intentionally resolve known assets directly from disk paths.
-    // This avoids relying on <base href> behavior inside about:srcdoc iframes.
-    const cssUrl = convertFileSrc(`${plugin.path}/dist/editor.css`.replace(/\\/g, '/'));
-    const jsUrl = convertFileSrc(`${plugin.path}/dist/editor.js`.replace(/\\/g, '/'));
-    return { cssUrl, jsUrl };
-  }, [plugin.path]);
-
   const shimScript = useMemo(() => {
-    const jsUrlLiteral = JSON.stringify(editorAssetUrls?.jsUrl ?? '');
     const supportedCapabilitiesLiteral = JSON.stringify(
       plugin.manifest.editor?.supports ?? [],
     ).replace(/</g, '\\u003c');
 
-    // In Tauri, convertFileSrc() can yield URLs where "directory joining" via URL('./', ...)
-    // isn't reliable (for example when the real filesystem path is encoded in query params).
-    // We inject a tiny resolver so the plugin can always derive pack URLs from the same
-    // mechanism used to load dist/editor.js.
     const resolverScript = `
   (function () {
-    const __editorJsUrl = ${jsUrlLiteral};
-    function __resolveViaUrlJoin(relativePath) {
-      try {
-        // If the pathname ends with editor.js, normal URL joining works.
-        const u = new URL(__editorJsUrl);
-        if (/\\/dist\\/editor\\.js$/i.test(u.pathname)) {
-          const dir = new URL('./', __editorJsUrl).toString();
-          return new URL(relativePath, dir).toString();
-        }
-      } catch { /* ignore */ }
-      return null;
-    }
-
-    function __resolveViaSearchParam(relativePath) {
-      try {
-        const u = new URL(__editorJsUrl);
-        for (const [key, value] of u.searchParams.entries()) {
-          if (!/editor\\.js$/i.test(value)) continue;
-          const baseValue = value.replace(/editor\\.js$/i, '');
-          u.searchParams.set(key, baseValue + relativePath);
-          return u.toString();
-        }
-      } catch { /* ignore */ }
-      return null;
-    }
-
-    function __resolveViaStringReplace(relativePath) {
-      if (!__editorJsUrl) return null;
-      const idx = __editorJsUrl.toLowerCase().lastIndexOf('editor.js');
-      if (idx < 0) return null;
-      return __editorJsUrl.slice(0, idx) + relativePath + __editorJsUrl.slice(idx + 'editor.js'.length);
-    }
-
     window.__zyncResolveEditorAsset = function (relativePath) {
-      const rel = String(relativePath || '');
-      return (
-        __resolveViaUrlJoin(rel) ||
-        __resolveViaSearchParam(rel) ||
-        __resolveViaStringReplace(rel) ||
-        rel
-      );
+      const value = String(relativePath || '');
+      try {
+        return new URL(value, document.baseURI).toString();
+      } catch {
+        return value;
+      }
     };
-
-    // Back-compat: base used by older plugin builds. This should resolve to the dist/ directory.
-    // (We intentionally compute it via the resolver so it works with query-param URL forms.)
-    const base = window.__zyncResolveEditorAsset('');
-    window.__zyncEditorAssetBase = (typeof base === 'string' && base && !base.endsWith('/')) ? (base + '/') : base;
   })();
     `;
 
@@ -430,21 +439,14 @@ export function EditorPluginFrame({
 })();
 </script>
 `;
-  }, [editorAssetUrls?.jsUrl, plugin.manifest.editor?.supports]);
+  }, [plugin.manifest.editor?.supports]);
 
+  const nativeEditorDocument = isTauri() && !plugin.path.startsWith('builtin://');
   const fullHtml = (plugin.editorHtml || plugin.style || plugin.script)
     ? (() => {
         let html = plugin.editorHtml || '<html><head></head><body></body></html>';
-        const securityMeta = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' asset: http://asset.localhost; style-src 'unsafe-inline' asset: http://asset.localhost; img-src data: blob: asset: http://asset.localhost; connect-src asset: http://asset.localhost; worker-src blob:; font-src data: asset: http://asset.localhost; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">`;
+        const securityMeta = nativeEditorDocument ? '' : `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; worker-src blob:; font-src data:; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">`;
         const headInjection = `${securityMeta}${shimScript}${plugin.style ? `<style>${plugin.style}</style>` : ''}${plugin.script ? `<script>${plugin.script}</script>` : ''}`;
-
-        // Hardening: rewrite common relative asset tags into file-backed asset URLs.
-        // This avoids 404s when the iframe is loaded via srcDoc (about:srcdoc).
-        if (editorAssetUrls) {
-          html = html
-            .replace(/href=(["'])\.?\/?dist\/editor\.css\1/gi, (_match, quote: string) => `href=${quote}${editorAssetUrls.cssUrl}${quote}`)
-            .replace(/src=(["'])\.?\/?dist\/editor\.js\1/gi, (_match, quote: string) => `src=${quote}${editorAssetUrls.jsUrl}${quote}`);
-        }
 
         if (/<head\b[^>]*>/i.test(html)) {
           return html.replace(/<head\b[^>]*>/i, (match) => `${match}${headInjection}`);
@@ -455,39 +457,21 @@ export function EditorPluginFrame({
         return `<html><head>${headInjection}</head><body>${html}</body></html>`;
       })()
     : `<html><head>${shimScript}</head><body style="font-family: sans-serif; background: #111827; color: white; display:flex; align-items:center; justify-content:center; min-height:100vh;">No editor entry found.</body></html>`;
+  const editorDocument = usePluginEditorDocument(fullHtml, plugin.manifest.id, nativeEditorDocument);
 
   return (
       <div className="absolute inset-0 z-[70] flex min-h-0 flex-col bg-app-panel">
         {!hideToolbar && (
-          <div className="flex h-9 items-center justify-between border-b border-app-border bg-app-panel px-3">
-            <div className="flex min-w-0 items-center gap-2">
-              <h3 className="truncate text-sm font-medium text-app-text">{filename}</h3>
-              <span aria-hidden="true" className="text-app-muted/50">·</span>
-              <span className="truncate text-xs text-app-muted">
-                {plugin.manifest.editor?.displayName || plugin.manifest.name}
-              </span>
-            </div>
-            <div className="flex shrink-0 items-center gap-3 text-[11px] text-app-muted">
-              <span className="inline-flex items-center gap-1.5">
-                <span
-                  aria-hidden="true"
-                  className={`h-1.5 w-1.5 rounded-full ${isReady ? 'bg-emerald-400' : 'bg-amber-400'}`}
-                />
-                {isReady ? 'Ready' : 'Connecting'}
-              </span>
-              <span className={dirty ? 'text-app-text' : 'text-app-muted'}>
-                {dirty ? 'Modified' : 'Saved'}
-              </span>
-              <button
-                type="button"
-                onClick={() => { void requestClose(); }}
-                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-base text-app-muted transition-colors hover:bg-app-surface hover:text-app-text"
-                aria-label="Close editor"
-              >
-                ×
-              </button>
-            </div>
-          </div>
+          <PluginEditorToolbar
+            dirty={dirty}
+            filename={filename}
+            isReady={isReady}
+            isSaving={isSaving}
+            onClose={() => { void requestClose(); }}
+            onCommand={sendEditorCommand}
+            providerName={plugin.manifest.editor?.displayName || plugin.manifest.name}
+            supports={plugin.manifest.editor?.supports}
+          />
         )}
         <div className="flex min-h-0 flex-1 flex-col">
         {saveError && (
@@ -501,11 +485,23 @@ export function EditorPluginFrame({
           </div>
         )}
         <div className="min-h-0 flex-1 overflow-hidden bg-app-bg">
-          <iframe
+          {editorDocument.native && editorDocument.state.status === 'error' ? (
+            <div role="alert" className="flex h-full items-center justify-center px-4 text-sm text-app-muted">
+              Editor provider assets could not load. Close and reopen the file to try again.
+            </div>
+          ) : editorDocument.native && editorDocument.state.status === 'loading' ? (
+            <div role="status" className="flex h-full items-center justify-center text-sm text-app-muted">
+              Loading editor provider…
+            </div>
+          ) : <iframe
             ref={iframeRef}
-            srcDoc={fullHtml}
+            src={editorDocument.native && editorDocument.state.status === 'ready' ? editorDocument.state.url : undefined}
+            srcDoc={editorDocument.native ? undefined : fullHtml}
             onLoad={() => {
+              frameGenerationRef.current += 1;
+              pendingSaveCountsRef.current.clear();
               setIsReady(false);
+              setIsSaving(false);
               setStatusReport(null);
               readyForDocRef.current = false;
               currentDocIdRef.current = null;
@@ -516,7 +512,7 @@ export function EditorPluginFrame({
             sandbox="allow-scripts"
             className="h-full w-full border-0 bg-transparent"
             title={`Editor Provider: ${plugin.manifest.id}`}
-          />
+          />}
         </div>
       </div>
     </div>

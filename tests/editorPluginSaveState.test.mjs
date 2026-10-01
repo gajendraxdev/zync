@@ -57,8 +57,26 @@ assert.equal(state.saveFailed('submitted without change'), true,
 const frame = fs.readFileSync(path.join(process.cwd(), 'src/components/EditorPluginFrame.tsx'), 'utf8');
 assert.match(frame, /if \(!isSameDoc \|\| !saveStateRef\.current\.dirty\)/,
   'do not send update-document over dirty text');
-assert.match(frame, /if \(docId === currentDocIdRef\.current\) \{\s*setSaveError\(message\);\s*setEditorDirty\(saveStateRef\.current\.saveFailed\(content\)\);/,
+assert.match(frame, /frameGeneration === frameGenerationRef\.current &&\s*docId === currentDocIdRef\.current\s*\) \{\s*setSaveError\(message\);\s*setEditorDirty\(saveStateRef\.current\.saveFailed\(content\)\);/,
   'a stale failed save must not change the new document state');
+assert.match(frame, /type: 'zync:editor:command'/,
+  'the shared toolbar must send commands through the editor protocol');
+assert.doesNotMatch(frame, /showToast\('success'/,
+  'successful plugin saves use inline state instead of a redundant toast');
+assert.match(frame, /markSavePending\(frameGeneration, docId\);[\s\S]*?saveQueueRef\.current\.then\(save, save\)/,
+  'a save must become pending before it is added to the async queue');
+assert.match(frame, /frameGenerationRef\.current \+= 1;[\s\S]*?pendingSaveCountsRef\.current\.clear\(\);[\s\S]*?setIsSaving\(false\);/,
+  'an iframe reload must clear pending save UI state');
+assert.match(frame, /frameGeneration === frameGenerationRef\.current[\s\S]*?finishSavePending\(frameGeneration, docId\)/,
+  'save completion must be scoped to the iframe generation that started it');
+
+const toolbar = fs.readFileSync(path.join(
+  process.cwd(), 'src/components/editor/PluginEditorToolbar.tsx',
+), 'utf8');
+for (const label of ['Shortcuts', 'Saved', 'Go to Line', 'Find / Replace']) {
+  assert.match(toolbar, new RegExp(label.replace('/', '\\/')),
+    `the shared plugin toolbar must expose ${label}`);
+}
 
 const builtin = fs.readFileSync(path.join(process.cwd(), 'src-tauri/src/plugins/builtins/editors.rs'), 'utf8');
 assert.match(builtin, /requestSave\(editor\.value, \{ docId: currentDoc\.docId, requestId \}\)/,

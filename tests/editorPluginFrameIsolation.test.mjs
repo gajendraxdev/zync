@@ -4,23 +4,43 @@ import path from 'node:path';
 
 const sourcePath = path.join(process.cwd(), 'src', 'components', 'EditorPluginFrame.tsx');
 const source = fs.readFileSync(sourcePath, 'utf8');
+const nativeDocumentSource = fs.readFileSync(
+  path.join(process.cwd(), 'src-tauri', 'src', 'plugins', 'pane_document.rs'),
+  'utf8',
+);
 
 const iframeSandbox = source.match(/<iframe[\s\S]*?sandbox="([^"]+)"/i)?.[1];
 assert.equal(iframeSandbox, 'allow-scripts');
 assert.equal(iframeSandbox.includes('allow-same-origin'), false);
-assert.match(source, /Content-Security-Policy/, 'editor frames must receive their own CSP');
 assert.match(
   source,
-  /connect-src asset: http:\/\/asset\.localhost/,
-  'editor frames may fetch only package assets needed to create isolated workers',
+  /usePluginEditorDocument\(fullHtml, plugin\.manifest\.id, nativeEditorDocument\)/,
+  'native editor frames must use the manifest-bound document route',
 );
-assert.match(source, /worker-src blob:/, 'editor frames must allow blob-backed package workers');
 assert.doesNotMatch(
-  source.match(/Content-Security-Policy[^`]+/)?.[0] ?? '',
-  /connect-src[^;]*https:/,
-  'editor frames must not inherit the app network allowlist',
+  source,
+  /convertFileSrc|dist\/editor\.(?:css|js)/,
+  'the host must not hardcode provider asset paths',
 );
-assert.match(source, /object-src 'none'/, 'editor frames must disable embedded objects');
+assert.match(source, /src=\{editorDocument\.native[\s\S]*?editorDocument\.state\.url/);
+assert.match(source, /srcDoc=\{editorDocument\.native \? undefined : fullHtml\}/);
+assert.match(source, /worker-src blob:/, 'browser fallback frames must allow blob-backed workers');
+assert.match(source, /object-src 'none'/, 'browser fallback frames must disable embedded objects');
+assert.match(
+  nativeDocumentSource,
+  /read_pane_asset\(app, binding, path, MAX_PACKAGE_FILE_BYTES\)/,
+  'isolated documents must accept every asset size already allowed by package validation',
+);
+assert.doesNotMatch(
+  nativeDocumentSource,
+  /MAX_ASSET_BYTES/,
+  'the document route must not impose a smaller duplicate limit on valid plugin assets',
+);
+assert.match(
+  nativeDocumentSource,
+  /pub\(crate\) async fn plugins_editor_document_register[\s\S]*?spawn_blocking[\s\S]*?editor_asset_binding/,
+  'editor package scanning and digesting must run outside the synchronous Tauri command path',
+);
 assert.match(
   source,
   /if \(readyForDocRef\.current\)/,

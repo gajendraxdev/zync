@@ -191,7 +191,7 @@ for (const responseCall of workerBridge.matchAll(/\brespond\(([^,\n]+)/g)) {
   assert.equal(responseCall[1].trim(), 'requester', 'every Worker response must retain its requester');
 }
 assert.match(workerSource, /requester,[\s\S]{0,160}'api:window:showQuickPick'/, 'delayed quick-pick replies must retain Worker identity');
-assert.match(workerSource, /if \(!isTrustedBuiltinTheme\(plugin\) \|\| !plugin\.style\) return;[\s\S]{0,240}document\.head\.appendChild\(style\)/, 'only app-owned built-in theme CSS may enter the host document');
+assert.match(workerSource, /if \(!isTrustedBuiltinTheme\(plugin\) \|\| !plugin\.style\) return;[\s\S]{0,300}applyCspStyleNonce\(style\);[\s\S]{0,160}document\.head\.appendChild\(style\)/, 'only app-owned built-in theme CSS may enter the host document with the release nonce');
 assert.match(workerSource, /Third-party manifest\.style is never injected/, 'the third-party CSS compatibility boundary must remain documented');
 assert.match(workerSource, /filterTrustedBuiltinThemeChoices/, 'theme-manager choices must be backed by trusted built-in packages');
 assert.match(settingsPluginsSource, /activeTab === 'appearance'[\s\S]{0,100}filterUnsupportedHostThemes\(plugins\)\.filter\(plugin => plugin\.enabled\)/, 'Appearance must advertise only enabled trusted themes');

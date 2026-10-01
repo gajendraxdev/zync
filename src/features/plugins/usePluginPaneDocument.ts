@@ -1,5 +1,5 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 interface PaneDocumentRegistration {
     id: string;
@@ -19,7 +19,30 @@ export function usePluginPaneDocument(html: string, pluginId: string, panelId: s
     native: boolean;
     state: PaneDocumentState;
 } {
-    const native = isTauri();
+    const args = useMemo(() => ({
+        html,
+        pluginId,
+        panelId,
+        legacyAccess,
+    }), [html, legacyAccess, panelId, pluginId]);
+    return usePluginDocument('plugins_pane_document_register', args);
+}
+
+/** Register an editor provider against its manifest-declared package entry. */
+export function usePluginEditorDocument(html: string, pluginId: string, enabled = true): {
+    native: boolean;
+    state: PaneDocumentState;
+} {
+    const args = useMemo(() => ({ html, pluginId }), [html, pluginId]);
+    return usePluginDocument('plugins_editor_document_register', args, enabled);
+}
+
+function usePluginDocument(
+    command: 'plugins_pane_document_register' | 'plugins_editor_document_register',
+    args: Record<string, unknown>,
+    enabled = true,
+): { native: boolean; state: PaneDocumentState } {
+    const native = isTauri() && enabled;
     const [state, setState] = useState<PaneDocumentState>({ status: 'loading' });
 
     useEffect(() => {
@@ -34,7 +57,7 @@ export function usePluginPaneDocument(html: string, pluginId: string, panelId: s
             });
         };
 
-        void invoke<PaneDocumentRegistration>('plugins_pane_document_register', { html, pluginId, panelId, legacyAccess })
+        void invoke<PaneDocumentRegistration>(command, args)
             .then(registration => {
                 documentId = registration.id;
                 if (disposed) unregister(registration.id);
@@ -48,7 +71,7 @@ export function usePluginPaneDocument(html: string, pluginId: string, panelId: s
             disposed = true;
             if (documentId) unregister(documentId);
         };
-    }, [html, native, pluginId, panelId, legacyAccess]);
+    }, [args, command, native]);
 
     return { native, state };
 }

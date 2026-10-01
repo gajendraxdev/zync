@@ -41,6 +41,7 @@ impl PluginNetworkGrant {
 }
 
 struct RuntimeRecord {
+    kind: RuntimeKind,
     plugin_id: String,
     plugin_path: String,
     package_digest: String,
@@ -49,6 +50,12 @@ struct RuntimeRecord {
     window_started: Instant,
     requests_in_window: u32,
     pane_connections: HashMap<String, PaneConnection>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RuntimeKind {
+    Worker,
+    EditorDocument,
 }
 
 struct PaneConnection {
@@ -93,6 +100,7 @@ pub struct PaneAssetBinding {
     pub(crate) runtime_instance_id: String,
     pub(crate) package_root: PathBuf,
     pub(crate) entry_route: String,
+    pub(crate) owns_runtime: bool,
 }
 
 impl PluginBrokerState {
@@ -122,10 +130,13 @@ impl PluginBrokerState {
             .runtimes
             .lock()
             .map_err(|_| anyhow!("Plugin broker state is unavailable"))?;
-        runtimes.retain(|_, runtime| runtime.plugin_id != plugin_id);
+        runtimes.retain(|_, runtime| {
+            runtime.plugin_id != plugin_id || runtime.kind != RuntimeKind::Worker
+        });
         runtimes.insert(
             runtime_instance_id.clone(),
             RuntimeRecord {
+                kind: RuntimeKind::Worker,
                 plugin_id: plugin_id.to_string(),
                 plugin_path: plugin.path,
                 package_digest,
@@ -150,6 +161,12 @@ impl PluginBrokerState {
     pub fn stop_plugin(&self, plugin_id: &str) {
         if let Ok(mut runtimes) = self.runtimes.lock() {
             runtimes.retain(|_, runtime| runtime.plugin_id != plugin_id);
+        }
+    }
+
+    pub fn reset_worker_runtimes(&self) {
+        if let Ok(mut runtimes) = self.runtimes.lock() {
+            runtimes.retain(|_, runtime| runtime.kind == RuntimeKind::EditorDocument);
         }
     }
 
@@ -498,7 +515,9 @@ impl PluginBrokerState {
                 .map_err(|_| anyhow!("Plugin broker state is unavailable"))?;
             let (runtime_id, runtime) = runtimes
                 .iter()
-                .find(|(_, runtime)| runtime.plugin_id == plugin_id)
+                .find(|(_, runtime)| {
+                    runtime.plugin_id == plugin_id && runtime.kind == RuntimeKind::Worker
+                })
                 .ok_or_else(|| anyhow!("Plugin runtime is no longer active"))?;
             if runtime.manifest.manifest_version() < 2 {
                 return if legacy_access {
@@ -532,25 +551,73 @@ impl PluginBrokerState {
             )
         };
         self.authorize_internal(app, &runtime_id, "ui.pane.register", false)?;
-        let canonical_root =
-            fs::canonicalize(&plugin_path).context("Failed to resolve plugin root")?;
-        let canonical_entry = fs::canonicalize(canonical_root.join(entry))
-            .context("Failed to resolve plugin pane entry")?;
-        if !canonical_entry.starts_with(&canonical_root) || !canonical_entry.is_file() {
-            return Err(anyhow!("Plugin pane entry escapes the package"));
+        build_asset_binding(runtime_id, &plugin_path, &entry, false).map(Some)
+    }
+
+    /// Create a short-lived principal for an editor document that has no Worker
+    /// runtime. The principal preserves the same permission, enabled-state and
+    /// package-integrity checks used by Worker-backed pane assets.
+    pub fn editor_asset_binding(
+        &self,
+        app: &AppHandle,
+        plugin_id: &str,
+    ) -> Result<PaneAssetBinding> {
+        let plugin = PluginScanner::scan(app)?
+            .into_iter()
+            .find(|plugin| plugin.manifest.id == plugin_id)
+            .ok_or_else(|| anyhow!("Plugin is not installed"))?;
+        if !plugin.enabled
+            || plugin.manifest.manifest_version() < 2
+            || plugin.manifest.manifest_type.as_deref() != Some("editor-provider")
+        {
+            return Err(anyhow!(
+                "Plugin is not an enabled Manifest v2 editor provider"
+            ));
         }
-        let entry_route = canonical_entry
-            .strip_prefix(&canonical_root)
-            .map_err(|_| anyhow!("Plugin pane entry escapes the package"))?
-            .components()
-            .map(|part| part.as_os_str().to_string_lossy().into_owned())
-            .collect::<Vec<_>>()
-            .join("/");
-        Ok(Some(PaneAssetBinding {
-            runtime_instance_id: runtime_id,
-            package_root: canonical_root,
-            entry_route,
-        }))
+        let entry = plugin
+            .manifest
+            .editor
+            .as_ref()
+            .and_then(|editor| editor.entry.clone())
+            .ok_or_else(|| anyhow!("Editor provider does not declare an entry"))?;
+        let package_digest =
+            runtime_package_digest(&plugin.path, &plugin.manifest.id, &plugin.manifest.version)?;
+        let runtime_instance_id = uuid::Uuid::new_v4().to_string();
+        {
+            let mut runtimes = self
+                .runtimes
+                .lock()
+                .map_err(|_| anyhow!("Plugin broker state is unavailable"))?;
+            runtimes.insert(
+                runtime_instance_id.clone(),
+                RuntimeRecord {
+                    kind: RuntimeKind::EditorDocument,
+                    plugin_id: plugin_id.to_string(),
+                    plugin_path: plugin.path.clone(),
+                    package_digest,
+                    package_digest_verified_at: Instant::now(),
+                    manifest: plugin.manifest,
+                    window_started: Instant::now(),
+                    requests_in_window: 0,
+                    pane_connections: HashMap::new(),
+                },
+            );
+        }
+
+        let result = (|| {
+            self.authorize_internal(app, &runtime_instance_id, "editor.provider.register", false)?;
+            build_asset_binding(runtime_instance_id.clone(), &plugin.path, &entry, true)
+        })();
+        if result.is_err() {
+            self.stop_runtime(&runtime_instance_id);
+        }
+        result
+    }
+
+    pub fn release_asset_binding(&self, binding: &PaneAssetBinding) {
+        if binding.owns_runtime {
+            self.stop_runtime(&binding.runtime_instance_id);
+        }
     }
 
     /// Recheck runtime permission for every asset; the broker also rechecks
@@ -562,7 +629,12 @@ impl PluginBrokerState {
         relative_path: &Path,
         max_bytes: u64,
     ) -> Result<Vec<u8>> {
-        self.authorize_internal(app, &binding.runtime_instance_id, "ui.pane.register", false)?;
+        let capability = if binding.owns_runtime {
+            "editor.provider.register"
+        } else {
+            "ui.pane.register"
+        };
+        self.authorize_internal(app, &binding.runtime_instance_id, capability, false)?;
         read_bounded_pane_asset(&binding.package_root, relative_path, max_bytes)
     }
 
@@ -674,6 +746,33 @@ impl PluginBrokerState {
     }
 }
 
+fn build_asset_binding(
+    runtime_instance_id: String,
+    plugin_path: &str,
+    entry: &str,
+    owns_runtime: bool,
+) -> Result<PaneAssetBinding> {
+    let canonical_root = fs::canonicalize(plugin_path).context("Failed to resolve plugin root")?;
+    let canonical_entry = fs::canonicalize(canonical_root.join(entry))
+        .context("Failed to resolve plugin pane entry")?;
+    if !canonical_entry.starts_with(&canonical_root) || !canonical_entry.is_file() {
+        return Err(anyhow!("Plugin pane entry escapes the package"));
+    }
+    let entry_route = canonical_entry
+        .strip_prefix(&canonical_root)
+        .map_err(|_| anyhow!("Plugin pane entry escapes the package"))?
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join("/");
+    Ok(PaneAssetBinding {
+        runtime_instance_id,
+        package_root: canonical_root,
+        entry_route,
+        owns_runtime,
+    })
+}
+
 const MAX_PANE_HTML_BYTES: u64 = 512 * 1024;
 
 fn read_bounded_pane_asset(
@@ -771,6 +870,7 @@ mod tests {
     #[test]
     fn request_budget_resets_and_rejects_floods() {
         let mut runtime = RuntimeRecord {
+            kind: RuntimeKind::Worker,
             plugin_id: "dev.example.demo".into(),
             plugin_path: "builtin://test".into(),
             package_digest: "sha256:test".into(),
@@ -793,12 +893,48 @@ mod tests {
     }
 
     #[test]
+    fn worker_reset_preserves_editor_documents_but_full_reset_revokes_them() {
+        let broker = PluginBrokerState::new();
+        let manifest: Manifest = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/plugins/manifest-v2-demo/manifest.json"
+        ))
+        .expect("parse manifest");
+        let runtime = |kind| RuntimeRecord {
+            kind,
+            plugin_id: manifest.id.clone(),
+            plugin_path: "builtin://test".into(),
+            package_digest: "sha256:test".into(),
+            package_digest_verified_at: Instant::now(),
+            manifest: manifest.clone(),
+            window_started: Instant::now(),
+            requests_in_window: 0,
+            pane_connections: HashMap::new(),
+        };
+        {
+            let mut runtimes = broker.runtimes.lock().expect("runtime lock");
+            runtimes.insert("worker".into(), runtime(RuntimeKind::Worker));
+            runtimes.insert("editor".into(), runtime(RuntimeKind::EditorDocument));
+        }
+
+        broker.reset_worker_runtimes();
+        {
+            let runtimes = broker.runtimes.lock().expect("runtime lock");
+            assert!(!runtimes.contains_key("worker"));
+            assert!(runtimes.contains_key("editor"));
+        }
+
+        broker.reset();
+        assert!(broker.runtimes.lock().expect("runtime lock").is_empty());
+    }
+
+    #[test]
     fn pane_connection_binding_requires_this_plugins_declared_pane() {
         let broker = PluginBrokerState::new();
         let runtime_instance_id = "runtime-a";
         broker.runtimes.lock().expect("runtime lock").insert(
             runtime_instance_id.into(),
             RuntimeRecord {
+                kind: RuntimeKind::Worker,
                 plugin_id: "dev.zync.examples.manifest-v2-demo".into(),
                 plugin_path: "builtin://test".into(),
                 package_digest: "sha256:test".into(),
@@ -912,6 +1048,7 @@ mod tests {
         state.runtimes.lock().expect("runtime lock").insert(
             "review-runtime".into(),
             RuntimeRecord {
+                kind: RuntimeKind::Worker,
                 plugin_id: manifest.id.clone(),
                 plugin_path: "unused-test-path".into(),
                 package_digest: "reviewed-digest".into(),

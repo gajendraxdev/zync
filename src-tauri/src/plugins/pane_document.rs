@@ -1,4 +1,5 @@
 use super::broker::{PaneAssetBinding, PluginBrokerState};
+use super::package::MAX_PACKAGE_FILE_BYTES;
 use percent_encoding::{percent_decode_str, utf8_percent_encode, NON_ALPHANUMERIC};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -11,14 +12,13 @@ use uuid::Uuid;
 pub(crate) const SCHEME: &str = "zync-plugin-pane";
 const MAX_DOCUMENT_BYTES: usize = 1024 * 1024;
 const MAX_TOTAL_BYTES: usize = 16 * MAX_DOCUMENT_BYTES;
-const MAX_ASSET_BYTES: u64 = 2 * 1024 * 1024;
 #[cfg(any(target_os = "windows", target_os = "android"))]
 const ASSET_ORIGIN: &str = "http://zync-plugin-pane.localhost";
 #[cfg(not(any(target_os = "windows", target_os = "android")))]
 const ASSET_ORIGIN: &str = "zync-plugin-pane:";
 
 fn pane_csp() -> String {
-    format!("default-src 'none'; script-src 'unsafe-inline' {ASSET_ORIGIN}; style-src 'unsafe-inline' {ASSET_ORIGIN}; img-src data: {ASSET_ORIGIN}; connect-src 'none'; font-src {ASSET_ORIGIN}; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'")
+    format!("default-src 'none'; script-src 'unsafe-inline' {ASSET_ORIGIN}; style-src 'unsafe-inline' {ASSET_ORIGIN}; img-src data: {ASSET_ORIGIN}; connect-src {ASSET_ORIGIN}; worker-src blob:; font-src data: {ASSET_ORIGIN}; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'")
 }
 
 #[derive(Default)]
@@ -79,12 +79,28 @@ impl PaneDocuments {
         Ok(PaneDocumentRegistration { url, id })
     }
 
-    fn unregister(&self, id: &str) {
+    fn unregister(&self, id: &str) -> Option<PaneAssetBinding> {
         if let Ok(mut documents) = self.inner.lock() {
             if let Some(entry) = documents.entries.remove(id) {
                 documents.total_bytes -= entry.html.len();
+                return entry.asset_binding.clone();
             }
         }
+        None
+    }
+
+    fn clear(&self) -> Vec<PaneAssetBinding> {
+        let Ok(mut documents) = self.inner.lock() else {
+            return Vec::new();
+        };
+        let bindings = documents
+            .entries
+            .values()
+            .filter_map(|entry| entry.asset_binding.clone())
+            .collect();
+        documents.entries.clear();
+        documents.total_bytes = 0;
+        bindings
     }
 
     /// The generated id scopes every route. Asset reads are delegated to the
@@ -238,6 +254,31 @@ pub(crate) fn plugins_pane_document_register(
     state.register(html, asset_binding)
 }
 
+#[tauri::command]
+pub(crate) async fn plugins_editor_document_register(
+    app: AppHandle,
+    html: String,
+    plugin_id: String,
+) -> Result<PaneDocumentRegistration, String> {
+    let app_for_binding = app.clone();
+    let asset_binding = tokio::task::spawn_blocking(move || {
+        let broker = app_for_binding.state::<PluginBrokerState>();
+        broker.editor_asset_binding(&app_for_binding, &plugin_id)
+    })
+    .await
+    .map_err(|error| format!("Editor provider registration task failed: {error}"))?
+    .map_err(|error| error.to_string())?;
+    let state = app.state::<PaneDocuments>();
+    let broker = app.state::<PluginBrokerState>();
+    match state.register(html, Some(asset_binding.clone())) {
+        Ok(registration) => Ok(registration),
+        Err(error) => {
+            broker.release_asset_binding(&asset_binding);
+            Err(error)
+        }
+    }
+}
+
 pub(crate) fn respond_with_broker(
     app: &AppHandle,
     request: &Request<Vec<u8>>,
@@ -246,14 +287,33 @@ pub(crate) fn respond_with_broker(
     let broker = app.state::<PluginBrokerState>();
     documents.respond(request, |binding, path| {
         broker
-            .read_pane_asset(app, binding, path, MAX_ASSET_BYTES)
+            .read_pane_asset(app, binding, path, MAX_PACKAGE_FILE_BYTES)
             .ok()
     })
 }
 
+/// Release documents whose browser-side unregister callbacks can no longer run.
+pub(crate) fn clear_all(app: &AppHandle) {
+    let Some(documents) = app.try_state::<PaneDocuments>() else {
+        return;
+    };
+    let bindings = documents.clear();
+    if let Some(broker) = app.try_state::<PluginBrokerState>() {
+        for binding in bindings {
+            broker.release_asset_binding(&binding);
+        }
+    }
+}
+
 #[tauri::command]
-pub(crate) fn plugins_pane_document_unregister(state: State<'_, PaneDocuments>, id: String) {
-    state.unregister(&id);
+pub(crate) fn plugins_pane_document_unregister(
+    state: State<'_, PaneDocuments>,
+    broker: State<'_, PluginBrokerState>,
+    id: String,
+) {
+    if let Some(binding) = state.unregister(&id) {
+        broker.release_asset_binding(&binding);
+    }
 }
 
 #[cfg(test)]
@@ -276,12 +336,18 @@ mod tests {
             response.headers()[header::CONTENT_SECURITY_POLICY],
             pane_csp()
         );
+        let csp = response.headers()[header::CONTENT_SECURITY_POLICY]
+            .to_str()
+            .unwrap();
+        assert!(csp.contains(&format!("connect-src {ASSET_ORIGIN}")));
+        assert!(csp.contains("worker-src blob:"));
+        assert!(csp.contains(&format!("font-src data: {ASSET_ORIGIN}")));
         assert!(response
             .headers()
             .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
             .is_none());
         assert_eq!(response.body(), b"<style>body{color:red}</style>");
-        store.unregister(&entry.id);
+        let _ = store.unregister(&entry.id);
         assert_eq!(
             store
                 .respond(&request(&format!("/{}/", entry.id)), |_, _| None)
@@ -323,8 +389,37 @@ mod tests {
             .map(|_| store.register(html.clone(), None).unwrap())
             .collect::<Vec<_>>();
         assert!(store.register("x".to_string(), None).is_err());
-        store.unregister(&entries[0].id);
+        let _ = store.unregister(&entries[0].id);
         assert!(store.register("x".to_string(), None).is_ok());
+    }
+
+    #[test]
+    fn clear_removes_documents_and_returns_runtime_bindings() {
+        let store = PaneDocuments::default();
+        let binding = PaneAssetBinding {
+            runtime_instance_id: "editor-runtime".to_string(),
+            package_root: PathBuf::new(),
+            entry_route: "ui/index.html".to_string(),
+            owns_runtime: true,
+        };
+        let entry = store
+            .register("<html></html>".to_string(), Some(binding))
+            .unwrap();
+
+        let bindings = store.clear();
+
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(bindings[0].runtime_instance_id, "editor-runtime");
+        assert!(bindings[0].owns_runtime);
+        assert_eq!(
+            store
+                .respond(&request(&format!("/{}/ui/index.html", entry.id)), |_, _| {
+                    None
+                })
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+        assert!(store.register("x".repeat(MAX_DOCUMENT_BYTES), None).is_ok());
     }
 
     #[test]
@@ -362,6 +457,7 @@ mod tests {
             runtime_instance_id: "test-runtime".to_string(),
             package_root: PathBuf::new(),
             entry_route: "ui/index.html".to_string(),
+            owns_runtime: false,
         };
         let entry = store
             .register("<html></html>".to_string(), Some(binding))
