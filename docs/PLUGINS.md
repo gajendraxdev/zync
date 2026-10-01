@@ -8,6 +8,17 @@
 
 ## Implementation status
 
+### Plugin-hosted terminals (experimental integration)
+
+The generic embedded-terminal design, lifecycle/geometry helpers and internal
+native SSH service are documented in [PLUGIN_TERMINALS.md](./PLUGIN_TERMINALS.md).
+Host pane surfaces and optional SDK helpers are wired for local testing in the
+2.1.0-beta.4 SDK integration beta, published on 2026-10-01. Existing command APIs, built-ins
+and plugin behavior are unchanged. Manifest v2 uses `ssh.terminal.open` for
+proposals; each session still needs a host-owned user confirmation. Docker's
+local integration was tested in the packaged app. A non-repeating WebView2 crash
+remains unresolved; SSH resource profiling and stable-release validation are pending.
+
 ### Pane document isolation migration (in progress)
 
 Packaged Zync currently renders plugin panes through `iframe.srcDoc`. That

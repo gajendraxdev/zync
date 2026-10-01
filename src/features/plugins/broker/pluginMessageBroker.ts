@@ -18,6 +18,7 @@ import type { PluginBrokerWorker, PluginMessageBrokerDependencies } from './type
 import { ipcRenderer } from '../../../lib/tauri-ipc';
 import { useAppStore } from '../../../store/useAppStore';
 import { createOptionalPermissionRequester } from '../runtime/pluginOptionalPermission';
+import { handleTerminalWorkerMessage } from '../terminal/paneBridge';
 
 const requestOptionalPermission = createOptionalPermissionRequester({
     inspect: (runtimeInstanceId, capability, approvedDigest) => ipcRenderer.invoke(
@@ -41,6 +42,8 @@ const ACTION_PERMISSIONS: Record<string, string> = {
     'api:ssh-filesystem:list': 'ssh.filesystem.read',
     'api:ssh-filesystem:read-text': 'ssh.filesystem.read',
     'api:ssh-command:execute': 'ssh.command.execute',
+    'api:terminal:context': 'ssh.terminal.open',
+    'api:terminal:prepare': 'ssh.terminal.open',
     'api:network:fetch': 'network.fetch',
     'api:storage:get': 'filesystem.pluginData.read',
     'api:storage:keys': 'filesystem.pluginData.read',
@@ -114,6 +117,16 @@ export function createPluginMessageBroker<W extends PluginBrokerWorker>(
             if (await handlePluginSshCommandMessage({
                 type, payload, runtimeInstanceId, isCurrent: current, respond: reply,
             })) return true;
+
+            if (type === 'api:terminal:context' || type === 'api:terminal:prepare') {
+                try {
+                    const result = await handleTerminalWorkerMessage(pluginId, runtimeInstanceId, type, payload);
+                    if (current()) reply({ requestId: payload?.requestId, result });
+                } catch (error) {
+                    if (current()) reply({ requestId: payload?.requestId, error: error instanceof Error ? error.message : String(error) });
+                }
+                return true;
+            }
 
             if (await handlePluginNotificationMessage(
                 dependencies,

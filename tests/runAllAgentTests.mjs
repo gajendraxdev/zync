@@ -72,6 +72,8 @@ const tests = [
   'tests/pluginDeveloperMode.test.mjs',
   'tests/pluginBrokerBoundary.test.mjs',
   'tests/pluginSshCommand.test.mjs',
+  'tests/pluginTerminalFoundation.test.mjs',
+  'tests/pluginTerminalIntegration.test.mjs',
   'tests/pluginPermissionDiff.test.mjs',
   'tests/pluginPaneMessages.test.mjs',
   'tests/pluginPaneBindingQueue.test.mjs',

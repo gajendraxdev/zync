@@ -575,6 +575,7 @@ tests/runTerminalRendererTests.mjs
 
 ## Related documents
 
+- [PLUGIN_TERMINALS.md](./PLUGIN_TERMINALS.md) — staged generic plugin-hosted terminal design; not a released API
 - [TERMINAL_GHOST.md](./TERMINAL_GHOST.md) — ghost completion system (inline, history, paths, AI integration plans)
 - [SESSION_PERSISTENCE.md](./SESSION_PERSISTENCE.md) — workspace tab/session restore (includes terminal snapshots)
 - [SETTINGS_SYSTEM.md](./SETTINGS_SYSTEM.md) — global settings persistence and `settings.terminal` schema

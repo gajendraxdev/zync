@@ -11,10 +11,12 @@ if (metadata.private || !metadata.name || !metadata.version || !metadata.bin?.['
 }
 
 for (const args of [
+  [path.join(root, 'node_modules', 'typescript', 'bin', 'tsc'), '-p', path.join(root, 'tsconfig.agent-tests.json')],
   [path.join(root, 'node_modules', 'typescript', 'bin', 'tsc'), '-p', path.join(sdk, 'tsconfig.test.json')],
   [path.join(root, 'tests', 'pluginSdkValidator.test.mjs')],
   [path.join(root, 'tests', 'pluginSdkTemplate.test.mjs')],
   [path.join(root, 'tests', 'pluginSdkPackage.test.mjs')],
+  [path.join(root, 'tests', 'pluginTerminalIntegration.test.mjs')],
   [path.join(root, 'tests', 'pluginSdkKeygen.test.mjs')],
   [path.join(root, 'tests', 'pluginPemSigning.test.mjs')],
 ]) {

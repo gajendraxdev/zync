@@ -36,7 +36,7 @@ try {
     'templates/basic/scripts/preview.mjs',
     'templates/basic/src/ui/index.html', 'templates/basic/src/ui/pane.css',
     'templates/basic/src/ui/pane.js', 'templates/basic/src/worker.js',
-    'validate.d.ts', 'validate.js', 'worker.d.ts',
+    'terminal.d.ts', 'terminal.js', 'validate.d.ts', 'validate.js', 'worker.d.ts',
   ]);
 } finally {
   rmSync(cacheDir, { recursive: true, force: true });

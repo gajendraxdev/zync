@@ -11,7 +11,7 @@ export const knownPermissionIds = Object.freeze([
   'ui.status.register', 'ui.notifications.emit', 'ui.sidebar.register',
   'ui.settings.register', 'editor.provider.register', 'theme.pack.register',
   'connection.metadata.read', 'terminal.input.send', 'terminal.tab.create',
-  'terminal.command.execute', 'ssh.command.execute',
+  'terminal.command.execute', 'ssh.command.execute', 'ssh.terminal.open',
   'filesystem.pluginData.read', 'filesystem.pluginData.write',
   'filesystem.external.read', 'filesystem.external.write', 'ssh.filesystem.read',
   'network.fetch', 'network.local', 'ui.dialog.confirm', 'clipboard.read',

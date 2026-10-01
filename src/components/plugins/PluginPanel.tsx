@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { useAppStore } from '../../store/useAppStore';
 import { getZyncThemePayload } from '../../lib/themePayload';
@@ -12,6 +12,7 @@ import { isPluginShortcutCommandAllowed, matchPluginShortcut, pluginShortcutBind
 import { runShortcutCommand } from '../../features/shortcuts/actions';
 import { TerminalDisconnectedView } from '../terminal/TerminalDisconnectedView';
 import { findNode, layoutForCanvas, layoutForPlugin } from '../../lib/paneLayout';
+import { PluginTerminalLayer } from './PluginTerminalLayer';
 
 interface PluginPanelProps {
     html: string;
@@ -65,6 +66,11 @@ export function PluginPanel(props: PluginPanelProps) {
 function PluginPanelFrame({ html, panelId, pluginId, connectionId, legacyAccess, paneInstanceId, visible }: PluginPanelProps) {
     const iframeRef = useRef<HTMLIFrameElement>(null);
     const frameGenerationRef = useRef(0);
+    const [frameGeneration, setFrameGeneration] = useState(0);
+    const [terminalRuntime, setTerminalRuntime] = useState<string | null>(null);
+    const pluginName = usePlugins().plugins.find(plugin => plugin.manifest.id === pluginId)?.manifest.name ?? pluginId;
+    const serverName = useAppStore(s => s.connections.find(connection => connection.id === connectionId)?.name ?? 'SSH workspace');
+    const terminalConnected = useAppStore(s => s.connections.some(connection => connection.id === connectionId && connection.status === 'connected'));
     const visibleRef = useRef(visible);
     useLayoutEffect(() => {
         visibleRef.current = visible;
@@ -195,16 +201,23 @@ function PluginPanelFrame({ html, panelId, pluginId, connectionId, legacyAccess,
         };
     }, [panelId, pluginId, connectionId, legacyAccess, paneInstanceId, postPaneMessage]);
 
-    useEffect(() => registerPaneMessageTarget(
-        pluginId,
-        panelId,
-        paneInstanceId,
-        connectionId ?? 'local',
-        message => iframeRef.current?.contentWindow?.postMessage({
-            type: 'zync:pane:message',
-            payload: message,
-        }, '*'),
-    ), [connectionId, panelId, pluginId, paneInstanceId, registerPaneMessageTarget]);
+    useEffect(() => {
+        const unregister = registerPaneMessageTarget(
+            pluginId,
+            panelId,
+            paneInstanceId,
+            connectionId ?? 'local',
+            message => iframeRef.current?.contentWindow?.postMessage({
+                type: 'zync:pane:message',
+                payload: message,
+            }, '*'),
+            setTerminalRuntime,
+        );
+        return () => {
+            unregister();
+            setTerminalRuntime(null);
+        };
+    }, [connectionId, panelId, pluginId, paneInstanceId, registerPaneMessageTarget]);
 
     // Inject the zync shim into the panel HTML
     const shimScript = legacyAccess ? `
@@ -342,6 +355,7 @@ window.zync = Object.freeze({
                 srcDoc={paneDocument.native ? undefined : fullHtml}
                 onLoad={() => {
                     frameGenerationRef.current += 1;
+                    setFrameGeneration(frameGenerationRef.current);
                     sendVisibility();
                     sendTheme();
                     sendShortcuts();
@@ -349,6 +363,11 @@ window.zync = Object.freeze({
                 sandbox={legacyAccess ? 'allow-scripts allow-modals' : 'allow-scripts'}
                 className="flex-1 w-full border-0 bg-transparent"
                 title={`Plugin Panel: ${panelId}`}
+            />}
+            {!legacyAccess && terminalConnected && terminalRuntime && frameGeneration > 0 && <PluginTerminalLayer
+                key={`${terminalRuntime}:${frameGeneration}`}
+                iframe={iframeRef} runtime={terminalRuntime} pane={paneInstanceId} plugin={pluginId}
+                pluginName={pluginName} serverName={serverName} visible={visible}
             />}
         </div>
     );
