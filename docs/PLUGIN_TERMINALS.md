@@ -11,11 +11,13 @@ to silently type commands. Docker is the first intended consumer, not a special
 case in the host. Other plugins use the same service and rendering contract.
 
 The existing `sshCommand.execute` API remains the bounded, non-interactive command
-API. Existing built-in plugins, workspace terminals, and Docker's confirmed
-command runner are unchanged. The native service and permission catalog are now
+API. Existing built-in plugins and workspace terminals are unchanged.
+The native service and permission catalog are now
 implemented. Host pane surfaces and optional worker/SDK APIs are wired in the
-experimental 2.1.0-beta.3 candidate, not published yet. Automatic terminal launch
-is deliberately unavailable. Docker adoption remains pending.
+experimental 2.1.0-beta.4 SDK, published under `beta` on 2026-10-01. A visible
+proposal requests host confirmation once; the SSH session starts only after
+approval. Docker's local integration now uses interactive shells and a copied
+command fallback for unsupported hosts.
 
 Implemented foundation:
 
@@ -27,7 +29,9 @@ Implemented foundation:
 
 Native authority and SSH streaming are implemented in a separate Rust module.
 Renderer integration and SDK transport are wired into `PluginPanel`. Packaged
-UI validation, real-server resource profiling and Docker adoption remain pending.
+UI was tested by the operator, who confirmed working dropdowns, copy and terminal
+rendering. A WebView2 crash was observed once and remains unresolved. Real-server
+resource profiling and stable-release validation remain pending.
 
 ## Ownership and boundaries
 
@@ -64,9 +68,12 @@ plugin. The helper requires an axis-aligned slot of at least 240 × 100 CSS pixe
 3. The worker passes the offer to its UI using the existing pane message channel.
 4. The UI mounts that offer into a slot element through the SDK surface helper.
    Slot registration reserves space; it does not start a process.
-5. Zync displays a trusted terminal header and an **Open terminal** control in the
-   slot. User activation opens a host-owned confirmation naming the plugin, server
-   and proposed program/arguments. A forged iframe click is not trusted input.
+5. Once the slot is visible and the app is focused, Zync requests confirmation
+   once per proposal, naming the plugin, server and proposed program/arguments.
+   Only approval in that host-owned dialog starts the session. Resizing, returning
+   from a dialog, cancellation and expiry never automatically repeat the prompt.
+   A **Review launch** control remains available if automatic presentation could
+   not run, such as when the app was unfocused.
 6. Native creation consumes the approved offer exactly once, revalidates the
    package, grants, lease and generation, and allocates the SSH PTY.
 7. Host xterm input goes to that dedicated native session. Normal user typing
@@ -113,6 +120,29 @@ its permission reason and confirmation. No background auto-restart on reconnect.
 
 ## Surface layout and input
 
+### Popup occlusion (SDK 2.1.0-beta.4 integration beta)
+
+`registerTerminalOverlay(element)` registers an open plugin popup and returns
+idempotent `dispose()` and `refresh()` methods. Dispose on close/unmount. It sends
+only bounded rectangles through the existing document/offer/revision protocol;
+there is no terminal I/O or host DOM access. At most eight popups are registered.
+Resize/style/scroll observations are event-driven and coalesced per frame.
+
+Hosts advertise `overlays: true` in the version-1 handshake. New SDKs omit the
+field for old hosts and temporarily hide the surface while a popup is open,
+retaining the session. New hosts subtract overlapping popup rectangles from
+the surface clip path so rendering and pointer hit testing agree. Terminal size,
+xterm instance and PTY dimensions stay unchanged. Overlapping holes are
+subtracted as a union, not even-odd paths that expose intersections again.
+
+Popups occlude only their actual rectangles, including over the header. The
+uncovered header and output remain visible without changing terminal dimensions.
+The host confirmation dialog remains the approval boundary. Host dialogs retain
+priority. Closing popups restores the surface without stealing focus or opening
+another session. This is axis-aligned rectangular occlusion, not arbitrary CSS
+stacking or a host-rendered menu service. Packaged WebView2 validation remains
+required before publishing this capability.
+
 The terminal is rendered in a stable host-owned DOM sibling above the iframe,
 clipped to the plugin pane content area. It is not a portal into iframe DOM and
 does not require another workspace split. The iframe declares a rectangular
@@ -126,10 +156,11 @@ slot using CSS-pixel coordinates relative to its viewport.
   Clipping is not a PTY resize. Fully clipped surfaces are hidden.
 - Coalesce slot observation/scroll/resize work per animation frame; no polling.
   Disconnect observers and cancel scheduled work on disposal.
-- Initial support is an axis-aligned rectangular slot without CSS transforms or
-  plugin elements layered over it. Do not claim arbitrary DOM embedding.
-- Zync's trusted header identifies the terminal's owner and destination. Plugins
-  cannot obscure it or style it as their own trusted approval UI.
+- Slots remain axis-aligned without CSS transforms. Registered rectangular
+  popups use the occlusion contract above; arbitrary DOM embedding is unsupported.
+- Zync's header identifies the terminal's owner and destination. Registered
+  popups may overlap it; it is not the approval boundary. The separate host
+  confirmation dialog cannot be covered or styled by plugin content.
 - Hide/disable terminal surfaces during host dialogs and workspace drag/resize
   hit-testing suppression. Host modals must win stacking and focus ownership.
 - Hide/blur inactive surfaces and suppress resize/input work while hidden. Keep
@@ -273,7 +304,8 @@ the underlying library limitation before advertising robust interactive terminal
 
 No terminal content, input, argv or session handles enter telemetry or persistence.
 Existing plugins need no changes. The SDK permission validator recognizes the
-new capability, but the beta.3 terminal API candidate is not published yet.
+new capability. The beta.3 SDK is published for integration testing; the operator
+chose to defer the pre-publish host-surface smoke test. That test remains pending.
 
 ### Host/SDK integration validation (2026-10-01)
 

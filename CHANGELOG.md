@@ -6,6 +6,14 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Changed
 
+- **Plugin terminal feedback:** Keep expired-proposal and startup-failure feedback
+  visible after native cleanup instead of silently removing the terminal header.
+  Load xterm styling independently and keep terminal output visible when a popup
+  covers the header; clip only popup bounds and preserve the uncovered header.
+  ([8bd83bc])
+- **Plugin terminal resize:** Treat remote resize errors/timeouts as best-effort
+  so they do not close a live shell and later size updates can proceed. ([6bbdec3])
+
 - **Plugin terminal groundwork:** Document the generic embedded-terminal design
   and add tested launch validation, pane-bounded geometry and host session
   lifecycle helpers. Existing plugins and workspace terminals are unchanged.
@@ -20,6 +28,17 @@ All notable changes to Zync are documented in this file. The format is based on 
   resource profiling remain pending; this is not a stable terminal API release.
   Clear terminal runtime ownership when pane message registration is disposed.
   ([3969740])
+
+- **Plugin terminal overlays:** Add an optional SDK popup registration contract
+  with bounded, document-scoped geometry and host clipping. Preserve terminal
+  layout/session state and fall back safely on old hosts. Published in SDK
+  2.1.0-beta.4 under the npm `beta` tag. ([49e3b34], [8bd83bc])
+
+- **Plugin terminal launch:** Request confirmation once a terminal proposal has a
+  visible, focused surface, removing the separate launch-button step. Starting
+  the SSH session still requires approval in Zync's confirmation dialog.
+  Coalesce handshake replies so rapidly remounted surfaces receive a response.
+  ([8bd83bc])
 
 ## [2.33.9] - 2026-09-30
 
@@ -1851,3 +1870,6 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [dc40757]: https://github.com/zync-sh/zync/commit/dc40757
 [e020d15]: https://github.com/zync-sh/zync/commit/e020d15
 [3969740]: https://github.com/zync-sh/zync/commit/3969740
+[6bbdec3]: https://github.com/zync-sh/zync/commit/6bbdec3
+[49e3b34]: https://github.com/zync-sh/zync/commit/49e3b34
+[8bd83bc]: https://github.com/zync-sh/zync/commit/8bd83bc
