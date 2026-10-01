@@ -304,8 +304,9 @@ pub fn spawn(app: AppHandle, state: AppState, registry: PluginTerminals, task: T
                     changed = sizes.changed() => {
                         changed.map_err(|_| "Terminal resize channel closed")?;
                         let size = *sizes.borrow_and_update();
-                        tokio::time::timeout(Duration::from_millis(100), remote.window_change(size.cols, size.rows, 0, 0)).await
-                            .map_err(|_| "Terminal resize timed out")?.map_err(|error| error.to_string())?;
+                        // Resize is advisory: a slow/rejected update must not
+                        // close a live shell. The watch channel retains later sizes.
+                        let _ = tokio::time::timeout(Duration::from_millis(100), remote.window_change(size.cols, size.rows, 0, 0)).await;
                     },
                     _ = timer.tick() => {
                         batch.flush(&mut window, |frame| emit_output(&output, frame))?;
