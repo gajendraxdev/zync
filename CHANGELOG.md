@@ -12,6 +12,7 @@ All notable changes to Zync are documented in this file. The format is based on 
   older app surveys that retained an installation ID to the private inbox.
   Analytics queues team replies until the installation connects; a separate
   rollout switch limits this lower-assurance migration path.
+  ([ddd629b], [a9bad02])
 - **Private replies inbox (feature gated):** Let Zync receive team responses to
   desktop surveys and feedback in a secure installation-specific inbox, with live
   unread updates, one user follow-up per team response, and conversation history.
@@ -24,6 +25,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Inbox submission fallback:** If secure credential storage is unavailable,
   submit surveys and feedback through the existing endpoint. Other inbox errors
   retain their retry behavior to avoid duplicate submissions.
+  ([ddd629b])
 
 ### Changed
 
@@ -1897,3 +1899,5 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [8bd83bc]: https://github.com/zync-sh/zync/commit/8bd83bc
 [6335b4b]: https://github.com/zync-sh/zync/commit/6335b4b
 [fbb4b5c]: https://github.com/zync-sh/zync-analytics/commit/fbb4b5c
+[ddd629b]: https://github.com/zync-sh/zync/commit/ddd629b
+[a9bad02]: https://github.com/zync-sh/zync-analytics/commit/a9bad02
