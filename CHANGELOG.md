@@ -10,6 +10,12 @@ All notable changes to Zync are documented in this file. The format is based on 
   Analytics while retaining history. Closing the last open conversation stops
   live reply delivery, even when earlier messages remain unread.
 
+### Fixed
+
+- **Installed terminal styling:** Authorize xterm-generated styles with the
+  release CSP nonce for workspace and embedded plugin terminals, preserving
+  typography, ANSI colours, and cursor styling when using the DOM renderer.
+
 ## [2.33.10] - 2026-10-02
 
 ### Added

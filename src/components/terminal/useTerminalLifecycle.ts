@@ -33,6 +33,7 @@ import {
   writeIdleHostSuspendNotice,
 } from '../../lib/terminal';
 import type { TerminalSettingsSlice } from './useTerminalTheme';
+import { getTerminalDocument } from '../../lib/terminal/terminalDocument';
 
 /** Run heavy renderer work after the next paint so tab/UI clicks feel instant. */
 function deferAfterPaint(task: () => void): void {
@@ -567,11 +568,14 @@ export function useTerminalLifecycle({
       const settings = terminalSettingsRef.current;
       const initialTheme = resolveInitialThemeRef.current();
 
-      term = new XTerm(buildXtermOptions({
-        settings,
-        theme: initialTheme,
-        windowsLocalPty: shouldUseWindowsLocalPtyOptions(terminalKey),
-      }));
+      term = new XTerm({
+        ...buildXtermOptions({
+          settings,
+          theme: initialTheme,
+          windowsLocalPty: shouldUseWindowsLocalPtyOptions(terminalKey),
+        }),
+        documentOverride: getTerminalDocument(containerRef.current.ownerDocument),
+      });
 
       fitAddon = new FitAddon();
       const webLinksAddon = new WebLinksAddon();

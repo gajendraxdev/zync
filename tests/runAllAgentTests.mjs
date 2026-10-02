@@ -45,6 +45,7 @@ const tests = [
   'tests/aiSidebarResize.test.mjs',
   'tests/codeMirrorHelpers.test.mjs',
   'tests/cspStyleNonce.test.mjs',
+  'tests/terminalDocument.test.mjs',
   'tests/connectionDomain.test.mjs',
   'tests/connectionDisplay.test.mjs',
   'tests/notificationHistory.test.mjs',
