@@ -4,6 +4,12 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Added
+
+- **Team conversation closure:** End survey and feedback conversations from
+  Analytics while retaining history. Closing the last open conversation stops
+  live reply delivery, even when earlier messages remain unread.
+
 ## [2.33.10] - 2026-10-02
 
 ### Added

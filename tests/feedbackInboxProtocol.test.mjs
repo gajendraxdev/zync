@@ -63,11 +63,17 @@ test('inbox snapshots retain plain text and never implicitly acknowledge replies
     ],
     nextAfter: 0,
   };
-  assert.deepEqual(parseReplies(replies), replies);
+  assert.deepEqual(parseReplies(replies), { ...replies, closedAt: null });
   assert.equal(parseReplies({ replies: [], nextAfter: 0 }).replyTo, null);
   assert.equal(parseReplies({ ...replies, replies: [{ ...replies.replies[0], sender: 'user' }] }).replies[0].sender, 'user');
   assert.throws(() => parseReplies({ ...replies, replyTo: '../invalid' }));
   assert.throws(() => parseReplies({ ...replies, replies: [{ ...replies.replies[0], sender: 'admin' }] }));
+});
+test('reply history exposes admin closure and tolerates older servers', () => {
+  const page = { replies: [], nextAfter: 0 };
+  assert.equal(parseReplies(page).closedAt, null);
+  assert.equal(parseReplies({ ...page, closedAt: date }).closedAt, date);
+  assert.throws(() => parseReplies({ ...page, closedAt: 'invalid' }));
 });
 test('inbox response validation rejects malformed counts, payloads and cursors', () => {
   for (const bad of [

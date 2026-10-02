@@ -30,6 +30,7 @@ export function InboxHistory({
   const [replies, setReplies] = useState<InboxReply[]>([]);
   const [after, setAfter] = useState(0);
   const [replyTo, setReplyTo] = useState<string | null>(null);
+  const [historyClosure, setHistoryClosure] = useState<{ thread: string; closedAt: string } | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -62,6 +63,7 @@ export function InboxHistory({
           setReplies(page.replies);
           setAfter(page.nextAfter);
           setReplyTo(page.replyTo);
+          if (page.closedAt) setHistoryClosure({ thread: selected.id, closedAt: page.closedAt });
         }
       })
       .catch((err) => {
@@ -103,6 +105,7 @@ export function InboxHistory({
         ]);
         setAfter(page.nextAfter);
         setReplyTo(page.replyTo);
+        if (page.closedAt) setHistoryClosure({ thread: selected.id, closedAt: page.closedAt });
       }
     } catch (err) {
       if (run === generation.current) setError(String(err));
@@ -133,6 +136,7 @@ export function InboxHistory({
     }
   };
   const closed = Boolean(
+    (historyClosure?.thread === selected?.id && historyClosure?.closedAt) ||
     threads.find((item) => item.id === selected?.id)?.closedAt ||
     selected?.closedAt,
   );

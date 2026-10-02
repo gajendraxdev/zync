@@ -32,6 +32,7 @@ export interface InboxSnapshot {
   nextBefore: number;
 }
 export interface InboxReplies {
+  closedAt: string | null;
   replyTo: string | null;
   replies: InboxReply[];
   nextAfter: number;
@@ -115,6 +116,7 @@ export function parseReplies(raw: unknown): InboxReplies {
   if (!Array.isArray(data.replies) || data.replies.length > PAGE_SIZE)
     throw new Error('Invalid inbox replies');
   return {
+    closedAt: data.closedAt == null ? null : date(data.closedAt),
     replyTo: data.replyTo == null ? null : identifier(data.replyTo),
     nextAfter: count(data.nextAfter),
     replies: data.replies.map((rawReply) => {
