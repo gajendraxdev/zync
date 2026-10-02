@@ -4,17 +4,21 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.33.11] - 2026-10-03
+
 ### Added
 
 - **Team conversation closure:** End survey and feedback conversations from
   Analytics while retaining history. Closing the last open conversation stops
   live reply delivery, even when earlier messages remain unread.
+  ([c0766ce], [c9b15f3])
 
 ### Fixed
 
 - **Installed terminal styling:** Authorize xterm-generated styles with the
   release CSP nonce for workspace and embedded plugin terminals, preserving
   typography, ANSI colours, and cursor styling when using the DOM renderer.
+  ([0d78142])
 
 ## [2.33.10] - 2026-10-02
 
@@ -1708,7 +1712,8 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [d3f4060]: https://github.com/zync-sh/zync/commit/d3f4060
 [840afc2]: https://github.com/zync-sh/zync/commit/840afc2
 [193f568]: https://github.com/zync-sh/zync/commit/193f568
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.33.10...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.33.11...HEAD
+[2.33.11]: https://github.com/zync-sh/zync/compare/v2.33.10...v2.33.11
 [2.33.10]: https://github.com/zync-sh/zync/compare/v2.33.9...v2.33.10
 [2.33.9]: https://github.com/zync-sh/zync/compare/v2.33.8...v2.33.9
 [2.33.8]: https://github.com/zync-sh/zync/compare/v2.33.7...v2.33.8
@@ -1913,3 +1918,6 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [fbb4b5c]: https://github.com/zync-sh/zync-analytics/commit/fbb4b5c
 [ddd629b]: https://github.com/zync-sh/zync/commit/ddd629b
 [a9bad02]: https://github.com/zync-sh/zync-analytics/commit/a9bad02
+[c0766ce]: https://github.com/zync-sh/zync/commit/c0766ce
+[c9b15f3]: https://github.com/zync-sh/zync-analytics/commit/c9b15f3
+[0d78142]: https://github.com/zync-sh/zync/commit/0d78142
