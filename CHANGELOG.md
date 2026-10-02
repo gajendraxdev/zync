@@ -4,6 +4,15 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Added
+
+- **Private replies inbox (feature gated):** Let Zync receive team responses to
+  desktop surveys and feedback in a secure installation-specific inbox, with live
+  unread updates, one user follow-up per team response, and conversation history.
+  Analytics adds authenticated storage, admin replies, and bounded notifications.
+  Both sides remain disabled by default pending installed-app and proxy validation.
+  ([6335b4b], [fbb4b5c])
+
 ### Changed
 
 - **Plugin terminal feedback:** Keep expired-proposal and startup-failure feedback
@@ -1873,3 +1882,5 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [6bbdec3]: https://github.com/zync-sh/zync/commit/6bbdec3
 [49e3b34]: https://github.com/zync-sh/zync/commit/49e3b34
 [8bd83bc]: https://github.com/zync-sh/zync/commit/8bd83bc
+[6335b4b]: https://github.com/zync-sh/zync/commit/6335b4b
+[fbb4b5c]: https://github.com/zync-sh/zync-analytics/commit/fbb4b5c
