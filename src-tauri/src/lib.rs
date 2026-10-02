@@ -2,6 +2,7 @@ mod ai;
 mod atomic_io;
 mod commands;
 mod connection_latency;
+mod feedback_inbox;
 mod fs;
 mod fs_volumes;
 mod ghost;
@@ -76,6 +77,7 @@ pub fn run() {
             let data_dir = commands::get_data_dir(&app_handle);
             let app_state = AppState::new(data_dir.clone(), app_handle.clone());
             app.manage(app_state);
+            app.manage(feedback_inbox::TransportState::default());
             app.manage(plugins::broker::PluginBrokerState::new());
             app.manage(plugins::pane_document::PaneDocuments::default());
             app.manage(plugins::terminal::PluginTerminals::default());
@@ -160,6 +162,9 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            feedback_inbox::feedback_inbox_identity,
+            feedback_inbox::transport::feedback_inbox_request,
+            feedback_inbox::transport::feedback_inbox_stream,
             commands::ssh_connect,
             commands::ssh_test_connection,
             commands::ssh_agent_signature_respond,

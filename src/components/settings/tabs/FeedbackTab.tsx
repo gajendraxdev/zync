@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button } from '../../ui/Button';
 import { Select } from '../../ui/Select';
 import { Section } from '../common/Section';
@@ -12,6 +12,13 @@ import {
   type FeedbackCategory,
 } from '../../../features/survey';
 import { useAppStore } from '../../../store/useAppStore';
+import type { FeedbackPayload } from '../../../features/survey/types';
+import { InboxReplyNotice } from '../../../features/feedbackInbox/InboxReplyNotice';
+import {
+  feedbackInboxEnabled,
+  INBOX_OPEN_EVENT,
+  submitInboxFeedback,
+} from '../../../features/feedbackInbox/client';
 
 export function FeedbackTab() {
   const showToast = useAppStore((state) => state.showToast);
@@ -21,11 +28,20 @@ export function FeedbackTab() {
   const [allowContact, setAllowContact] = useState(false);
   const [reproSteps, setReproSteps] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const submissionInFlight = useRef(false);
+  const retry = useRef<{
+    key: string;
+    id: string;
+    payload: FeedbackPayload;
+  } | null>(null);
 
   const openGitHubIssue = async () => {
     const trimmed = message.trim();
     if (trimmed.length < 10) {
-      showToast('error', 'Please write at least a short message (10+ characters).');
+      showToast(
+        'error',
+        'Please write at least a short message (10+ characters).',
+      );
       return;
     }
     try {
@@ -39,28 +55,38 @@ export function FeedbackTab() {
       });
       await window.ipcRenderer.invoke('shell:open', url);
     } catch (err) {
-      showToast('error', err instanceof Error ? err.message : 'Could not open GitHub');
+      showToast(
+        'error',
+        err instanceof Error ? err.message : 'Could not open GitHub',
+      );
     }
   };
 
   const handleSubmit = async () => {
+    if (submissionInFlight.current) return;
+    submissionInFlight.current = true;
     const trimmed = message.trim();
     if (trimmed.length < 10) {
-      showToast('error', 'Please write at least a short message (10+ characters).');
+      submissionInFlight.current = false;
+      showToast(
+        'error',
+        'Please write at least a short message (10+ characters).',
+      );
       return;
     }
 
     setSubmitting(true);
     try {
       const appVersion = await resolveAppVersion();
-      await submitFeedback({
+      const payload: FeedbackPayload = {
         schemaVersion: 1,
         category,
         message: trimmed,
         appVersion: appVersion || 'unknown',
         platform: resolveSurveyPlatform(),
         arch: resolveSurveyArch(),
-        contactEmail: allowContact && contactEmail.trim() ? contactEmail.trim() : undefined,
+        contactEmail:
+          allowContact && contactEmail.trim() ? contactEmail.trim() : undefined,
         allowContact: Boolean(allowContact && contactEmail.trim()),
         submittedAt: new Date().toISOString(),
         submittedFrom: 'app',
@@ -68,7 +94,19 @@ export function FeedbackTab() {
           category === 'bug' && reproSteps.trim()
             ? { reproSteps: reproSteps.trim().slice(0, 2000) }
             : undefined,
-      });
+      };
+      if (feedbackInboxEnabled) {
+        const key = JSON.stringify({ ...payload, submittedAt: undefined });
+        const attempt =
+          retry.current?.key === key
+            ? retry.current
+            : { key, id: crypto.randomUUID(), payload };
+        retry.current = attempt;
+        await submitInboxFeedback(attempt.id, attempt.payload);
+        retry.current = null;
+      } else {
+        await submitFeedback(payload);
+      }
       setMessage('');
       setReproSteps('');
       setContactEmail('');
@@ -81,6 +119,7 @@ export function FeedbackTab() {
         : raw;
       showToast('error', friendly);
     } finally {
+      submissionInFlight.current = false;
       setSubmitting(false);
     }
   };
@@ -92,9 +131,24 @@ export function FeedbackTab() {
           <p className="text-xs text-app-muted">
             Send bugs, ideas, or praise anytime.
           </p>
+          {feedbackInboxEnabled && (
+            <div className="space-y-2 text-xs text-app-muted">
+              <InboxReplyNotice />
+              <button
+                onClick={() =>
+                  window.dispatchEvent(new Event(INBOX_OPEN_EVENT))
+                }
+                className="text-app-accent"
+              >
+                Open replies inbox
+              </button>
+            </div>
+          )}
 
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-app-muted">Category</label>
+            <label className="text-xs font-medium text-app-muted">
+              Category
+            </label>
             <Select
               value={category}
               onChange={(value) => setCategory(value as FeedbackCategory)}
@@ -104,7 +158,9 @@ export function FeedbackTab() {
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-app-muted">Message</label>
+            <label className="text-xs font-medium text-app-muted">
+              Message
+            </label>
             <textarea
               value={message}
               onChange={(e) => setMessage(e.target.value)}
@@ -117,7 +173,9 @@ export function FeedbackTab() {
 
           {category === 'bug' && (
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-app-muted">Steps to reproduce (optional)</label>
+              <label className="text-xs font-medium text-app-muted">
+                Steps to reproduce (optional)
+              </label>
               <textarea
                 value={reproSteps}
                 onChange={(e) => setReproSteps(e.target.value)}
@@ -131,7 +189,9 @@ export function FeedbackTab() {
 
           <div className="space-y-2">
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-app-muted">Email</label>
+              <label className="text-xs font-medium text-app-muted">
+                Email
+              </label>
               <input
                 type="email"
                 value={contactEmail}
@@ -163,12 +223,20 @@ export function FeedbackTab() {
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <button
               type="button"
-              onClick={() => { void openGitHubIssue(); }}
+              onClick={() => {
+                void openGitHubIssue();
+              }}
               className="text-left text-xs text-app-muted transition-colors hover:text-app-text"
             >
               Want it public? Open a GitHub issue
             </button>
-            <Button size="sm" isLoading={submitting} onClick={() => { void handleSubmit(); }}>
+            <Button
+              size="sm"
+              isLoading={submitting}
+              onClick={() => {
+                void handleSubmit();
+              }}
+            >
               Send feedback
             </Button>
           </div>

@@ -149,6 +149,7 @@ const tests = [
   'tests/sidebarSubmit.test.mjs',
   'tests/statusBarLatency.test.mjs',
   'tests/surveyEligibility.test.mjs',
+  'tests/feedbackInboxProtocol.test.mjs',
   'tests/tunnelAutoStartService.test.mjs',
   'tests/tunnelReconnectService.test.mjs',
   'tests/tunnelIpcArguments.test.mjs',

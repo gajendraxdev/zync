@@ -6,6 +6,9 @@ use std::process::Command;
 fn main() {
     vendor_windows_conpty();
     println!("cargo:rerun-if-changed=.env");
+    println!("cargo:rerun-if-env-changed=VITE_ANALYTICS_API_URL");
+    println!("cargo:rerun-if-env-changed=VITE_SURVEY_API_URL");
+    println!("cargo:rerun-if-env-changed=VITE_FEEDBACK_INBOX_ENABLED");
     // Rebuild window/taskbar icons when generated icon assets change.
     println!("cargo:rerun-if-changed=icons/icon.ico");
     println!("cargo:rerun-if-changed=icons/icon.png");
@@ -30,6 +33,11 @@ fn main() {
             };
             if let Some((key, value)) = line.split_once('=') {
                 let key = key.trim();
+                // Match Vite's environment precedence for inbox configuration.
+                if matches!(key, "VITE_ANALYTICS_API_URL" | "VITE_SURVEY_API_URL" | "VITE_FEEDBACK_INBOX_ENABLED")
+                    && std::env::var_os(key).is_some() {
+                    continue;
+                }
                 if should_skip_rustc_env(key) {
                     continue;
                 }

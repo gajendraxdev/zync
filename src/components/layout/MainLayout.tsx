@@ -27,6 +27,7 @@ import { ShieldAlert, Loader2 } from 'lucide-react';
 import { ConnectStagePanel, PanelLoader, useConnectionStageOverlay } from '../loaders';
 import { SurveyPromptModal } from '../survey/SurveyPromptModal';
 import { SurveyReminderButton } from '../survey/SurveyReminderButton';
+import { FeedbackInbox } from '../../features/feedbackInbox/FeedbackInbox';
 import {
     normalizeSurveySettings,
     initializeSurveyIdentity,
@@ -1505,6 +1506,8 @@ export function MainLayout({ children }: { children: ReactNode }) {
                     setIsSurveyPromptOpen(true);
                 }}
             />
+
+            <FeedbackInbox reminderVisible={isSurveyReminderVisible && !isSurveyPromptOpen} />
 
             <ConfirmCloseModal
                 isOpen={isShutdownModalOpen}

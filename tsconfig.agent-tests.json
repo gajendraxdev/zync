@@ -22,6 +22,7 @@
     },
     "include": [
         "src/global.d.ts",
+        "src/features/feedbackInbox/protocol.ts",
         "src/ai/lib/redactContext.ts",
         "src/ai/lib/requestContext.ts",
         "src/ai/store/agentRunStore.ts",

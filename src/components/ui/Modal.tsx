@@ -23,6 +23,10 @@ interface ModalProps {
   subtitle?: ReactNode;
   children: ReactNode;
   width?: string;
+  /** Initial dialog anchor; dragging still works and resets on each open. */
+  placement?: 'center' | 'bottom-right';
+  /** Lighter dimming for compact dialogs; standard dialogs keep their backdrop. */
+  backdrop?: 'default' | 'subtle';
   className?: string;
   headerClassName?: string;
   contentClassName?: string;
@@ -62,6 +66,8 @@ export function Modal({
   subtitle,
   children,
   width = 'max-w-md',
+  placement = 'center',
+  backdrop = 'default',
   className,
   headerClassName,
   contentClassName,
@@ -180,7 +186,8 @@ export function Modal({
             exit={{ opacity: 0, pointerEvents: 'none' }}
             transition={{ duration: 0.15, ease: 'easeOut' }}
             className={cn(
-              "absolute inset-0 flex items-center justify-center p-4 pointer-events-none",
+              "absolute inset-0 flex p-4 pointer-events-none",
+              placement === 'bottom-right' ? 'items-end justify-end' : 'items-center justify-center',
               zIndexClassName ?? "z-[9999]"
             )}
           >
@@ -190,7 +197,7 @@ export function Modal({
               animate={{ pointerEvents: 'auto' }}
               exit={{ pointerEvents: 'none' }}
               onClick={effectiveCloseOnOverlayClick ? onClose : undefined}
-              className="absolute inset-0 bg-black/70"
+              className={cn('absolute inset-0', backdrop === 'subtle' ? 'bg-black/15' : 'bg-black/70')}
             />
             <motion.div
               initial={{ opacity: 0, scale: 0.96, y: 8 }}
