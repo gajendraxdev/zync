@@ -4,6 +4,8 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.33.10] - 2026-10-02
+
 ### Added
 
 - **Private replies inbox (feature gated):** Let Zync receive team responses to
@@ -1682,7 +1684,8 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [d3f4060]: https://github.com/zync-sh/zync/commit/d3f4060
 [840afc2]: https://github.com/zync-sh/zync/commit/840afc2
 [193f568]: https://github.com/zync-sh/zync/commit/193f568
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.33.9...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.33.10...HEAD
+[2.33.10]: https://github.com/zync-sh/zync/compare/v2.33.9...v2.33.10
 [2.33.9]: https://github.com/zync-sh/zync/compare/v2.33.8...v2.33.9
 [2.33.8]: https://github.com/zync-sh/zync/compare/v2.33.7...v2.33.8
 [2.33.7]: https://github.com/zync-sh/zync/compare/v2.33.6...v2.33.7
