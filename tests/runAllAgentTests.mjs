@@ -150,6 +150,7 @@ const tests = [
   'tests/statusBarLatency.test.mjs',
   'tests/surveyEligibility.test.mjs',
   'tests/feedbackInboxProtocol.test.mjs',
+  'tests/visibleReplyReceipts.test.mjs',
   'tests/tunnelAutoStartService.test.mjs',
   'tests/tunnelReconnectService.test.mjs',
   'tests/tunnelIpcArguments.test.mjs',

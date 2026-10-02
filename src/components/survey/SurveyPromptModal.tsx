@@ -23,6 +23,7 @@ import {
 import { getOrCreateInstallId } from '../../features/installation/identity.js';
 import type { SurveyPayload } from '../../features/survey/types';
 import { feedbackInboxEnabled, submitInboxSurvey } from '../../features/feedbackInbox/client';
+import { isInboxCredentialStorageError } from '../../features/feedbackInbox/protocol';
 import { InboxReplyNotice } from '../../features/feedbackInbox/InboxReplyNotice';
 
 export function SurveyPromptModal({
@@ -56,7 +57,7 @@ export function SurveyPromptModal({
   const [wantUpdates, setWantUpdates] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const inFlight = useRef(false);
-  const retry = useRef<{ key: string; id: string; payload: SurveyPayload } | null>(null);
+  const retry = useRef<{ key: string; id: string; payload: SurveyPayload; legacy?: boolean } | null>(null);
   const [responseAccepted, setResponseAccepted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [thanks, setThanks] = useState(false);
@@ -177,10 +178,20 @@ export function SurveyPromptModal({
         };
         if (feedbackInboxEnabled) {
           const key = JSON.stringify({ ...payload, submittedAt: undefined });
-          const attempt = retry.current?.key === key
+          const attempt: NonNullable<typeof retry.current> = retry.current?.key === key
             ? retry.current : { key, id: crypto.randomUUID(), payload };
           retry.current = attempt;
-          await submitInboxSurvey(attempt.id, attempt.payload);
+          if (attempt.legacy) {
+            await submitSurvey(attempt.payload);
+          } else {
+            try {
+              await submitInboxSurvey(attempt.id, attempt.payload);
+            } catch (error) {
+              if (!isInboxCredentialStorageError(error)) throw error;
+              attempt.legacy = true;
+              await submitSurvey(attempt.payload);
+            }
+          }
           retry.current = null;
         } else {
           await submitSurvey(payload);

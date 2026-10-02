@@ -3,8 +3,9 @@ import { listen } from "@tauri-apps/api/event";
 import { MessageSquare } from "lucide-react";
 import { Modal } from "../../components/ui/Modal";
 import { ZPortal } from "../../components/ui/ZPortal";
-import { getFeedbackInboxIdentity } from "./identity";
+import { getExistingInstallId } from "../installation/identity";
 import {
+  claimLegacySurveys,
   fetchInbox,
   feedbackInboxEnabled,
   INBOX_OPEN_EVENT,
@@ -20,6 +21,16 @@ const empty: InboxSnapshot = {
   active: false,
   nextBefore: 0,
 };
+const LEGACY_CLAIMED_KEY = "zync.feedbackInbox.legacyClaimedInstallId";
+
+function previouslyClaimed(installId: string | null): boolean {
+  if (!installId) return true;
+  try {
+    return localStorage.getItem(LEGACY_CLAIMED_KEY) === installId;
+  } catch {
+    return false;
+  }
+}
 
 /** One app-level coordinator owns SSE and unread state independently of settings
  * or tab mounting. No polling interval and no startup credential enrollment.
@@ -29,9 +40,14 @@ export function FeedbackInbox({ reminderVisible = false }: {
   reminderVisible?: boolean;
 }) {
   const [snapshot, setSnapshot] = useState(empty);
+  const [snapshotReady, setSnapshotReady] = useState(false);
   const [open, setOpen] = useState(false);
   const [revision, setRevision] = useState(0);
   const [error, setError] = useState("");
+  const [legacyInstallId] = useState(getExistingInstallId);
+  const [legacyClaimed, setLegacyClaimed] = useState(() => previouslyClaimed(legacyInstallId));
+  const [claiming, setClaiming] = useState(false);
+  const [claimResult, setClaimResult] = useState("");
   const refreshRef = useRef<() => void>(() => {});
   useEffect(() => {
     if (!feedbackInboxEnabled) return;
@@ -51,10 +67,12 @@ export function FeedbackInbox({ reminderVisible = false }: {
       do {
         pending = false;
         try {
-          const id = await getFeedbackInboxIdentity();
-          const next = id ? await fetchInbox() : empty;
+          // Native snapshot loading checks the build gate and returns an empty
+          // inbox without creating credentials for installations not enrolled yet.
+          const next = await fetchInbox();
           if (disposed || !online) break;
           setSnapshot(next);
+          setSnapshotReady(true);
           setRevision((value) => value + 1);
           setError("");
           if (next.active !== streaming) {
@@ -63,7 +81,10 @@ export function FeedbackInbox({ reminderVisible = false }: {
             streaming = next.active;
           }
         } catch (err) {
-          if (!disposed) setError(String(err));
+          if (!disposed) {
+            setSnapshotReady(false);
+            setError(String(err));
+          }
         }
       } while (pending && !disposed);
       running = false;
@@ -76,6 +97,7 @@ export function FeedbackInbox({ reminderVisible = false }: {
     };
     const disconnected = () => {
       streaming = false;
+      if (!disposed) setSnapshotReady(false);
       if (!disposed)
         setError(
           "Live reply delivery is disconnected. Open or refresh the inbox to reconnect.",
@@ -93,6 +115,7 @@ export function FeedbackInbox({ reminderVisible = false }: {
     const pause = () => {
       online = false;
       streaming = false;
+      setSnapshotReady(false);
       void setInboxStream(false).catch(() => {});
     };
     const subscriptions = [
@@ -123,6 +146,28 @@ export function FeedbackInbox({ reminderVisible = false }: {
     };
   }, []);
   const refresh = useCallback(() => refreshRef.current(), []);
+  const connectEarlierSurveys = async () => {
+    if (!legacyInstallId || claiming || legacyClaimed) return;
+    setClaiming(true);
+    setError("");
+    try {
+      const count = await claimLegacySurveys(legacyInstallId);
+      setLegacyClaimed(true);
+      setClaimResult(count > 0
+        ? `${count} earlier survey ${count === 1 ? "response" : "responses"} connected.`
+        : "Earlier surveys are connected. Any team replies will appear here.");
+      try {
+        localStorage.setItem(LEGACY_CLAIMED_KEY, legacyInstallId);
+      } catch {
+        // Server-side claiming is idempotent if local storage is unavailable.
+      }
+      refresh();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setClaiming(false);
+    }
+  };
   if (!feedbackInboxEnabled) return null;
   return (
     <>
@@ -146,6 +191,19 @@ export function FeedbackInbox({ reminderVisible = false }: {
           </div>
         </ZPortal>
       )}
+      {snapshotReady && snapshot.unread === 0 && !legacyClaimed && !open && (
+        <ZPortal passive className="absolute inset-0 z-[80]">
+          <div className={`pointer-events-none absolute right-4 ${reminderVisible ? "bottom-24" : "bottom-12"}`}>
+            <button
+              onClick={() => setOpen(true)}
+              className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-app-border bg-app-panel px-3 py-2 text-xs text-app-text shadow-xl"
+            >
+              <MessageSquare size={14} />
+              Earlier survey replies
+            </button>
+          </div>
+        </ZPortal>
+      )}
       <Modal
         isOpen={open}
         onClose={() => setOpen(false)}
@@ -162,6 +220,25 @@ export function FeedbackInbox({ reminderVisible = false }: {
           <p className="text-xs text-app-muted">
             Replies are private to this installation.
           </p>
+          {!legacyClaimed && legacyInstallId && (
+            <div className="space-y-2 rounded-lg border border-app-border bg-app-surface/40 p-3 text-xs">
+              <p className="font-medium text-app-text">Connect earlier surveys</p>
+              <p className="text-app-muted">
+                If you answered a survey in an older Zync version on this device,
+                connect it to this inbox to receive team replies. This uses the
+                existing installation ID rather than the newer private inbox
+                credential. Only connect surveys on your own device.
+              </p>
+              <button
+                disabled={claiming}
+                onClick={() => void connectEarlierSurveys()}
+                className="rounded-md bg-app-accent px-3 py-2 font-medium text-app-bg disabled:opacity-50"
+              >
+                {claiming ? "Connecting…" : "Connect earlier surveys"}
+              </button>
+            </div>
+          )}
+          {claimResult && <p role="status" className="text-xs text-app-muted">{claimResult}</p>}
           <button onClick={refresh} className="text-xs text-app-accent">
             Refresh inbox
           </button>

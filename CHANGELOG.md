@@ -8,12 +8,22 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Added
 
+- **Earlier survey replies:** Let upgraded installations explicitly connect
+  older app surveys that retained an installation ID to the private inbox.
+  Analytics queues team replies until the installation connects; a separate
+  rollout switch limits this lower-assurance migration path.
 - **Private replies inbox (feature gated):** Let Zync receive team responses to
   desktop surveys and feedback in a secure installation-specific inbox, with live
   unread updates, one user follow-up per team response, and conversation history.
   Analytics adds authenticated storage, admin replies, and bounded notifications.
-  Both sides remain disabled by default pending installed-app and proxy validation.
+  Both sides are disabled unless explicitly enabled during rollout.
   ([6335b4b], [fbb4b5c])
+
+### Fixed
+
+- **Inbox submission fallback:** If secure credential storage is unavailable,
+  submit surveys and feedback through the existing endpoint. Other inbox errors
+  retain their retry behavior to avoid duplicate submissions.
 
 ### Changed
 

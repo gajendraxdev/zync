@@ -145,8 +145,7 @@ export function InboxHistory({
       )}
       {!threads.length && (
         <p className="text-sm text-app-muted">
-          No conversations yet. Choose in-app replies when submitting a survey
-          or feedback.
+          No conversations yet. Team replies to your surveys and feedback will appear here.
         </p>
       )}
       <div className="min-w-0">

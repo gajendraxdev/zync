@@ -128,6 +128,10 @@ pub enum Operation {
         submission_id: String,
         survey: Value,
     },
+    ClaimLegacySurveys {
+        #[serde(rename = "installId")]
+        install_id: String,
+    },
     Read {
         reply: String,
     },
@@ -181,6 +185,20 @@ fn route(operation: Operation) -> Result<(&'static str, String, Option<Value>), 
             submission_id,
             survey,
         } => submission_route(submission_id, survey, "/surveys", 8192)?,
+        Operation::ClaimLegacySurveys { install_id } => {
+            // Stored installation IDs historically allowed uppercase hex. They
+            // are JSON data, not route segments; preserve their original casing.
+            let parsed = uuid::Uuid::parse_str(&install_id)
+                .map_err(|_| "Invalid installation identifier")?;
+            if parsed.is_nil() || !parsed.to_string().eq_ignore_ascii_case(&install_id) {
+                return Err("Invalid installation identifier".into());
+            }
+            (
+                "POST",
+                "/legacy-surveys".into(),
+                Some(json!({"installId": install_id})),
+            )
+        }
         _ => return Err("Invalid inbox cursor".into()),
     })
 }
@@ -228,7 +246,9 @@ pub async fn feedback_inbox_request(
     check_window(&window)?;
     let create = matches!(
         &operation,
-        Operation::Submit { .. } | Operation::SubmitSurvey { .. }
+        Operation::Submit { .. }
+            | Operation::SubmitSurvey { .. }
+            | Operation::ClaimLegacySurveys { .. }
     );
     let snapshot = matches!(&operation, Operation::Snapshot { .. });
     let accepts_no_content = matches!(&operation, Operation::Read { .. } | Operation::Close { .. });
@@ -238,6 +258,7 @@ pub async fn feedback_inbox_request(
         }
         _ => None,
     };
+    let claim = matches!(&operation, Operation::ClaimLegacySurveys { .. });
     let (method, suffix, body) = route(operation)?;
     let Some(secret) = load(create).await? else {
         return if snapshot {
@@ -291,6 +312,12 @@ pub async fn feedback_inbox_request(
         {
             return Err("Invalid feedback acknowledgement".into());
         }
+    }
+    if claim
+        && (value.get("status").and_then(Value::as_str) != Some("accepted")
+            || !value.get("claimed").is_some_and(Value::is_u64))
+    {
+        return Err("Invalid legacy survey claim acknowledgement".into());
     }
     if create || snapshot && !secret.registered {
         let owner = secret.id;
@@ -508,6 +535,31 @@ mod tests {
             survey: json!({"experienceDetails":"x".repeat(8192)}),
         })
         .is_err());
+    }
+    #[test]
+    fn legacy_claim_preserves_installation_casing_on_its_fixed_route() {
+        for id in [
+            "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE",
+        ] {
+            let (method, path, body) = route(Operation::ClaimLegacySurveys {
+                install_id: id.into(),
+            })
+            .unwrap();
+            assert_eq!(method, "POST");
+            assert_eq!(path, "/legacy-surveys");
+            assert_eq!(body.unwrap()["installId"], id);
+        }
+        for invalid in [
+            "../other",
+            "00000000-0000-0000-0000-000000000000",
+            "aaaaaaaabbbb4ccc8dddeeeeeeeeeeee",
+        ] {
+            assert!(route(Operation::ClaimLegacySurveys {
+                install_id: invalid.into(),
+            })
+            .is_err());
+        }
     }
     #[test]
     fn origins_and_routes_reject_secret_forwarding() {

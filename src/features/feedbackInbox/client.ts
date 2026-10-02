@@ -23,6 +23,14 @@ export const acknowledgeReply = (reply: string) =>
   request({ kind: 'read', reply });
 export const closeConversation = (thread: string) =>
   request({ kind: 'close', thread });
+/** Claim prior app surveys only after the user chooses the lower-assurance bridge. */
+export async function claimLegacySurveys(installId: string): Promise<number> {
+  const result = responseObject(await request({ kind: 'claimLegacySurveys', installId }));
+  if (result.status !== 'accepted' || !Number.isSafeInteger(result.claimed) || (result.claimed as number) < 0)
+    throw new Error('Invalid legacy survey claim acknowledgement');
+  window.dispatchEvent(new Event(INBOX_REFRESH_EVENT));
+  return result.claimed as number;
+}
 /** Reuse the same ID and parent on retry; only Analytics can grant another turn. */
 export async function sendFollowUp(thread: string, id: string, replyTo: string, message: string): Promise<void> {
   const result = responseObject(await request({ kind: 'followUp', thread, id, replyTo, message }));

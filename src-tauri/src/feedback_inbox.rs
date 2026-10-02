@@ -10,7 +10,14 @@ pub use transport::TransportState;
 
 const SERVICE: &str = "com.zync.feedback-inbox";
 const ACCOUNT: &str = "installation-v1";
+// Only pre-request keyring failures carry this code. An accepted submission
+// whose enrollment write fails must never be retried through the legacy API.
+const STORAGE_ERROR_CODE: &str = "INBOX_CREDENTIAL_STORAGE_UNAVAILABLE";
 static CREDENTIAL_LOCK: Mutex<()> = Mutex::new(());
+
+fn storage_error(message: &str) -> String {
+    format!("{STORAGE_ERROR_CODE}: {message}")
+}
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -57,9 +64,9 @@ impl Credential {
 fn credential(create: bool) -> Result<Option<Credential>, String> {
     let _guard = CREDENTIAL_LOCK
         .lock()
-        .map_err(|_| "Feedback inbox is unavailable")?;
+        .map_err(|_| storage_error("Feedback inbox is unavailable"))?;
     let entry = keyring::Entry::new(SERVICE, ACCOUNT)
-        .map_err(|_| "Feedback inbox credential storage is unavailable")?;
+        .map_err(|_| storage_error("Feedback inbox credential storage is unavailable"))?;
     match entry.get_password() {
         Ok(raw) => Ok(Some(Credential::parse(&raw)?)),
         Err(keyring::Error::NoEntry) if !create => Ok(None),
@@ -67,12 +74,14 @@ fn credential(create: bool) -> Result<Option<Credential>, String> {
             let credential = Credential::generate()?;
             let raw = serde_json::to_string(&credential)
                 .map_err(|_| "Could not encode feedback inbox credentials")?;
-            entry
-                .set_password(&raw)
-                .map_err(|_| "Could not securely store feedback inbox credentials")?;
+            entry.set_password(&raw).map_err(|_| {
+                storage_error("Could not securely store feedback inbox credentials")
+            })?;
             Ok(Some(credential))
         }
-        Err(_) => Err("Could not read feedback inbox credential storage".into()),
+        Err(_) => Err(storage_error(
+            "Could not read feedback inbox credential storage",
+        )),
     }
 }
 

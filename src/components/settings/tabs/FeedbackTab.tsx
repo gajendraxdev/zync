@@ -19,6 +19,7 @@ import {
   INBOX_OPEN_EVENT,
   submitInboxFeedback,
 } from '../../../features/feedbackInbox/client';
+import { isInboxCredentialStorageError } from '../../../features/feedbackInbox/protocol';
 
 export function FeedbackTab() {
   const showToast = useAppStore((state) => state.showToast);
@@ -33,6 +34,7 @@ export function FeedbackTab() {
     key: string;
     id: string;
     payload: FeedbackPayload;
+    legacy?: boolean;
   } | null>(null);
 
   const openGitHubIssue = async () => {
@@ -97,12 +99,22 @@ export function FeedbackTab() {
       };
       if (feedbackInboxEnabled) {
         const key = JSON.stringify({ ...payload, submittedAt: undefined });
-        const attempt =
+        const attempt: NonNullable<typeof retry.current> =
           retry.current?.key === key
             ? retry.current
             : { key, id: crypto.randomUUID(), payload };
         retry.current = attempt;
-        await submitInboxFeedback(attempt.id, attempt.payload);
+        if (attempt.legacy) {
+          await submitFeedback(attempt.payload);
+        } else {
+          try {
+            await submitInboxFeedback(attempt.id, attempt.payload);
+          } catch (error) {
+            if (!isInboxCredentialStorageError(error)) throw error;
+            attempt.legacy = true;
+            await submitFeedback(attempt.payload);
+          }
+        }
         retry.current = null;
       } else {
         await submitFeedback(payload);

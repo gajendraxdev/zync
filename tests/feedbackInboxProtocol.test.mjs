@@ -4,7 +4,20 @@ import {
   parseSnapshot,
   parseReplies,
   mergeThreadPages,
+  isInboxCredentialStorageError,
 } from '../.tmp-agent-tests/src/features/feedbackInbox/protocol.js';
+
+test('only tagged credential-storage errors allow legacy submission fallback', () => {
+  assert.equal(isInboxCredentialStorageError('INBOX_CREDENTIAL_STORAGE_UNAVAILABLE: keyring locked'), true);
+  assert.equal(isInboxCredentialStorageError(new Error('INBOX_CREDENTIAL_STORAGE_UNAVAILABLE: keyring locked')), true);
+  for (const error of [
+    'Could not reach feedback inbox',
+    'Could not save inbox enrollment',
+    'Feedback inbox credential is damaged',
+    'INBOX_CREDENTIAL_STORAGE_UNAVAILABLE',
+    { message: 'INBOX_CREDENTIAL_STORAGE_UNAVAILABLE: forged object' },
+  ]) assert.equal(isInboxCredentialStorageError(error), false);
+});
 
 const id = '11111111-1111-4111-8111-111111111111';
 const date = '2026-10-01T10:00:00Z';

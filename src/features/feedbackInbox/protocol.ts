@@ -1,4 +1,12 @@
 /** Bounded, text-only inbox contract shared by UI consumers and validation tests. */
+const CREDENTIAL_STORAGE_ERROR = 'INBOX_CREDENTIAL_STORAGE_UNAVAILABLE:';
+
+/** Only pre-request keyring failures permit a legacy submission fallback. */
+export function isInboxCredentialStorageError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : error;
+  return typeof message === 'string' && message.startsWith(CREDENTIAL_STORAGE_ERROR);
+}
+
 export interface InboxThread {
   kind: 'feedback' | 'survey';
   id: string;
