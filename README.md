@@ -4,7 +4,7 @@
   <br /><br />
 
   <p>
-    <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" /></a>&nbsp;
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-FSL--1.1--ALv2-blue.svg" alt="License: FSL 1.1 ALv2" /></a>&nbsp;
     <a href="https://github.com/zync-sh/zync/releases"><img src="https://img.shields.io/github/v/release/zync-sh/zync?include_prereleases" alt="Version" /></a>&nbsp;
     <a href="https://github.com/zync-sh/zync/releases"><img src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-lightgrey" alt="Platform" /></a>&nbsp;
     <a href="https://github.com/zync-sh/zync"><img src="https://img.shields.io/github/stars/zync-sh/zync?style=social" alt="GitHub Stars" /></a>
@@ -41,7 +41,7 @@ Manage hosts from a persistent sidebar, keep shells alive while you switch panel
 - **One app for the whole workflow:** connections, terminals, files, tunnels, vault, and snippets in a persistent sidebar
 - **A terminal you can use before you add hosts:** local shells and remote SSH share the same stack ([Local terminal](#local-terminal))
 - **Your data stays yours:** no Zync server for hosts or credentials; optional encrypted sync goes to your own cloud ([Your data](#your-data))
-- **Open source:** MIT licensed, built in public; ideas and contributions welcome ([Contributing](#contributing))
+- **Source available:** desktop releases use FSL-1.1-ALv2 and become Apache 2.0 after two years; ideas and contributions are welcome ([License](LICENSE), [Contributing](#contributing))
 
 Everyday infra work should feel fast, clear, and under your control.
 
@@ -93,8 +93,8 @@ Comparisons reflect each product's typical use today, not every paid tier or plu
 | **Files** | SFTP manager + in-app editor | SFTP client | Remote explorer in the IDE | SFTP browser + editor |
 | **Vault** | On-device encrypted vault | **Local vault on free**; cloud/team vault needs paid plan | SSH keys / system agent | Local saved sessions (master password) |
 | **Sync** | Your cloud (Google Drive; encrypted) | **No cross-device sync on free**; Termius cloud on paid | None (local workspace) | None (local sessions) |
-| **Open Source** | MIT | No | VS Code is OSS; Remote SSH is a Microsoft extension | Proprietary (free Home + paid Pro) |
-| **Pricing** | Free (MIT, no subscription) | Free Starter (**no sync/snippets/cloud vault**); Pro from ~$10/mo (annual) | Free (VS Code + Remote SSH extension) | Free Home (**12 sessions, 2 tunnels**); Pro ~$69/user/year with **perpetual license** (updates optional) |
+| **Source license** | FSL-1.1-ALv2 (source available; Apache 2.0 after two years) | Proprietary | VS Code OSS; Remote SSH is a Microsoft extension | Proprietary (free Home + paid Pro) |
+| **Pricing** | Free (no subscription) | Free Starter (**no sync/snippets/cloud vault**); Pro from ~$10/mo (annual) | Free (VS Code + Remote SSH extension) | Free Home (**12 sessions, 2 tunnels**); Pro ~$69/user/year with **perpetual license** (updates optional) |
 | **Best Fit** | One native desktop app for SSH, files, vault, and tunnels without a vendor-owned workspace | Mobile + cross-device sync inside the Termius platform | Editing and debugging code as a full IDE remote session | Windows-heavy workflows with X11 and classic session tooling |
 
 See vendor websites for current pricing and plan details.
@@ -334,7 +334,7 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## License
 
-MIT © [Zync](https://github.com/zync-sh/zync)
+Desktop application: [FSL-1.1-ALv2](LICENSE), with Apache 2.0 rights for each version after two years. Earlier MIT releases remain MIT; the separately maintained [plugin SDK](https://github.com/zync-sh/plugin-sdk) and [plugin UI](https://github.com/zync-sh/plugin-ui) remain MIT.
 
 ---
 

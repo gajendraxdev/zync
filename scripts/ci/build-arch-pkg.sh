@@ -24,6 +24,7 @@ cleanup() {
 trap cleanup EXIT
 
 cp "$ROOT/packaging/arch/PKGBUILD.in" "$STAGE/PKGBUILD"
+cp "$ROOT/LICENSE" "$STAGE/"
 sed -i "s|@VERSION@|${VERSION}|g" "$STAGE/PKGBUILD"
 
 if [[ -n "$DEB_DIR" ]]; then

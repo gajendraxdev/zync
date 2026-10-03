@@ -8,7 +8,7 @@ pkgrel=1
 pkgdesc="SSH workspace with terminal, files, vault, and tunnels"
 arch=('x86_64')
 url="https://github.com/zync-sh/zync"
-license=('MIT')
+license=('FSL-1.1-ALv2')
 depends=(
   'webkit2gtk-4.1'
   'gtk3'
@@ -19,8 +19,8 @@ depends=(
 provides=('zync')
 conflicts=('zync-bin' 'zync-git')
 options=('!strip' '!debug')
-source=("zync_${pkgver}_amd64.deb")
-sha256sums=('SKIP')
+source=("zync_${pkgver}_amd64.deb" 'LICENSE')
+sha256sums=('SKIP' 'SKIP')
 
 package() {
   cd "$srcdir"
@@ -36,6 +36,8 @@ package() {
 
   mkdir -p "$pkgdir"
   bsdtar -xf "$data" -C "$pkgdir"
+
+  install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 
   # Arch desktop files expect /usr/share; Tauri deb already uses that layout.
   if [[ -f "$pkgdir/usr/share/applications/zync.desktop" ]]; then

@@ -209,7 +209,7 @@ export function AboutTab({
                     <LinkButton onClick={() => openExternal('https://zync.thesudoer.in')}>Website</LinkButton>
                     <LinkButton onClick={() => openExternal('https://github.com/zync-sh/zync/blob/main/CHANGELOG.md')}>Changelog</LinkButton>
                     <LinkButton onClick={() => openExternal('https://github.com/zync-sh/zync/blob/main/PLUGIN_CATALOG.md')}>Extensions</LinkButton>
-                    <LinkButton onClick={() => openExternal('https://opensource.org/licenses/MIT')}>License</LinkButton>
+                    <LinkButton onClick={() => openExternal('https://github.com/zync-sh/zync/blob/main/LICENSE')}>License</LinkButton>
                     <LinkButton onClick={() => openExternal('https://github.com/zync-sh/zync/issues/new')}>Report Issue</LinkButton>
                 </div>
             </div>
@@ -235,7 +235,7 @@ export function AboutTab({
                 </div>
             </div>
 
-            <p className="mt-8 text-[11px] text-[var(--color-app-muted)]/50 font-medium">© 2026 Zync - MIT License</p>
+            <p className="mt-8 text-[11px] text-[var(--color-app-muted)]/50 font-medium">© 2026 Zync - FSL-1.1-ALv2</p>
         </div>
     );
 }
