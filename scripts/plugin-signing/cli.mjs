@@ -10,8 +10,7 @@ import {
   verifySignedRegistry,
 } from './registry-signing.mjs';
 import { checkPublishedRegistry } from './registry-release-check.mjs';
-import { readKeyText } from '../../packages/plugin-sdk/bin/pem-key.mjs';
-import { readHiddenPassphrase } from '../../packages/plugin-sdk/bin/keygen.mjs';
+import { readKeyText, readHiddenPassphrase } from './sdk-internals.mjs';
 
 async function keyOptions(keyPath) {
   return readKeyText(keyPath).includes('-----BEGIN ENCRYPTED PRIVATE KEY-----')

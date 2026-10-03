@@ -7,6 +7,7 @@ import { cn } from '../../lib/utils';
 import { Tooltip } from '../ui/Tooltip';
 import { StatusBarTransferIndicator } from '../file-manager/StatusBarTransferIndicator';
 import { StatusBarUpdateIndicator } from '../../features/updater/StatusBarUpdateIndicator';
+import { StatusBarInboxIndicator } from '../../features/feedbackInbox/StatusBarInboxIndicator';
 import { NotificationBell, useNotificationBellPlacement } from '../notifications/NotificationBell';
 import {
   DEFAULT_STATUS_BAR_SETTINGS,
@@ -178,6 +179,7 @@ export function StatusBar() {
         <StatusBarTransferIndicator />
         <StatusBarUpdateIndicator />
         <StatusMessage />
+        <StatusBarInboxIndicator />
         {showInStatusRight && <NotificationBell tooltipPosition="top" size="status" />}
 
         <div className="h-4 w-px shrink-0 bg-app-border/50" aria-hidden />

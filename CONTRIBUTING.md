@@ -2,6 +2,21 @@
 
 Thank you for your interest in contributing to Zync. This document provides guidelines and instructions for contributing.
 
+## Licensing contributions
+
+The desktop application is distributed under [FSL-1.1-ALv2](LICENSE), with
+Apache 2.0 rights for each version after two years. By submitting a desktop
+contribution, you confirm you have the right to license it for inclusion under
+those terms and that it does not contain incompatible third-party code. You
+retain copyright in your contribution. The separately licensed plugin SDK and
+plugin UI packages remain MIT in their [SDK](https://github.com/zync-sh/plugin-sdk)
+and [UI](https://github.com/zync-sh/plugin-ui) repositories.
+
+Do not submit code you cannot license under the applicable terms. If your
+employer may own your work, obtain its permission before contributing. Any
+separate commercial licensing of contributed code would require additional
+rights from its copyright holder; a pull request alone does not grant them.
+
 ## Getting Started
 
 1. **Fork** the [repository](https://github.com/zync-sh/zync) on GitHub.

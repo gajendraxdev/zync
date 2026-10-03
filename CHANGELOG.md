@@ -4,6 +4,62 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Added
+
+- **Inbox status bar access:** Keep a visible Inbox button in the bottom status
+  bar, with an unread count, so conversations remain easy to reopen. ([ac501c3])
+
+### Changed
+
+- **Survey inbox detail:** Show all submitted survey answers as labeled fields,
+  including in earlier conversations, while keeping contact and installation
+  metadata out of the conversation. ([ac501c3], [35cd831])
+- License future Zync desktop releases under FSL-1.1-ALv2, with Apache 2.0
+  rights for each version after two years. Preserve prior MIT releases and
+  keep the plugin SDK and UI packages under MIT. ([8cb2bb0])
+- Move the npm plugin SDK and UI packages to separate repositories. Zync now
+  pins the published SDK for signing and host compatibility checks rather
+  than importing its source tree. ([b344e7e], [6f032cb], [815f317])
+
+## [2.33.11] - 2026-10-03
+
+### Added
+
+- **Team conversation closure:** End survey and feedback conversations from
+  Analytics while retaining history. Closing the last open conversation stops
+  live reply delivery, even when earlier messages remain unread.
+  ([c0766ce], [c9b15f3])
+
+### Fixed
+
+- **Installed terminal styling:** Authorize xterm-generated styles with the
+  release CSP nonce for workspace and embedded plugin terminals, preserving
+  typography, ANSI colours, and cursor styling when using the DOM renderer.
+  ([0d78142])
+
+## [2.33.10] - 2026-10-02
+
+### Added
+
+- **Earlier survey replies:** Let upgraded installations explicitly connect
+  older app surveys that retained an installation ID to the private inbox.
+  Analytics queues team replies until the installation connects; a separate
+  rollout switch limits this lower-assurance migration path.
+  ([ddd629b], [a9bad02])
+- **Private replies inbox (feature gated):** Let Zync receive team responses to
+  desktop surveys and feedback in a secure installation-specific inbox, with live
+  unread updates, one user follow-up per team response, and conversation history.
+  Analytics adds authenticated storage, admin replies, and bounded notifications.
+  Both sides are disabled unless explicitly enabled during rollout.
+  ([6335b4b], [fbb4b5c])
+
+### Fixed
+
+- **Inbox submission fallback:** If secure credential storage is unavailable,
+  submit surveys and feedback through the existing endpoint. Other inbox errors
+  retain their retry behavior to avoid duplicate submissions.
+  ([ddd629b])
+
 ### Changed
 
 - **Plugin terminal feedback:** Keep expired-proposal and startup-failure feedback
@@ -1673,7 +1729,9 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [d3f4060]: https://github.com/zync-sh/zync/commit/d3f4060
 [840afc2]: https://github.com/zync-sh/zync/commit/840afc2
 [193f568]: https://github.com/zync-sh/zync/commit/193f568
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.33.9...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.33.11...HEAD
+[2.33.11]: https://github.com/zync-sh/zync/compare/v2.33.10...v2.33.11
+[2.33.10]: https://github.com/zync-sh/zync/compare/v2.33.9...v2.33.10
 [2.33.9]: https://github.com/zync-sh/zync/compare/v2.33.8...v2.33.9
 [2.33.8]: https://github.com/zync-sh/zync/compare/v2.33.7...v2.33.8
 [2.33.7]: https://github.com/zync-sh/zync/compare/v2.33.6...v2.33.7
@@ -1873,3 +1931,16 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [6bbdec3]: https://github.com/zync-sh/zync/commit/6bbdec3
 [49e3b34]: https://github.com/zync-sh/zync/commit/49e3b34
 [8bd83bc]: https://github.com/zync-sh/zync/commit/8bd83bc
+[6335b4b]: https://github.com/zync-sh/zync/commit/6335b4b
+[fbb4b5c]: https://github.com/zync-sh/zync-analytics/commit/fbb4b5c
+[ddd629b]: https://github.com/zync-sh/zync/commit/ddd629b
+[a9bad02]: https://github.com/zync-sh/zync-analytics/commit/a9bad02
+[c0766ce]: https://github.com/zync-sh/zync/commit/c0766ce
+[c9b15f3]: https://github.com/zync-sh/zync-analytics/commit/c9b15f3
+[0d78142]: https://github.com/zync-sh/zync/commit/0d78142
+[8cb2bb0]: https://github.com/zync-sh/zync/commit/8cb2bb0
+[b344e7e]: https://github.com/zync-sh/zync/commit/b344e7e
+[6f032cb]: https://github.com/zync-sh/plugin-sdk/commit/6f032cb
+[815f317]: https://github.com/zync-sh/plugin-ui/commit/815f317
+[ac501c3]: https://github.com/zync-sh/zync/commit/ac501c3
+[35cd831]: https://github.com/zync-sh/zync-analytics/commit/35cd831

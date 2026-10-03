@@ -12,6 +12,7 @@ import { createTerminalHandshakeReply } from '../../features/plugins/terminal/ha
 import { terminalOcclusion, TERMINAL_HEADER_HEIGHT } from '../../features/plugins/terminal/surfaceOcclusion';
 import { useAppStore } from '../../store/useAppStore';
 import { buildXtermOptions } from '../../lib/terminal/xtermOptions';
+import { getTerminalDocument } from '../../lib/terminal/terminalDocument';
 import { resolveXtermTheme } from '../terminal/terminalTheme';
 /** Stable host sibling: only the plugin's rectangle is shared, never xterm/PTY. */
 export function PluginTerminalLayer({ iframe, runtime, pane, plugin, pluginName, serverName, visible }: {
@@ -209,7 +210,15 @@ export function PluginTerminalLayer({ iframe, runtime, pane, plugin, pluginName,
             if (!alive.current || offerRef.current !== proposal || !visibleRef.current || document.hidden || !host.current)
                 return;
             terminal.current?.dispose();
-            const instance = new Terminal({ ...buildXtermOptions({ settings: useAppStore.getState().settings.terminal, theme: resolveXtermTheme(host.current, undefined, { enabled: false, opacity: 1 }) }), allowProposedApi: false, scrollback: 2000 });
+            const instance = new Terminal({
+                ...buildXtermOptions({
+                    settings: useAppStore.getState().settings.terminal,
+                    theme: resolveXtermTheme(host.current, undefined, { enabled: false, opacity: 1 }),
+                }),
+                documentOverride: getTerminalDocument(host.current.ownerDocument),
+                allowProposedApi: false,
+                scrollback: 2000,
+            });
             const fitter = new FitAddon();
             instance.loadAddon(fitter);
             instance.open(host.current);

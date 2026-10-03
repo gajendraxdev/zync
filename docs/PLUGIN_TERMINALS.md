@@ -241,7 +241,7 @@ analytics. App restart must never restore an interactive plugin session silently
 | `src/features/plugins/terminal/paneBridge.ts` | Mounted host pane routing for worker proposals |
 | `src/features/plugins/terminal/nativeTransport.ts` | Host-only native leases, binary output credits and bounded input |
 | `src/components/plugins/PluginTerminalLayer.tsx` | Trusted header, confirmation, stable xterm and observer cleanup |
-| `packages/plugin-sdk/terminal.js` | Optional surface handshake, geometry observations and disposal |
+| `@zync-sh/plugin-sdk/terminal` (`zync-sh/plugin-sdk`) | Optional surface handshake, geometry observations and disposal |
 | `tests/pluginTerminalIntegration.test.mjs` | SDK fallback, routing, framing and teardown regressions |
 | `tests/pluginTerminalFoundation.test.mjs` | Foundation validation, geometry and lifecycle race tests |
 | `src-tauri/src/plugins/terminal/mod.rs` | Host-only native commands and async broker authorization |

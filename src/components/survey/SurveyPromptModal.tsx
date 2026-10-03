@@ -21,6 +21,10 @@ import {
   type SurveyPromptKind,
 } from '../../features/survey';
 import { getOrCreateInstallId } from '../../features/installation/identity.js';
+import type { SurveyPayload } from '../../features/survey/types';
+import { feedbackInboxEnabled, submitInboxSurvey } from '../../features/feedbackInbox/client';
+import { isInboxCredentialStorageError } from '../../features/feedbackInbox/protocol';
+import { InboxReplyNotice } from '../../features/feedbackInbox/InboxReplyNotice';
 
 export function SurveyPromptModal({
   open,
@@ -52,6 +56,8 @@ export function SurveyPromptModal({
   const [email, setEmail] = useState('');
   const [wantUpdates, setWantUpdates] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const inFlight = useRef(false);
+  const retry = useRef<{ key: string; id: string; payload: SurveyPayload; legacy?: boolean } | null>(null);
   const [responseAccepted, setResponseAccepted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [thanks, setThanks] = useState(false);
@@ -59,7 +65,7 @@ export function SurveyPromptModal({
   const acceptedPrefsRef = useRef<SurveyPrefill | null>(null);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || inFlight.current) return;
 
     const rolePrefill = splitPrefillValue(prefill?.lastRole, ROLE_OPTIONS);
     const workPrefill = splitPrefillValue(prefill?.lastWorkContext, WORK_CONTEXT_OPTIONS);
@@ -76,6 +82,7 @@ export function SurveyPromptModal({
     setExperienceDetails('');
     setEmail('');
     setWantUpdates(false);
+    retry.current = null;
     setSubmitting(false);
     setResponseAccepted(false);
     setError(null);
@@ -116,6 +123,8 @@ export function SurveyPromptModal({
   });
 
   const handleSubmit = async () => {
+    if (inFlight.current || thanks) return;
+    inFlight.current = true;
     setSubmitting(true);
     setError(null);
     try {
@@ -130,7 +139,7 @@ export function SurveyPromptModal({
 
       const prefs = acceptedPrefsRef.current ?? buildPrefs(resolvedRole, resolvedWorkContext);
       if (!acceptedPrefsRef.current) {
-        await submitSurvey({
+        const payload: SurveyPayload = {
           schemaVersion: 1,
           installId: getOrCreateInstallId(),
           surveyId: kind === 'install' ? 'install' : `release:${appVersion}`,
@@ -166,7 +175,27 @@ export function SurveyPromptModal({
           locale: navigator.language || undefined,
           submittedAt: new Date().toISOString(),
           submittedFrom: 'app',
-        });
+        };
+        if (feedbackInboxEnabled) {
+          const key = JSON.stringify({ ...payload, submittedAt: undefined });
+          const attempt: NonNullable<typeof retry.current> = retry.current?.key === key
+            ? retry.current : { key, id: crypto.randomUUID(), payload };
+          retry.current = attempt;
+          if (attempt.legacy) {
+            await submitSurvey(attempt.payload);
+          } else {
+            try {
+              await submitInboxSurvey(attempt.id, attempt.payload);
+            } catch (error) {
+              if (!isInboxCredentialStorageError(error)) throw error;
+              attempt.legacy = true;
+              await submitSurvey(attempt.payload);
+            }
+          }
+          retry.current = null;
+        } else {
+          await submitSurvey(payload);
+        }
         acceptedPrefsRef.current = prefs;
         setResponseAccepted(true);
       }
@@ -185,6 +214,7 @@ export function SurveyPromptModal({
             : String(err),
       );
     } finally {
+      inFlight.current = false;
       setSubmitting(false);
     }
   };
@@ -193,7 +223,7 @@ export function SurveyPromptModal({
     <Modal
       isOpen={open}
       onClose={() => {
-        if (thanks || submitting || responseAccepted) return;
+        if (thanks || inFlight.current || responseAccepted) return;
         onDismissed();
       }}
       title={thanks ? 'Thank you' : title}
@@ -366,13 +396,17 @@ export function SurveyPromptModal({
             <p className="text-xs text-app-danger">{error}</p>
           )}
 
+          {feedbackInboxEnabled && (
+            <InboxReplyNotice />
+          )}
+
           <div className="flex items-center justify-end gap-2 pt-1">
             {!responseAccepted && (
               <Button
                 variant="ghost"
                 size="sm"
                 disabled={submitting}
-                onClick={onDismissed}
+                onClick={() => { if (!inFlight.current) onDismissed(); }}
               >
                 Skip for now
               </Button>

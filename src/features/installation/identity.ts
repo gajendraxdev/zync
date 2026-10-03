@@ -35,3 +35,13 @@ export function getOrCreateInstallId(): string {
 
   return created;
 }
+
+/** Read the pre-existing installation ID without creating a new claim hint. */
+export function getExistingInstallId(): string | null {
+  try {
+    const value = localStorage.getItem(INSTALL_ID_KEY)?.trim() ?? '';
+    return isUuid(value) ? value : null;
+  } catch {
+    return null;
+  }
+}

@@ -280,6 +280,19 @@ otherwise                    → WebGL (if WebGL2 probe passes)
 
 `WebGL → DOM → log warning` — terminal never blanks on renderer failure.
 
+**Release CSP:** `terminalDocument.ts` supplies xterm's public `documentOverride`
+with a cached, host-only document adapter. It sets Tauri's style nonce when
+xterm creates a style element, before insertion; native document methods remain
+bound to the real document. xterm 6's viewport creates scrollbar styles through
+the main document rather than the override; adapter-created divs therefore
+authorize direct style children synchronously before `appendChild` insertion.
+This bridge is confined to terminal-owned containers, not DOM prototypes.
+Workspace and plugin terminals share this adapter,
+including DOM renderer recreation after WebGL fallback. Development without a
+nonce uses the original document. No global DOM patch, asynchronous style
+observer, private xterm API, or CSP relaxation is used. Plugin documents never
+receive this adapter or the host nonce.
+
 ### Inactive tab behavior
 
 Switching shell tabs re-applies WebGL on the active tab (`syncTerminalRenderer`). Background tabs may stay on DOM until reselected.
@@ -292,6 +305,15 @@ Switching shell tabs re-applies WebGL on the active tab (`syncTerminalRenderer`)
 ### Tests
 
 `npm run test:terminal-renderer` — policy, probe cache, session ownership, controller sync, diagnostics, setup helper.
+
+`tests/terminalDocument.test.mjs` covers the nonce adapter and both integration
+points in the regular regression suites. After `npm run compile:agent-tests`,
+run `node tests/terminalDocument.browser.test.mjs` with Playwright available
+(or `ZYNC_PLAYWRIGHT_MODULE` pointing to its module URL) for a real-browser CSP
+check. It reproduces the unpatched release failure and verifies two patched
+terminals, ANSI colours, font/resize updates, cursors, hide/show, WebGL disposal
+back to DOM, development behavior, and continued blocking of unrelated styles.
+Windows uses installed Edge; other platforms use Playwright's Chromium.
 
 ---
 

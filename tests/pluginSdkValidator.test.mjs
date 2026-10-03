@@ -4,9 +4,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { externalPaneAssetsMinZyncVersion, knownPermissionIds, pluginApiVersion, validateManifest, validatePackageDirectory } from '../packages/plugin-sdk/validate.js';
+import { externalPaneAssetsMinZyncVersion, knownPermissionIds, pluginApiVersion, validateManifest, validatePackageDirectory } from '@zync-sh/plugin-sdk/validate';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const sdkRoot = path.dirname(fileURLToPath(import.meta.resolve('@zync-sh/plugin-sdk')));
 const demo = path.join(root, 'tests', 'fixtures', 'plugins', 'manifest-v2-demo');
 const base = JSON.parse(fs.readFileSync(path.join(demo, 'manifest.json'), 'utf8'));
 const clone = value => structuredClone(value);
@@ -116,10 +117,10 @@ try {
   result = validatePackageDirectory(fixture);
   assert.equal(result.valid, true, messages(result));
 
-  const command = spawnSync(process.execPath, [path.join(root, 'packages', 'plugin-sdk', 'bin', 'zync-plugin.mjs'), 'validate', fixture], { encoding: 'utf8' });
+  const command = spawnSync(process.execPath, [path.join(sdkRoot, 'bin', 'zync-plugin.mjs'), 'validate', fixture], { encoding: 'utf8' });
   assert.equal(command.status, 0, command.stderr);
   assert.match(command.stdout, /preflight passed/i);
-  const incompatibleCommand = spawnSync(process.execPath, [path.join(root, 'packages', 'plugin-sdk', 'bin', 'zync-plugin.mjs'), 'validate', fixture, '--zync-version', '2.31.9'], { encoding: 'utf8' });
+  const incompatibleCommand = spawnSync(process.execPath, [path.join(sdkRoot, 'bin', 'zync-plugin.mjs'), 'validate', fixture, '--zync-version', '2.31.9'], { encoding: 'utf8' });
   assert.equal(incompatibleCommand.status, 1);
   assert.match(incompatibleCommand.stderr, /engines\.zync/);
 
@@ -132,7 +133,7 @@ try {
   fs.rmSync(largeFile);
 
   fs.writeFileSync(path.join(fixture, 'manifest.json'), '{bad json');
-  const invalidCommand = spawnSync(process.execPath, [path.join(root, 'packages', 'plugin-sdk', 'bin', 'zync-plugin.mjs'), 'validate', fixture], { encoding: 'utf8' });
+  const invalidCommand = spawnSync(process.execPath, [path.join(sdkRoot, 'bin', 'zync-plugin.mjs'), 'validate', fixture], { encoding: 'utf8' });
   assert.equal(invalidCommand.status, 1);
   assert.match(invalidCommand.stderr, /manifest\.json: Invalid JSON/);
 } finally {

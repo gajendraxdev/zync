@@ -22,7 +22,7 @@ Before marketplace publication, validate the signature, package integrity, appro
 
 ## Standard OpenSSL publisher key generation
 
-The SDK's `zync-sdk keygen` command wraps the standard OpenSSL CLI. See `packages/plugin-sdk/README.md` for usage. It generates publisher keys only, not registry roots. This new command must be published in a new SDK version before it is available through npm.
+The SDK's `zync-sdk keygen` command wraps the standard OpenSSL CLI. See the [plugin SDK README](https://github.com/zync-sh/plugin-sdk/blob/main/README.md) for usage. It generates publisher keys only, not registry roots.
 
 Keep private PEM files and passphrases private; distribute only public PEM files. The operator signing CLI accepts Ed25519 PEM keys as well as existing JSON keys. Encrypted private PEM keys prompt for a passphrase; registry verification can use the public PEM file without a passphrase. Keep publisher and root keys separate: PEM itself has no publisher or purpose label. Desktop builds require the raw 32-byte public key encoded as base64, not PEM text. Protected registry-release CI signing and documented solo-maintainer operation are approved root custody models.
 
