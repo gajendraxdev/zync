@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { MessageSquare } from "lucide-react";
 import { Modal } from "../../components/ui/Modal";
-import { ZPortal } from "../../components/ui/ZPortal";
 import { getExistingInstallId } from "../installation/identity";
 import {
   claimLegacySurveys,
@@ -14,6 +12,7 @@ import {
   type InboxSnapshot,
 } from "./client";
 import { InboxHistory } from "./InboxHistory";
+import { setInboxUnreadCount } from "./status";
 
 const empty: InboxSnapshot = {
   threads: [],
@@ -35,12 +34,8 @@ function previouslyClaimed(installId: string | null): boolean {
 /** One app-level coordinator owns SSE and unread state independently of settings
  * or tab mounting. No polling interval and no startup credential enrollment.
  */
-export function FeedbackInbox({ reminderVisible = false }: {
-  /** Reserve space only while the survey reminder occupies the bottom corner. */
-  reminderVisible?: boolean;
-}) {
+export function FeedbackInbox() {
   const [snapshot, setSnapshot] = useState(empty);
-  const [snapshotReady, setSnapshotReady] = useState(false);
   const [open, setOpen] = useState(false);
   const [revision, setRevision] = useState(0);
   const [error, setError] = useState("");
@@ -72,7 +67,7 @@ export function FeedbackInbox({ reminderVisible = false }: {
           const next = await fetchInbox();
           if (disposed || !online) break;
           setSnapshot(next);
-          setSnapshotReady(true);
+          setInboxUnreadCount(next.unread);
           setRevision((value) => value + 1);
           setError("");
           if (next.active !== streaming) {
@@ -82,7 +77,6 @@ export function FeedbackInbox({ reminderVisible = false }: {
           }
         } catch (err) {
           if (!disposed) {
-            setSnapshotReady(false);
             setError(String(err));
           }
         }
@@ -97,7 +91,6 @@ export function FeedbackInbox({ reminderVisible = false }: {
     };
     const disconnected = () => {
       streaming = false;
-      if (!disposed) setSnapshotReady(false);
       if (!disposed)
         setError(
           "Live reply delivery is disconnected. Open or refresh the inbox to reconnect.",
@@ -115,7 +108,6 @@ export function FeedbackInbox({ reminderVisible = false }: {
     const pause = () => {
       online = false;
       streaming = false;
-      setSnapshotReady(false);
       void setInboxStream(false).catch(() => {});
     };
     const subscriptions = [
@@ -143,6 +135,7 @@ export function FeedbackInbox({ reminderVisible = false }: {
       for (const subscription of subscriptions)
         void subscription.then((release) => release()).catch(() => {});
       void setInboxStream(false).catch(() => {});
+      setInboxUnreadCount(0);
     };
   }, []);
   const refresh = useCallback(() => refreshRef.current(), []);
@@ -171,39 +164,6 @@ export function FeedbackInbox({ reminderVisible = false }: {
   if (!feedbackInboxEnabled) return null;
   return (
     <>
-      {snapshot.unread > 0 && !open && (
-        <ZPortal passive className="absolute inset-0 z-[80]">
-          <div className={`pointer-events-none absolute right-4 ${reminderVisible ? "bottom-24" : "bottom-12"}`}>
-            <button
-              onClick={() => {
-                setOpen(true);
-                refresh();
-              }}
-              aria-label={`${snapshot.unread} unread replies`}
-              className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-app-border bg-app-panel px-3 py-2 text-xs text-app-text shadow-xl"
-            >
-              <MessageSquare size={14} />
-              <span>Replies</span>
-              <span className="rounded-full bg-app-accent px-2 text-app-bg">
-                {snapshot.unread}
-              </span>
-            </button>
-          </div>
-        </ZPortal>
-      )}
-      {snapshotReady && snapshot.unread === 0 && !legacyClaimed && !open && (
-        <ZPortal passive className="absolute inset-0 z-[80]">
-          <div className={`pointer-events-none absolute right-4 ${reminderVisible ? "bottom-24" : "bottom-12"}`}>
-            <button
-              onClick={() => setOpen(true)}
-              className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-app-border bg-app-panel px-3 py-2 text-xs text-app-text shadow-xl"
-            >
-              <MessageSquare size={14} />
-              Earlier survey replies
-            </button>
-          </div>
-        </ZPortal>
-      )}
       <Modal
         isOpen={open}
         onClose={() => setOpen(false)}

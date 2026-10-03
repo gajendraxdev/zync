@@ -1507,7 +1507,7 @@ export function MainLayout({ children }: { children: ReactNode }) {
                 }}
             />
 
-            <FeedbackInbox reminderVisible={isSurveyReminderVisible && !isSurveyPromptOpen} />
+            <FeedbackInbox />
 
             <ConfirmCloseModal
                 isOpen={isShutdownModalOpen}

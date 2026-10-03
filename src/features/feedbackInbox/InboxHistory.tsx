@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, MessageSquareOff } from "lucide-react";
 import { FollowUpComposer } from "./FollowUpComposer";
+import { SurveyAnswerCard } from "./SurveyAnswerCard";
 import { useVisibleReplyReceipts } from "./useVisibleReplyReceipts";
 import { mergeThreadPages } from "./protocol";
 import {
@@ -140,6 +141,11 @@ export function InboxHistory({
     threads.find((item) => item.id === selected?.id)?.closedAt ||
     selected?.closedAt,
   );
+  // Keep an open conversation in sync when a refreshed snapshot replaces its
+  // summary; the selected object itself is only the stable thread identity.
+  const selectedThread = selected
+    ? threads.find((item) => item.id === selected.id) ?? selected
+    : null;
   return (
     <div ref={historyRef} className="space-y-4">
       {error && (
@@ -196,13 +202,15 @@ export function InboxHistory({
                 <ArrowLeft size={16} />
               </button>
               <div className="min-w-0">
-                <p className="break-words text-sm font-medium">{selected.category}</p>
-                <p className="text-xs text-app-muted">{selected.kind === "survey" ? "Survey" : "Feedback"} · {closed ? "Closed" : "Open"}</p>
+                <p className="break-words text-sm font-medium">{selectedThread?.category}</p>
+                <p className="text-xs text-app-muted">{selectedThread?.kind === "survey" ? "Survey" : "Feedback"} · {closed ? "Closed" : "Open"}</p>
               </div>
             </div>
             <div className="ml-6 rounded-2xl rounded-tr-sm border border-app-accent/20 bg-app-accent/10 p-3">
               <p className="mb-1 text-xs font-medium text-app-muted">You</p>
-              <p className="whitespace-pre-wrap break-words text-sm">{selected.message}</p>
+              {selectedThread?.kind === "survey" && selectedThread.answers?.length
+                ? <SurveyAnswerCard answers={selectedThread.answers} />
+                : <p className="whitespace-pre-wrap break-words text-sm">{selectedThread?.message}</p>}
             </div>
             {loading && (
               <p role="status" className="text-xs text-app-muted">

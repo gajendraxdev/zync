@@ -36,6 +36,9 @@ const snapshot = { threads: [thread], unread: 1, active: true, nextBefore: 0 };
 test('shared history accepts survey threads and preserves feedback-only server compatibility', () => {
   const survey = { ...thread, kind: 'survey', category: 'Release survey' };
   assert.deepEqual(parseSnapshot({ ...snapshot, threads: [survey] }).threads, [survey]);
+  const answers = [{ label: 'Role', value: 'developer' }, { label: 'Found Zync', value: 'other: A friend' }];
+  const detailedSurvey = { ...survey, answers };
+  assert.deepEqual(parseSnapshot({ ...snapshot, threads: [detailedSurvey] }).threads, [detailedSurvey]);
   const { kind, ...legacyThread } = thread;
   assert.deepEqual(parseSnapshot({ ...snapshot, threads: [legacyThread] }).threads, [thread]);
 });
@@ -86,6 +89,8 @@ test('inbox response validation rejects malformed counts, payloads and cursors',
     { ...snapshot, threads: [{ ...thread, id: '../other' }] },
     { ...snapshot, threads: [{ ...thread, createdAt: 'invalid' }] },
     { ...snapshot, threads: [{ ...thread, kind: 'unknown' }] },
+    { ...snapshot, threads: [{ ...thread, kind: 'survey', answers: Array(11).fill({ label: 'Role', value: 'developer' }) }] },
+    { ...snapshot, threads: [{ ...thread, kind: 'survey', answers: [{ label: 'Role', value: {} }] }] },
   ])
     assert.throws(() => parseSnapshot(bad));
   for (const bad of [

@@ -13,9 +13,15 @@ export interface InboxThread {
   sequence: number;
   category: string;
   message: string;
+  /** Present on survey threads served by an Analytics version with answer cards. */
+  answers?: InboxAnswer[];
   createdAt: string;
   closedAt: string | null;
   unread: number;
+}
+export interface InboxAnswer {
+  label: string;
+  value: string;
 }
 export interface InboxReply {
   sender: 'team' | 'user';
@@ -79,6 +85,15 @@ function date(value: unknown): string {
 function optionalDate(value: unknown): string | null {
   return value === null ? null : date(value);
 }
+function surveyAnswers(value: unknown): InboxAnswer[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > 10)
+    throw new Error('Invalid survey answers');
+  return value.map((raw) => {
+    const answer = responseObject(raw);
+    return { label: text(answer.label, 32), value: text(answer.value, 600) };
+  });
+}
 
 /** Validate server data before it controls unread state or UI pagination. */
 export function parseSnapshot(raw: unknown): InboxSnapshot {
@@ -104,6 +119,9 @@ export function parseSnapshot(raw: unknown): InboxSnapshot {
         sequence: count(item.sequence),
         category: text(item.category, 64),
         message: text(item.message),
+        ...(kind === 'survey' && item.answers !== undefined
+          ? { answers: surveyAnswers(item.answers) }
+          : {}),
         createdAt: date(item.createdAt),
         closedAt: optionalDate(item.closedAt),
         unread: count(item.unread),
