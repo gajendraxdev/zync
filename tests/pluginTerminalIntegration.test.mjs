@@ -40,7 +40,7 @@ function sdkHarness() {
     requestAnimationFrame: fn => {frames.set(++id,fn);return id;}, cancelAnimationFrame: id => frames.delete(id),
     setTimeout: fn => {timers.set(++id,fn);return id;}, clearTimeout: id => timers.delete(id),
   };
-  vm.runInNewContext(readFileSync(new URL('../packages/plugin-sdk/terminal.js',import.meta.url),'utf8').replaceAll('export function','function')+'\nglobalThis.mount = mountTerminalSurface; globalThis.overlay = registerTerminalOverlay;',context);
+  vm.runInNewContext(readFileSync(new URL(import.meta.resolve('@zync-sh/plugin-sdk/terminal')),'utf8').replaceAll('export function','function')+'\nglobalThis.mount = mountTerminalSurface; globalThis.overlay = registerTerminalOverlay;',context);
   const dispatch = (data,source=parent) => {for(const fn of listeners.get('message')??[])fn({source,data});};
   const flush = () => {const scheduled=[...frames.values()];frames.clear();scheduled.forEach(fn=>fn());};
   return {context,slot:new Element(),posts,observers,listeners,frames,timers,dispatch,flush};

@@ -6,7 +6,7 @@
     "strict": true,
     "noEmit": true,
     "types": [],
-    "lib": ["ES2022"]
+    "lib": ["ES2022", "DOM"]
   },
-  "files": ["test/consumer.ts"]
+  "files": ["tests/pluginSdkConsumer.test.ts"]
 }

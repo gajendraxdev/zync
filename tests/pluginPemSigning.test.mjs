@@ -5,9 +5,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { generateKeyPairSync } from 'node:crypto';
 import { PassThrough } from 'node:stream';
-import { generateKeys, readHiddenPassphrase } from '../packages/plugin-sdk/bin/keygen.mjs';
-import { signPluginDirectory, verifySignedPlugin } from '../packages/plugin-sdk/signing.js';
-import { readPemKey } from '../packages/plugin-sdk/bin/pem-key.mjs';
+import { generateKeys, readHiddenPassphrase, signPluginDirectory, verifySignedPlugin, readPemKey, sdkPackageRoot } from '../scripts/plugin-signing/sdk-internals.mjs';
 import { buildSignedRegistry, verifySignedRegistry } from '../scripts/plugin-signing/registry-signing.mjs';
 
 // Prompt regressions: previously resumed stdin kept the CLI running after Enter.
@@ -55,7 +53,7 @@ try {
     assert.equal(readPemKey(fs.readFileSync(keys.publicPath, 'utf8'), { requirePrivate: false }).keyId, result.keyId);
     assert.throws(() => signPluginDirectory(source, keys.publicPath, path.join(root, 'bad-public')), /private key/);
     if (encrypted) assert.throws(() => signPluginDirectory(source, keys.privatePath, path.join(root, 'wrong-passphrase'), Date.now(), { passphrase: 'wrong' }), /passphrase/);
-    const cli = spawnSync(process.execPath, ['packages/plugin-sdk/bin/zync-plugin.mjs', 'verify', '--source', output], { encoding: 'utf8', timeout: 5000 });
+    const cli = spawnSync(process.execPath, [path.join(sdkPackageRoot, 'bin', 'zync-plugin.mjs'), 'verify', '--source', output], { encoding: 'utf8', timeout: 5000 });
     assert.equal(cli.status, 0, cli.stderr);
     const now = Date.now();
     const registry = path.join(root, encrypted ? 'registry-encrypted.json' : 'registry-plain.json');

@@ -9,7 +9,7 @@ import {
 import fs from 'node:fs';
 import path from 'node:path';
 import { verifySignedPlugin } from './package-signing.mjs';
-import { readKeyText, readPemKey } from '../../packages/plugin-sdk/bin/pem-key.mjs';
+import { readKeyText, readPemKey } from './sdk-internals.mjs';
 
 const REGISTRY_TYPE = 'zync.plugin-registry';
 const REGISTRY_DOMAIN = 'zync-plugin-registry-v1\n';
