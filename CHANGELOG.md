@@ -4,8 +4,16 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Added
+
+- **Inbox status bar access:** Keep a visible Inbox button in the bottom status
+  bar, with an unread count, so conversations remain easy to reopen. ([ac501c3])
+
 ### Changed
 
+- **Survey inbox detail:** Show all submitted survey answers as labeled fields,
+  including in earlier conversations, while keeping contact and installation
+  metadata out of the conversation. ([ac501c3], [35cd831])
 - License future Zync desktop releases under FSL-1.1-ALv2, with Apache 2.0
   rights for each version after two years. Preserve prior MIT releases and
   keep the plugin SDK and UI packages under MIT. ([8cb2bb0])
@@ -1934,3 +1942,5 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [b344e7e]: https://github.com/zync-sh/zync/commit/b344e7e
 [6f032cb]: https://github.com/zync-sh/plugin-sdk/commit/6f032cb
 [815f317]: https://github.com/zync-sh/plugin-ui/commit/815f317
+[ac501c3]: https://github.com/zync-sh/zync/commit/ac501c3
+[35cd831]: https://github.com/zync-sh/zync-analytics/commit/35cd831
