@@ -4,6 +4,15 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Changed
+
+- License future Zync desktop releases under FSL-1.1-ALv2, with Apache 2.0
+  rights for each version after two years. Preserve prior MIT releases and
+  keep the plugin SDK and UI packages under MIT. ([8cb2bb0])
+- Move the npm plugin SDK and UI packages to separate repositories. Zync now
+  pins the published SDK for signing and host compatibility checks rather
+  than importing its source tree. ([b344e7e], [6f032cb], [815f317])
+
 ## [2.33.11] - 2026-10-03
 
 ### Added
@@ -1921,3 +1930,7 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [c0766ce]: https://github.com/zync-sh/zync/commit/c0766ce
 [c9b15f3]: https://github.com/zync-sh/zync-analytics/commit/c9b15f3
 [0d78142]: https://github.com/zync-sh/zync/commit/0d78142
+[8cb2bb0]: https://github.com/zync-sh/zync/commit/8cb2bb0
+[b344e7e]: https://github.com/zync-sh/zync/commit/b344e7e
+[6f032cb]: https://github.com/zync-sh/plugin-sdk/commit/6f032cb
+[815f317]: https://github.com/zync-sh/plugin-ui/commit/815f317
