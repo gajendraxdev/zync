@@ -4,6 +4,42 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Added
+
+- **Terminal shortcut control:** Share the same shortcut priority control across
+  the sidebar, terminal quick settings and Settings. Keep command palette
+  (Ctrl/Cmd+Shift+P) and Snippets (Ctrl+Shift+S) available in terminal-first mode;
+  select or disable app exceptions in Settings → Shortcuts. Existing app-first
+  choices are preserved. ([133fcff])
+- **Clear shortcut modes:** Choose **Terminal first** (recommended) or **Zync first**
+  from a themed, keyboard-accessible dropdown that avoids panel clipping, with
+  app exceptions under **Customize terminal-first shortcuts**. ([133fcff])
+- **Pause suggestions:** Temporarily pause Zync suggestions for an individual
+  terminal from its context menu. ([077ede6])
+- **Terminal Find button:** Add a small search icon beside the split controls to
+  search the selected shell in either shortcut mode, without intercepting Ctrl+F.
+  ([133fcff])
+- **tmux regression coverage:** Add an isolated real-tmux browser smoke test for
+  pane switching, interrupts, shortcut routing, resize, mouse mode, and
+  detach/reattach. ([4cacff1])
+
+### Fixed
+
+- **Terminal-first input:** Let tmux prefixes and other terminal keys reach the
+  focused terminal without sidebar, palette, split or tab shortcuts intercepting
+  them unless explicitly reserved. Copy/paste remain explicit host utilities;
+  remove duplicate palette routing and outdated quick-settings descriptions.
+  ([077ede6], [133fcff])
+- **Focused clipboard actions:** Target the actual workspace or host-owned plugin
+  terminal, and cancel delayed pastes after focus, visibility or session changes.
+  ([077ede6])
+- **Terminal input ownership:** Stop an open plain-text editor from capturing a
+  neighboring terminal's keys, and prevent context-menu Escape from also reaching
+  the terminal. Resolve circular terminal input-pipeline bundle imports. ([077ede6])
+- **Full-screen suggestion safety:** Suppress ghost suggestions and shell history/CWD
+  inference in alternate-screen and mouse-reporting contexts; reject stale results
+  across context changes and reconnects. ([077ede6])
+
 ## [2.33.12] - 2026-10-03
 
 ### Added
@@ -1951,3 +1987,6 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [815f317]: https://github.com/zync-sh/plugin-ui/commit/815f317
 [ac501c3]: https://github.com/zync-sh/zync/commit/ac501c3
 [35cd831]: https://github.com/zync-sh/zync-analytics/commit/35cd831
+[077ede6]: https://github.com/zync-sh/zync/commit/077ede6
+[133fcff]: https://github.com/zync-sh/zync/commit/133fcff
+[4cacff1]: https://github.com/zync-sh/zync/commit/4cacff1
