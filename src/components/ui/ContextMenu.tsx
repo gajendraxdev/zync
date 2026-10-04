@@ -173,16 +173,20 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
       onClose();
     };
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key !== 'Escape' || e.isComposing || e.defaultPrevented) return;
+      // Menu dismissal owns Escape even when the terminal retains DOM focus.
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      onClose();
     };
 
     document.addEventListener('mousedown', handleClickOutside);
     document.addEventListener('scroll', handleScroll, true);
-    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('keydown', handleKeyDown, true);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('scroll', handleScroll, true);
-      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('keydown', handleKeyDown, true);
     };
   }, [onClose]);
 

@@ -2,6 +2,8 @@ import { isEditorOverlayOpen } from '../../components/editor/overlayState';
 import { canSplit, layoutForTerm, paneNavDirectionFromKey } from '../../lib/paneLayout';
 import { useAppStore, type Tab } from '../../store/useAppStore';
 import { keyboardFocus } from './focus';
+import { runTerminalInteraction, terminalInteractionForEvent } from '../../lib/terminal/terminalInteraction';
+import { TERMINAL_FONT_SIZE_MAX, TERMINAL_FONT_SIZE_MIN } from '../../components/settings/constants/defaults';
 
 let sidebarCollapseTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -118,19 +120,20 @@ export function runShortcutCommand(id: string, event: KeyboardEvent): boolean {
             return true;
         }
         case 'termCopy':
-            emit('ssh-ui:term-copy');
-            return true;
+            return runTerminalInteraction('copy', event);
         case 'termPaste':
-            emit('ssh-ui:term-paste');
-            return true;
+            return runTerminalInteraction('paste', event);
         case 'termFind':
-            emit('ssh-ui:term-find');
-            return true;
+            return runTerminalInteraction('find', event);
         case 'zoomIn':
-            void window.ipcRenderer?.invoke('app:zoomIn');
-            return true;
         case 'zoomOut':
-            void window.ipcRenderer?.invoke('app:zoomOut');
+            if (terminalInteractionForEvent(event)) {
+                const fontSize = Math.min(TERMINAL_FONT_SIZE_MAX, Math.max(TERMINAL_FONT_SIZE_MIN,
+                    store.settings.terminal.fontSize + (id === 'zoomIn' ? 1 : -1)));
+                void store.updateTerminalSettings({ fontSize }).catch(() => store.showToast('error', 'Could not save terminal font size.'));
+            } else {
+                void window.ipcRenderer?.invoke(id === 'zoomIn' ? 'app:zoomIn' : 'app:zoomOut');
+            }
             return true;
         case 'filesFeature':
             return connectionFeature('files');

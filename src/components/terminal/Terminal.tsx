@@ -58,13 +58,7 @@ export const TerminalComponent = memo(function TerminalComponent({
   const setTabView = useAppStore((state) => state.setTabView);
   const activeTabId = useAppStore((state) => state.activeTabId);
   const settings = useAppStore((state) => state.settings);
-  const updateTerminalSettingsFromStore = useAppStore((state) => state.updateTerminalSettings);
   const ghostSettings = settings.ghostSuggestions;
-
-  // Prefer store updater so font size / weight normalization matches Settings.
-  const updateTerminalSettings = useCallback((newSettings: Partial<typeof settings.terminal>) => {
-    void updateTerminalSettingsFromStore(newSettings);
-  }, [updateTerminalSettingsFromStore]);
 
   const activeConnectionId = connectionId || globalActiveId;
   const terminalKey = activeConnectionId || LOCAL_TERMINAL_CONNECTION_ID;
@@ -120,13 +114,12 @@ export const TerminalComponent = memo(function TerminalComponent({
     spawnConnectionId,
     ghostScope,
     ghostSettings,
+    isVisible,
     isVisibleRef,
     isConnectedRef,
   });
 
   const { attachKeybindings } = useTerminalKeybindings({
-    fontSize: settings.terminal.fontSize,
-    updateTerminalSettings,
     isSearchOpenRef,
     closeSearch: handleClose,
     sessionId,
@@ -175,7 +168,9 @@ export const TerminalComponent = memo(function TerminalComponent({
   });
 
   useTerminalGlobalShortcuts({
-    isVisible: isVisible && (isFocused ?? isActiveTab),
+    isVisible: isVisible && isWorkspaceActive && isTerminalView && isConnected,
+    isKeyboardOwner: isFocused ?? isActiveTab,
+    sessionId,
     termRef,
     onOpenSearch: openSearch,
   });

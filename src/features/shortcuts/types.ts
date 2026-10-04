@@ -20,4 +20,8 @@ export type ShortcutCommand = {
     /** User override in settings.keybindings. Omit for non-configurable chords. */
     settingsKey?: KeybindingId;
     configurable: boolean;
+    /** Host copy/paste only: stays available in terminal-first mode. */
+    terminalUtility?: boolean;
+    /** Held keys must not repeat toggles or destructive actions by default. */
+    repeatable?: boolean;
 };

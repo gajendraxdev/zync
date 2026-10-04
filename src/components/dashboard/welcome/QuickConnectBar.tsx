@@ -11,6 +11,7 @@ import {
 import { Key, Sparkles, CornerDownLeft } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../../../lib/utils';
+import { isXtermKeyboardTarget } from '../../../lib/shortcuts';
 import type { Connection } from '../../../store/connectionSlice';
 import { useAppStore } from '../../../store/useAppStore';
 import { filterConnectionSuggestions } from './welcomeQuickConnectHelpers';
@@ -96,6 +97,7 @@ export function QuickConnectBar({ connections, onConnect, onSelectExisting }: Qu
     // ── Ctrl/Cmd+L focuses the input ───────────────────────────────────
     useEffect(() => {
         function onKey(e: globalThis.KeyboardEvent) {
+            if (e.defaultPrevented || e.isComposing || isXtermKeyboardTarget(e.target)) return;
             if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'l') {
                 e.preventDefault();
                 inputRef.current?.focus();

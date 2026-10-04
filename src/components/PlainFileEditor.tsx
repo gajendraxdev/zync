@@ -12,6 +12,7 @@ import { useAppStore } from '../store/useAppStore';
 import { markPlainDocumentSaved, reconcilePlainDocument } from './editor/plainDocumentState';
 import { plainCursorPosition } from './editor/editorStatusReport';
 import { formatCodeMirrorStatus } from './editor/codemirror/status';
+import { isXtermKeyboardTarget } from '../lib/shortcuts';
 
 interface PlainFileEditorProps {
   documentId?: string;
@@ -162,6 +163,8 @@ export function PlainFileEditor({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      // A mounted editor must not claim keys from a neighboring terminal pane.
+      if (event.defaultPrevented || event.isComposing || isXtermKeyboardTarget(event.composedPath()[0] ?? event.target)) return;
       const ctrlOrMeta = event.ctrlKey || event.metaKey;
       if (ctrlOrMeta && event.key.toLowerCase() === 's') {
         event.preventDefault();

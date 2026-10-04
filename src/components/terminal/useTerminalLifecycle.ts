@@ -13,7 +13,6 @@ import {
   clearTerminalPendingInput,
   createResizeScheduler,
   isPaneSizeTransient,
-  flushPendingInput,
   getTerminalRendererState,
   isTerminalDomMeasurable,
   resolveLazyPtyAction,
@@ -32,8 +31,10 @@ import {
   shouldUseWindowsLocalPtyOptions,
   writeIdleHostSuspendNotice,
 } from '../../lib/terminal';
+import { flushPendingInput } from '../../lib/terminal/inputPipeline';
 import type { TerminalSettingsSlice } from './useTerminalTheme';
 import { getTerminalDocument } from '../../lib/terminal/terminalDocument';
+import { canTrackTerminalShell } from '../../lib/terminal/terminalShellContext';
 
 /** Run heavy renderer work after the next paint so tab/UI clicks feel instant. */
 function deferAfterPaint(task: () => void): void {
@@ -586,6 +587,8 @@ export function useTerminalLifecycle({
       term.loadAddon(searchAddon);
 
       term.parser.registerOscHandler(7, (data) => {
+        const owner = terminalCache.get(sessionId);
+        if (!owner?.ghostContextActive || !canTrackTerminalShell(term, owner.ghostPaused)) return true;
         try {
           let path = data;
           if (path.startsWith('file://')) {

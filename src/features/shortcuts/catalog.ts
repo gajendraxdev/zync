@@ -34,8 +34,9 @@ const FILE_MANAGER: ShortcutCommand[] = [
 /**
  * Zync commands. PTY chords (Ctrl+/) are not listed here.
  *
- * `when: 'app'` — skip while xterm is focused under shell-first (Ctrl+T/W/F/N).
- * `when: 'always'` — still work in a terminal (sidebar, palette, AI, Shift chords, tab switch).
+ * All app commands respect terminal-first, including `when: 'always'`.
+ * Only explicit terminal clipboard utilities and selected allowlisted app
+ * exceptions bypass that policy. Never infer ownership from modifiers alone.
  * `settings.keybindings` overrides `defaultKeys` when `settingsKey` is set.
  */
 export const SHORTCUT_CATALOG: readonly ShortcutCommand[] = [
@@ -172,7 +173,8 @@ export const SHORTCUT_CATALOG: readonly ShortcutCommand[] = [
         label: 'Copy',
         section: 'terminal',
         defaultKeys: 'Mod+Shift+C',
-        when: 'always',
+        when: 'xterm',
+        terminalUtility: true,
         settingsKey: 'termCopy',
         configurable: true,
     },
@@ -181,7 +183,8 @@ export const SHORTCUT_CATALOG: readonly ShortcutCommand[] = [
         label: 'Paste',
         section: 'terminal',
         defaultKeys: 'Mod+Shift+V',
-        when: 'always',
+        when: 'xterm',
+        terminalUtility: true,
         settingsKey: 'termPaste',
         configurable: true,
     },
@@ -196,6 +199,7 @@ export const SHORTCUT_CATALOG: readonly ShortcutCommand[] = [
     },
     {
         id: 'zoomIn',
+        repeatable: true,
         label: 'Zoom In',
         section: 'view',
         defaultKeys: 'Mod+=',
@@ -206,6 +210,7 @@ export const SHORTCUT_CATALOG: readonly ShortcutCommand[] = [
     },
     {
         id: 'zoomOut',
+        repeatable: true,
         label: 'Zoom Out',
         section: 'view',
         defaultKeys: 'Mod+-',

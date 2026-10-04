@@ -106,22 +106,8 @@ export function CommandPalette() {
     // Listen for global toggle event
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.key.toLowerCase() === 'p' && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                cancelActiveQuickPick();
-                setOpen(true);
-                openRef.current = true;
-
-                if (e.shiftKey) {
-                    // Ctrl+Shift+P -> Command Mode
-                    setCommandMode(true);
-                    setSearch(">"); // Start with >
-                } else {
-                    // Ctrl+P -> File/History Mode
-                    setCommandMode(false);
-                    setSearch("");
-                }
-            } else if (e.key === 'Escape' && openRef.current) {
+            // Opening is owned exclusively by the shortcut dispatcher.
+            if (e.key === 'Escape' && openRef.current) {
                 setOpen(false);
                 openRef.current = false;
                 cancelActiveQuickPick();
