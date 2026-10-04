@@ -4,6 +4,8 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.34.0] - 2026-10-05
+
 ### Added
 
 - **Terminal shortcut control:** Share the same shortcut priority control across
@@ -23,6 +25,13 @@ All notable changes to Zync are documented in this file. The format is based on 
   pane switching, interrupts, shortcut routing, resize, mouse mode, and
   detach/reattach. ([4cacff1])
 
+### Changed
+
+- **Terminal first by default:** Give shortcuts to the focused terminal unless
+  they are reserved app exceptions or host clipboard utilities. Existing explicit
+  **Zync first** choices remain unchanged; switch modes in the terminal controls
+  or Settings → Shortcuts. ([077ede6], [133fcff])
+
 ### Fixed
 
 - **Terminal-first input:** Let tmux prefixes and other terminal keys reach the
@@ -39,6 +48,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Full-screen suggestion safety:** Suppress ghost suggestions and shell history/CWD
   inference in alternate-screen and mouse-reporting contexts; reject stale results
   across context changes and reconnects. ([077ede6])
+- **Explicit working-directory tracking:** Accept OSC 7 directory reports in
+  normal-shell contexts even before suggestion tracking initializes or while
+  suggestions are paused. Keep alternate-screen and mouse-reporting safeguards.
+  ([3efbf72])
 
 ## [2.33.12] - 2026-10-03
 
@@ -1771,7 +1784,8 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [840afc2]: https://github.com/zync-sh/zync/commit/840afc2
 [193f568]: https://github.com/zync-sh/zync/commit/193f568
 [4e3c5ff]: https://github.com/zync-sh/zync/commit/4e3c5ff
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.33.12...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.34.0...HEAD
+[2.34.0]: https://github.com/zync-sh/zync/compare/v2.33.12...v2.34.0
 [2.33.12]: https://github.com/zync-sh/zync/compare/v2.33.11...v2.33.12
 [2.33.11]: https://github.com/zync-sh/zync/compare/v2.33.10...v2.33.11
 [2.33.10]: https://github.com/zync-sh/zync/compare/v2.33.9...v2.33.10
@@ -1990,3 +2004,4 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [077ede6]: https://github.com/zync-sh/zync/commit/077ede6
 [133fcff]: https://github.com/zync-sh/zync/commit/133fcff
 [4cacff1]: https://github.com/zync-sh/zync/commit/4cacff1
+[3efbf72]: https://github.com/zync-sh/zync/commit/3efbf72
