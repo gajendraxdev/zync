@@ -3,7 +3,7 @@ import { useAppStore } from '../../store/useAppStore';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../../lib/utils';
 import { pluginTabInventory } from './featureTabInventory';
-import { FolderOpen, Plus, X, PanelRight, Terminal as TerminalIcon } from 'lucide-react';
+import { FolderOpen, Plus, X, PanelRight, Search, Terminal as TerminalIcon } from 'lucide-react';
 import { ContextMenu, type ContextMenuItem } from '../ui/ContextMenu';
 import { useWindowDrag } from '../../hooks/useWindowDrag';
 import type { ShellEntry } from '../../lib/shells/types';
@@ -23,6 +23,7 @@ import {
     isPluginContent,
     isSplitFeatureId,
     isSplitLayout,
+    isTermContent,
     layoutForCanvas,
     layoutHasFeature,
     layoutHasPlugin,
@@ -39,6 +40,8 @@ import { splitOpenMenuItems, useDockTabPointer, type DockTabPointerHandlers } fr
 import { useInternalFileDrag } from '../../lib/dragDrop';
 import { acceptFilePathDrag } from '../../lib/terminal/fileDropToTerminal';
 import { pasteFilePathsIntoTerminal } from '../../lib/terminal/pasteFileDropToTerminal';
+import { terminalCache } from '../../lib/terminal/terminalCache';
+import { openTerminalFind } from '../../lib/terminal/terminalInteraction';
 
 
 interface CombinedTabBarProps {
@@ -285,6 +288,11 @@ export const CombinedTabBar = memo(function CombinedTabBar({
         ?? 'Ctrl+Shift+ArrowDown';
     const canOpenFeature = Boolean(onOpenFeature);
     const splitLayout = layoutForCanvas(paneGroups, activeTerminalId, activePaneGroupOwner);
+    const focusedPane = splitLayout ? findNode(splitLayout.root, splitLayout.activePaneId) : null;
+    // A feature pane must not send Find to the last selected (possibly hidden) shell.
+    const findTerminalId = activeView !== 'terminal' ? null : splitLayout
+        ? (focusedPane && isPaneLeaf(focusedPane) && isTermContent(focusedPane.content) ? focusedPane.content.termId : null)
+        : activeTerminalId;
     const splitGroups = Object.entries(paneGroups ?? {})
         .filter((entry): entry is [string, NonNullable<typeof entry[1]>] => isSplitLayout(entry[1]));
     const allPaneLeaves = Object.values(paneGroups ?? {}).flatMap(layout => collectLeaves(layout.root));
@@ -806,11 +814,23 @@ export const CombinedTabBar = memo(function CombinedTabBar({
                 )}
             </div>
 
-            {(onSplit || onToggleSessionTools) && (
+            {(findTerminalId || onSplit || onToggleSessionTools) && (
                 <div
                     className="ml-auto flex items-center shrink-0 gap-1 pr-0.5 drag-none"
                     data-tauri-drag-region="false"
                 >
+                    {findTerminalId && (
+                        <Tooltip content="Find in terminal" position="bottom">
+                            <button
+                                type="button"
+                                aria-label="Find in terminal"
+                                onClick={() => openTerminalFind(terminalCache.get(findTerminalId)?.term.element ?? null)}
+                                className="h-7 w-7 flex items-center justify-center rounded-md border border-transparent text-app-muted transition-colors hover:text-app-text hover:bg-app-surface hover:border-app-border/40"
+                            >
+                                <Search size={14} aria-hidden="true" />
+                            </button>
+                        </Tooltip>
+                    )}
                     {onSplit && (
                         <div className="flex items-center bg-app-surface/30 rounded-lg p-0.5 border border-app-border/30">
                             <Tooltip

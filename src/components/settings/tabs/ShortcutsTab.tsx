@@ -3,23 +3,19 @@ import { useAppStore } from '../../../store/useAppStore';
 import {
     SHORTCUT_SECTIONS,
     catalogBySection,
-    normalizeTerminalFocusPolicy,
 } from '../../../features/shortcuts';
-import { formatShortcutLabel } from '../../../lib/shortcuts';
 import { KeybindingRow } from '../common/KeybindingRow';
 import { Section } from '../common/Section';
-import { Toggle } from '../common/Toggle';
+import { TerminalShortcutControl } from '../common/TerminalShortcutControl';
 
 interface ShortcutsTabProps {
     settings: AppSettings;
     updateKeybindings: (updates: Partial<AppSettings['keybindings']>) => Promise<void>;
-    updateKeyboardSettings: (updates: Partial<AppSettings['keyboard']>) => Promise<void>;
 }
 
-export function ShortcutsTab({ settings, updateKeybindings, updateKeyboardSettings }: ShortcutsTabProps) {
+export function ShortcutsTab({ settings, updateKeybindings }: ShortcutsTabProps) {
     const showToast = useAppStore((state) => state.showToast);
     const keybindings = settings.keybindings ?? defaultSettings.keybindings;
-    const shellFirst = normalizeTerminalFocusPolicy(settings.keyboard?.terminalFocusPolicy) === 'shell';
     const handleKeybindingChange = (updates: Partial<AppSettings['keybindings']>) => {
         void updateKeybindings(updates).catch((error) => {
             console.error('Failed to update keybinding', error);
@@ -27,23 +23,11 @@ export function ShortcutsTab({ settings, updateKeybindings, updateKeyboardSettin
             showToast('error', `Failed to save keybinding: ${message}`);
         });
     };
-    const handlePolicyChange = (preferShell: boolean) => {
-        void updateKeyboardSettings({ terminalFocusPolicy: preferShell ? 'shell' : 'app' }).catch((error) => {
-            console.error('Failed to update keyboard policy', error);
-            const message = error instanceof Error ? error.message : String(error);
-            showToast('error', `Failed to save shortcut policy: ${message}`);
-        });
-    };
 
     return (
         <div className="space-y-6 animate-in fade-in duration-300">
             <Section title="When a terminal is focused">
-                <Toggle
-                    label="Give keys to the shell"
-                    description={`${formatShortcutLabel('Mod+T')}, ${formatShortcutLabel('Mod+W')}, ${formatShortcutLabel('Mod+F')}, and ${formatShortcutLabel('Mod+N')} go to the shell. Sidebar (${formatShortcutLabel('Mod+B')}), palette (${formatShortcutLabel('Mod+P')}), and AI (${formatShortcutLabel('Mod+I')}) still open Zync. Turn off so all Zync shortcuts win in the terminal.`}
-                    checked={shellFirst}
-                    onChange={handlePolicyChange}
-                />
+                <TerminalShortcutControl showExceptions />
             </Section>
             {SHORTCUT_SECTIONS.map((section) => {
                 const rows = catalogBySection(section.id);

@@ -74,7 +74,6 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     const updateStatusBarSettings = useAppStore(state => state.updateStatusBarSettings);
     const updateLocalTermSettings = useAppStore(state => state.updateLocalTermSettings);
     const updateKeybindings = useAppStore(state => state.updateKeybindings);
-    const updateKeyboardSettings = useAppStore(state => state.updateKeyboardSettings);
     const updateGhostSuggestionsSettings = useAppStore(state => state.updateGhostSuggestionsSettings);
     const openSettingsJsonTab = useAppStore(state => state.openSettingsJsonTab);
     const showToast = useAppStore(state => state.showToast);
@@ -770,7 +769,6 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             <ShortcutsTab
                                 settings={settings}
                                 updateKeybindings={updateKeybindings}
-                                updateKeyboardSettings={updateKeyboardSettings}
                             />
                         )}
 
