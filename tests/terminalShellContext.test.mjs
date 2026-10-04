@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import ts from 'typescript';
 import { canTrackTerminalShell, observeTerminalShellContext } from '../.tmp-agent-tests/src/lib/terminal/terminalShellContext.js';
 import { InputTracker } from '../.tmp-agent-tests/src/lib/ghostSuggestions/inputTracker.js';
 import { bindGhostTrackerRuntime } from '../.tmp-agent-tests/src/lib/ghostSuggestions/runtime.js';
@@ -46,6 +48,39 @@ generation++; observation.sync();
 assert.equal(invalidations, 9);
 observation.dispose();
 assert.equal(buffer.listeners.size + parsed.listeners.size + csi.size, 0, 'all observers disposed');
+
+// Exercise the production OSC 7 callback without mounting the React/PTY lifecycle.
+const lifecycleSource = ts.createSourceFile('useTerminalLifecycle.ts', await readFile(new URL('../src/components/terminal/useTerminalLifecycle.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true);
+const oscHandlers = [];
+function collectOscHandlers(node) {
+  if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
+      && node.expression.name.text === 'registerOscHandler' && node.arguments[0]?.getText(lifecycleSource) === '7') {
+    oscHandlers.push(node.arguments[1].getText(lifecycleSource));
+  }
+  ts.forEachChild(node, collectOscHandlers);
+}
+collectOscHandlers(lifecycleSource);
+assert.equal(oscHandlers.length, 1, 'exercise exactly the production OSC 7 handler');
+const cwdUpdates = [];
+const sessionId = 'cwd-session';
+const terminalKey = 'local';
+const terminalCache = new Map();
+const useAppStore = { getState: () => ({ setTerminalCwd: (...args) => cwdUpdates.push(args) }) };
+const onOsc7 = new Function('terminalCache', 'sessionId', 'term', 'canTrackTerminalShell', 'useAppStore', 'terminalKey', `return (${oscHandlers[0]});`)(terminalCache, sessionId, term, canTrackTerminalShell, useAppStore, terminalKey);
+for (const owner of [{}, { ghostContextActive: false }, { ghostContextActive: true, ghostPaused: true }]) {
+  terminalCache.set(sessionId, owner);
+  assert.equal(onOsc7('file://host/home/test%20user'), true);
+  assert.deepEqual(cwdUpdates.at(-1), [terminalKey, sessionId, '/home/test user']);
+}
+assert.equal(cwdUpdates.length, 3, 'explicit CWD works before observer binding and while suggestions are paused');
+onOsc7('file://host/C:/Users/test');
+assert.equal(cwdUpdates.at(-1)[2], 'C:/Users/test', 'Windows path normalization is preserved');
+const acceptedUpdates = cwdUpdates.length;
+term.buffer.active.type = 'alternate'; onOsc7('file://host/untrusted');
+term.buffer.active.type = 'normal'; term.modes.mouseTrackingMode = 'drag'; onOsc7('file://host/untrusted');
+term.modes.mouseTrackingMode = 'none'; onOsc7('file://host/%broken');
+terminalCache.delete(sessionId); onOsc7('file://host/stale');
+assert.equal(cwdUpdates.length, acceptedUpdates, 'unsafe context, malformed reports and missing owners cannot update CWD');
 
 const commits = [];
 const tracker = new InputTracker({ onLineChange: () => {}, onAccept: () => {}, onDismiss: () => {}, onHistoryCommit: text => commits.push(text) });

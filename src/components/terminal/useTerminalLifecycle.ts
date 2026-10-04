@@ -588,7 +588,8 @@ export function useTerminalLifecycle({
 
       term.parser.registerOscHandler(7, (data) => {
         const owner = terminalCache.get(sessionId);
-        if (!owner?.ghostContextActive || !canTrackTerminalShell(term, owner.ghostPaused)) return true;
+        // Explicit shell CWD reports do not depend on suggestion tracking being active.
+        if (!owner || !canTrackTerminalShell(term)) return true;
         try {
           let path = data;
           if (path.startsWith('file://')) {
