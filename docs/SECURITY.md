@@ -16,7 +16,7 @@ Zync’s core security surface is **encrypted local vaulting**, optional **remem
 ### Local Vault (encrypted at rest)
 
 - Host credentials can be stored in an **encrypted local vault** instead of plaintext connection files.
-- Vault crypto uses **Argon2id key derivation** and **AEAD** for record encryption (see [VAULT.md](./VAULT.md)).
+- Vault crypto uses **Argon2id key derivation** and **AEAD** for record encryption (see the [vault guide](https://zync.thesudoer.in/docs/vault)).
 - Vault unlock requires a user passphrase; a **recovery key** can be generated for passphrase loss scenarios.
 - Plaintext host credentials can be **migrated into the vault** during normal workflows.
 
@@ -51,7 +51,7 @@ When **Settings → General → Share anonymous usage** is on (default), the des
 - **Legacy trust boundary.** Local and legacy plugins require Developer Mode, which defaults off. Their compatibility bridge is broader than Manifest v2's brokered API; do not describe legacy plugins as having the same isolation. Crash quarantine targets a failing plugin. App restarts no longer trigger blanket third-party-plugin safe mode; saved global safe-mode flags are cleared while per-plugin failure history is retained.
 - **Shortcut messages are untrusted.** A focused iframe and matching binding do not prove a user keypress. The host permits only a restricted set of presentation/navigation requests; privileged actions stay host-controlled.
 
-See [PLUGINS.md](./PLUGINS.md) for the implemented boundaries and remaining release gates, and [PLUGIN_REGISTRY_OPERATIONS.md](./PLUGIN_REGISTRY_OPERATIONS.md) for signing-key custody and staging procedures.
+See the [plugin guide](https://zync.thesudoer.in/docs/plugins) for public guidance. Detailed implementation boundaries, release gates, signing-key custody, and staging procedures are maintained in the private [zync-docs repository](https://github.com/zync-sh/zync-docs).
 
 ### Public URLs (Beta)
 
@@ -127,7 +127,7 @@ These are **product scope** limits today, not vulnerabilities:
 
 - **No team/org policy controls** — vault and sync are single-user oriented; shared/team vaults are deferred to later phases.
 - **No live bi-directional sync scheduling** — Google sync is manual upload/restore; there is no background auto-sync scheduler yet.
-- **Plugins** — there is no standard raw-vault-secret export API. Granted remote-command or file access can nevertheless expose sensitive data outside the vault. See the implemented trust boundary above and [PLUGINS.md](./PLUGINS.md); broader credential-sharing capabilities remain deferred.
+- **Plugins** — there is no standard raw-vault-secret export API. Granted remote-command or file access can nevertheless expose sensitive data outside the vault. See the implemented trust boundary above and the [plugin guide](https://zync.thesudoer.in/docs/plugins); broader credential-sharing capabilities remain deferred.
 - **Public URLs Beta** — no team/org sharing, no custom domains, no pricing plans in-app; GA hardening is deferred.
 
 ### AI credential policy
@@ -148,9 +148,9 @@ If you discover a vulnerability in Zync, report it privately to the maintainers 
 
 ## Related Documentation
 
-- [VAULT.md](./VAULT.md) — vault and sync architecture
-- [VAULT_ROADMAP.md](./VAULT_ROADMAP.md) — planned vault/sync work
-- [TUNNELS.md](./TUNNELS.md) — SSH port forwarding (separate from Public URLs)
-- [PLUGINS.md](./PLUGINS.md) — plugin trust tiers, sandbox, permissions, publisher identity, and marketplace architecture
+- [Vault guide](https://zync.thesudoer.in/docs/vault) — vault and sync usage
+- [Port forwarding guide](https://zync.thesudoer.in/docs/port-forwarding) — SSH forwarding (separate from Public URLs)
+- [Plugin guide](https://zync.thesudoer.in/docs/plugins) — plugin usage and permissions
+- [Private implementation references](https://github.com/zync-sh/zync-docs) — maintainer architecture, roadmaps, and operational procedures (access required)
 - [CHANGELOG.md](../CHANGELOG.md) — release history
 - Privacy Policy (marketing site) — `https://zync.thesudoer.in/privacy`
