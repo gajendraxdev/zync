@@ -4,6 +4,20 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Changed
+
+- **Global keyboard shortcut control:** Move the Terminal first / Zync first
+  selector from the sidebar footer to a flyout below Settings in the profile
+  menu. The choice applies to all terminals; detailed exceptions remain in
+  Settings → Shortcuts. ([025d573])
+
+### Fixed
+
+- **Submenu dismissal:** Keep the parent context menu open when Escape closes
+  an expanded submenu, including when its trigger has focus. Share flyout
+  positioning and keyboard navigation across context and profile menus.
+  ([025d573])
+
 ## [2.34.0] - 2026-10-05
 
 ### Added
@@ -2005,3 +2019,4 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [133fcff]: https://github.com/zync-sh/zync/commit/133fcff
 [4cacff1]: https://github.com/zync-sh/zync/commit/4cacff1
 [3efbf72]: https://github.com/zync-sh/zync/commit/3efbf72
+[025d573]: https://github.com/zync-sh/zync/commit/025d573
