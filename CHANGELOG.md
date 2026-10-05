@@ -4,6 +4,8 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.34.1] - 2026-10-05
+
 ### Changed
 
 - **Global keyboard shortcut control:** Move the Terminal first / Zync first
@@ -1798,7 +1800,8 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [840afc2]: https://github.com/zync-sh/zync/commit/840afc2
 [193f568]: https://github.com/zync-sh/zync/commit/193f568
 [4e3c5ff]: https://github.com/zync-sh/zync/commit/4e3c5ff
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.34.0...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.34.1...HEAD
+[2.34.1]: https://github.com/zync-sh/zync/compare/v2.34.0...v2.34.1
 [2.34.0]: https://github.com/zync-sh/zync/compare/v2.33.12...v2.34.0
 [2.33.12]: https://github.com/zync-sh/zync/compare/v2.33.11...v2.33.12
 [2.33.11]: https://github.com/zync-sh/zync/compare/v2.33.10...v2.33.11
