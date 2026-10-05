@@ -309,7 +309,12 @@ Command families include `ssh_*`, `terminal_*`, `tunnel_*`, `vault_*`, `sync_*`,
 
 ## Extensions
 
-Plugins, theme packs, and editor providers ship through the built-in Marketplace. Browse the [Plugin Catalog](PLUGIN_CATALOG.md) or develop at [zync-extensions](https://github.com/zync-sh/zync-extensions).
+Discover plugins in the built-in Marketplace or on the [Extensions page](https://zync.thesudoer.in/extensions/).
+Community developers can follow the [development guide](https://zync.thesudoer.in/docs/plugin-development/),
+[API and permissions](https://zync.thesudoer.in/docs/plugin-api/),
+[publishing guide](https://zync.thesudoer.in/docs/plugin-publishing/), and
+[best practices](https://zync.thesudoer.in/docs/plugin-best-practices/).
+The current signed registry is maintained in [zync-plugin-registry](https://github.com/zync-sh/zync-plugin-registry).
 
 ## Contributing
 
