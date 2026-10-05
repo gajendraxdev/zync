@@ -1,5 +1,6 @@
 import { useId, useSyncExternalStore } from 'react';
 import { Keyboard } from 'lucide-react';
+import { TerminalShortcutMenu } from './TerminalShortcutMenu';
 import { normalizeKeyboardSettings, normalizeTerminalFocusPolicy, TERMINAL_SHORTCUT_EXCEPTION_IDS, type KeyboardSettings } from '../../../features/shortcuts/policy';
 import { SHORTCUT_CATALOG } from '../../../features/shortcuts/catalog';
 import { formatShortcutLabel } from '../../../lib/shortcuts';
@@ -19,8 +20,8 @@ function setSaving(value: boolean): void {
     listeners.forEach(listener => listener());
 }
 
-/** One preference and save boundary for the sidebar and Settings controls. */
-export function TerminalShortcutControl({ compact = false, showExceptions = false }: { compact?: boolean; showExceptions?: boolean }) {
+/** One global preference and save boundary for menu, quick settings, and Settings. */
+export function TerminalShortcutControl({ compact = false, showExceptions = false, menu = false }: { compact?: boolean; showExceptions?: boolean; menu?: boolean }) {
     const controlId = useId();
     const descriptionId = useId();
     const rawKeyboard = useAppStore(state => state.settings.keyboard);
@@ -46,6 +47,10 @@ export function TerminalShortcutControl({ compact = false, showExceptions = fals
     const description = enabled
         ? 'Zync shortcuts take priority in the focused terminal.'
         : 'Terminal keys take priority. Selected Zync shortcuts and terminal copy/paste remain available.';
+    if (menu) {
+        return <TerminalShortcutMenu value={keyboard.terminalFocusPolicy} pending={pending}
+            onChange={value => { void save({ terminalFocusPolicy: value }); }} />;
+    }
     return (
         <div data-zync-shortcuts="local" className={compact ? 'space-y-1 px-2 py-2' : 'space-y-2 px-3 py-3'}>
             <label htmlFor={controlId} className="flex items-center gap-2 text-xs font-medium text-app-text">

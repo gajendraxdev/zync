@@ -31,7 +31,6 @@ import {
     type ConnectionExchangeExportFormat,
 } from '../../features/connections/infrastructure/connectionTransfer';
 import { FEATURE_META, type FeatureId } from './featureMeta';
-import { TerminalShortcutControl } from '../settings/common/TerminalShortcutControl';
 
 // Lazy Load Modals
 const SettingsModal = lazy(() => import('../settings/SettingsModal').then(mod => ({ default: mod.SettingsModal })));
@@ -907,9 +906,6 @@ export function Sidebar({ className }: { className?: string }) {
                         {allHostsContent}
                     </SidebarSection>
                 </div>
-                {!isCollapsed && <div className="shrink-0 border-t border-app-border/30 px-2 py-1">
-                    <TerminalShortcutControl compact />
-                </div>}
             </div>
 
             {/* Modals */}

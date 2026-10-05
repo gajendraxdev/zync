@@ -70,7 +70,12 @@ const bundle = await build({
     function MenuFixture() {
       const [open, setOpen] = useState(false);
       window.controlsTest.openMenu = () => setOpen(true);
-      return open ? <ContextMenu x={10} y={10} items={[{ label: 'Test menu action', action: () => {} }]} onClose={() => setOpen(false)} /> : null;
+      return open ? <ContextMenu x={10} y={10} items={[
+        { label: 'Test menu action', action: () => {} },
+        { label: 'Tools', children: [{ label: 'Nested tools', children: [
+          { label: 'Nested action', action: () => { window.controlsTest.menuActions = (window.controlsTest.menuActions || 0) + 1; } },
+        ] }] },
+      ]} onClose={() => setOpen(false)} /> : null;
     }
     window.controlsTest.findTerms = ['terminal', 'terminal-two'].map((id, index) => {
       const term = new Terminal();
@@ -85,6 +90,7 @@ const bundle = await build({
       <section id="bar" style={{ gridColumn: '1 / -1' }}><BarFixture /></section>
       <FindFixture index={0} /><FindFixture index={1} />
       <section id="sidebar"><TerminalShortcutControl compact /></section>
+      <section id="profile-menu"><TerminalShortcutControl menu /></section>
       <section id="settings"><TerminalShortcutControl showExceptions /></section>
       <section id="quick"><TerminalQuickSettings /></section>
       <section id="editor"><PlainFileEditor filename="test.txt" initialContent="test content"
@@ -239,6 +245,88 @@ try {
   assert.equal(await page.evaluate(() => controlsTest.bytes.length), 3, 'menu Escape never reaches the PTY');
   await page.keyboard.press('Escape');
   assert.equal(await page.evaluate(() => controlsTest.bytes.at(-1)), '\x1b', 'menu handler is removed after dismissal');
+  // The global menu uses the same preference, save lock, and rollback as Settings.
+  const profileMenu = page.locator('#profile-menu');
+  const shortcutSummary = profileMenu.getByRole('button', { name: 'Keyboard shortcuts', exact: true });
+  await shortcutSummary.focus();
+  await page.keyboard.press('Enter');
+  const flyout = page.getByRole('menu', { name: 'Keyboard shortcuts', exact: true });
+  await flyout.getByText('Applies to all terminals', { exact: true }).waitFor();
+  const terminalFirst = flyout.getByRole('menuitemradio', { name: 'Terminal first', exact: true });
+  const zyncFirst = flyout.getByRole('menuitemradio', { name: 'Zync first', exact: true });
+  assert.equal(await terminalFirst.getAttribute('aria-checked'), 'true');
+  await terminalFirst.focus();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  assert.equal(await zyncFirst.getAttribute('aria-checked'), 'true');
+  assert.equal(await zyncFirst.isDisabled(), true);
+  assert.deepEqual(await controls.allTextContents(), ['Zync first', 'Zync first', 'Zync first']);
+  assert.deepEqual(await controls.evaluateAll(nodes => nodes.map(node => node.disabled)), [true, true, true]);
+  await page.evaluate(() => controlsTest.save.reject(new Error('Menu save failed')));
+  await page.waitForFunction(() => document.querySelector('.context-menu-submenu-portal [role=menuitemradio]').getAttribute('aria-disabled') === 'false');
+  assert.equal(await terminalFirst.getAttribute('aria-checked'), 'true', 'failed menu save rolls back all surfaces');
+  assert.deepEqual(await controls.allTextContents(), ['Terminal first', 'Terminal first', 'Terminal first']);
+  await terminalFirst.focus();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await page.evaluate(() => controlsTest.save.resolve());
+  await page.waitForFunction(() => document.querySelector('.context-menu-submenu-portal [role=menuitemradio]').getAttribute('aria-disabled') === 'false');
+  assert.equal(await zyncFirst.getAttribute('aria-checked'), 'true');
+  assert.deepEqual(await page.evaluate(() => controlsTest.writes.at(-1).keyboard.terminalShortcutExceptions), []);
+  const writesBeforeMenuClose = await page.evaluate(() => controlsTest.writes.length);
+  await zyncFirst.focus();
+  await page.keyboard.press('Escape');
+  assert.equal(await shortcutSummary.getAttribute('aria-expanded'), 'false');
+  assert.equal(await shortcutSummary.evaluate(node => document.activeElement === node), true);
+  assert.equal(await page.evaluate(() => controlsTest.writes.length), writesBeforeMenuClose);
+  // Flyouts stay beside the row, flip at viewport edges, and survive the hover gap.
+  await profileMenu.evaluate(node => { node.style.cssText = 'position:fixed;right:8px;top:100px;width:240px;z-index:100'; });
+  await shortcutSummary.hover();
+  await flyout.waitFor();
+  const triggerBounds = await shortcutSummary.boundingBox();
+  const flyoutBounds = await flyout.boundingBox();
+  assert.ok(flyoutBounds.x + flyoutBounds.width <= triggerBounds.x, 'right-edge menu opens to the left');
+  await flyout.hover();
+  await page.waitForTimeout(220);
+  assert.equal(await flyout.isVisible(), true, 'moving to the flyout does not close it');
+  if (process.env.ZYNC_SHORTCUT_MENU_SCREENSHOT) await page.screenshot({ path: process.env.ZYNC_SHORTCUT_MENU_SCREENSHOT });
+  await zyncFirst.focus();
+  await page.keyboard.press('ArrowLeft');
+  assert.equal(await shortcutSummary.getAttribute('aria-expanded'), 'false');
+  await profileMenu.evaluate(node => { node.style.left = '8px'; node.style.right = 'auto'; });
+  await shortcutSummary.press('ArrowRight');
+  const leftTriggerBounds = await shortcutSummary.boundingBox();
+  const rightFlyoutBounds = await flyout.boundingBox();
+  assert.ok(rightFlyoutBounds.x >= leftTriggerBounds.x + leftTriggerBounds.width, 'left-edge menu opens to the right');
+  await page.setViewportSize({ width: 375, height: 400 });
+  const narrowBounds = await flyout.boundingBox();
+  assert.ok(narrowBounds.x >= 0 && narrowBounds.x + narrowBounds.width <= 375 && narrowBounds.y >= 0 && narrowBounds.y + narrowBounds.height <= 400, 'flyout stays inside a narrow viewport');
+  await page.keyboard.press('Escape');
+  await page.setViewportSize({ width: 1280, height: 720 });
+  // Existing context menus exercise the same renderer, including nested portal ownership.
+  await page.evaluate(() => controlsTest.openMenu());
+  const tools = page.getByRole('button', { name: 'Tools', exact: true });
+  await tools.hover();
+  await page.getByRole('menu', { name: 'Tools', exact: true }).waitFor();
+  await tools.focus();
+  await page.waitForTimeout(50);
+  assert.equal(await tools.getAttribute('aria-expanded'), 'true');
+  await tools.press('Escape');
+  assert.equal(await tools.getAttribute('aria-expanded'), 'false', 'Escape on an expanded trigger closes its flyout');
+  assert.equal(await page.getByText('Test menu action', { exact: true }).isVisible(), true, 'Escape on a submenu trigger preserves the parent menu');
+  await tools.press('ArrowRight');
+  const nestedTools = page.getByRole('button', { name: 'Nested tools', exact: true });
+  await nestedTools.press('ArrowRight');
+  const nestedAction = page.getByRole('menuitem', { name: 'Nested action', exact: true });
+  await nestedAction.waitFor();
+  await nestedAction.press('Escape');
+  await nestedAction.waitFor({ state: 'detached' });
+  assert.equal(await nestedTools.evaluate(node => document.activeElement === node), true);
+  assert.equal(await tools.isVisible(), true, 'Escape closes only the innermost flyout');
+  await nestedTools.press('ArrowRight');
+  await nestedAction.click();
+  await tools.waitFor({ state: 'detached' });
+  assert.equal(await page.evaluate(() => controlsTest.menuActions), 1, 'nested action executes before its owning context menu closes');
   assert.deepEqual(errors, []);
   console.log('Terminal toolbar Find targeting, shared shortcut controls, exception persistence and rollback browser tests passed.');
 } finally {
