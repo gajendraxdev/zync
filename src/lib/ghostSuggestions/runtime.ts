@@ -9,6 +9,9 @@ interface GhostTrackerRuntimeParams {
   onAccept: (suffix: string, lineAfterAccept: string) => void;
   onHistoryCommit: (command: string) => void;
   onClearUI: () => void;
+  /** Dynamic context gates also apply after an asynchronous provider resolves. */
+  isEnabled?: () => boolean;
+  getContextVersion?: () => unknown;
 }
 
 /**
@@ -23,6 +26,8 @@ export function bindGhostTrackerRuntime({
   onAccept,
   onHistoryCommit,
   onClearUI,
+  isEnabled = () => true,
+  getContextVersion = () => 0,
 }: GhostTrackerRuntimeParams): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let requestSeq = 0;
@@ -44,6 +49,10 @@ export function bindGhostTrackerRuntime({
 
   tracker.updateOptions({
     onLineChange: (line) => {
+      if (!isEnabled()) {
+        clearState();
+        return;
+      }
       tracker.clearSuggestion();
       onSuggestion('', line);
       onClearUI();
@@ -62,15 +71,25 @@ export function bindGhostTrackerRuntime({
 
       requestSeq += 1;
       const seq = requestSeq;
+      const contextVersion = getContextVersion();
       clearTimer();
 
       timer = setTimeout(async () => {
         timer = null;
-        if (!active || seq !== requestSeq || tracker.getLineBuffer() !== line) return;
+        if (!active || seq !== requestSeq || tracker.getLineBuffer() !== line
+          || !isEnabled() || getContextVersion() !== contextVersion) return;
         if (tracker.isDesynced()) return;
 
-        const suffix = await resolveInlineSuggestion(line);
-        if (!active || seq !== requestSeq || tracker.getLineBuffer() !== line) return;
+        let suffix: string;
+        try {
+          suffix = await resolveInlineSuggestion(line);
+        } catch {
+          // Provider failure must not become an unhandled rejection or prevent
+          // subsequent typing from requesting a new suggestion.
+          return;
+        }
+        if (!active || seq !== requestSeq || tracker.getLineBuffer() !== line
+          || !isEnabled() || getContextVersion() !== contextVersion) return;
         if (tracker.isDesynced()) return;
 
         tracker.setSuggestion(suffix);

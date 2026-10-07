@@ -72,6 +72,16 @@ export class InputTracker {
     this.opts = opts;
   }
 
+  /** Discard inferred input without clearing a known secret prompt. Resume only
+   * after a shell reset key is fed while the surrounding context is safe. */
+  suspend(): void {
+    if (this.desynced && !this.lineBuffer && !this.activeSuffix) return;
+    this.lineBuffer = '';
+    this.activeSuffix = '';
+    this.desynced = true;
+    this.opts.onDismiss();
+  }
+
   private dismissAndDesync(): void {
     this.activeSuffix = '';
     this.desynced = true;
@@ -236,6 +246,10 @@ export class InputTracker {
 
   clearSuggestion(): void {
     this.activeSuffix = '';
+  }
+
+  getSuggestion(): string {
+    return this.activeSuffix;
   }
 
   getLineBuffer(): string {

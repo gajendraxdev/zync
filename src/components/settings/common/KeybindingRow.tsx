@@ -80,6 +80,8 @@ export function KeybindingRow({
             <span className="text-[var(--color-app-text)] font-medium">{label}</span>
             <button
                 type="button"
+                data-zync-shortcuts={isRecording ? 'local' : undefined}
+                data-zync-shortcut-recording={isRecording ? 'true' : undefined}
                 onClick={() => setIsRecording(true)}
                 aria-label={`${label}: ${displayText}`}
                 className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-mono border transition-all min-w-[100px] justify-center

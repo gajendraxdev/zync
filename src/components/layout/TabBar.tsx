@@ -15,6 +15,8 @@ import { ConfirmModal } from '../ui/ConfirmModal';
 import { AppAddMenu } from './appAddMenu';
 import { useShowHostAddressesInLists } from '../../features/connections/presentation/useConnectionDisplayLabels';
 import { TopbarDropdown } from '../ui/TopbarDropdown';
+import { isInsideMenu } from '../ui/MenuSubmenu';
+import { TerminalShortcutControl } from '../settings/common/TerminalShortcutControl';
 import { useWindowDrag } from '../../hooks/useWindowDrag';
 import { isEditorOverlayOpen } from '../editor/overlayState';
 import { syncIpc, SYNC_STATUS_CHANGED_EVENT, type SyncProviderStatus } from '../../vault/syncIpc';
@@ -280,7 +282,7 @@ export function TabBar() {
             if (addMenuRef.current && !addMenuRef.current.contains(event.target as Node)) {
                 setIsAddMenuOpen(false);
             }
-            if (profileMenuRef.current && !profileMenuRef.current.contains(event.target as Node)) {
+            if (profileMenuRef.current && !isInsideMenu(profileMenuRef.current, event.target)) {
                 setIsProfileMenuOpen(false);
             }
         };
@@ -586,6 +588,7 @@ export function TabBar() {
                                             <SettingsIcon size={13} className="text-app-muted" />
                                             <span>Settings</span>
                                         </button>
+                                        <TerminalShortcutControl menu />
                                         <button
                                             onClick={() => {
                                                 openVaultTab('local');

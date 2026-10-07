@@ -1,63 +1,43 @@
-import { useEffect, type RefObject } from 'react';
+import { useEffect, useRef, type RefObject } from 'react';
 import type { Terminal as XTerm } from '@xterm/xterm';
-import {
-  readTerminalClipboardText,
-  writeTerminalClipboardText,
-} from '../../lib/terminal/terminalClipboard.js';
+import { terminalCache } from '../../lib/terminal/terminalCache';
+import { registerTerminalInteraction } from '../../lib/terminal/terminalInteraction';
 
 export interface UseTerminalGlobalShortcutsOptions {
   isVisible: boolean;
+  isKeyboardOwner: boolean;
+  sessionId: string;
   termRef: RefObject<XTerm | null>;
   onOpenSearch: () => void;
 }
 
+/** Bind this mounted terminal to host actions without broadcasting clipboard data. */
 export function useTerminalGlobalShortcuts({
-  isVisible,
-  termRef,
-  onOpenSearch,
+  isVisible, isKeyboardOwner, sessionId, termRef, onOpenSearch,
 }: UseTerminalGlobalShortcutsOptions) {
+  const state = useRef({ isVisible, isKeyboardOwner, onOpenSearch });
+  state.current = { isVisible, isKeyboardOwner, onOpenSearch };
   useEffect(() => {
-    const handleGlobalCopy = async () => {
-      if (isVisible && termRef.current?.hasSelection()) {
-        const selection = termRef.current.getSelection();
-        if (selection) {
-          await writeTerminalClipboardText(selection).catch(console.error);
-        }
-      }
+    const term = termRef.current;
+    if (!term?.element) return;
+    const unregister = registerTerminalInteraction({
+      root: term.element,
+      isAvailable: () => state.current.isVisible && termRef.current === term
+        && terminalCache.get(sessionId)?.term === term && Boolean(terminalCache.get(sessionId)?.spawned),
+      epoch: () => terminalCache.get(sessionId)?.generation,
+      selection: () => term.getSelection(),
+      paste: text => term.paste(text),
+      focus: () => term.focus(),
+      find: () => state.current.onOpenSearch(),
+    });
+    // Explicit snippet UI focus request still addresses the selected visible pane.
+    const focus = () => {
+      if (state.current.isVisible && state.current.isKeyboardOwner) term.focus();
     };
-
-    const handleGlobalPaste = async () => {
-      if (!isVisible || !termRef.current) {
-        return;
-      }
-      const text = await readTerminalClipboardText();
-      if (text) {
-        termRef.current.paste(text);
-      }
-    };
-
-    const handleGlobalFind = () => {
-      if (isVisible && termRef.current) {
-        onOpenSearch();
-      }
-    };
-
-    const handleGlobalFocus = () => {
-      if (isVisible) {
-        termRef.current?.focus();
-      }
-    };
-
-    window.addEventListener('ssh-ui:term-copy', handleGlobalCopy);
-    window.addEventListener('ssh-ui:term-paste', handleGlobalPaste);
-    window.addEventListener('ssh-ui:term-find', handleGlobalFind);
-    window.addEventListener('ssh-ui:term-focus', handleGlobalFocus);
-
+    window.addEventListener('ssh-ui:term-focus', focus);
     return () => {
-      window.removeEventListener('ssh-ui:term-copy', handleGlobalCopy);
-      window.removeEventListener('ssh-ui:term-paste', handleGlobalPaste);
-      window.removeEventListener('ssh-ui:term-find', handleGlobalFind);
-      window.removeEventListener('ssh-ui:term-focus', handleGlobalFocus);
+      unregister();
+      window.removeEventListener('ssh-ui:term-focus', focus);
     };
-  }, [isVisible, termRef, onOpenSearch]);
+  }, [sessionId, termRef, isVisible]);
 }

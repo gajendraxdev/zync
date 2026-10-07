@@ -28,12 +28,15 @@ import {
   clearTerminalResizeState,
   enqueueTerminalInputTask,
   getTerminalRecentLines,
-  queueTerminalInput,
   isTerminalIdleSuspended,
   spawnTerminalFromStoreContext,
   terminalCache,
 } from '../../lib/terminal';
+import { queueTerminalInput } from '../../lib/terminal/inputPipeline';
 import type { TerminalMountContext } from './useTerminalLifecycle';
+import { canTrackTerminalShell, observeTerminalShellContext } from '../../lib/terminal/terminalShellContext';
+import { clearPromptCwdSniffer } from '../../lib/ghostSuggestions/promptCwdSniffer';
+import { clearSecretInputSniffer } from '../../lib/ghostSuggestions/secretInputDetect';
 
 function getEffectiveShellId(
   terminalKey: string,
@@ -49,6 +52,7 @@ export interface UseTerminalGhostOptions {
   spawnConnectionId: string;
   ghostScope: string;
   ghostSettings: AppSettings['ghostSuggestions'];
+  isVisible: boolean;
   isVisibleRef: RefObject<boolean>;
   isConnectedRef: RefObject<boolean>;
 }
@@ -59,6 +63,7 @@ export function useTerminalGhost({
   spawnConnectionId,
   ghostScope,
   ghostSettings,
+  isVisible,
   isVisibleRef,
   isConnectedRef,
 }: UseTerminalGhostOptions) {
@@ -103,22 +108,30 @@ export function useTerminalGhost({
     ghostSettingsRef.current = ghostSettings;
     if (!ghostSettings.inlineEnabled) {
       setGhostSuggestion('');
-      ghostTrackerRef.current?.clearSuggestion();
+      ghostTrackerRef.current?.suspend();
       lineOriginRef.current = null;
       setGhostLayout({ typedCellCount: 0, origin: null });
     }
   }, [ghostSettings]);
 
+  useEffect(() => {
+    if (!isVisible) ghostTrackerRef.current?.suspend();
+  }, [isVisible]);
+
   const acceptGhostSuffix = useCallback((suffix: string) => {
     if (!suffix) return;
     const cached = terminalCache.get(sessionId);
+    if (!cached || !cached.spawned || !isVisibleRef.current || !ghostSettingsRef.current.inlineEnabled
+      || !canTrackTerminalShell(cached.term, cached.ghostPaused)
+      || cached.ghostTracker?.isDesynced() || cached.ghostTracker?.isSecretInputMode()
+      || cached.ghostTracker?.getSuggestion() !== suffix) return;
     cached?.ghostTracker?.appendToLineBuffer(suffix);
     cached?.ghostTracker?.clearSuggestion();
     queueTerminalInput(sessionId, suffix);
     acceptGhostCommand(cached?.ghostTracker?.getLineBuffer() ?? '', ghostScope).catch(() => {});
     setGhostSuggestion('');
     syncGhostLayout(cached?.ghostTracker ?? null);
-  }, [sessionId, ghostScope, syncGhostLayout]);
+  }, [sessionId, ghostScope, syncGhostLayout, isVisibleRef]);
 
   const truncateLabel = useCallback((label: string, max = 60) => {
     if (label.length <= max) return label;
@@ -146,8 +159,23 @@ export function useTerminalGhost({
     const cachedGhostTracker = terminalCache.get(mountSessionId)?.ghostTracker;
     ghostTrackerRef.current = cachedGhostTracker ?? null;
     if (!ghostSettingsRef.current.inlineEnabled) {
-      ghostTrackerRef.current?.clearSuggestion();
+      ghostTrackerRef.current?.suspend();
     }
+
+    const mountEntry = terminalCache.get(mountSessionId);
+    if (mountEntry) mountEntry.ghostContextActive = true;
+    const safeContext = () => terminalCache.get(mountSessionId) === mountEntry
+      && canTrackTerminalShell(term, mountEntry?.ghostPaused);
+    const context = observeTerminalShellContext(term, {
+      isPaused: () => Boolean(mountEntry?.ghostPaused),
+      generation: () => mountEntry?.generation ?? 0,
+      invalidate: () => {
+        if (mountEntry) mountEntry.ghostContextEpoch = (mountEntry.ghostContextEpoch ?? 0) + 1;
+        clearPromptCwdSniffer(mountSessionId);
+        clearSecretInputSniffer(mountSessionId);
+        cachedGhostTracker?.suspend();
+      },
+    });
 
     const storeOnBind = useAppStore.getState();
     const termStateOnBind = storeOnBind.terminals[terminalKey]?.find((t) => t.id === mountSessionId);
@@ -162,6 +190,8 @@ export function useTerminalGhost({
       ? bindGhostTrackerRuntime({
         tracker: cachedGhostTracker,
         debounceMs: 30,
+        isEnabled: () => safeContext() && isVisibleRef.current && ghostSettingsRef.current.inlineEnabled,
+        getContextVersion: () => `${mountEntry?.generation}:${mountEntry?.ghostContextEpoch ?? 0}`,
         resolveInlineSuggestion: async (line) => {
           if (!ghostSettingsRef.current.inlineEnabled) return '';
           if (!isVisibleRef.current) return '';
@@ -198,7 +228,9 @@ export function useTerminalGhost({
             ghostDebug('terminal', { phase: 'suppressed', shellId: shellId ?? null });
             return '';
           }
-          const recentCommands = extractRecentCommands(
+          // Normal-screen full-screen apps may leave text in scrollback. Once
+          // context was invalidated, rank by tracked history rather than that text.
+          const recentCommands = mountEntry?.ghostContextEpoch ? [] : extractRecentCommands(
             getTerminalRecentLines(mountSessionId, 24),
           );
           return resolveInlineSuggestion({
@@ -213,7 +245,7 @@ export function useTerminalGhost({
         },
         onSuggestion: (suffix, line) => {
           syncGhostLayout(cachedGhostTracker, term);
-          if (ghostSettingsRef.current.inlineEnabled) {
+          if (ghostSettingsRef.current.inlineEnabled && isVisibleRef.current && safeContext()) {
             setGhostSuggestion(suffix);
           } else {
             setGhostSuggestion('');
@@ -226,11 +258,13 @@ export function useTerminalGhost({
           });
         },
         onAccept: (suffix, lineAfterAccept) => {
+          if (!safeContext() || !isVisibleRef.current || !ghostSettingsRef.current.inlineEnabled) return;
           queueTerminalInput(mountSessionId, suffix);
           acceptGhostCommand(lineAfterAccept, ghostScope).catch(() => {});
           syncGhostLayout(cachedGhostTracker, term);
         },
         onHistoryCommit: (cmd) => {
+          if (!safeContext() || !isVisibleRef.current) return;
           commitGhostCommand(cmd, ghostScope).catch(() => {});
           const termState = useAppStore.getState().terminals[terminalKey]?.find((t) => t.id === mountSessionId);
           const cwd = termState?.lastKnownCwd ?? termState?.initialPath;
@@ -256,8 +290,14 @@ export function useTerminalGhost({
 
     if (cachedForInput) {
       cachedForInput.onDataDisposable = term.onData((data) => {
+        context.sync();
+        const inputGeneration = mountEntry?.generation;
+        const inputContext = mountEntry?.ghostContextEpoch;
+        const shellAtInput = safeContext();
         enqueueTerminalInputTask(mountSessionId, async () => {
           const cached = terminalCache.get(mountSessionId);
+          if (cached !== mountEntry || cached?.generation !== inputGeneration) return;
+          context.sync();
 
           if (cached && !cached.spawned) {
             const isRestartKey = data === '\r' || data === '\n';
@@ -304,7 +344,7 @@ export function useTerminalGhost({
             return;
           }
 
-          if (isVisibleRef.current) {
+          if (isVisibleRef.current && shellAtInput && safeContext() && cached?.ghostContextEpoch === inputContext) {
             // Capture line origin *before* feed when the buffer is empty so we
             // pin to the prompt caret even if local echo is extremely fast.
             const tracker = cached?.ghostTracker;
@@ -324,6 +364,8 @@ export function useTerminalGhost({
             const handledByGhost = handleGhostInputEvent(data, tracker);
             syncGhostLayout(tracker, term);
             if (handledByGhost) return;
+          } else {
+            cached?.ghostTracker?.suspend();
           }
 
           queueTerminalInput(mountSessionId, data);
@@ -331,7 +373,16 @@ export function useTerminalGhost({
       });
     }
 
+    const boundInput = cachedForInput?.onDataDisposable;
     return () => {
+      context.dispose();
+      if (mountEntry && terminalCache.get(mountSessionId) === mountEntry) {
+        mountEntry.ghostContextActive = false;
+        if (mountEntry.onDataDisposable === boundInput) {
+          boundInput?.dispose();
+          mountEntry.onDataDisposable = undefined;
+        }
+      }
       termRefForLayout.current = null;
       unbindGhostTracker();
     };

@@ -918,7 +918,9 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
         } catch (error) {
             console.error('Failed to save keyboard settings:', error);
             const current = get().settings;
-            const latest = normalizeKeyboardSettings(current.keyboard);
+            // Compare the stored optimistic value: normalization copies exception
+            // arrays and would otherwise prevent rollback after a failed save.
+            const latest = current.keyboard;
             const rollbackPatch = Object.fromEntries(
                 changedKeys.filter((key) => latest[key] === nextKeyboard[key]).map((key) => [key, currentKeyboard[key]]),
             ) as Partial<AppSettings['keyboard']>;

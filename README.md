@@ -111,7 +111,7 @@ See vendor websites for current pricing and plan details.
 ### Connect
 
 - SSH with key or password auth, **jump hosts**, and connection folders
-- **SSH config import** and visual **port forwarding** — local (`-L`), remote (`-R`), and SOCKS (`-D`); paste `ssh` commands to import; per-host and global dashboard; auto-start and reconnect restore ([docs/TUNNELS.md](docs/TUNNELS.md))
+- **SSH config import** and visual **port forwarding** — local (`-L`), remote (`-R`), and SOCKS (`-D`); paste `ssh` commands to import; per-host and global dashboard; auto-start and reconnect restore ([port forwarding guide](https://zync.thesudoer.in/docs/port-forwarding))
 - Jump from **local shells** to remote sessions in the same app (see [Local terminal](#local-terminal))
 
 ### Work
@@ -234,17 +234,13 @@ Operator details: [`packaging/arch/README.md`](packaging/arch/README.md).
 
 **User guides & install help:** [zync.thesudoer.in/docs](https://zync.thesudoer.in/docs)
 
-**Repository docs** (architecture and implementation):
+**Public repository guidance:** [Security notes](docs/SECURITY.md),
+[contributing](CONTRIBUTING.md), and [release history](CHANGELOG.md).
 
-| Document | Covers |
-|----------|--------|
-| [docs/SECURITY.md](docs/SECURITY.md) | Vault, sync, Public URLs, OAuth, and operator security guidance |
-| [docs/VAULT.md](docs/VAULT.md) | Vault, credentials, Google sync |
-| [docs/TERMINAL.md](docs/TERMINAL.md) | Terminal system (IPC, renderer, lifecycle, settings) |
-| [docs/TERMINAL_GHOST.md](docs/TERMINAL_GHOST.md) | Ghost completions (inline, history, paths, suggestion engine) |
-| [docs/TUNNELS.md](docs/TUNNELS.md) | Port forwarding architecture — local/remote/SOCKS, lifecycle, reconnect, sync, design decisions |
-| [docs/SESSION_PERSISTENCE.md](docs/SESSION_PERSISTENCE.md) | Tab and terminal restore across restarts |
-| [docs/SETTINGS_SYSTEM.md](docs/SETTINGS_SYSTEM.md) | Global settings and `settings.json` |
+Internal architecture, implementation references, and planning notes live in
+the private [zync-docs repository](https://github.com/zync-sh/zync-docs).
+Maintainers with access can clone it beside this checkout; desktop references
+are under `../zync-docs/zync/docs/`. It is not required to build or run Zync.
 
 ## For developers
 
@@ -309,11 +305,16 @@ src/features/ (React UI)  →  Zustand  →  Tauri IPC  →  src-tauri/ (Rust)
 
 **Layout:** UI and feature logic live in `src/features/`; native work runs in `src-tauri/`. One-shot work uses `invoke`; streaming paths (notably terminal PTY output) use Tauri `Channel`s.
 
-**Start here:** [docs/TERMINAL.md](docs/TERMINAL.md) for terminal IPC, lifecycle, and renderer patterns; [docs/TUNNELS.md](docs/TUNNELS.md) for port forwarding architecture and reconnect behavior. Command families include `ssh_*`, `terminal_*`, `tunnel_*`, `vault_*`, `sync_*`, `ghost_*`, `ai_agent_*`, `session_*`, and `settings_*`. See the docs table above for other subsystem guides.
+Command families include `ssh_*`, `terminal_*`, `tunnel_*`, `vault_*`, `sync_*`, `ghost_*`, `ai_agent_*`, `session_*`, and `settings_*`. Maintainer implementation references are in the private documentation repository described above. Public contributors can use the source, tests, and [contributing guide](CONTRIBUTING.md) without that checkout.
 
 ## Extensions
 
-Plugins, theme packs, and editor providers ship through the built-in Marketplace. Browse the [Plugin Catalog](PLUGIN_CATALOG.md) or develop at [zync-extensions](https://github.com/zync-sh/zync-extensions).
+Discover plugins in the built-in Marketplace or on the [Extensions page](https://zync.thesudoer.in/extensions/).
+Community developers can follow the [development guide](https://zync.thesudoer.in/docs/plugin-development/),
+[API and permissions](https://zync.thesudoer.in/docs/plugin-api/),
+[publishing guide](https://zync.thesudoer.in/docs/plugin-publishing/), and
+[best practices](https://zync.thesudoer.in/docs/plugin-best-practices/).
+The current signed registry is maintained in [zync-plugin-registry](https://github.com/zync-sh/zync-plugin-registry).
 
 ## Contributing
 

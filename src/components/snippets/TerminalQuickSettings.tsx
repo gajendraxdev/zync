@@ -7,8 +7,7 @@ import {
 } from '../settings/constants/defaults';
 import { Toggle } from '../settings/common/Toggle';
 import { cn } from '../../lib/utils';
-import { normalizeTerminalFocusPolicy } from '../../features/shortcuts';
-import { formatShortcutLabel } from '../../lib/shortcuts';
+import { TerminalShortcutControl } from '../settings/common/TerminalShortcutControl';
 
 const CURSOR_STYLES = [
     { id: 'block' as const, label: 'Block' },
@@ -19,12 +18,10 @@ const CURSOR_STYLES = [
 export function TerminalQuickSettings() {
     const settings = useAppStore((s) => s.settings);
     const updateTerminalSettings = useAppStore((s) => s.updateTerminalSettings);
-    const updateKeyboardSettings = useAppStore((s) => s.updateKeyboardSettings);
     const showToast = useAppStore((s) => s.showToast);
 
     const fontSize = settings.terminal.fontSize;
     const gpu = settings.terminal.gpuAcceleration ?? DEFAULT_TERMINAL_GPU_ACCELERATION;
-    const shellFirst = normalizeTerminalFocusPolicy(settings.keyboard?.terminalFocusPolicy) === 'shell';
 
     const fail = (label: string, error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
@@ -100,16 +97,7 @@ export function TerminalQuickSettings() {
                         void updateTerminalSettings({ gpuAcceleration: v }).catch((e) => fail('GPU', e));
                     }}
                 />
-                <Toggle
-                    label="Give keys to the shell"
-                    description={`${formatShortcutLabel('Mod+T')}, ${formatShortcutLabel('Mod+W')}, ${formatShortcutLabel('Mod+F')}, and ${formatShortcutLabel('Mod+N')} stay in the shell. ${formatShortcutLabel('Mod+B')}, ${formatShortcutLabel('Mod+P')}, and ${formatShortcutLabel('Mod+I')} still open Zync.`}
-                    checked={shellFirst}
-                    onChange={(v) => {
-                        void updateKeyboardSettings({ terminalFocusPolicy: v ? 'shell' : 'app' }).catch((e) =>
-                            fail('shortcut policy', e),
-                        );
-                    }}
-                />
+                <TerminalShortcutControl />
             </div>
         </div>
     );

@@ -14,6 +14,8 @@ import { useAppStore } from '../../store/useAppStore';
 import { buildXtermOptions } from '../../lib/terminal/xtermOptions';
 import { getTerminalDocument } from '../../lib/terminal/terminalDocument';
 import { resolveXtermTheme } from '../terminal/terminalTheme';
+import { registerTerminalInteraction } from '../../lib/terminal/terminalInteraction';
+import { routeTerminalKey } from '../../lib/terminal/terminalKeyRouting';
 /** Stable host sibling: only the plugin's rectangle is shared, never xterm/PTY. */
 export function PluginTerminalLayer({ iframe, runtime, pane, plugin, pluginName, serverName, visible }: {
     iframe: RefObject<HTMLIFrameElement | null>;
@@ -35,6 +37,7 @@ export function PluginTerminalLayer({ iframe, runtime, pane, plugin, pluginName,
     const [suppressed, setSuppressed] = useState(false);
     const controller = useRef<NativeTerminalPane | null>(null);
     const terminal = useRef<Terminal | null>(null);
+    const unregisterInteraction = useRef<(() => void) | null>(null);
     const fit = useRef<FitAddon | null>(null);
     const transport = useRef<NativeTerminalTransport | null>(null);
     const host = useRef<HTMLDivElement>(null);
@@ -142,6 +145,8 @@ export function PluginTerminalLayer({ iframe, runtime, pane, plugin, pluginName,
             unregister();
             target.dispose();
             transport.current?.detach();
+            unregisterInteraction.current?.();
+            unregisterInteraction.current = null;
             terminal.current?.dispose();
             terminal.current = null;
             resize.disconnect();
@@ -209,7 +214,12 @@ export function PluginTerminalLayer({ iframe, runtime, pane, plugin, pluginName,
             const [{ Terminal }, { FitAddon }] = await Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit')]);
             if (!alive.current || offerRef.current !== proposal || !visibleRef.current || document.hidden || !host.current)
                 return;
+            unregisterInteraction.current?.();
+            unregisterInteraction.current = null;
             terminal.current?.dispose();
+            // A new surface must not retain the previous proposal's transport.
+            transport.current?.detach();
+            transport.current = null;
             const instance = new Terminal({
                 ...buildXtermOptions({
                     settings: useAppStore.getState().settings.terminal,
@@ -226,6 +236,17 @@ export function PluginTerminalLayer({ iframe, runtime, pane, plugin, pluginName,
             terminal.current = instance;
             fit.current = fitter;
             instance.parser.registerOscHandler(52, () => true); // Never service remote clipboard escape sequences.
+            instance.attachCustomKeyEventHandler(event => routeTerminalKey(event, bytes => {
+                if (activeRef.current) transport.current?.write(bytes);
+            }));
+            if (instance.element) unregisterInteraction.current = registerTerminalInteraction({
+                root: instance.element,
+                isAvailable: () => activeRef.current && terminal.current === instance && Boolean(transport.current?.active),
+                epoch: () => transport.current,
+                selection: () => instance.getSelection(),
+                paste: text => instance.paste(text),
+                focus: () => instance.focus(),
+            });
             instance.onData(text => { if (activeRef.current)
                 transport.current?.write(text); });
             setStatus('Opening');
@@ -267,6 +288,8 @@ export function PluginTerminalLayer({ iframe, runtime, pane, plugin, pluginName,
             void open();
     });
     const close = () => {
+        unregisterInteraction.current?.();
+        unregisterInteraction.current = null;
         transport.current?.detach();
         transport.current = null;
         terminal.current?.dispose();

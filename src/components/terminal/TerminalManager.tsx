@@ -8,7 +8,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { Terminal as TerminalIcon, Plus, X, Zap, Loader2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { once, type UnlistenFn } from '@tauri-apps/api/event';
-import { queueTerminalInput } from '../../lib/terminal';
+import { queueTerminalInput } from '../../lib/terminal/inputPipeline';
 import {
     findLayoutOwner,
     isFeatureContent,

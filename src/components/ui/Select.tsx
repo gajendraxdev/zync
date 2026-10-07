@@ -13,6 +13,10 @@ export interface SelectOption {
 }
 
 interface SelectProps {
+    id?: string;
+    ariaLabel?: string;
+    ariaDescribedBy?: string;
+    title?: string;
     value?: string;
     onChange: (value: string) => void;
     options: SelectOption[];
@@ -96,6 +100,10 @@ const calculateDropdownCoords = (
 };
 
 export function Select({
+    id,
+    ariaLabel,
+    ariaDescribedBy,
+    title,
     value,
     onChange,
     options,
@@ -111,8 +119,11 @@ export function Select({
 }: SelectProps) {
     const internalId = useId();
     const dropdownId = `select-dropdown-${internalId}`;
+    const triggerId = id ?? `select-trigger-${internalId}`;
     const [isOpen, setIsOpen] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
+    const triggerRef = useRef<HTMLButtonElement>(null);
+    const commandRef = useRef<HTMLDivElement>(null);
     const [coords, setCoords] = useState<DropdownCoords>({ top: 0, left: 0, width: 0, maxHeight: MIN_LIST_HEIGHT, openUpward: false });
 
     const selectedOption = options.find(opt => opt.value === value);
@@ -123,13 +134,19 @@ export function Select({
         setCoords(calculateDropdownCoords(containerRef.current, true));
     }, [isOpen, portal]);
 
+    useLayoutEffect(() => {
+        if (isOpen && !showSearch) commandRef.current?.focus();
+    }, [isOpen, showSearch]);
+
     useEffect(() => {
         const handleEscClose = (event: KeyboardEvent) => {
             if (!isOpen) return;
             if (event.key !== 'Escape') return;
+            if (event.isComposing) return;
             event.preventDefault();
             event.stopPropagation();
             setIsOpen(false);
+            triggerRef.current?.focus();
         };
 
         const handleClickOutside = (event: MouseEvent) => {
@@ -184,6 +201,7 @@ export function Select({
         <motion.div
             id={dropdownId}
             data-zync-select-open="true"
+            data-zync-shortcuts="local"
             initial={{ opacity: 0, y: coords.openUpward ? -2 : 2, scale: 0.995 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: coords.openUpward ? -2 : 2, scale: 0.995 }}
@@ -202,7 +220,7 @@ export function Select({
                 "bg-app-panel/95 border border-app-border shadow-2xl rounded-xl overflow-hidden backdrop-blur-3xl ring-1 ring-black/5 dark:ring-white/10"
             )}
         >
-            <Command className="flex flex-col w-full bg-transparent">
+            <Command ref={commandRef} defaultValue={selectedOption ? (selectedOption.label + " " + (selectedOption.description || "")).trim() : undefined} loop className="flex flex-col w-full bg-transparent">
                 {showSearch && (
                     <div className="flex items-center border-b border-white/[0.05] px-3 bg-white/[0.02]" cmdk-input-wrapper="">
                         <Search className="w-3.5 h-3.5 text-app-muted/30" />
@@ -226,8 +244,9 @@ export function Select({
                             key={option.value}
                             value={option.label + " " + (option.description || "")}
                             onSelect={() => {
-                                onChange(option.value);
                                 setIsOpen(false);
+                                triggerRef.current?.focus();
+                                onChange(option.value);
                             }}
                             className={cn(
                                 "flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-xs transition-all cursor-pointer select-none group/item mb-0.5 last:mb-0",
@@ -278,13 +297,28 @@ export function Select({
     return (
         <div className={cn("relative w-full", className)} ref={containerRef}>
             {label && (
-                <label className="text-[10px] font-bold text-app-muted uppercase tracking-wider block mb-2 px-1">
+                <label htmlFor={triggerId} className="text-[10px] font-bold text-app-muted uppercase tracking-wider block mb-2 px-1">
                     {label}
                 </label>
             )}
             <button
+                ref={triggerRef}
+                id={triggerId}
                 type="button"
+                role={ariaLabel ? 'combobox' : undefined}
+                aria-label={ariaLabel}
+                aria-describedby={ariaDescribedBy}
+                aria-expanded={isOpen}
+                aria-controls={isOpen ? dropdownId : undefined}
+                aria-haspopup="listbox"
+                title={title}
                 onClick={() => !disabled && setIsOpen(!isOpen)}
+                onKeyDown={event => {
+                    if (!disabled && !event.nativeEvent.isComposing && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+                        event.preventDefault();
+                        setIsOpen(true);
+                    }
+                }}
                 className={cn(
                     "w-full flex items-center justify-between px-3 py-2 rounded-xl border text-[13px] transition-all duration-300 outline-none group",
                     "bg-app-surface text-app-text",

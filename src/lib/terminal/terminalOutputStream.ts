@@ -8,6 +8,7 @@ import { touchTerminalActivity } from './terminalActivity.js';
 import { silenceTerminalOutputChannel } from './terminalReloadTeardown.js';
 import { recordChannelFrame, recordTermWrite } from './terminalIoDebug.js';
 import { selectSnifferBytes, SNIFF_FULL_MAX_BYTES } from './terminalSnifferBytes.js';
+import { canTrackTerminalShell } from './terminalShellContext.js';
 import {
   decodeTerminalOutputChannelFrame,
   GENERATION_HEADER_BYTES,
@@ -84,24 +85,30 @@ export function attachTerminalOutputChannel(termId: string, term: XTerm): Channe
 
     touchTerminalActivity(termId);
     recordChannelFrame(termId, data.byteLength);
-    if (entry.connectionId) {
-      const connectionId = entry.connectionId;
-      const large = data.length > SNIFF_FULL_MAX_BYTES;
-      const sniff = selectSnifferBytes(data);
-      feedSecretInputSniffer(termId, sniff, () => {
-        const live = terminalCache.get(termId);
-        live?.ghostTracker?.enterSecretInputMode();
-      }, { resetDecoder: large, resetBuffer: large });
-      if (outputMayContainPrompt(sniff)) {
-        feedPromptCwdSniffer(termId, sniff, (path) => {
-          entry.ghostTracker?.exitSecretInputMode();
-          useAppStore.getState().setTerminalCwd(connectionId, termId, path);
-        }, { resetDecoder: large, resetBuffer: large });
-      }
-    }
+    const contextEpoch = entry.ghostContextEpoch;
+    const startedInShell = canTrackTerminalShell(term, entry.ghostPaused);
     const writeStarted = performance.now();
     term.write(data, () => {
       recordTermWrite(termId, performance.now() - writeStarted);
+      // xterm must parse mode transitions before output can influence shell
+      // history/CWD. A round trip through an alternate buffer is unsafe too.
+      if (terminalCache.get(termId) !== entry || entry.generation !== generation || !entry.ghostContextActive
+        || !startedInShell || !canTrackTerminalShell(term, entry.ghostPaused)
+        || entry.ghostContextEpoch !== contextEpoch) return;
+      if (entry.connectionId) {
+        const connectionId = entry.connectionId;
+        const large = data.length > SNIFF_FULL_MAX_BYTES;
+        const sniff = selectSnifferBytes(data);
+        feedSecretInputSniffer(termId, sniff, () => {
+          entry.ghostTracker?.enterSecretInputMode();
+        }, { resetDecoder: large, resetBuffer: large });
+        if (outputMayContainPrompt(sniff)) {
+          feedPromptCwdSniffer(termId, sniff, (path) => {
+            entry.ghostTracker?.exitSecretInputMode();
+            useAppStore.getState().setTerminalCwd(connectionId, termId, path);
+          }, { resetDecoder: large, resetBuffer: large });
+        }
+      }
     });
   });
 

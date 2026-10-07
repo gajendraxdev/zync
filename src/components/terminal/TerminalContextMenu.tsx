@@ -7,9 +7,9 @@ import type { AppSettings } from '../../store/settingsSlice';
 import { useAppStore } from '../../store/useAppStore';
 import { terminalCache } from '../../lib/terminal';
 import {
-  readTerminalClipboardText,
   writeTerminalClipboardText,
 } from '../../lib/terminal/terminalClipboard.js';
+import { pasteIntoTerminal, terminalInteractionForElement } from '../../lib/terminal/terminalInteraction';
 
 export interface TerminalContextMenuProps {
   position: { x: number; y: number };
@@ -52,6 +52,16 @@ export const TerminalContextMenu = memo(function TerminalContextMenu({
       y={position.y}
       onClose={onClose}
       items={[
+        {
+          label: terminalCache.get(sessionId)?.ghostPaused ? 'Resume Zync suggestions' : 'Pause Zync suggestions',
+          action: () => {
+            const cached = terminalCache.get(sessionId);
+            if (!cached) return;
+            cached.ghostPaused = !cached.ghostPaused;
+            cached.ghostContextEpoch = (cached.ghostContextEpoch ?? 0) + 1;
+            cached.ghostTracker?.suspend();
+          },
+        },
         ...ghostItems,
         {
           label: 'Copy',
@@ -67,11 +77,11 @@ export const TerminalContextMenu = memo(function TerminalContextMenu({
         {
           label: 'Paste',
           icon: <ClipboardIcon className="w-4 h-4" />,
-          action: async () => {
-            const text = await readTerminalClipboardText();
-            if (text) {
-              termRef.current?.paste(text);
-            }
+          action: () => {
+            const target = terminalInteractionForElement(termRef.current?.element ?? null);
+            if (!target) return;
+            target.focus();
+            void pasteIntoTerminal(target).catch(() => console.warn('Terminal paste failed'));
           },
         },
         {

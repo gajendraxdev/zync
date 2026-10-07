@@ -33,6 +33,12 @@ export interface TerminalCache {
   /** Owning workspace connection — used to close the tab on natural shell exit. */
   connectionId?: string;
   ghostTracker?: InputTracker;
+  /** User pause lasts for this cached terminal, never changes remote configuration. */
+  ghostPaused?: boolean;
+  /** Invalidates suggestion/output inference across terminal mode transitions. */
+  ghostContextEpoch?: number;
+  /** False while no mounted input/context observer owns this cache entry. */
+  ghostContextActive?: boolean;
   onDataDisposable?: { dispose: () => void };
   ligaturesAddon?: { dispose: () => void };
   ligaturesEnabled: boolean;

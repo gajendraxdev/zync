@@ -1,19 +1,16 @@
-# Zync Plugin Catalog
+# Zync plugin resources
 
-Official catalog of community and Zync-supported plugins available in the Marketplace.
+The former static catalog is no longer maintained. This file remains as a
+navigation pointer for existing links.
 
-For installation instructions and developer documentation, see the [zync-extensions](https://github.com/zync-sh/zync-extensions) repository. The target runtime, permission, publisher, and marketplace security architecture is documented in [docs/PLUGINS.md](./docs/PLUGINS.md).
+- **Discover and install:** use Settings > Plugins > Marketplace in Zync.
+- **Website:** [Extensions](https://zync.thesudoer.in/extensions/).
+- **Develop:** [Build your first plugin](https://zync.thesudoer.in/docs/plugin-development/).
+- **API:** [Permissions and supported operations](https://zync.thesudoer.in/docs/plugin-api/).
+- **Publish:** [Signing and registry submission](https://zync.thesudoer.in/docs/plugin-publishing/).
+- **Quality:** [Plugin best practices](https://zync.thesudoer.in/docs/plugin-best-practices/).
+- **Registry:** [zync-plugin-registry](https://github.com/zync-sh/zync-plugin-registry).
+- **SDK and UI:** [plugin-sdk](https://github.com/zync-sh/plugin-sdk) and
+  [plugin-ui](https://github.com/zync-sh/plugin-ui).
 
----
-
-## Available Plugins
-
-| Plugin | ID | Version | Type | Description |
-|--------|-----|---------|------|-------------|
-| [SSH Quick Commands](https://github.com/zync-sh/zync-extensions/tree/main/plugins/ssh-quick-commands) | `com.zync.plugin.ssh-quick-commands` | 1.0.0 | plugin | Adds SSH utility commands to the command palette — ping, uptime, disk usage, memory, and more. |
-| [Connection Stats](https://github.com/zync-sh/zync-extensions/tree/main/plugins/connection-stats) | `com.zync.plugin.connection-stats` | 1.0.0 | plugin | Displays live CPU, memory, and disk stats for the active SSH connection in the status bar. |
-| [PM2 Monitor](https://github.com/zync-sh/zync-extensions/tree/main/plugins/pm2-monitor) | `com.zync.plugin.pm2-monitor` | 1.1.0 | plugin | PM2 process manager panel. View status, CPU/memory usage, restart, stop, and tail logs from a rich UI panel. |
-
----
-
-This catalog is synchronized with `marketplace.json` in [zync-extensions](https://github.com/zync-sh/zync-extensions).
+New community packages use Manifest v2 and the signed registry workflow.

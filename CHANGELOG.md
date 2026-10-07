@@ -4,6 +4,71 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.34.1] - 2026-10-05
+
+### Changed
+
+- **Global keyboard shortcut control:** Move the Terminal first / Zync first
+  selector from the sidebar footer to a flyout below Settings in the profile
+  menu. The choice applies to all terminals; detailed exceptions remain in
+  Settings → Shortcuts. ([025d573])
+
+### Fixed
+
+- **Submenu dismissal:** Keep the parent context menu open when Escape closes
+  an expanded submenu, including when its trigger has focus. Share flyout
+  positioning and keyboard navigation across context and profile menus.
+  ([025d573])
+
+## [2.34.0] - 2026-10-05
+
+### Added
+
+- **Terminal shortcut control:** Share the same shortcut priority control across
+  the sidebar, terminal quick settings and Settings. Keep command palette
+  (Ctrl/Cmd+Shift+P) and Snippets (Ctrl+Shift+S) available in terminal-first mode;
+  select or disable app exceptions in Settings → Shortcuts. Existing app-first
+  choices are preserved. ([133fcff])
+- **Clear shortcut modes:** Choose **Terminal first** (recommended) or **Zync first**
+  from a themed, keyboard-accessible dropdown that avoids panel clipping, with
+  app exceptions under **Customize terminal-first shortcuts**. ([133fcff])
+- **Pause suggestions:** Temporarily pause Zync suggestions for an individual
+  terminal from its context menu. ([077ede6])
+- **Terminal Find button:** Add a small search icon beside the split controls to
+  search the selected shell in either shortcut mode, without intercepting Ctrl+F.
+  ([133fcff])
+- **tmux regression coverage:** Add an isolated real-tmux browser smoke test for
+  pane switching, interrupts, shortcut routing, resize, mouse mode, and
+  detach/reattach. ([4cacff1])
+
+### Changed
+
+- **Terminal first by default:** Give shortcuts to the focused terminal unless
+  they are reserved app exceptions or host clipboard utilities. Existing explicit
+  **Zync first** choices remain unchanged; switch modes in the terminal controls
+  or Settings → Shortcuts. ([077ede6], [133fcff])
+
+### Fixed
+
+- **Terminal-first input:** Let tmux prefixes and other terminal keys reach the
+  focused terminal without sidebar, palette, split or tab shortcuts intercepting
+  them unless explicitly reserved. Copy/paste remain explicit host utilities;
+  remove duplicate palette routing and outdated quick-settings descriptions.
+  ([077ede6], [133fcff])
+- **Focused clipboard actions:** Target the actual workspace or host-owned plugin
+  terminal, and cancel delayed pastes after focus, visibility or session changes.
+  ([077ede6])
+- **Terminal input ownership:** Stop an open plain-text editor from capturing a
+  neighboring terminal's keys, and prevent context-menu Escape from also reaching
+  the terminal. Resolve circular terminal input-pipeline bundle imports. ([077ede6])
+- **Full-screen suggestion safety:** Suppress ghost suggestions and shell history/CWD
+  inference in alternate-screen and mouse-reporting contexts; reject stale results
+  across context changes and reconnects. ([077ede6])
+- **Explicit working-directory tracking:** Accept OSC 7 directory reports in
+  normal-shell contexts even before suggestion tracking initializes or while
+  suggestions are paused. Keep alternate-screen and mouse-reporting safeguards.
+  ([3efbf72])
+
 ## [2.33.12] - 2026-10-03
 
 ### Added
@@ -1735,7 +1800,9 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [840afc2]: https://github.com/zync-sh/zync/commit/840afc2
 [193f568]: https://github.com/zync-sh/zync/commit/193f568
 [4e3c5ff]: https://github.com/zync-sh/zync/commit/4e3c5ff
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.33.12...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.34.1...HEAD
+[2.34.1]: https://github.com/zync-sh/zync/compare/v2.34.0...v2.34.1
+[2.34.0]: https://github.com/zync-sh/zync/compare/v2.33.12...v2.34.0
 [2.33.12]: https://github.com/zync-sh/zync/compare/v2.33.11...v2.33.12
 [2.33.11]: https://github.com/zync-sh/zync/compare/v2.33.10...v2.33.11
 [2.33.10]: https://github.com/zync-sh/zync/compare/v2.33.9...v2.33.10
@@ -1951,3 +2018,8 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [815f317]: https://github.com/zync-sh/plugin-ui/commit/815f317
 [ac501c3]: https://github.com/zync-sh/zync/commit/ac501c3
 [35cd831]: https://github.com/zync-sh/zync-analytics/commit/35cd831
+[077ede6]: https://github.com/zync-sh/zync/commit/077ede6
+[133fcff]: https://github.com/zync-sh/zync/commit/133fcff
+[4cacff1]: https://github.com/zync-sh/zync/commit/4cacff1
+[3efbf72]: https://github.com/zync-sh/zync/commit/3efbf72
+[025d573]: https://github.com/zync-sh/zync/commit/025d573

@@ -6,6 +6,7 @@ export function ShortcutManager() {
         const handleKeyDown = (event: KeyboardEvent) => {
             if (dispatchAppShortcut(event)) {
                 event.preventDefault();
+                event.stopImmediatePropagation();
             }
         };
         window.addEventListener('keydown', handleKeyDown, { capture: true });
