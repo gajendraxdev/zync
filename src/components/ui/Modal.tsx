@@ -15,6 +15,19 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(',');
 
+/** Share visible, enabled Tab candidates between initial focus and focus wrapping.
+ * Client rects exclude hidden ancestors without excluding fixed-position controls.
+ * Do not filter opacity: the dialog itself fades in while acquiring focus.
+ */
+function getFocusableControls(dialog: HTMLElement): HTMLElement[] {
+  return Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(element => {
+    if (element.tabIndex < 0 || element.matches(':disabled, input[type="hidden"]')
+      || element.closest('[inert]') || element.getClientRects().length === 0) return false;
+    const visibility = getComputedStyle(element).visibility;
+    return visibility !== 'hidden' && visibility !== 'collapse';
+  });
+}
+
 const DRAG_BLOCK_SELECTOR = 'button, a, input, textarea, select, [role="button"], [data-no-modal-drag="true"]';
 
 interface ModalProps {
@@ -139,8 +152,12 @@ export function Modal({
     if (!isOpen || !dialogElement) return;
     const previouslyFocused = openerRef.current;
     const frame = window.requestAnimationFrame(() => {
-      const firstFocusable = dialogElement.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
-      (firstFocusable ?? dialogElement).focus();
+      for (const control of getFocusableControls(dialogElement)) {
+        control.focus();
+        // Some rendered candidates still reject focus (e.g. closed content).
+        if (dialogElement.ownerDocument.activeElement === control) return;
+      }
+      dialogElement.focus();
     });
 
     return () => {
@@ -156,8 +173,7 @@ export function Modal({
     const dialog = dialogElement;
     if (!dialog) return;
 
-    const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
-      .filter((element) => element.offsetParent !== null);
+    const focusable = getFocusableControls(dialog);
 
     if (focusable.length === 0) {
       event.preventDefault();
