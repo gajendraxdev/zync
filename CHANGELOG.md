@@ -31,6 +31,9 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Fixed
 
+- **Dialog focus restoration:** Capture the opener before auto-focused portal
+  content mounts, so dismissal returns focus to the correct control. Add an
+  auto-focus regression fixture to the overlay gallery. ([2ac5078])
 - **Dialog initial focus:** Wait for portal content to mount before moving keyboard
   focus into a dialog, and restore its opener on dismissal. ([c23b6fe])
 - **Accessible input errors:** Associate validation messages with their inputs
@@ -2062,3 +2065,4 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [829aa77]: https://github.com/zync-sh/zync/commit/829aa77
 [5e525a1]: https://github.com/zync-sh/zync/commit/5e525a1
 [fe2da58]: https://github.com/zync-sh/zync/commit/fe2da58
+[2ac5078]: https://github.com/zync-sh/zync/commit/2ac5078
