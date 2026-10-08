@@ -3,7 +3,7 @@ import { Button } from './Button.js';
 import { cn } from '../../lib/utils.js';
 
 export interface IconButtonProps extends Omit<ComponentPropsWithoutRef<typeof Button>, 'children' | 'size' | 'aria-label'> {
-  /** Required accessible action name; also used as the native tooltip by default. */
+  /** Required accessible action name. Supply title separately for supplementary text. */
   label: string;
   icon: ReactNode;
   size?: 'sm' | 'md';
@@ -23,7 +23,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(({
     variant={variant}
     size="icon"
     aria-label={label}
-    title={title ?? label}
+    title={title}
     isLoading={isLoading}
     className={cn(
       'shrink-0 [&>svg]:mr-0',
