@@ -40,6 +40,8 @@ const tests = [
   'tests/uiControls.test.mjs',
   'tests/uiSurfaces.test.mjs',
   'tests/uiLayoutPrimitives.test.mjs',
+  'tests/uiSwitch.test.mjs',
+  'tests/settingsNavigation.test.mjs',
   'tests/pluginPaneClose.test.mjs',
   'tests/paneSurfaces.test.mjs',
   'tests/pluginFallbacks.test.mjs',

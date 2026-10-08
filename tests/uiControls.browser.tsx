@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type CSSProperties } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Plus, Copy, X, RefreshCw } from 'lucide-react';
 import { Button } from '../src/components/ui/Button';
@@ -6,6 +6,10 @@ import { Input } from '../src/components/ui/Input';
 import { IconButton } from '../src/components/ui/IconButton';
 import { PanelHeader } from '../src/components/ui/PanelHeader';
 import { Toolbar } from '../src/components/ui/Toolbar';
+import { Switch } from '../src/components/ui/Switch';
+import { Toggle } from '../src/components/settings/common/Toggle';
+import { SettingsGroup } from '../src/components/settings/common/SettingsGroup';
+import { SettingsNavigation, settingsPanelId, settingsTabId, type SettingsSection } from '../src/components/settings/SettingsNavigation';
 import '../src/index.css';
 import './uiControls.browser.css';
 
@@ -17,10 +21,25 @@ function ControlExamples({ theme }: { theme: 'dark' | 'light' }) {
   const [actions, setActions] = useState(0);
   const [parentActions, setParentActions] = useState(0);
   const actionRef = useRef<HTMLButtonElement>(null);
+  const [enabled, setEnabled] = useState(false);
+  const [switchChanges, setSwitchChanges] = useState(0);
+  const changeSwitch = (value: boolean) => { setEnabled(value); setSwitchChanges(count => count + 1); };
   const inputRef = useRef<HTMLInputElement>(null);
+  const [section, setSection] = useState<SettingsSection>('general');
+  const [jsonOpens, setJsonOpens] = useState(0);
   return <section className="control-gallery-panel" data-gallery-theme={theme} aria-label={`${theme} controls`}>
     <h2>{theme === 'dark' ? 'Dark' : 'Light'} theme</h2>
     <p>Theme fixtures use the existing app color contract.</p>
+    <div className="flex border border-app-border" data-settings-navigation>
+      <SettingsNavigation idPrefix={`${theme}-settings`} activeTab={section} onTabChange={setSection}
+        onOpenJson={() => setJsonOpens(count => count + 1)} aboutBadge aboutBadgeLabel="Fixture update available" />
+      <div role="tabpanel" id={settingsPanelId(`${theme}-settings`)} aria-labelledby={settingsTabId(`${theme}-settings`, section)} className="min-w-0 p-4">
+        <p>Selected section: {section}</p>
+        <Input label={`${theme} section input`} placeholder="Arrow keys here do not change sections" />
+        <Button type="button">Panel action</Button>
+        <output>JSON opens: {jsonOpens}</output>
+      </div>
+    </div>
     <div className="control-gallery-row">
       <Button type="button" data-primary>Primary</Button>
       <Button type="button" variant="secondary">Secondary</Button>
@@ -53,6 +72,39 @@ function ControlExamples({ theme }: { theme: 'dark' | 'light' }) {
         <Button type="submit" data-submit>Submit fixture</Button>
       </div>
       <output aria-live="polite">Submissions: {submissions}</output>
+      <div className="control-gallery-row">
+        <Switch label={`${theme} compact preview`} checked={enabled} onCheckedChange={changeSwitch} data-switch />
+        <Switch label={`${theme} disabled off`} checked={false} onCheckedChange={changeSwitch} disabled data-disabled-switch />
+        <Switch label={`${theme} disabled on`} checked onCheckedChange={changeSwitch} disabled />
+      </div>
+      <Toggle label={`${theme} labeled preview`} description="This entire row toggles the same fixture value. No real setting is changed."
+        checked={enabled} onChange={changeSwitch} />
+      <output aria-live="polite">Switch changes: {switchChanges}; enabled: {String(enabled)}</output>
+      {[240, 480].map(width => <div key={width} data-settings-layout className="max-w-full space-y-4" style={{ width }}>
+        <SettingsGroup>
+          <Toggle label="Boxed setting" description="A long description wraps without pushing the switch out of its column."
+            checked={enabled} onChange={changeSwitch} />
+          <div className="px-4 pb-3 text-xs text-app-muted">Additional setting details</div>
+        </SettingsGroup>
+        <SettingsGroup plain>
+          <Toggle label="Plain setting" description="Same right gutter." checked={!enabled} onChange={value => changeSwitch(!value)} />
+          <SettingsGroup>
+            <div className="px-4 pt-3 text-xs text-app-muted">Nested provider group</div>
+            <Toggle label="Nested setting" description="Disabled, but not a different size." checked={enabled} onChange={changeSwitch} disabled />
+          </SettingsGroup>
+        </SettingsGroup>
+      </div>)}
+      <div className="control-gallery-row" aria-label={`${theme} switch geometry fixtures`}>
+        {[0.875, 1, 1.25].map(scale => <div key={scale} className="flex items-center gap-2" style={{
+          '--zync-switch-width': `${44 * scale}px`,
+          '--zync-switch-height': `${24 * scale}px`,
+          '--zync-switch-inset': `${2 * scale}px`,
+        } as CSSProperties}>
+          <span>{scale * 100}%</span>
+          {[false, true].map(checked => <Switch key={String(checked)} label={`${theme} ${scale} ${checked ? 'on' : 'off'}`}
+            checked={checked} onCheckedChange={() => {}} disabled data-switch-geometry />)}
+        </div>)}
+      </div>
     </form>
     <div data-layout-example className="mt-6 w-full max-w-[320px] border border-app-border" onClick={() => setParentActions(count => count + 1)}>
       <PanelHeader title="A long panel title that must not cover the actions" titleId={`${theme}-panel-title`} headingLevel={3}
@@ -79,6 +131,17 @@ function runChecks(): string[] {
   };
   for (const theme of ['dark', 'light']) {
     const panel = document.querySelector<HTMLElement>(`[data-gallery-theme="${theme}"]`)!;
+    const navigation = panel.querySelector<HTMLElement>('[data-settings-navigation]')!;
+    const list = navigation.querySelector<HTMLElement>('[role="tablist"]')!;
+    const tabs = [...list.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    const settingsPanel = navigation.querySelector<HTMLElement>('[role="tabpanel"]')!;
+    const jsonAction = [...navigation.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'settings.json')!;
+    check(tabs.length === 10 && list.getAttribute('aria-orientation') === 'vertical', `${theme}: vertical settings sections`);
+    check(tabs.filter(tab => tab.tabIndex === 0).length === 1, `${theme}: single section Tab stop`);
+    check(!list.contains(jsonAction) && !jsonAction.hasAttribute('role') && jsonAction.tabIndex === 0, `${theme}: JSON is a separate action`);
+    check(tabs.every(tab => tab.getAttribute('aria-controls') === settingsPanel.id)
+      && settingsPanel.getAttribute('aria-labelledby') === tabs.find(tab => tab.getAttribute('aria-selected') === 'true')?.id,
+      `${theme}: selected section labels the settings panel`);
     const medium = panel.querySelector<HTMLButtonElement>('[data-medium]')!;
     const input = panel.querySelector<HTMLInputElement>('[data-standard]')!;
     const invalid = panel.querySelector<HTMLInputElement>('[data-invalid]')!;
@@ -95,6 +158,34 @@ function runChecks(): string[] {
     check(action.type === 'button', `${theme}: icon action cannot submit implicitly`);
     check(loadingIcon.disabled && loadingIcon.getAttribute('aria-busy') === 'true', `${theme}: loading icon blocks activation`);
     check(layout.scrollWidth <= layout.clientWidth, `${theme}: narrow header and actions fit`);
+    const switchControl = panel.querySelector<HTMLButtonElement>('[data-switch]')!;
+    const disabledSwitch = panel.querySelector<HTMLButtonElement>('[data-disabled-switch]')!;
+    const track = switchControl.querySelector<HTMLElement>('[aria-hidden="true"]')!;
+    check(switchControl.type === 'button' && switchControl.getAttribute('role') === 'switch', `${theme}: switch semantics and form safety`);
+    check(disabledSwitch.disabled, `${theme}: native disabled switch`);
+    check(getComputedStyle(track).width === '44px' && getComputedStyle(track).height === '24px', `${theme}: consistent switch geometry`);
+    for (const fixture of panel.querySelectorAll<HTMLElement>('[data-settings-layout]')) {
+      const bounds = fixture.getBoundingClientRect();
+      const tracks = [...fixture.querySelectorAll<HTMLElement>('[role="switch"] > [aria-hidden="true"]')];
+      check(tracks.length === 3, `${theme}: grouped switch fixtures present at ${bounds.width}px`);
+      check(tracks.every(item => Math.abs(bounds.right - item.getBoundingClientRect().right - 16) < 0.2),
+        `${theme}: boxed, plain and nested switch columns align at ${bounds.width}px`);
+      check(tracks.every(item => Math.abs(item.getBoundingClientRect().width - 44) < 0.2 && Math.abs(item.getBoundingClientRect().height - 24) < 0.2),
+        `${theme}: grouped switch sizes match at ${bounds.width}px`);
+      check(fixture.scrollWidth <= fixture.clientWidth, `${theme}: wrapped setting labels fit at ${bounds.width}px`);
+    }
+    for (const fixture of panel.querySelectorAll<HTMLButtonElement>('[data-switch-geometry]')) {
+      const fixtureTrack = fixture.querySelector<HTMLElement>('[aria-hidden="true"]')!;
+      const thumb = fixtureTrack.firstElementChild as HTMLElement;
+      const outer = fixtureTrack.getBoundingClientRect();
+      const inner = thumb.getBoundingClientRect();
+      const inset = parseFloat(getComputedStyle(thumb).top);
+      const name = fixture.getAttribute('aria-label');
+      check(inner.width > 0 && Math.abs(inner.width - inner.height) < 0.2, `${name}: circular thumb`);
+      check(Math.abs(inner.top - outer.top - inset) < 0.2 && Math.abs(outer.bottom - inner.bottom - inset) < 0.2, `${name}: vertically centered and contained`);
+      const endGap = fixture.getAttribute('aria-checked') === 'true' ? outer.right - inner.right : inner.left - outer.left;
+      check(Math.abs(endGap - inset) < 0.2, `${name}: equal end inset`);
+    }
     check(loading.disabled && loading.getAttribute('aria-busy') === 'true', `${theme}: loading semantics`);
     let clicks = 0;
     const onClick = () => { clicks++; };
