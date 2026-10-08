@@ -1,8 +1,11 @@
 import { useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Plus } from 'lucide-react';
+import { Plus, Copy, X, RefreshCw } from 'lucide-react';
 import { Button } from '../src/components/ui/Button';
 import { Input } from '../src/components/ui/Input';
+import { IconButton } from '../src/components/ui/IconButton';
+import { PanelHeader } from '../src/components/ui/PanelHeader';
+import { Toolbar } from '../src/components/ui/Toolbar';
 import '../src/index.css';
 import './uiControls.browser.css';
 
@@ -11,6 +14,9 @@ function ControlExamples({ theme }: { theme: 'dark' | 'light' }) {
   const [value, setValue] = useState('My workspace');
   const [submissions, setSubmissions] = useState(0);
   const [showPassword, setShowPassword] = useState(false);
+  const [actions, setActions] = useState(0);
+  const [parentActions, setParentActions] = useState(0);
+  const actionRef = useRef<HTMLButtonElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   return <section className="control-gallery-panel" data-gallery-theme={theme} aria-label={`${theme} controls`}>
     <h2>{theme === 'dark' ? 'Dark' : 'Light'} theme</h2>
@@ -48,6 +54,19 @@ function ControlExamples({ theme }: { theme: 'dark' | 'light' }) {
       </div>
       <output aria-live="polite">Submissions: {submissions}</output>
     </form>
+    <div data-layout-example className="mt-6 w-full max-w-[320px] border border-app-border" onClick={() => setParentActions(count => count + 1)}>
+      <PanelHeader title="A long panel title that must not cover the actions" titleId={`${theme}-panel-title`} headingLevel={3}
+        icon={<Plus size={16} />} actions={<IconButton label="Close preview panel" icon={<X size={16} />} onClick={event => { event.stopPropagation(); setActions(count => count + 1); }} />} />
+      <form className="p-2" onSubmit={event => { event.preventDefault(); setSubmissions(count => count + 1); }}>
+        <Toolbar label={`${theme} preview actions`}>
+          <IconButton ref={actionRef} label="Copy preview" icon={<Copy size={16} />} data-icon-action onClick={event => { event.stopPropagation(); setActions(count => count + 1); }} />
+          <IconButton label="Disabled preview" icon={<X size={16} />} disabled />
+          <IconButton label="Loading preview" icon={<RefreshCw size={16} />} isLoading data-loading-icon />
+          <Button type="button" size="sm" onClick={event => { event.stopPropagation(); actionRef.current?.focus(); }}>Focus copy</Button>
+        </Toolbar>
+      </form>
+      <output className="block p-2" aria-live="polite">Actions: {actions}; parent actions: {parentActions}</output>
+    </div>
   </section>;
 }
 
@@ -70,6 +89,12 @@ function runChecks(): string[] {
     check(getComputedStyle(medium).borderRadius === getComputedStyle(input).borderRadius, `${theme}: input/button radius matches`);
     check(getComputedStyle(compact).height === '28px' && getComputedStyle(compactInput).height === '28px', `${theme}: caller height override`);
     check(getComputedStyle(compact).borderRadius === '0px', `${theme}: caller radius override`);
+    const layout = panel.querySelector<HTMLElement>('[data-layout-example]')!;
+    const action = panel.querySelector<HTMLButtonElement>('[data-icon-action]')!;
+    const loadingIcon = panel.querySelector<HTMLButtonElement>('[data-loading-icon]')!;
+    check(action.type === 'button', `${theme}: icon action cannot submit implicitly`);
+    check(loadingIcon.disabled && loadingIcon.getAttribute('aria-busy') === 'true', `${theme}: loading icon blocks activation`);
+    check(layout.scrollWidth <= layout.clientWidth, `${theme}: narrow header and actions fit`);
     check(loading.disabled && loading.getAttribute('aria-busy') === 'true', `${theme}: loading semantics`);
     let clicks = 0;
     const onClick = () => { clicks++; };
@@ -104,12 +129,12 @@ function Gallery() {
   return <main className="control-gallery">
     <header>
       <h1>Zync control foundation</h1>
-      <p>Development gallery · Button and Input · No application data is accessed.</p>
+      <p>Development gallery · Controls, panel headers and action rows · No application data is accessed.</p>
       <Button type="button" onClick={() => {
         try { setResults(runChecks().join('\n')); }
         catch (error) { setResults(`FAIL ${error instanceof Error ? error.message : String(error)}`); }
       }}>Run browser checks</Button>
-      <p role="status">{results.startsWith('PASS') ? 'All 22 browser checks passed.' : results}</p>
+      <p role="status">{results.startsWith('PASS') ? `All ${results.split('\n').length} browser checks passed.` : results}</p>
       <details><summary>Check details</summary><pre data-check-results>{results}</pre></details>
     </header>
     <div className="control-gallery-grid"><ControlExamples theme="dark" /><ControlExamples theme="light" /></div>
