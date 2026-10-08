@@ -4,6 +4,29 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Added
+
+- **Shared UI regression coverage:** Add control and surface contract tests plus
+  development-only light/dark galleries for buttons, inputs, dropdowns, menus and
+  dialogs. These fixtures are not production app routes. ([3039d68])
+
+### Changed
+
+- **Consistent shared controls:** Centralize control sizing, typography, focus,
+  disabled states and theme colors for buttons and inputs while preserving native
+  form behavior and caller styling overrides. ([c1057ee])
+- **Consistent popup surfaces:** Align shared selects, menus and dialogs with
+  reusable surface tokens, clearer labels and reduced-motion support. Existing
+  placement and protected-dialog dismissal rules are retained. ([c23b6fe])
+
+### Fixed
+
+- **Dialog initial focus:** Wait for portal content to mount before moving keyboard
+  focus into a dialog, and restore its opener on dismissal. ([c23b6fe])
+- **Accessible input errors:** Associate validation messages with their inputs
+  without losing caller-provided descriptions; expose loading buttons as busy.
+  ([c1057ee])
+
 ## [2.34.1] - 2026-10-05
 
 ### Changed
@@ -2023,3 +2046,6 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [4cacff1]: https://github.com/zync-sh/zync/commit/4cacff1
 [3efbf72]: https://github.com/zync-sh/zync/commit/3efbf72
 [025d573]: https://github.com/zync-sh/zync/commit/025d573
+[c1057ee]: https://github.com/zync-sh/zync/commit/c1057ee
+[c23b6fe]: https://github.com/zync-sh/zync/commit/c23b6fe
+[3039d68]: https://github.com/zync-sh/zync/commit/3039d68
