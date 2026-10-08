@@ -9,6 +9,12 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Shared UI regression coverage:** Add control and surface contract tests plus
   development-only light/dark galleries for buttons, inputs, dropdowns, menus and
   dialogs. These fixtures are not production app routes. ([3039d68])
+- **Panel and action primitives:** Add reusable panel headers, named icon buttons
+  and wrapping action groups with shared sizing tokens and native Tab navigation.
+  ([829aa77])
+- **Header and action coverage:** Add six component contract tests and extend the
+  control gallery with narrow-header, loading-action and form-safety checks.
+  ([fe2da58])
 
 ### Changed
 
@@ -18,6 +24,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Consistent popup surfaces:** Align shared selects, menus and dialogs with
   reusable surface tokens, clearer labels and reduced-motion support. Existing
   placement and protected-dialog dismissal rules are retained. ([c23b6fe])
+- **Settings and Snippets headers:** Adopt shared panel headers and a named Settings
+  close action. Keep snippet copy/edit/delete actions visible without hovering and
+  allow their row to wrap in narrow panes, preserving existing action handlers.
+  ([5e525a1])
 
 ### Fixed
 
@@ -2049,3 +2059,6 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [c1057ee]: https://github.com/zync-sh/zync/commit/c1057ee
 [c23b6fe]: https://github.com/zync-sh/zync/commit/c23b6fe
 [3039d68]: https://github.com/zync-sh/zync/commit/3039d68
+[829aa77]: https://github.com/zync-sh/zync/commit/829aa77
+[5e525a1]: https://github.com/zync-sh/zync/commit/5e525a1
+[fe2da58]: https://github.com/zync-sh/zync/commit/fe2da58
