@@ -1,5 +1,5 @@
 import { GripHorizontal, X } from 'lucide-react';
-import { type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
+import { type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { ZPortal } from './ZPortal';
 import { motion, AnimatePresence, useDragControls, useMotionValue, useReducedMotion } from 'framer-motion';
 import { cn } from '../../lib/utils';
@@ -83,6 +83,7 @@ export function Modal({
   const subtitleId = useId();
   const reduceMotion = useReducedMotion();
   const [dialogElement, setDialogElement] = useState<HTMLDivElement | null>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
   const dragConstraintsRef = useRef<HTMLDivElement>(null);
   const dragControls = useDragControls();
   const x = useMotionValue(0);
@@ -124,14 +125,19 @@ export function Modal({
     y.set(0);
   }, [isOpen, x, y]);
 
-  // ZPortal mounts asynchronously: acquire focus only after the dialog exists.
-  // Keep restoration scoped to this opening, not subsequent content updates.
-  useEffect(() => {
-    if (!isOpen || !dialogElement) return;
-
-    const previouslyFocused = document.activeElement instanceof HTMLElement
+  // Capture the opener before ZPortal's passive mount can auto-focus a child.
+  // Keep the saved opener stable across dialog/content ref updates.
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    openerRef.current = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null;
+  }, [isOpen]);
+
+  // ZPortal mounts asynchronously: acquire focus only after the dialog exists.
+  useEffect(() => {
+    if (!isOpen || !dialogElement) return;
+    const previouslyFocused = openerRef.current;
     const frame = window.requestAnimationFrame(() => {
       const firstFocusable = dialogElement.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
       (firstFocusable ?? dialogElement).focus();
@@ -139,9 +145,8 @@ export function Modal({
 
     return () => {
       window.cancelAnimationFrame(frame);
-      if (previouslyFocused && previouslyFocused.isConnected) {
-        previouslyFocused.focus();
-      }
+      // Restore after the closing commit, not during layout-effect teardown.
+      if (previouslyFocused?.isConnected) previouslyFocused.focus();
     };
   }, [isOpen, dialogElement]);
 

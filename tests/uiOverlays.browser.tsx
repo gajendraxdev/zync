@@ -20,7 +20,7 @@ const options = [
 function Gallery() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [shell, setShell] = useState('sh');
-  const [modal, setModal] = useState<'normal' | 'explicit' | null>(null);
+  const [modal, setModal] = useState<'normal' | 'explicit' | 'autofocus' | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [topbarOpen, setTopbarOpen] = useState(false);
   const [actions, setActions] = useState(0);
@@ -61,6 +61,7 @@ function Gallery() {
         }}>Open context menu</Button>
         <Button type="button" onClick={() => setModal('normal')}>Open dialog</Button>
         <Button type="button" variant="secondary" onClick={() => setModal('explicit')}>Open protected dialog</Button>
+        <Button type="button" variant="secondary" onClick={() => setModal('autofocus')}>Open auto-focus dialog</Button>
         <p>Check Escape, outside dismissal, focus restoration, search, selection and nested menus.</p>
       </section>
     </div>
@@ -74,7 +75,7 @@ function Gallery() {
     <Modal isOpen={modal !== null} onClose={() => setModal(null)} title={modal === 'explicit' ? 'Protected dialog' : 'Overlay test dialog'}
       subtitle="This fixture never changes application data." explicitDismissOnly={modal === 'explicit'}>
       <div className="overlay-gallery-form">
-        <Input label="Display name" defaultValue="Fixture" />
+        <Input label="Display name" defaultValue="Fixture" autoFocus={modal === 'autofocus'} />
         <Select label="Dialog shell" value={shell} options={options} onChange={setShell} portal />
         <Button type="button" onClick={() => setModal(null)}>Finish dialog</Button>
       </div>
