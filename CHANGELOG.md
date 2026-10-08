@@ -31,6 +31,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Fixed
 
+- **Visible dialog focus targets:** Skip hidden, disabled and inert controls when
+  acquiring or wrapping focus. Verify initial focus succeeds and fall back to the
+  dialog when no eligible control exists; add hidden/empty-control fixtures.
+  ([56fc544])
 - **Dialog focus restoration:** Capture the opener before auto-focused portal
   content mounts, so dismissal returns focus to the correct control. Add an
   auto-focus regression fixture to the overlay gallery. ([2ac5078])
@@ -2066,3 +2070,4 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [5e525a1]: https://github.com/zync-sh/zync/commit/5e525a1
 [fe2da58]: https://github.com/zync-sh/zync/commit/fe2da58
 [2ac5078]: https://github.com/zync-sh/zync/commit/2ac5078
+[56fc544]: https://github.com/zync-sh/zync/commit/56fc544
