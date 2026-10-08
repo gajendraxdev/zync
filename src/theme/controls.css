@@ -13,6 +13,9 @@
     --zync-popup-radius: 0.5rem;
     --zync-dialog-radius: 0.75rem;
     --zync-menu-item-height: 2rem;
+    --zync-toolbar-gap: 0.25rem;
+    --zync-panel-header-gap: 0.5rem;
+    --zync-panel-header-height: 3rem;
     --zync-popup-shadow: 0 8px 24px rgb(0 0 0 / 0.2);
     --zync-dialog-shadow: 0 16px 48px rgb(0 0 0 / 0.25);
 }
