@@ -3,6 +3,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { motion, useDragControls, useMotionValue } from 'framer-motion';
 import { ZPortal } from '../ui/ZPortal';
+import { IconButton } from '../ui/IconButton';
+import { PanelHeader } from '../ui/PanelHeader';
 import { useAppStore } from '../../store/useAppStore'; // Updated Import
 import { usePlugins } from '../../context/PluginContext';
 
@@ -652,12 +654,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 {/* Content Area */}
                 <div className="flex-1 flex flex-col min-w-0 bg-[var(--color-app-bg)]">
                     {/* Header */}
-                    <div
-                        className="h-12 flex items-center justify-between px-4 border-b border-[var(--color-app-border)]/30 shrink-0 cursor-move active:cursor-grabbing select-none"
+                    <PanelHeader
+                        className="border-app-border/30 cursor-move active:cursor-grabbing select-none"
                         onPointerDown={handleDragHandlePointerDown}
-                    >
-                        <h2 id={titleId} className="font-medium text-[var(--color-app-text)] text-sm tracking-tight">
-                            {activeTab === 'fileManager'
+                        titleId={titleId}
+                        title={activeTab === 'fileManager'
                                 ? 'File Manager'
                                 : activeTab === 'statusBar'
                                     ? 'Status Bar'
@@ -666,15 +667,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                 : activeTab === 'feedback'
                                     ? 'Feedback'
                                 : activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}
-                        </h2>
-                        <GripHorizontal
-                            aria-hidden="true"
-                            className="ml-auto mr-2 h-4 w-4 shrink-0 text-app-muted/45"
-                        />
-                        <button onClick={onClose} className="p-1.5 rounded-md text-[var(--color-app-muted)] hover:text-[var(--color-app-text)] hover:bg-[var(--color-app-surface)] transition-colors">
-                            <X size={16} />
-                        </button>
-                    </div>
+                        actions={<>
+                            <GripHorizontal aria-hidden="true" className="mr-2 h-4 w-4 shrink-0 text-app-muted/45" />
+                            <IconButton label="Close settings" icon={<X size={16} />} onClick={onClose} />
+                        </>}
+                    />
 
                     {/* Scrollable Content */}
                     <div className={`flex-1 overflow-y-auto p-4 lg:p-5 space-y-6 transition-opacity duration-150 ${isTransitioning ? 'opacity-0' : 'opacity-100'}`}>
