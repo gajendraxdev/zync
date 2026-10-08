@@ -6,6 +6,13 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Added
 
+- **Shared switches:** Add compact and labeled switches with native keyboard
+  activation, accessible descriptions, shared theme tokens and track-relative
+  thumb geometry. Existing settings callbacks continue to own persistence.
+  ([c502279])
+- **Switch and navigation coverage:** Add ten component/navigation contract tests
+  and expand the development control gallery to 94 checks, including scaled switch
+  geometry, grouped-row alignment and Settings tab semantics. ([b6cbb16])
 - **Shared UI regression coverage:** Add control and surface contract tests plus
   development-only light/dark galleries for buttons, inputs, dropdowns, menus and
   dialogs. These fixtures are not production app routes. ([3039d68])
@@ -18,6 +25,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Changed
 
+- **Settings and connection controls:** Adopt shared switches and action groups in
+  General Settings, plus named icon buttons and wrapping footer actions in Add
+  Connection. Existing save, test and confirmation handlers are retained.
+  ([4a679a5])
 - **Consistent shared controls:** Centralize control sizing, typography, focus,
   disabled states and theme colors for buttons and inputs while preserving native
   form behavior and caller styling overrides. ([c1057ee])
@@ -31,6 +42,13 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Fixed
 
+- **Settings switch alignment:** Give boxed, plain and nested Terminal settings
+  rows a consistent gutter; use the same grouping for Compact Mode. ([c502279])
+- **Settings keyboard navigation:** Scope Up/Down and Home/End to the vertical
+  section list, with Enter/Space activation and one Tab stop. Separate settings.json
+  from the section tabs, link tabs to their panel, and exclude inactive tabs from
+  dialog focus wrapping. Arrow keys elsewhere no longer switch sections.
+  ([3a47a70])
 - **Visible dialog focus targets:** Skip hidden, disabled and inert controls when
   acquiring or wrapping focus. Verify initial focus succeeds and fall back to the
   dialog when no eligible control exists; add hidden/empty-control fixtures.
@@ -2071,3 +2089,7 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [fe2da58]: https://github.com/zync-sh/zync/commit/fe2da58
 [2ac5078]: https://github.com/zync-sh/zync/commit/2ac5078
 [56fc544]: https://github.com/zync-sh/zync/commit/56fc544
+[c502279]: https://github.com/zync-sh/zync/commit/c502279
+[3a47a70]: https://github.com/zync-sh/zync/commit/3a47a70
+[4a679a5]: https://github.com/zync-sh/zync/commit/4a679a5
+[b6cbb16]: https://github.com/zync-sh/zync/commit/b6cbb16
