@@ -181,6 +181,7 @@
         "src/lib/releaseNotes/mediaUrls.ts",
         "src/lib/releaseNotes/alerts.ts",
         "src/lib/releaseNotes/headings.ts",
+        "src/features/workspace/domain/contentInventory.ts",
         "src/components/layout/featureMeta.ts",
         "src/components/layout/featureTabInventory.ts",
         "src/lib/shells/types.ts",
@@ -235,6 +236,23 @@
         "src/vault/syncPassphrase.ts",
         "src/vault/connectionsRestore.ts",
         "src/vault/vaultUnlockPrompt.ts",
-        "src/components/ai/useAiSidebarResize.ts"
+        "src/components/ai/useAiSidebarResize.ts",
+        "src/features/connections/domain/authMethodTransition.ts",
+        "src/features/connections/domain/importPlan.ts",
+        "src/features/connections/domain/credentialAssignments.ts",
+        "src/lib/terminal/shellExit.ts",
+        "src/features/shortcuts/catalog.ts",
+        "src/features/shortcuts/policy.ts",
+        "src/lib/terminal/terminalActivity.ts",
+        "src/lib/terminal/terminalIdlePty.ts",
+        "src/components/settings/constants/defaults.ts",
+        "src/lib/terminal/terminalIdlePtyPolicy.ts",
+        "src/lib/terminal/terminalIdleSuspendNotice.ts",
+        "src/lib/terminal/terminalLifecycleListeners.ts",
+        "src/lib/terminal/terminalOutputPayload.ts",
+        "src/lib/terminal/terminalOutputFrame.ts",
+        "src/lib/terminal/terminalSnifferBytes.ts",
+        "src/lib/terminal/terminalPanelRestore.ts",
+        "src/components/ui/surfaceStyles.ts"
     ]
 }

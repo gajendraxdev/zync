@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Implementation progress
 
+- Preserve pane identities through restore/release and add kind-agnostic visibility, region and presentation models.
+
+### Implementation progress
+
 - Define theme JSON validation, atomic import preferences, bounded file I/O and palette/contrast presentation.
 
 ### Implementation progress

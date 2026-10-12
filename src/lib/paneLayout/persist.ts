@@ -31,7 +31,8 @@ function parseContent(raw: unknown): PaneContent | null {
     if (raw.kind === 'plugin') {
         if (typeof raw.pluginId !== 'string' || !raw.pluginId) return null;
         const instanceId = typeof raw.instanceId === 'string' && raw.instanceId ? raw.instanceId : undefined;
-        return pluginPaneContent(raw.pluginId, instanceId);
+        // Parsing restores identity; only an explicit create operation allocates one.
+        return instanceId ? pluginPaneContent(raw.pluginId, instanceId) : { kind: 'plugin', pluginId: raw.pluginId };
     }
     return null;
 }

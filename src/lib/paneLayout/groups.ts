@@ -1,5 +1,6 @@
 import { parsePaneLayout } from './persist';
-import { dropTerm, sanitizePaneLayout } from './ops';
+import { paneContentKey } from './contentIdentity';
+import { dropTerm, sanitizePaneLayout, unsplitPane } from './ops';
 import {
     activeTermId,
     collectLeaves,
@@ -12,7 +13,7 @@ import {
     isTermContent,
     visibleTermIds,
 } from './query';
-import type { PaneLayout } from './types';
+import type { PaneLayout, PaneLeaf } from './types';
 
 /** owner tab id → split tree. One host can have several split tabs. */
 export type PaneLayoutGroups = Record<string, PaneLayout>;
@@ -22,13 +23,16 @@ export const WORKSPACE_PANE_OWNER = 'workspace';
 
 /** Retain an owner only while its content remains in the canvas. */
 export function ownerForLayout(layout: PaneLayout, preferred?: string): string {
-    const owners = collectLeaves(layout.root).map(({ content }) => {
+    const leaves = collectLeaves(layout.root);
+    const owners = leaves.map(({ content }) => {
         if (isTermContent(content)) return content.termId;
         if (isPluginContent(content)) return content.instanceId ?? content.pluginId;
         return content.instanceId;
     }).filter((owner): owner is string => Boolean(owner));
 
-    return preferred && owners.includes(preferred)
+    const retainsLegacyOwner = preferred && leaves.some(leaf => !isTermContent(leaf.content) && !leaf.content.instanceId
+        && paneContentKey(leaf.content, leaf.id) === preferred);
+    return preferred && (owners.includes(preferred) || retainsLegacyOwner)
         ? preferred
         : owners[0] ?? WORKSPACE_PANE_OWNER;
 }
@@ -109,11 +113,61 @@ export function layoutForFeatureInstance(
 export function layoutForPlugin(
     groups: PaneLayoutGroups | null | undefined,
     pluginId: string | null | undefined,
+    preferredOwner?: string | null,
 ): PaneLayout | undefined {
     if (!groups || !pluginId) return undefined;
+    const preferred = preferredOwner ? groups[preferredOwner] : undefined;
+    if (preferred && collectLeaves(preferred.root).some(leaf =>
+        isPluginContent(leaf.content) && leaf.content.pluginId === pluginId,
+    )) return preferred;
     return Object.values(groups).find(layout => collectLeaves(layout.root).some(leaf =>
         isPluginContent(leaf.content) && leaf.content.pluginId === pluginId,
     ));
+}
+
+/**
+ * Detach an unambiguous leaf from a split, optionally within an exact owner,
+ * without replacing its content. Callers handle unsplit canvases separately.
+ */
+export function releasePaneFromGroups(groups: PaneLayoutGroups | undefined, paneId: string, layoutOwner?: string): {
+    groups: PaneLayoutGroups;
+    released: PaneLeaf;
+    releasedOwner: string | null;
+    visibleTermIds: string[];
+} | undefined {
+    const matches = Object.entries(groups ?? {}).filter(([owner, layout]) => (layoutOwner === undefined || owner === layoutOwner)
+        && collectLeaves(layout.root).some(leaf => leaf.id === paneId));
+    if (matches.length !== 1) return undefined;
+    const [owner, layout] = matches[0];
+    if (!isSplitLayout(layout)) return undefined;
+    const released = collectLeaves(layout.root).find(leaf => leaf.id === paneId)!;
+    const remainder = unsplitPane(layout, paneId);
+    const next = { ...groups };
+    delete next[owner];
+    const visibleTerms = isTermContent(released.content) ? [released.content.termId] : [];
+    if (isKeepableRemainder(remainder)) {
+        const nextOwner = releaseOwnerForLayout(remainder, owner);
+        if (next[nextOwner]) return undefined;
+        next[nextOwner] = remainder;
+    } else {
+        visibleTerms.push(...visibleTermIds(remainder));
+    }
+    let releasedOwner: string | null = null;
+    if (!isTermContent(released.content)) {
+        const standalone: PaneLayout = { version: layout.version, root: released, activePaneId: released.id };
+        releasedOwner = releaseOwnerForLayout(standalone);
+        if (next[releasedOwner]) return undefined;
+        next[releasedOwner] = standalone;
+    }
+    return { groups: next, released, releasedOwner, visibleTermIds: visibleTerms };
+}
+
+/** Legacy leaves have stable persisted IDs, but may not have instance-owned canvases. */
+function releaseOwnerForLayout(layout: PaneLayout, preferred?: string): string {
+    const owner = ownerForLayout(layout, preferred);
+    const legacy = collectLeaves(layout.root).find(leaf => !isTermContent(leaf.content) && !leaf.content.instanceId
+        && (owner === WORKSPACE_PANE_OWNER || (isPluginContent(leaf.content) && leaf.content.pluginId === owner)));
+    return legacy ? paneContentKey(legacy.content, legacy.id) : owner;
 }
 
 /** Prefer the layout's focused leaf over a stale active-terminal id after restore. */
@@ -192,6 +246,7 @@ function hasValidGroupOwner(
     return collectLeaves(layout.root).some((leaf) => (
         (isFeatureContent(leaf.content) && leaf.content.instanceId === owner)
         || (isPluginContent(leaf.content) && (leaf.content.pluginId === owner || leaf.content.instanceId === owner))
+        || (!isTermContent(leaf.content) && !leaf.content.instanceId && paneContentKey(leaf.content, leaf.id) === owner)
     ));
 }
 

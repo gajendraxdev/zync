@@ -128,6 +128,7 @@ const tests = [
   'tests/usageSession.test.mjs',
   'tests/featureTabInventory.test.mjs',
   'tests/paneLayout.test.mjs',
+  'tests/paneLayoutVisibility.test.mjs',
   'tests/dockInSplit.self.test.mjs',
   'tests/workspaceOpenItems.test.mjs',
   'tests/openHerePaths.test.mjs',

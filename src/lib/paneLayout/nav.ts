@@ -1,10 +1,10 @@
 import { focusPane } from './ops';
 import { isPaneLeaf, isPaneSplit } from './query';
-import type { PaneLayout, PaneNode } from './types';
+import type { PaneLayout, PaneLeaf, PaneNode } from './types';
 
 export type PaneNavDirection = 'left' | 'right' | 'up' | 'down';
 
-type PaneRect = { id: string; x: number; y: number; w: number; h: number };
+export type PaneRect = { id: string; x: number; y: number; w: number; h: number };
 
 const EPS = 1e-6;
 
@@ -23,23 +23,26 @@ export function paneNavDirectionFromKey(key: string): PaneNavDirection | null {
     }
 }
 
-function collectRects(node: PaneNode, x: number, y: number, w: number, h: number): PaneRect[] {
+/** Project existing split ratios into an allocation; callers may supply global identities. */
+export function collectPaneRects(node: PaneNode, bounds: Omit<PaneRect, 'id'>,
+    identity: (leaf: PaneLeaf) => string = leaf => leaf.id): PaneRect[] {
+    const { x, y, w, h } = bounds;
     if (isPaneLeaf(node)) {
-        return [{ id: node.id, x, y, w, h }];
+        return [{ id: identity(node), x, y, w, h }];
     }
     const sum = node.sizes[0] + node.sizes[1];
     const first = sum > 0 ? node.sizes[0] / sum : 0.5;
     if (node.direction === 'horizontal') {
         const w0 = w * first;
         return [
-            ...collectRects(node.children[0], x, y, w0, h),
-            ...collectRects(node.children[1], x + w0, y, w - w0, h),
+            ...collectPaneRects(node.children[0], { x, y, w: w0, h }, identity),
+            ...collectPaneRects(node.children[1], { x: x + w0, y, w: w - w0, h }, identity),
         ];
     }
     const h0 = h * first;
     return [
-        ...collectRects(node.children[0], x, y, w, h0),
-        ...collectRects(node.children[1], x, y + h0, w, h - h0),
+        ...collectPaneRects(node.children[0], { x, y, w, h: h0 }, identity),
+        ...collectPaneRects(node.children[1], { x, y: y + h0, w, h: h - h0 }, identity),
     ];
 }
 
@@ -53,8 +56,12 @@ function isBetter(overlap: number, gap: number, bestOverlap: number, bestGap: nu
 
 export function neighborPaneId(layout: PaneLayout, direction: PaneNavDirection): string | null {
     if (!isPaneSplit(layout.root)) return null;
-    const rects = collectRects(layout.root, 0, 0, 1, 1);
-    const src = rects.find((rect) => rect.id === layout.activePaneId);
+    return neighborRectId(collectPaneRects(layout.root, { x: 0, y: 0, w: 1, h: 1 }), layout.activePaneId, direction);
+}
+
+/** Shared spatial navigation for split trees and connection-wide region allocations. */
+export function neighborRectId(rects: readonly PaneRect[], sourceId: string, direction: PaneNavDirection): string | null {
+    const src = rects.find((rect) => rect.id === sourceId);
     if (!src) return null;
 
     let bestId: string | null = null;

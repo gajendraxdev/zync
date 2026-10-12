@@ -1,4 +1,5 @@
 import type { VaultProfileId } from '../../../vault/profileTypes';
+import type { MainTabPresentation } from '../../workspace/domain/mainTabPresentation';
 
 export type CoreTabView = 'dashboard' | 'files' | 'port-forwarding' | 'snippets' | 'terminal';
 export type PluginTabView = `plugin:${string}`;
@@ -52,6 +53,10 @@ export interface Tab {
     id: string;
     type: 'connection' | 'settings' | 'port-forwarding' | 'release-notes' | 'vault' | 'sync' | 'public-urls';
     title: string;
+    /** Presentation only; never changes host names, resource IDs or ownership. */
+    displayAlias?: string;
+    /** Pinning changes visual order only, never resource lifetime or close behavior. */
+    presentation?: MainTabPresentation;
     connectionId?: string;
     vaultProfileId?: VaultProfileId;
     view: TabView;

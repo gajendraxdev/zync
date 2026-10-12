@@ -1,4 +1,6 @@
 export { createPaneId } from './ids';
+export { paneContentKey } from './contentIdentity';
+export { projectVisiblePaneLayout } from './visibility';
 export { isKeepableRemainder, ownerForLayout } from './groups';
 export {
     focusPaneInDirection,
