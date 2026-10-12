@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Implementation progress
 
+- Add validated element-color contracts, contrast helpers and acknowledged preference updates with regression fixtures.
+
+### Implementation progress
+
 - Extract the idle-terminal policy into a side-effect-free module while preserving existing runtime exports.
 
 ### Added

@@ -21,6 +21,10 @@
         "sourceMap": false
     },
     "include": [
+        "src/features/appearance/domain/elementColors.ts",
+        "src/features/appearance/application/updateElementColors.ts",
+        "src/features/appearance/presentation/elementColorStyle.ts",
+        "src/features/appearance/domain/colorContrast.ts",
         "src/global.d.ts",
         "src/vite-env.d.ts",
         "src/features/feedbackInbox/protocol.ts",
