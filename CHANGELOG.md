@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Implementation progress
 
+- Preview theme and element colors against a realistic inert workspace and expose supported JSON keys.
+
+### Implementation progress
+
 - Add a reusable keyboard-accessible Zync color picker with RGB/HSV conversion and a full-spectrum hue track.
 
 ### Implementation progress

@@ -265,6 +265,8 @@
         "src/features/workspace/domain/dockPresentation.ts",
         "src/components/ui/menuFocus.ts",
         "src/components/ui/colorPickerMath.ts",
-        "src/components/ui/ColorPicker.tsx"
+        "src/components/ui/ColorPicker.tsx",
+        "src/features/appearance/presentation/ElementColorPreview.tsx",
+        "src/features/appearance/presentation/elementColorBindings.ts"
     ]
 }
