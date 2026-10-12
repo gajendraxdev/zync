@@ -12,13 +12,23 @@ const US_SHIFT_DIGIT_KEY: Record<string, string> = {
     '0': ')',
 };
 
+const SHORTCUT_KEY_ALIASES: Readonly<Record<string, string>> = {
+    plus: '+', space: ' ', left: 'arrowleft', right: 'arrowright', up: 'arrowup', down: 'arrowdown', esc: 'escape', return: 'enter',
+};
+
+/** Shared key-token vocabulary for app/file matchers, recording and conflict labels. */
+export function normalizeShortcutKey(token: string): string {
+    const key = token.trim().toLowerCase();
+    return SHORTCUT_KEY_ALIASES[key] ?? key;
+}
+
 /** True when the event's key/code matches the binding token (Shift+digit uses `!` / `@` or `DigitN`). */
 export function shortcutMainKeyMatches(
     event: Pick<KeyboardEvent, 'key' | 'code' | 'shiftKey'>,
     token: string,
     shiftRequired: boolean,
 ): boolean {
-    const want = token.toLowerCase();
+    const want = normalizeShortcutKey(token);
     if (event.key.toLowerCase() === want) return true;
     if (want === 'tab' && event.key === 'Tab') return true;
     if (shiftRequired && /^[0-9]$/.test(want)) {
@@ -34,15 +44,14 @@ export function shortcutMainKeyMatches(
  */
 export function matchShortcut(e: KeyboardEvent, shortcut: string): boolean {
     if (!shortcut) return false;
-    const parts = shortcut.toLowerCase().split('+');
-    let key = parts[parts.length - 1];
-    if (key === 'plus') key = '+';
+    const parts = shortcut.toLowerCase().split('+').map(part => part.trim());
+    const key = parts[parts.length - 1];
 
     // Check modifiers
     const hasCtrl = parts.includes('ctrl') || parts.includes('control');
     const hasShift = parts.includes('shift');
     const hasAlt = parts.includes('alt');
-    const hasMeta = parts.includes('meta') || parts.includes('cmd') || parts.includes('command') || parts.includes('super');
+    const hasMeta = parts.includes('meta') || parts.includes('cmd') || parts.includes('command') || parts.includes('super') || parts.includes('win');
     const hasMod = parts.includes('mod'); // Ctrl on Win/Linux, Meta on Mac
 
     const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;

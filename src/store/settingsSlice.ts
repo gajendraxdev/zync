@@ -177,6 +177,28 @@ export interface AppSettings {
         };
     };
     keybindings: {
+        filesFeature: string;
+        tunnelsFeature: string;
+        snippetsFeature: string;
+        dashboardFeature: string;
+        toggleSidebarAlternative: string;
+        commandPaletteAlternative: string;
+        aiCommandBarAlternative: string;
+        navigationWorkspaceAlternative: string;
+        navigationPublicUrlsAlternative: string;
+        navigationTunnelsAlternative: string;
+        navigationSnippetsAlternative: string;
+        navigationVaultsAlternative: string;
+        navigationPluginsAlternative: string;
+        navigationHosts: string;
+        navigationWorkspace: string;
+        navigationPublicUrls: string;
+        navigationTunnels: string;
+        navigationSnippets: string;
+        navigationVaults: string;
+        navigationPlugins: string;
+        navigationProfile: string;
+        commandPaletteMode: string;
         toggleSidebar: string;
         openNewConnection: string;
         newLocalTerminal: string;
@@ -189,6 +211,11 @@ export interface AppSettings {
         commandPalette: string;
         switchTabNext: string;
         switchTabPrev: string;
+        customizeWorkspaceTab: string;
+        customizeNavigation: string;
+        workspaceContents: string;
+        maximizeWorkspacePane: string;
+        showAllWorkspacePanes: string;
         // Terminal
         termCopy: string;
         termPaste: string;
@@ -326,6 +353,28 @@ export const defaultSettings: AppSettings = {
         },
     },
     keybindings: {
+        filesFeature: 'Ctrl+Shift+F',
+        tunnelsFeature: 'Ctrl+Shift+N',
+        snippetsFeature: 'Ctrl+Shift+S',
+        dashboardFeature: 'Ctrl+Shift+D',
+        toggleSidebarAlternative: 'Mod+Shift+B',
+        commandPaletteAlternative: 'Mod+Shift+Space',
+        aiCommandBarAlternative: 'Mod+Shift+I',
+        navigationWorkspaceAlternative: 'Mod+Shift+H',
+        navigationPublicUrlsAlternative: 'Mod+Shift+U',
+        navigationTunnelsAlternative: 'Mod+Shift+G',
+        navigationSnippetsAlternative: 'Mod+Shift+J',
+        navigationVaultsAlternative: 'Mod+Shift+O',
+        navigationPluginsAlternative: 'Mod+Shift+E',
+        navigationHosts: 'Mod+Alt+1',
+        navigationWorkspace: 'Mod+Alt+2',
+        navigationPublicUrls: 'Mod+Alt+3',
+        navigationTunnels: 'Mod+Alt+4',
+        navigationSnippets: 'Mod+Alt+5',
+        navigationVaults: 'Mod+Alt+6',
+        navigationPlugins: 'Mod+Alt+7',
+        navigationProfile: 'Mod+Alt+0',
+        commandPaletteMode: 'Mod+Shift+P',
         toggleSidebar: 'Mod+B',
         openNewConnection: 'Mod+N',
         newLocalTerminal: 'Mod+T',
@@ -338,6 +387,12 @@ export const defaultSettings: AppSettings = {
         commandPalette: 'Mod+P',
         switchTabNext: 'Ctrl+Tab',
         switchTabPrev: 'Ctrl+Shift+Tab',
+        // Opt-in bindings: never reserve existing terminal/program keys on upgrade.
+        customizeWorkspaceTab: '',
+        customizeNavigation: '',
+        workspaceContents: '',
+        maximizeWorkspacePane: '',
+        showAllWorkspacePanes: '',
         // Terminal
         termCopy: 'Mod+Shift+C',
         termPaste: 'Mod+Shift+V',

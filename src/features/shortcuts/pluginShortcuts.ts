@@ -1,4 +1,5 @@
 import { SHORTCUT_CATALOG } from './catalog';
+import { shortcutBindings } from './bindings';
 
 // Payloads are untrusted requests, NOT evidence of user keyboard input.
 // Only presentation/navigation actions are permitted. Never route persisted
@@ -25,13 +26,12 @@ export interface PluginShortcutBinding {
 }
 
 export function pluginShortcutBindings(overrides: Record<string, string> | null | undefined, isMac: boolean): PluginShortcutBinding[] {
-    return SHORTCUT_CATALOG.filter(command => PLUGIN_CHROME_COMMANDS.has(command.id)).flatMap(command => {
-        const primary = command.settingsKey ? overrides?.[command.settingsKey] || command.defaultKeys : command.defaultKeys;
-        return [primary, ...(command.extraKeys || [])].filter(Boolean).map(chord => {
+    return SHORTCUT_CATALOG.filter(command => PLUGIN_CHROME_COMMANDS.has(command.actionId ?? command.id)).flatMap(command => {
+        return shortcutBindings(command, overrides ?? {}).map(chord => {
             const parts = chord.toLowerCase().split('+');
             const key = parts[parts.length - 1];
             return {
-                id: command.id, key: key === 'plus' ? '+' : key,
+                id: command.actionId ?? command.id, key: key === 'plus' ? '+' : key === 'space' ? ' ' : key,
                 ctrlKey: parts.includes('ctrl') || parts.includes('control') || (parts.includes('mod') && !isMac),
                 metaKey: parts.some(part => ['meta', 'cmd', 'command', 'super'].includes(part)) || (parts.includes('mod') && isMac),
                 altKey: parts.includes('alt'), shiftKey: parts.includes('shift'),

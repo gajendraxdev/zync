@@ -19,6 +19,9 @@ assert.deepEqual(pluginShortcutBindings(undefined, false), bindings, 'Missing se
 assert.deepEqual(pluginShortcutBindings(null, false), bindings, 'Null settings must use default shortcuts');
 assert.deepEqual(pluginShortcutBindings(undefined, true), pluginShortcutBindings({}, true));
 assert.equal(matchPluginShortcut(key('p'), bindings), 'commandPalette');
+assert.equal(matchPluginShortcut(key(' ', { shiftKey: true }), bindings), 'commandPalette', 'an alternative delivers only the already-authorized action');
+assert.equal(matchPluginShortcut(key(' ', { shiftKey: true }), pluginShortcutBindings({ commandPaletteAlternative: '' }, false)), null);
+assert.equal(matchPluginShortcut(key('b', { shiftKey: true }), bindings), null, 'sidebar alternatives cannot expand iframe authority');
 assert.equal(matchPluginShortcut(key('p', { shiftKey: true, inField: true }), bindings), 'commandPaletteMode');
 assert.equal(matchPluginShortcut(key('w', { inField: true }), bindings), null);
 assert.equal(matchPluginShortcut(key('v'), bindings), null);

@@ -8,6 +8,7 @@ const SWITCH_TABS: ShortcutCommand[] = ([1, 2, 3, 4, 5, 6, 7, 8, 9] as const).ma
     when: 'always',
     settingsKey: `switchTab${n}`,
     configurable: true,
+    terminalReservation: 'recommended',
 }));
 
 const FILE_MANAGER: ShortcutCommand[] = [
@@ -28,7 +29,7 @@ const FILE_MANAGER: ShortcutCommand[] = [
     { id: 'fmGridView', label: 'Grid View', section: 'files', defaultKeys: 'Mod+Shift+2', when: 'files', settingsKey: 'fmGridView', configurable: true },
     { id: 'fmHidden', label: 'Show/Hide Hidden Files', section: 'files', defaultKeys: 'Mod+H', when: 'files', settingsKey: 'fmHidden', configurable: true },
     { id: 'fmBookmark', label: 'Pin Current Location', section: 'files', defaultKeys: 'Mod+D', when: 'files', settingsKey: 'fmBookmark', configurable: true },
-    { id: 'fmRefresh', label: 'Refresh View', section: 'files', defaultKeys: 'F5', when: 'files', settingsKey: 'fmRefresh', configurable: true },
+    { id: 'fmRefresh', label: 'Refresh View', section: 'files', defaultKeys: 'F5', extraKeys: ['Mod+R'], when: 'files', settingsKey: 'fmRefresh', configurable: true },
 ];
 
 /**
@@ -39,7 +40,20 @@ const FILE_MANAGER: ShortcutCommand[] = [
  * exceptions bypass that policy. Never infer ownership from modifiers alone.
  * `settings.keybindings` overrides `defaultKeys` when `settingsKey` is set.
  */
-export const SHORTCUT_CATALOG: readonly ShortcutCommand[] = [
+export const SHORTCUT_CATALOG: readonly ShortcutCommand[] = ([
+    { id: 'navigationHosts', label: 'Show Hosts', section: 'global', defaultKeys: 'Mod+Alt+1', when: 'app', settingsKey: 'navigationHosts', configurable: true, navigationAction: 'hosts' },
+    { id: 'navigationWorkspace', label: 'Show host workspace', section: 'global', defaultKeys: 'Mod+Alt+2', when: 'app', settingsKey: 'navigationWorkspace', configurable: true, navigationAction: 'workspace' },
+    { id: 'navigationPublicUrls', label: 'Show Public URLs', section: 'global', defaultKeys: 'Mod+Alt+3', when: 'app', settingsKey: 'navigationPublicUrls', configurable: true, navigationAction: 'public-urls' },
+    { id: 'navigationTunnels', label: 'Show global Port Forwarding', section: 'global', defaultKeys: 'Mod+Alt+4', when: 'app', settingsKey: 'navigationTunnels', configurable: true, navigationAction: 'tunnels' },
+    { id: 'navigationSnippets', label: 'Show global Snippets', section: 'global', defaultKeys: 'Mod+Alt+5', when: 'app', settingsKey: 'navigationSnippets', configurable: true, navigationAction: 'snippets' },
+    { id: 'navigationVaults', label: 'Show Vaults', section: 'global', defaultKeys: 'Mod+Alt+6', when: 'app', settingsKey: 'navigationVaults', configurable: true, navigationAction: 'vaults' },
+    { id: 'navigationPlugins', label: 'Show Plugins', section: 'global', defaultKeys: 'Mod+Alt+7', when: 'app', settingsKey: 'navigationPlugins', configurable: true, navigationAction: 'plugins' },
+    { id: 'navigationProfile', label: 'Open Profile and Sync menu', section: 'global', defaultKeys: 'Mod+Alt+0', when: 'app', settingsKey: 'navigationProfile', configurable: true, shellAction: 'profile-menu', terminalReservation: 'recommended' },
+    {
+        id: 'customizeNavigation', label: 'Customize navigation', section: 'view',
+        defaultKeys: '', when: 'app', configurable: true, settingsKey: 'customizeNavigation',
+        shellAction: 'customize-navigation',
+    },
     {
         id: 'openNewConnection',
         label: 'New Connection',
@@ -51,7 +65,7 @@ export const SHORTCUT_CATALOG: readonly ShortcutCommand[] = [
     },
     {
         id: 'toggleSidebar',
-        label: 'Toggle Sidebar',
+        label: 'Toggle Hosts / Sidebar',
         section: 'global',
         defaultKeys: 'Mod+B',
         when: 'always',
@@ -69,6 +83,7 @@ export const SHORTCUT_CATALOG: readonly ShortcutCommand[] = [
     },
     {
         id: 'toggleSettings',
+        terminalReservation: 'recommended',
         label: 'Settings',
         section: 'global',
         defaultKeys: 'Mod+,',
@@ -87,11 +102,13 @@ export const SHORTCUT_CATALOG: readonly ShortcutCommand[] = [
     },
     {
         id: 'commandPaletteMode',
+        terminalReservation: 'default',
         label: 'Command Palette (commands)',
-        section: 'hidden',
+        section: 'global',
         defaultKeys: 'Mod+Shift+P',
         when: 'always',
-        configurable: false,
+        settingsKey: 'commandPaletteMode',
+        configurable: true,
     },
     {
         id: 'aiCommandBar',
@@ -104,6 +121,7 @@ export const SHORTCUT_CATALOG: readonly ShortcutCommand[] = [
     },
     {
         id: 'newHostTerminal',
+        terminalReservation: 'recommended',
         label: 'New Terminal (Current Host)',
         section: 'tabs',
         defaultKeys: 'Mod+Shift+T',
@@ -122,6 +140,7 @@ export const SHORTCUT_CATALOG: readonly ShortcutCommand[] = [
     },
     {
         id: 'closeTerminalTab',
+        terminalReservation: 'recommended',
         label: 'Close Terminal Tab',
         section: 'terminal',
         defaultKeys: 'Mod+Shift+W',
@@ -131,6 +150,7 @@ export const SHORTCUT_CATALOG: readonly ShortcutCommand[] = [
     },
     {
         id: 'splitPanes',
+        terminalReservation: 'recommended',
         label: 'Split focused pane',
         section: 'terminal',
         defaultKeys: 'Ctrl+Shift+ArrowRight',
@@ -141,6 +161,8 @@ export const SHORTCUT_CATALOG: readonly ShortcutCommand[] = [
     },
     {
         id: 'focusSplitPane',
+        terminalReservation: 'recommended',
+        keyConstraint: 'arrow',
         label: 'Focus pane in direction',
         section: 'terminal',
         defaultKeys: 'Ctrl+Alt+ArrowRight',
@@ -151,6 +173,7 @@ export const SHORTCUT_CATALOG: readonly ShortcutCommand[] = [
     },
     {
         id: 'switchTabNext',
+        terminalReservation: 'recommended',
         label: 'Next Tab',
         section: 'tabs',
         defaultKeys: 'Ctrl+Tab',
@@ -160,6 +183,7 @@ export const SHORTCUT_CATALOG: readonly ShortcutCommand[] = [
     },
     {
         id: 'switchTabPrev',
+        terminalReservation: 'recommended',
         label: 'Previous Tab',
         section: 'tabs',
         defaultKeys: 'Ctrl+Shift+Tab',
@@ -168,6 +192,26 @@ export const SHORTCUT_CATALOG: readonly ShortcutCommand[] = [
         configurable: true,
     },
     ...SWITCH_TABS,
+    {
+        id: 'customizeWorkspaceTab', label: 'Active workspace tab appearance', section: 'tabs',
+        defaultKeys: '', when: 'app', settingsKey: 'customizeWorkspaceTab', configurable: true,
+        workspaceAction: 'customize-tab',
+    },
+    {
+        id: 'workspaceContents', label: 'Show hidden panes', section: 'tabs',
+        defaultKeys: '', when: 'app', settingsKey: 'workspaceContents', configurable: true,
+        workspaceAction: 'contents',
+    },
+    {
+        id: 'showAllWorkspacePanes', label: 'Show all panes', section: 'tabs',
+        defaultKeys: '', when: 'app', settingsKey: 'showAllWorkspacePanes', configurable: true,
+        workspaceAction: 'reveal-all',
+    },
+    {
+        id: 'maximizeWorkspacePane', label: 'Toggle maximized pane', section: 'tabs',
+        defaultKeys: '', when: 'app', settingsKey: 'maximizeWorkspacePane', configurable: true,
+        workspaceAction: 'maximize-pane',
+    },
     {
         id: 'termCopy',
         label: 'Copy',
@@ -190,15 +234,17 @@ export const SHORTCUT_CATALOG: readonly ShortcutCommand[] = [
     },
     {
         id: 'termFind',
+        terminalReservation: 'optional',
         label: 'Find',
         section: 'terminal',
         defaultKeys: 'Mod+F',
-        when: 'app',
+        when: 'xterm',
         settingsKey: 'termFind',
         configurable: true,
     },
     {
         id: 'zoomIn',
+        terminalReservation: 'recommended',
         repeatable: true,
         label: 'Zoom In',
         section: 'view',
@@ -210,6 +256,7 @@ export const SHORTCUT_CATALOG: readonly ShortcutCommand[] = [
     },
     {
         id: 'zoomOut',
+        terminalReservation: 'recommended',
         repeatable: true,
         label: 'Zoom Out',
         section: 'view',
@@ -220,39 +267,65 @@ export const SHORTCUT_CATALOG: readonly ShortcutCommand[] = [
     },
     {
         id: 'filesFeature',
+        terminalReservation: 'recommended',
         label: 'Files',
         section: 'hidden',
         defaultKeys: 'Ctrl+Shift+F',
         when: 'always',
-        configurable: false,
+        settingsKey: 'filesFeature',
+        configurable: true,
     },
     {
         id: 'tunnelsFeature',
+        terminalReservation: 'recommended',
         label: 'Port Forwarding',
         section: 'hidden',
         defaultKeys: 'Ctrl+Shift+N',
         when: 'always',
-        configurable: false,
+        settingsKey: 'tunnelsFeature',
+        configurable: true,
     },
     {
         id: 'snippetsFeature',
+        terminalReservation: 'default',
         label: 'Snippets',
         section: 'hidden',
         defaultKeys: 'Ctrl+Shift+S',
         extraKeys: ['Ctrl+Shift+`', 'Ctrl+Shift+~'],
         when: 'always',
-        configurable: false,
+        settingsKey: 'snippetsFeature',
+        configurable: true,
     },
     {
         id: 'dashboardFeature',
+        terminalReservation: 'recommended',
         label: 'Dashboard',
         section: 'hidden',
         defaultKeys: 'Ctrl+Shift+D',
         when: 'always',
-        configurable: false,
+        settingsKey: 'dashboardFeature',
+        configurable: true,
     },
+    // Separate binding identities preserve shell Ctrl+B/P/I while their alternatives
+    // can be reserved, remapped or removed independently. Actions remain shared.
+    { id: 'toggleSidebarAlternative', actionId: 'toggleSidebar', label: 'Toggle Hosts / Sidebar (alternative)', section: 'global', defaultKeys: 'Mod+Shift+B', settingsKey: 'toggleSidebarAlternative', when: 'always', configurable: true, terminalReservation: 'recommended' },
+    { id: 'commandPaletteAlternative', actionId: 'commandPalette', label: 'Command Palette (alternative)', section: 'global', defaultKeys: 'Mod+Shift+Space', settingsKey: 'commandPaletteAlternative', when: 'always', configurable: true, terminalReservation: 'recommended' },
+    { id: 'aiCommandBarAlternative', actionId: 'aiCommandBar', label: 'AI Command Bar (alternative)', section: 'global', defaultKeys: 'Mod+Shift+I', settingsKey: 'aiCommandBarAlternative', when: 'always', configurable: true, terminalReservation: 'recommended' },
+    { id: 'navigationWorkspaceAlternative', actionId: 'navigationWorkspace', label: 'Show host workspace (alternative)', section: 'global', defaultKeys: 'Mod+Shift+H', settingsKey: 'navigationWorkspaceAlternative', when: 'app', configurable: true, terminalReservation: 'recommended' },
+    { id: 'navigationPublicUrlsAlternative', actionId: 'navigationPublicUrls', label: 'Show Public URLs (alternative)', section: 'global', defaultKeys: 'Mod+Shift+U', settingsKey: 'navigationPublicUrlsAlternative', when: 'app', configurable: true, terminalReservation: 'recommended' },
+    { id: 'navigationTunnelsAlternative', actionId: 'navigationTunnels', label: 'Show global Port Forwarding (alternative)', section: 'global', defaultKeys: 'Mod+Shift+G', settingsKey: 'navigationTunnelsAlternative', when: 'app', configurable: true, terminalReservation: 'recommended' },
+    { id: 'navigationSnippetsAlternative', actionId: 'navigationSnippets', label: 'Show global Snippets (alternative)', section: 'global', defaultKeys: 'Mod+Shift+J', settingsKey: 'navigationSnippetsAlternative', when: 'app', configurable: true, terminalReservation: 'recommended' },
+    { id: 'navigationVaultsAlternative', actionId: 'navigationVaults', label: 'Show Vaults (alternative)', section: 'global', defaultKeys: 'Mod+Shift+O', settingsKey: 'navigationVaultsAlternative', when: 'app', configurable: true, terminalReservation: 'recommended' },
+    { id: 'navigationPluginsAlternative', actionId: 'navigationPlugins', label: 'Show Plugins (alternative)', section: 'global', defaultKeys: 'Mod+Shift+E', settingsKey: 'navigationPluginsAlternative', when: 'app', configurable: true, terminalReservation: 'recommended' },
     ...FILE_MANAGER,
-];
+] satisfies ShortcutCommand[]).map((command): ShortcutCommand => ({
+    ...command,
+    // Named app actions may be explicitly reserved. Editor/file-local keys and
+    // clipboard utilities retain their own ownership, never a second override.
+    terminalReservation: 'terminalReservation' in command ? command.terminalReservation
+        : 'navigationAction' in command ? 'recommended'
+        : command.when === 'app' || command.when === 'always' ? 'optional' : undefined,
+}));
 
 export const SHORTCUT_SECTIONS: Array<{ id: ShortcutCommand['section']; title: string }> = [
     { id: 'global', title: 'Global Shortcuts' },

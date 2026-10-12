@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Implementation progress
 
+- Add catalog-driven hybrid shortcut reservations, independent alternatives, conflict validation and shared binding labels.
+
+### Implementation progress
+
 - Preview theme and element colors against a realistic inert workspace and expose supported JSON keys.
 
 ### Implementation progress

@@ -114,6 +114,7 @@
         "src/features/plugins/pluginCommandBridge.ts",
         "src/features/shortcuts/pluginShortcuts.ts",
         "src/features/shortcuts/route.ts",
+        "src/features/shortcuts/labels.ts",
         "src/features/shortcuts/focus.ts",
         "src/lib/terminal/terminalInteraction.ts",
         "src/lib/terminal/terminalKeyRouting.ts",
@@ -267,6 +268,7 @@
         "src/components/ui/colorPickerMath.ts",
         "src/components/ui/ColorPicker.tsx",
         "src/features/appearance/presentation/ElementColorPreview.tsx",
-        "src/features/appearance/presentation/elementColorBindings.ts"
+        "src/features/appearance/presentation/elementColorBindings.ts",
+        "src/features/shortcuts/bindings.ts"
     ]
 }
