@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Implementation progress
 
+- Validate and atomically persist managed navigation, element colors, theme imports and chrome preferences in native commands.
+
+### Implementation progress
+
 - Define navigation and toolbar visibility preferences with shared validation and acknowledged updates.
 
 ### Implementation progress
