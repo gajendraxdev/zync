@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Implementation progress
 
+- Serialize appearance and keyboard saves, preserve newer preferences on failure and expose acknowledged customization actions.
+
+### Implementation progress
+
 - Integrate canonical pane docking, guarded lifecycle operations and presentation metadata into session/store state.
 
 ### Implementation progress

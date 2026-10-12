@@ -1,5 +1,6 @@
 import { useAppStore } from '../store/useAppStore';
 import { resolveThemeModeFromRegistry } from './themeModeRegistry.js';
+import { CUSTOM_THEME_ID, parseThemeDocument } from '../features/appearance/domain/themeDocument';
 
 export type ZyncThemeMode = 'light' | 'dark';
 
@@ -126,6 +127,10 @@ function isExplicitDarkThemeId(themeId: string | null | undefined): boolean {
 
 export function resolveZyncThemeMode(): ZyncThemeMode {
   const activeThemeId = useAppStore.getState().settings.theme;
+  if (activeThemeId === CUSTOM_THEME_ID) {
+    const custom = parseThemeDocument(useAppStore.getState().settings.customTheme);
+    if (custom) return custom.mode;
+  }
   const fromManifest = resolveThemeModeFromRegistry(activeThemeId);
   if (fromManifest) {
     return fromManifest;

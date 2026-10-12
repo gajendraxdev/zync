@@ -53,6 +53,7 @@ const tests = [
   'tests/workspacePresentation.test.mjs',
   'tests/workspaceRegistrations.test.mjs',
   'tests/contentPresentation.test.mjs',
+  'tests/customizationSettingsStorage.test.mjs',
   'tests/workspaceDocking.test.mjs',
   'tests/mainTabPresentation.test.mjs',
   'tests/sessionRestore.test.mjs',

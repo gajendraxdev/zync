@@ -6,7 +6,7 @@ import {
     DEFAULT_IDLE_HOST_PTY_SUSPEND_MINUTES,
     DEFAULT_SUSPEND_IDLE_HOST_PTYS,
     normalizeIdleHostPtySuspendMinutes,
-} from '../lib/terminal/terminalIdlePty.js';
+} from '../lib/terminal/terminalIdlePtyPolicy.js';
 import type { FontWeight } from '@xterm/xterm';
 import {
     resolveDefaultTerminalTypography,
@@ -32,6 +32,16 @@ import {
     normalizeSurveySettings,
 } from '../features/survey/settings.js';
 import { setUsageEnabled, startUsageLifecycle, stopUsageLifecycle } from '../features/usage';
+import { resolveWorkspaceNavigation, type NavigationChange } from '../features/workspace/domain/navigation';
+import { createNavigationUpdater } from '../features/workspace/application/updateNavigation';
+import { createElementColorUpdater } from '../features/appearance/application/updateElementColors';
+import type { ElementColorChange } from '../features/appearance/domain/elementColors';
+import { createThemeImportUpdater } from '../features/appearance/application/importTheme';
+import { createPreferencesQueue } from '../features/settings/application/acknowledgedPreferences';
+import { sameThemeSettings, themeSettingsSnapshot, type ThemeDocument, type ThemeSettingsSnapshot } from '../features/appearance/domain/themeDocument';
+import { createChromeActionUpdater } from '../features/workspace/application/updateChromeActions';
+import type { ChromeActionArea, ChromeActionChange } from '../features/workspace/domain/chromeActions';
+import type { MainTabCloseButtonMode } from '../features/workspace/domain/mainTabPresentation';
 
 let usageConsentWrites: Promise<void> = Promise.resolve();
 
@@ -54,6 +64,39 @@ async function persistSettingsUpdate(
     }
 
     const previous = get().settings;
+    const sidebarSelectionRevision = get().globalSidebarSelectionRevision;
+    const settingsLoadGeneration = get().settingsLoadGeneration;
+    if ('workspaceLayoutPresets' in actualSettings) {
+        throw new Error('Saved layout presets are retired; existing data is preserved.');
+    }
+    if ('elementColors' in actualSettings) {
+        throw new Error('Use the element color editor to change these preferences.');
+    }
+    if ('customTheme' in actualSettings) {
+        throw new Error('Use theme import to change the custom theme.');
+    }
+    if ('chromeActions' in actualSettings) {
+        throw new Error('Use the toolbar and status editor to change these preferences.');
+    }
+    if ('workspaceNavigation' in actualSettings) {
+        throw new Error('Use the navigation editor to change these preferences.');
+    }
+    if ('theme' in actualSettings || 'accentColor' in actualSettings) {
+        // All appearance writers share a queue. Keep the acknowledged theme visible
+        // until native accepts this snapshot; never roll back to an unsaved draft.
+        if (get().isLoadingSettings || get().isReloadingSettings) throw new Error('Wait for settings to finish loading.');
+        await persistSettings(actualSettings, themeSettingsSnapshot(previous));
+        const current = get();
+        if (current.isLoadingSettings || current.isReloadingSettings || current.settingsLoadGeneration !== settingsLoadGeneration
+            || !sameThemeSettings(themeSettingsSnapshot(current.settings), themeSettingsSnapshot(previous))) {
+            throw new Error('Theme was saved, but settings changed before confirmation. Reload settings before changing the theme again.');
+        }
+        const settings = { ...current.settings, ...actualSettings };
+        set({ settings, ...(actualSettings.privacy && 'showHostAddressesInLists' in actualSettings.privacy
+            ? { tabs: refreshConnectionTabTitles(current.tabs, current.connections, settings.privacy.showHostAddressesInLists) } : {}) });
+        if (actualSettings.privacy && 'shareAnonymousUsage' in actualSettings.privacy) applyUsageConsent(settings.privacy.shareAnonymousUsage === true);
+        return;
+    }
     const previousTabs = get().tabs;
     const updated = { ...previous, ...actualSettings };
     const privacyPatch = actualSettings.privacy;
@@ -81,7 +124,14 @@ async function persistSettingsUpdate(
             || currentUsage === optimisticUsage;
         if (rollbackThisRequest) {
             const rollbackPatch = Object.fromEntries(
-                changedKeys.map((key) => [key, previous[key]])
+                changedKeys
+                    // A late visibility failure must not undo a newer navigation action.
+                    .filter(key => key !== 'sidebarCollapsed' || (current[key] === updated[key]
+                        && get().globalSidebarSelectionRevision === sidebarSelectionRevision
+                        && get().settingsLoadGeneration === settingsLoadGeneration))
+                    // A reload may have installed newer/future navigation data while native save was pending.
+                    .filter(key => key !== 'workspaceNavigation' || current[key] === updated[key])
+                    .map((key) => [key, previous[key]])
             ) as Partial<AppSettings>;
             const rollbackState: Partial<AppStore> = {
                 settings: { ...current, ...rollbackPatch },
@@ -119,8 +169,20 @@ export interface AppSettings {
     windowOpacity: number;
     enableVibrancy: boolean;
     compactMode: boolean;
+    /** App-wide tab chrome default; saved per-tab overrides take precedence. */
+    mainTabCloseButton: MainTabCloseButtonMode;
     sidebarWidth: number;
     sidebarCollapsed: boolean;
+    /** Kept raw so unsupported future preferences survive unrelated settings updates. */
+    workspaceNavigation?: unknown;
+    /** Retired opaque data; never interpreted or edited, preserved across unrelated saves. */
+    workspaceLayoutPresets?: unknown;
+    /** Semantic colors; preserve unsupported formats for deliberate settings.json recovery. */
+    elementColors?: unknown;
+    /** Bounded imported theme; keep unsupported future documents raw on unrelated saves. */
+    customTheme?: unknown;
+    /** Raw versioned action presentation; unsupported data must not be overwritten. */
+    chromeActions?: unknown;
     sidebarSections: {
         vaultExpanded: boolean;
     };
@@ -287,6 +349,7 @@ export const defaultSettings: AppSettings = {
     windowOpacity: 1.0,
     enableVibrancy: false,
     compactMode: true,
+    mainTabCloseButton: 'hover',
     sidebarWidth: 288,
     sidebarCollapsed: false,
     sidebarSections: {
@@ -546,8 +609,9 @@ function normalizeTerminalFontFamily(fontFamily: string | undefined): string | u
     return trimmed;
 }
 
-async function persistSettings(settings: Record<string, unknown>): Promise<void> {
-    await invoke('settings_set', { settings });
+async function persistSettings(settings: Record<string, unknown>, expectedTheme?: ThemeSettingsSnapshot): Promise<void> {
+    if (expectedTheme) await invoke('settings_theme_set', { settings, expected: expectedTheme });
+    else await invoke('settings_set', { settings });
 }
 
 /** Built-in settings sidebar tabs (matches SettingsModal). */
@@ -568,11 +632,21 @@ export interface SettingsSlice {
     isSettingsOpen: boolean;
     /** When set, SettingsModal focuses this tab on open, then clears it. */
     settingsFocusTab: SettingsTabId | null;
+    /** Transient deep-link within Settings; never persisted as a preference. */
+    settingsFocusChromeArea: ChromeActionArea | null;
     isLoadingSettings: boolean;
+    /** Blocks preference writes during background reload without re-entering the boot gate. */
+    isReloadingSettings: boolean;
+    /** Invalidates pending layout-library publications when settings are reloaded. */
+    settingsLoadGeneration: number;
     appRoot: string | null;
 
     // Actions
     updateSettings: (settings: Partial<AppSettings>) => Promise<void>;
+    updateWorkspaceNavigation: (action: NavigationChange) => Promise<void>;
+    updateElementColors: (action: ElementColorChange) => Promise<void>;
+    importTheme: (theme: ThemeDocument) => Promise<void>;
+    updateChromeActions: (action: ChromeActionChange) => Promise<void>;
     updateAiSettings: (updates: Partial<AppSettings['ai']>) => Promise<void>;
     updateEditorSettings: (updates: Partial<AppSettings['editor']>) => Promise<void>;
     updateSidebarSectionsSettings: (updates: Partial<AppSettings['sidebarSections']>) => Promise<void>;
@@ -583,28 +657,105 @@ export interface SettingsSlice {
     updateSurveySettings: (updates: Partial<AppSettings['survey']>) => Promise<void>;
     updateGhostSuggestionsSettings: (updates: Partial<AppSettings['ghostSuggestions']>) => Promise<void>;
     updateKeybindings: (updates: Partial<AppSettings['keybindings']>) => Promise<void>;
+    /** In-memory save count shared by every shortcut editor, including reopened modals. */
+    pendingKeybindingWrites: number;
     updateKeyboardSettings: (updates: Partial<AppSettings['keyboard']>) => Promise<void>;
     toggleExpandedFolder: (folderPath: string) => Promise<void>;
     /** In-memory only (responsive layout). Does not write settings.json. */
     setSidebarCollapsedLocal: (collapsed: boolean) => void;
 
-    openSettings: (tab?: SettingsTabId) => void;
+    openSettings: (tab?: SettingsTabId, chromeArea?: ChromeActionArea) => void;
     clearSettingsFocusTab: () => void;
     closeSettings: () => void;
     loadSettings: () => Promise<void>;
     fetchSystemInfo: () => Promise<void>;
 }
 
-export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> = (set, get) => ({
+export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> = (set, get) => {
+    const themeWrites = createPreferencesQueue();
+    const keybindingWrites = createPreferencesQueue();
+    return ({
+    pendingKeybindingWrites: 0,
     settings: defaultSettings,
     isSettingsOpen: false,
     settingsFocusTab: null,
+    settingsFocusChromeArea: null,
     isLoadingSettings: true,
+    isReloadingSettings: false,
+    settingsLoadGeneration: 0,
     appRoot: null,
 
+    updateWorkspaceNavigation: createNavigationUpdater({
+        read: () => ({ loading: get().isLoadingSettings || get().isReloadingSettings,
+            generation: get().settingsLoadGeneration, value: get().settings.workspaceNavigation }),
+        save: (expected, value) => invoke('settings_navigation_save', { expected, value }),
+        publish: (before, value) => {
+            const current = get();
+            if (current.isLoadingSettings || current.isReloadingSettings || current.settingsLoadGeneration !== before.generation
+                || current.settings.workspaceNavigation !== before.value) return false;
+            const moved = resolveWorkspaceNavigation(before.value).workspaceTabsPosition !== value.workspaceTabsPosition;
+            set({ settings: { ...current.settings, workspaceNavigation: value },
+                ...(moved ? { globalSidebarSection: value.workspaceTabsPosition === 'default'
+                    ? current.globalSidebarSection === 'workspace' ? 'hosts' : current.globalSidebarSection
+                    : 'workspace', globalSidebarSelectionRevision: current.globalSidebarSelectionRevision + 1 } : {}) });
+            return true;
+        },
+    }),
+
+    updateElementColors: createElementColorUpdater({
+        read: () => ({ loading: get().isLoadingSettings || get().isReloadingSettings, generation: get().settingsLoadGeneration,
+            value: get().settings.elementColors }),
+        save: (expected, value) => invoke('settings_element_colors_save', { expected, value }),
+        publish: (before, value) => {
+            const current = get();
+            if (current.isLoadingSettings || current.isReloadingSettings || current.settingsLoadGeneration !== before.generation
+                || current.settings.elementColors !== before.value) return false;
+            set({ settings: { ...current.settings, elementColors: value } });
+            return true;
+        },
+    }, themeWrites),
+
+    updateChromeActions: createChromeActionUpdater({
+        read: () => ({ loading: get().isLoadingSettings || get().isReloadingSettings, generation: get().settingsLoadGeneration,
+            value: get().settings.chromeActions }),
+        save: (expected, value) => invoke('settings_chrome_actions_save', { expected, value }),
+        publish: (before, value) => {
+            const current = get();
+            if (current.isLoadingSettings || current.isReloadingSettings || current.settingsLoadGeneration !== before.generation
+                || current.settings.chromeActions !== before.value) return false;
+            set({ settings: { ...current.settings, chromeActions: value } });
+            return true;
+        },
+    }),
+
+    importTheme: createThemeImportUpdater({
+        read: () => ({ loading: get().isLoadingSettings || get().isReloadingSettings,
+            generation: get().settingsLoadGeneration, value: themeSettingsSnapshot(get().settings) }),
+        save: (expected, value) => invoke('settings_theme_import', {
+            expected: expected.exists ? expected.value : null, value: value.customTheme,
+        }),
+        publish: (before, value) => {
+            const current = get();
+            if (current.isLoadingSettings || current.isReloadingSettings || current.settingsLoadGeneration !== before.generation
+                || !sameThemeSettings(themeSettingsSnapshot(current.settings), before.value as ThemeSettingsSnapshot)) return false;
+            set({ settings: { ...current.settings, ...value } });
+            return true;
+        },
+    }, themeWrites),
+
     loadSettings: async () => {
+        const generation = get().settingsLoadGeneration + 1;
+        set({ settingsLoadGeneration: generation, isReloadingSettings: true });
         try {
             const loaded = await invoke<AppSettings>('settings_get');
+            if (get().settingsLoadGeneration !== generation) return;
+            // A genuinely empty settings file is a new installation. Persist its
+            // preset once so later partial saves/restarts retain the same policy.
+            if (get().isLoadingSettings && loaded && Object.keys(loaded).length === 0) {
+                await persistSettings({ keyboard: DEFAULT_KEYBOARD_SETTINGS });
+                loaded.keyboard = normalizeKeyboardSettings(DEFAULT_KEYBOARD_SETTINGS);
+                if (get().settingsLoadGeneration !== generation) return;
+            }
             const merged = {
                 ...defaultSettings,
                 ...loaded,
@@ -659,10 +810,10 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
                 survey: normalizeSurveySettings(loaded?.survey),
                 expandedFolders: loaded?.expandedFolders || []
             };
-            set({ settings: merged, isLoadingSettings: false });
+            set({ settings: merged, isLoadingSettings: false, isReloadingSettings: false });
         } catch (error) {
             console.error('Failed to load settings:', error);
-            set({ isLoadingSettings: false });
+            if (get().settingsLoadGeneration === generation) set({ isLoadingSettings: false, isReloadingSettings: false });
         }
     },
 
@@ -670,7 +821,11 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
         const touchesUsageConsent = Boolean(
             newSettings.privacy && 'shareAnonymousUsage' in newSettings.privacy,
         );
-        const run = () => persistSettingsUpdate(get, set, newSettings);
+        // Copy the theme intent before queueing; never capture an optimistic snapshot.
+        const patch = { ...newSettings };
+        const run = () => ('theme' in patch || 'accentColor' in patch)
+            ? themeWrites(() => persistSettingsUpdate(get, set, patch))
+            : persistSettingsUpdate(get, set, patch);
         if (!touchesUsageConsent) return run();
         const chained = usageConsentWrites.then(run, run);
         usageConsentWrites = chained.then(() => undefined, () => undefined);
@@ -992,23 +1147,34 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
     },
 
     updateKeybindings: async (updates) => {
-        const previous = get().settings;
-        const updated = {
-            ...previous,
-            keybindings: { ...previous.keybindings, ...updates }
-        };
-        set({ settings: updated });
-        const changedKeys = Object.keys(updates) as Array<keyof AppSettings['keybindings']>;
+        // Snapshot intent before waiting; read the rollback baseline only after
+        // prior writes have settled so it can never contain their failed edits.
+        const patch = { ...updates };
+        set(state => ({ pendingKeybindingWrites: state.pendingKeybindingWrites + 1 }));
         try {
-            await persistSettings({ keybindings: updates });
-        } catch (error) {
-            console.error('Failed to save keybindings:', error);
-            const current = get().settings;
-            const rollbackPatch = Object.fromEntries(
-                changedKeys.map((key) => [key, previous.keybindings[key]])
-            ) as Partial<AppSettings['keybindings']>;
-            set({ settings: { ...current, keybindings: { ...current.keybindings, ...rollbackPatch } } });
-            throw error;
+            await keybindingWrites(async () => {
+                const previous = get().settings;
+                const updated = {
+                    ...previous,
+                    keybindings: { ...previous.keybindings, ...patch }
+                };
+                set({ settings: updated });
+                const changedKeys = Object.keys(patch) as Array<keyof AppSettings['keybindings']>;
+                try {
+                    await persistSettings({ keybindings: patch });
+                } catch (error) {
+                    console.error('Failed to save keybindings:', error);
+                    const current = get().settings;
+                    const rollbackPatch = Object.fromEntries(
+                        changedKeys.filter((key) => current.keybindings[key] === updated.keybindings[key])
+                            .map((key) => [key, previous.keybindings[key]])
+                    ) as Partial<AppSettings['keybindings']>;
+                    set({ settings: { ...current, keybindings: { ...current.keybindings, ...rollbackPatch } } });
+                    throw error;
+                }
+            });
+        } finally {
+            set(state => ({ pendingKeybindingWrites: state.pendingKeybindingWrites - 1 }));
         }
     },
 
@@ -1031,12 +1197,13 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
         }
     },
 
-    openSettings: (tab) => set({
+    openSettings: (tab, chromeArea) => set({
         isSettingsOpen: true,
         settingsFocusTab: tab ?? null,
+        settingsFocusChromeArea: chromeArea ?? null,
     }),
-    clearSettingsFocusTab: () => set({ settingsFocusTab: null }),
-    closeSettings: () => set({ isSettingsOpen: false, settingsFocusTab: null }),
+    clearSettingsFocusTab: () => set({ settingsFocusTab: null, settingsFocusChromeArea: null }),
+    closeSettings: () => set({ isSettingsOpen: false, settingsFocusTab: null, settingsFocusChromeArea: null }),
     fetchSystemInfo: async () => {
         try {
             const info = await invoke<{ app_root: string }>('get_system_info');
@@ -1045,4 +1212,5 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
             console.error('Failed to fetch system info:', e);
         }
     }
-});
+    });
+};
