@@ -23,6 +23,8 @@
     "include": [
         "tests/themeFiles.browser.tsx",
         "tests/settingsOrganization.browser.tsx",
+        "src/components/layout/WorkspaceTabAppearanceDialog.tsx",
+        "src/components/layout/useWorkspaceTabCloseFocus.ts",
         "src/features/appearance/domain/elementColors.ts",
         "src/features/appearance/application/updateElementColors.ts",
         "src/features/appearance/presentation/elementColorStyle.ts",
@@ -80,6 +82,8 @@
         "src/components/settings/tabs/terminal/TerminalAppearanceSection.tsx",
         "src/components/ui/Input.tsx",
         "src/components/ui/Textarea.tsx",
+        "src/components/workspace/DisplayAliasDialog.tsx",
+        "src/components/layout/WorkspaceTabList.tsx",
         "src/components/ui/Select.tsx",
         "src/components/ui/TopbarDropdown.tsx",
         "src/components/ui/MenuSubmenu.tsx",
@@ -192,6 +196,7 @@
         "src/lib/releaseNotes/mediaUrls.ts",
         "src/lib/releaseNotes/alerts.ts",
         "src/lib/releaseNotes/headings.ts",
+        "src/components/workspace/PaneHeader.tsx",
         "src/features/workspace/domain/registrations.ts",
         "src/features/workspace/domain/contentInventory.ts",
         "src/features/workspace/application/viewRegistrationAdapters.ts",
@@ -280,6 +285,9 @@
         "src/features/workspace/domain/dockingTopology.ts",
         "src/features/workspace/domain/canvases.ts",
         "src/components/settings/common/FontStackField.tsx",
-        "src/components/layout/sidebar/useSidebarResize.ts"
+        "src/components/layout/sidebar/useSidebarResize.ts",
+        "src/components/settings/tabs/layout/WorkspaceTabsSection.tsx",
+        "src/components/layout/WorkspaceTabDecoration.tsx",
+        "src/components/layout/workspaceTabContextMenu.ts"
     ]
 }

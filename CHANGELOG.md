@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Implementation progress
 
+- Introduce reusable tab labels, appearance controls, alias dialogs and close-focus behavior.
+
+### Implementation progress
+
 - Share pointer drag sessions, insertion feedback and click suppression across workspace tab strips.
 
 ### Implementation progress
