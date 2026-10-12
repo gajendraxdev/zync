@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Implementation progress
 
+- Keep imported custom theme selectors device-local on settings upload and restore, with compatibility regression tests.
+
+### Implementation progress
+
 - Persist bounded pane docking and presentation metadata with compatible restore and no-overwrite recovery snapshots.
 
 ### Implementation progress
