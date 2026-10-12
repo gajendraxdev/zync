@@ -27,6 +27,8 @@ tauri-plugin-store = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
+# Already used transitively; portable no-overwrite publication of recovery snapshots.
+tempfile = "3.24"
 russh = "0.46"
 russh-keys = "0.46"
 portable-pty = "0.8"
@@ -42,6 +44,7 @@ tauri-plugin-updater = "2.10"
 base64 = "0.21"
 url = "2.5"
 percent-encoding = "2.3"
+# Match renderer NFC name validation using the ICU data already used by URL/IDNA.
 regex = "1.12.3"
 semver = "1"
 tauri-plugin-clipboard-manager = "2.3.2"

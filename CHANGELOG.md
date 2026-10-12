@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Implementation progress
 
+- Persist bounded pane docking and presentation metadata with compatible restore and no-overwrite recovery snapshots.
+
+### Implementation progress
+
 - Validate and atomically persist managed navigation, element colors, theme imports and chrome preferences in native commands.
 
 ### Implementation progress
