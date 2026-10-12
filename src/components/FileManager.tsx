@@ -103,10 +103,12 @@ function terminalHereMenuItems(
   listedPath: string,
   file: { type: string; name: string; path?: string } | undefined,
   onDone: () => void,
+  instanceId?: string,
 ): ContextMenuItem[] {
-  const splitDisabled = !canSplitBesideFiles(connectionId);
+  const splitDisabled = !canSplitBesideFiles(connectionId, { instanceId });
+  const syncedSplitDisabled = !canSplitBesideFiles(connectionId, { instanceId, synced: true });
   const run = (opts?: { synced?: boolean; edge?: 'left' | 'right' | 'top' | 'bottom' }) => {
-    void openTerminalHere(connectionId, listedPath, { ...opts, file }).then(onDone);
+    void openTerminalHere(connectionId, listedPath, { ...opts, file, instanceId }).then(onDone);
   };
   return [
     {
@@ -124,7 +126,7 @@ function terminalHereMenuItems(
       children: openHerePlacementItems(
         () => run({ synced: true }),
         (edge) => run({ synced: true, edge }),
-        splitDisabled,
+        syncedSplitDisabled,
       ),
     },
   ];
@@ -1600,6 +1602,7 @@ export const FileManager = memo(function FileManager({
               currentPath,
               contextMenu.file,
               () => setContextMenu(null),
+              instanceId,
             )
           : []),
         ...(contextMenu.file.type === 'd' ? [{
@@ -1658,7 +1661,7 @@ export const FileManager = memo(function FileManager({
         },
         { separator: true },
         ...(activeConnectionId
-          ? terminalHereMenuItems(activeConnectionId, currentPath, undefined, () => setContextMenu(null))
+          ? terminalHereMenuItems(activeConnectionId, currentPath, undefined, () => setContextMenu(null), instanceId)
           : []),
         { separator: true },
         {

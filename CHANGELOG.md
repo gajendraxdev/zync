@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Implementation progress
 
+- Resolve open-here split actions against stable visible content and respect docking capacity and persistence gates.
+
+### Implementation progress
+
 - Add resizable docking regions and shared drag hit-testing with explicit previews, reorder insertion and cancellation safety.
 
 ### Implementation progress

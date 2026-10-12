@@ -14,7 +14,6 @@ export {
     openTerminalHere,
     canDockHere,
     canSplitBesideFiles,
-    filesAlreadyInSplit,
     directoryFromFileLocation,
     isUnconfirmedHomeToken,
     isUnresolvedFilesPath,
