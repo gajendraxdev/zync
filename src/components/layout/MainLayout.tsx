@@ -737,10 +737,14 @@ const TabContent = memo(function TabContent({ tab, isActive }: {
 
 
     const dockPointer = useMemo<DockTabPointerHandlers>(() => ({
+        contextId: tab.id,
+        isEnabled: () => useAppStore.getState().activeTabId === tab.id,
         getSurface: () => dockSurfaceRef.current,
         // Dragging never changes the visible destination canvas.
         onDragStart: () => {},
-        onDragEnd: (payload, edge, paneId) => {
+        onDragEnd: (payload, target) => {
+            if (target?.kind !== 'pane') return;
+            const { edge, paneId } = target;
             if (!edge || !paneId || !tab.connectionId) return;
             const result = dockInSplit(tab.connectionId, payload, edge, paneId);
             if (result === 'refused-cap') {
