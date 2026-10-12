@@ -2,6 +2,8 @@ import { useState } from 'react';
 import type { AppSettings } from '../../../store/settingsSlice';
 import { useAppStore } from '../../../store/useAppStore';
 import { FILE_RECENT_LIMIT_CHOICES, clampFileRecentLimit } from '../../file-manager/fileChrome';
+import { Button } from '../../ui/Button';
+import { Toolbar } from '../../ui/Toolbar';
 import { Section } from '../common/Section';
 import { Toggle } from '../common/Toggle';
 
@@ -65,8 +67,8 @@ export function FileManagerTab({
                         onChange={(v) => { void runUpdate(() => updateFileManagerSettings({ clickPolicy: v ? 'single' : 'double' })); }}
                     />
                     <div className="p-4 bg-[var(--color-app-surface)]/50 rounded-lg border border-[var(--color-app-border)]/50">
-                        <div className="flex items-center justify-between gap-3">
-                            <div className="min-w-0">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="min-w-0 flex-1 basis-40">
                                 <div className="text-sm font-medium text-[var(--color-app-text)]">Default Download Folder</div>
                                 <div
                                     className="text-xs text-[var(--color-app-muted)] mt-1 truncate"
@@ -75,24 +77,26 @@ export function FileManagerTab({
                                     {settings.fileManager.defaultDownloadPath || 'Ask every time'}
                                 </div>
                             </div>
-                            <div className="flex items-center gap-2">
-                                <button
+                            <Toolbar label="Default download folder actions">
+                                <Button
                                     type="button"
+                                    variant="secondary"
+                                    size="sm"
                                     disabled={isUpdating}
                                     onClick={() => { void runUpdate(onPickDefaultDownloadPath); }}
-                                    className="px-3 py-1.5 bg-[var(--color-app-bg)] border border-[var(--color-app-border)] rounded-md text-xs font-medium text-[var(--color-app-text)] hover:border-[var(--color-app-accent)]/50 disabled:hover:border-[var(--color-app-border)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                                 >
                                     Browse
-                                </button>
-                                <button
+                                </Button>
+                                <Button
                                     type="button"
+                                    variant="secondary"
+                                    size="sm"
                                     disabled={isUpdating}
                                     onClick={() => { void runUpdate(() => updateFileManagerSettings({ defaultDownloadPath: '' })); }}
-                                    className="px-3 py-1.5 bg-[var(--color-app-bg)] border border-[var(--color-app-border)] rounded-md text-xs font-medium text-[var(--color-app-muted)] hover:text-[var(--color-app-text)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                                 >
                                     Reset
-                                </button>
-                            </div>
+                                </Button>
+                            </Toolbar>
                         </div>
                     </div>
                 </div>

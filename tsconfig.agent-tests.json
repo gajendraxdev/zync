@@ -252,6 +252,7 @@
         "src/features/usage/types.ts",
         "src/store/sessionPersistence.ts",
         "src/components/workspace/workspaceDockingSurfaces.ts",
+        "tests/settingsPopups.browser.tsx",
         "src/vault/credentialTypes.ts",
         "src/vault/profileTypes.ts",
         "src/vault/syncError.ts",

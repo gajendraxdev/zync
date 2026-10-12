@@ -56,6 +56,7 @@ const tests = [
   'tests/elementColorPreview.test.mjs',
   'tests/elementColorEditor.test.mjs',
   'tests/colorPicker.test.mjs',
+  'tests/settingsControlIntegration.test.mjs',
   'tests/terminalIdlePtyPolicy.test.mjs',
   'tests/workspacePresentation.test.mjs',
   'tests/workspaceRegistrations.test.mjs',

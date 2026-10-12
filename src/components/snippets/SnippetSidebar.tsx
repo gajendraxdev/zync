@@ -3,7 +3,7 @@ import { Globe, Server, X, Search, Terminal, Settings2, SlidersHorizontal } from
 import { useAppStore } from '../../store/useAppStore';
 import { track } from '../../features/usage';
 import { cn } from '../../lib/utils';
-import { formatShortcutLabel } from '../../lib/shortcuts';
+import { shortcutHint } from '../../features/shortcuts/labels';
 import { TerminalQuickSettings } from './TerminalQuickSettings';
 
 type SessionToolId = 'snippets' | 'terminal';
@@ -43,8 +43,7 @@ export function SnippetSidebar({ connectionId, tabId, isOpen, onClose, restoreTe
     const inputRef = useRef<HTMLInputElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
     const wasOpenRef = useRef(isOpen);
-    const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform);
-    const shortcutLabel = formatShortcutLabel('Ctrl+Shift+S', isMac);
+    const shortcutLabel = useAppStore(state => shortcutHint('snippetsFeature', state.settings.keybindings ?? {}));
 
     useEffect(() => {
         const wasOpen = wasOpenRef.current;
@@ -161,7 +160,7 @@ export function SnippetSidebar({ connectionId, tabId, isOpen, onClose, restoreTe
                     type="button"
                     onClick={onClose}
                     className="text-app-muted hover:text-app-text hover:bg-app-surface/50 transition-all p-1 rounded-md shrink-0"
-                    title={`Close (${shortcutLabel})`}
+                    title={shortcutLabel ? `Close (${shortcutLabel})` : 'Close'}
                     aria-label="Close session tools"
                 >
                     <X size={12} />

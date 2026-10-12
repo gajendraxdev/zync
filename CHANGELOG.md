@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Implementation progress
 
+- Finish settings and session-tool controls on shared button, field, header and focus primitives.
+
+### Implementation progress
+
 - Integrate workspace navigation, grouped content tabs, docking, hide/reveal recovery and kind-agnostic plugin registration.
 
 ### Implementation progress

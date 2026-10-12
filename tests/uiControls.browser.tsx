@@ -3,13 +3,16 @@ import { createRoot } from 'react-dom/client';
 import { Plus, Copy, X, RefreshCw } from 'lucide-react';
 import { Button } from '../src/components/ui/Button';
 import { Input } from '../src/components/ui/Input';
+import { Textarea } from '../src/components/ui/Textarea';
 import { IconButton } from '../src/components/ui/IconButton';
 import { PanelHeader } from '../src/components/ui/PanelHeader';
 import { Toolbar } from '../src/components/ui/Toolbar';
+import { StateMessage } from '../src/components/ui/StateMessage';
 import { Switch } from '../src/components/ui/Switch';
 import { Toggle } from '../src/components/settings/common/Toggle';
 import { SettingsGroup } from '../src/components/settings/common/SettingsGroup';
 import { SettingsNavigation, settingsPanelId, settingsTabId, type SettingsSection } from '../src/components/settings/SettingsNavigation';
+import { FontStackField } from '../src/components/settings/common/FontStackField';
 import '../src/index.css';
 import './uiControls.browser.css';
 
@@ -21,10 +24,15 @@ function ControlExamples({ theme }: { theme: 'dark' | 'light' }) {
   const [actions, setActions] = useState(0);
   const [parentActions, setParentActions] = useState(0);
   const actionRef = useRef<HTMLButtonElement>(null);
+  const statusRef = useRef<HTMLParagraphElement>(null);
   const [enabled, setEnabled] = useState(false);
   const [switchChanges, setSwitchChanges] = useState(0);
   const changeSwitch = (value: boolean) => { setEnabled(value); setSwitchChanges(count => count + 1); };
   const inputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [notes, setNotes] = useState('First line\nSecond line');
+  const [fontDraft, setFontDraft] = useState('Example, monospace');
+  const [fontApplies, setFontApplies] = useState(0);
   const [section, setSection] = useState<SettingsSection>('general');
   const [jsonOpens, setJsonOpens] = useState(0);
   return <section className="control-gallery-panel" data-gallery-theme={theme} aria-label={`${theme} controls`}>
@@ -67,11 +75,22 @@ function ControlExamples({ theme }: { theme: 'dark' | 'light' }) {
         <button type="button" onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? 'Hide password' : 'Show password'}>{showPassword ? 'Hide' : 'Show'}</button>
       } />
       <Input label="Caller-sized field" className="h-7 rounded-none text-xs" placeholder="Compact override" data-compact-input />
+      <Textarea ref={textareaRef} label={`${theme} multiline notes`} value={notes} onChange={event => setNotes(event.target.value)}
+        rows={3} maxLength={200} name="notes" data-textarea />
+      <Textarea label="Invalid notes" error="Enter notes." aria-describedby={`${theme}-hint`} rows={2} data-invalid-textarea />
+      <Textarea label="Disabled notes" disabled defaultValue="Unavailable" rows={2} data-disabled-textarea />
+      <Textarea label="Read-only notes" readOnly defaultValue="Readable notes" rows={2} data-readonly-textarea />
       <div className="control-gallery-row">
         <Button type="button" variant="secondary" onClick={() => inputRef.current?.focus()}>Focus name</Button>
+        <Button type="button" variant="secondary" onClick={() => textareaRef.current?.focus()}>Focus notes</Button>
         <Button type="submit" data-submit>Submit fixture</Button>
       </div>
       <output aria-live="polite">Submissions: {submissions}</output>
+      <div className="w-[240px] max-w-full" data-font-field>
+        <FontStackField label={`${theme} custom font`} value={fontDraft} onChange={setFontDraft}
+          onApply={() => setFontApplies(count => count + 1)} placeholder="Example font" monospace />
+        <output aria-live="polite">Font applies: {fontApplies}</output>
+      </div>
       <div className="control-gallery-row">
         <Switch label={`${theme} compact preview`} checked={enabled} onCheckedChange={changeSwitch} data-switch />
         <Switch label={`${theme} disabled off`} checked={false} onCheckedChange={changeSwitch} disabled data-disabled-switch />
@@ -106,6 +125,13 @@ function ControlExamples({ theme }: { theme: 'dark' | 'light' }) {
         </div>)}
       </div>
     </form>
+    <section className="mt-6 w-[240px] max-w-full space-y-2" data-state-messages aria-label={`${theme} state messages`}>
+      <StateMessage variant="empty" data-empty-state>No items yet.</StateMessage>
+      <StateMessage variant="error" data-error-state>Could not save these preferences. Your current settings are unchanged.</StateMessage>
+      <StateMessage ref={statusRef} variant="status" tabIndex={-1} data-status-state>Preferences saved.</StateMessage>
+      <StateMessage variant="empty" data-long-state>{'Unbroken'.repeat(30)}</StateMessage>
+      <Button type="button" variant="secondary" size="sm" data-focus-status onClick={() => statusRef.current?.focus()}>Focus result</Button>
+    </section>
     <div data-layout-example className="mt-6 w-full max-w-[320px] border border-app-border" onClick={() => setParentActions(count => count + 1)}>
       <PanelHeader title="A long panel title that must not cover the actions" titleId={`${theme}-panel-title`} headingLevel={3}
         icon={<Plus size={16} />} actions={<IconButton label="Close preview panel" icon={<X size={16} />} onClick={event => { event.stopPropagation(); setActions(count => count + 1); }} />} />
@@ -131,6 +157,18 @@ function runChecks(): string[] {
   };
   for (const theme of ['dark', 'light']) {
     const panel = document.querySelector<HTMLElement>(`[data-gallery-theme="${theme}"]`)!;
+    const states = panel.querySelector<HTMLElement>('[data-state-messages]')!;
+    const empty = states.querySelector<HTMLParagraphElement>('[data-empty-state]')!;
+    const error = states.querySelector<HTMLParagraphElement>('[data-error-state]')!;
+    const status = states.querySelector<HTMLParagraphElement>('[data-status-state]')!;
+    check(!empty.hasAttribute('role') && !empty.hasAttribute('aria-live') && !empty.hasAttribute('tabindex'), `${theme}: empty state is quiet and outside Tab order`);
+    check(error.getAttribute('role') === 'alert' && status.getAttribute('role') === 'status', `${theme}: error and result announcement roles`);
+    check(states.scrollWidth <= states.clientWidth, `${theme}: state text wraps within a narrow surface`);
+    check(getComputedStyle(error).color !== getComputedStyle(empty).color, `${theme}: error uses a distinct semantic color`);
+    const previousFocus = document.activeElement;
+    states.querySelector<HTMLButtonElement>('[data-focus-status]')!.click();
+    check(document.activeElement === status && status.tabIndex === -1, `${theme}: owner can focus the forwarded status ref`);
+    if (previousFocus instanceof HTMLElement) previousFocus.focus();
     const navigation = panel.querySelector<HTMLElement>('[data-settings-navigation]')!;
     const list = navigation.querySelector<HTMLElement>('[role="tablist"]')!;
     const tabs = [...list.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
@@ -148,6 +186,22 @@ function runChecks(): string[] {
     const compact = panel.querySelector<HTMLButtonElement>('[data-compact]')!;
     const compactInput = panel.querySelector<HTMLInputElement>('[data-compact-input]')!;
     const loading = panel.querySelector<HTMLButtonElement>('[data-loading]')!;
+    const textarea = panel.querySelector<HTMLTextAreaElement>('[data-textarea]')!;
+    const invalidTextarea = panel.querySelector<HTMLTextAreaElement>('[data-invalid-textarea]')!;
+    check(getComputedStyle(textarea).borderRadius === getComputedStyle(input).borderRadius, `${theme}: multiline/input radius matches`);
+    check(getComputedStyle(textarea).resize === 'vertical', `${theme}: multiline resize is vertical`);
+    check(textarea.labels?.[0]?.textContent === `${theme} multiline notes`, `${theme}: multiline label association`);
+    check(textarea.rows === 3 && textarea.maxLength === 200 && textarea.name === 'notes', `${theme}: multiline native attributes preserved`);
+    check(invalidTextarea.getAttribute('aria-invalid') === 'true'
+      && (invalidTextarea.getAttribute('aria-describedby') ?? '').split(' ').every(id => document.getElementById(id)), `${theme}: multiline error and hint association`);
+    check(panel.querySelector<HTMLTextAreaElement>('[data-disabled-textarea]')!.disabled
+      && panel.querySelector<HTMLTextAreaElement>('[data-readonly-textarea]')!.readOnly, `${theme}: multiline disabled/read-only states`);
+    const fontField = panel.querySelector<HTMLElement>('[data-font-field]')!;
+    const fontInput = fontField.querySelector<HTMLInputElement>('input')!;
+    const fontApply = fontField.querySelector<HTMLButtonElement>('button')!;
+    check(fontField.scrollWidth <= fontField.clientWidth, `${theme}: custom font row fits a narrow surface`);
+    check(fontInput.labels?.[0]?.textContent === `${theme} custom font`, `${theme}: custom font label association`);
+    check(fontApply.type === 'button', `${theme}: custom font Apply cannot submit implicitly`);
     check(getComputedStyle(medium).height === getComputedStyle(input).height, `${theme}: input/button height matches`);
     check(getComputedStyle(medium).borderRadius === getComputedStyle(input).borderRadius, `${theme}: input/button radius matches`);
     check(getComputedStyle(compact).height === '28px' && getComputedStyle(compactInput).height === '28px', `${theme}: caller height override`);

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Button } from '../src/components/ui/Button';
 import { Input } from '../src/components/ui/Input';
@@ -7,6 +7,13 @@ import { Modal } from '../src/components/ui/Modal';
 import { ContextMenu } from '../src/components/ui/ContextMenu';
 import { TopbarDropdown } from '../src/components/ui/TopbarDropdown';
 import { MENU_ITEM_CLASSES } from '../src/components/ui/surfaceStyles';
+import { Provider as TooltipProvider } from '@radix-ui/react-tooltip';
+import { SidebarSection } from '../src/components/layout/sidebar/SidebarSection';
+import { SidebarActionButton } from '../src/components/layout/sidebar/SidebarActionButton';
+import { SplitSidebarActionButton } from '../src/components/layout/sidebar/SplitSidebarActionButton';
+import { ConnectionItem } from '../src/components/layout/sidebar/ConnectionItem';
+import { useAppStore, type Connection } from '../src/store/useAppStore';
+import { Server, Shield } from 'lucide-react';
 import '../src/index.css';
 import './uiOverlays.browser.css';
 
@@ -16,6 +23,38 @@ const options = [
   { value: 'pwsh', label: 'PowerShell', description: 'Cross-platform shell' },
 ];
 
+const fixtureHost: Connection = { id: 'sidebar-fixture', name: 'Fixture host', host: 'example.invalid',
+  username: 'fixture', port: 22, status: 'connected' };
+
+function SidebarControlsFixture() {
+  const [actions, setActions] = useState({ opened: 0, edited: 0, disconnected: 0, created: 0 });
+  const [expanded, setExpanded] = useState(false);
+  useEffect(() => {
+    const { openTab, disconnect } = useAppStore.getState();
+    // In-memory callbacks only; this page never connects/disconnects a real host.
+    useAppStore.setState({
+      openTab: () => setActions(value => ({ ...value, opened: value.opened + 1 })),
+      disconnect: async () => { setActions(value => ({ ...value, disconnected: value.disconnected + 1 })); },
+    });
+    return () => { useAppStore.setState({ openTab, disconnect }); };
+  }, []);
+  return <section aria-label="Sidebar controls" className="mt-6 max-w-sm">
+    <h2>Sidebar controls</h2>
+    <div className="overflow-hidden rounded-lg bg-app-panel p-1">
+      <SidebarSection title="All Hosts" count={102} variant="action" icon={<Server size={14} />}
+        createMenu={[{ id: 'host', label: 'New fixture host', onSelect: () => setActions(value => ({ ...value, created: value.created + 1 })) }]}>
+        <ConnectionItem conn={fixtureHost} isCollapsed={false}
+          onEdit={() => setActions(value => ({ ...value, edited: value.edited + 1 }))} onOpenContextMenu={() => {}} />
+      </SidebarSection>
+      <SidebarActionButton label="Forwarding fixture" icon={<Server size={14} />} onClick={() => {}} />
+      <SplitSidebarActionButton label="Vault fixture" icon={<Shield size={14} />} expanded={expanded}
+        toggleAriaLabel="Toggle vault fixture" badge={3} badgeTitle="3 unsecured fixture hosts"
+        onPrimaryClick={() => {}} onToggleClick={() => setExpanded(value => !value)} />
+    </div>
+    <output aria-label="Sidebar action counts">Opened: {actions.opened}; edited: {actions.edited}; disconnected: {actions.disconnected}; created: {actions.created}</output>
+  </section>;
+}
+
 /** Isolated overlay fixtures exercise production portals without app data or native IPC. */
 function Gallery() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
@@ -23,6 +62,8 @@ function Gallery() {
   const [modal, setModal] = useState<'normal' | 'explicit' | 'autofocus' | 'hidden-controls' | 'no-controls' | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [topbarOpen, setTopbarOpen] = useState(false);
+  const [anchoredOpen, setAnchoredOpen] = useState(false);
+  const anchoredTrigger = useRef<HTMLButtonElement>(null);
   const [actions, setActions] = useState(0);
   const recordAction = () => setActions(value => value + 1);
   useEffect(() => {
@@ -38,6 +79,16 @@ function Gallery() {
       <Button type="button" variant="secondary" onClick={() => setTheme(value => value === 'dark' ? 'light' : 'dark')}>Use {theme === 'dark' ? 'light' : 'dark'} theme</Button>
       <output aria-live="polite">Actions: {actions}; selected: {shell}</output>
     </div>
+    <div className="flex justify-end">
+      <Button ref={anchoredTrigger} type="button" variant="secondary" aria-expanded={anchoredOpen}
+        onClick={() => setAnchoredOpen(value => !value)}>Toggle anchored profile popup</Button>
+      {anchoredOpen && <TopbarDropdown anchor={anchoredTrigger.current} align="right" widthClass="w-64"
+        role="menu" aria-label="Anchored profile actions">
+        <button type="button" role="menuitem" className={`${MENU_ITEM_CLASSES} w-full hover:bg-app-surface`}
+          onClick={() => { recordAction(); setAnchoredOpen(false); }}>Profile fixture action</button>
+      </TopbarDropdown>}
+    </div>
+    <SidebarControlsFixture />
     <div className="overlay-gallery-grid">
       <section>
         <h2>Dropdowns</h2>
@@ -97,4 +148,4 @@ function Gallery() {
   </main>;
 }
 
-createRoot(document.getElementById('root')!).render(<Gallery />);
+createRoot(document.getElementById('root')!).render(<TooltipProvider delayDuration={120}><Gallery /></TooltipProvider>);
