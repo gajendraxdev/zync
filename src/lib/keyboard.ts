@@ -37,18 +37,5 @@ export function isMatch(e: KeyboardEvent, binding: string): boolean {
 
     const targetKey = mainKeys[0];
 
-    // Map common aliases to standard KeyboardEvent.key values (lowercase)
-    const aliases: Record<string, string> = {
-        'left': 'arrowleft',
-        'right': 'arrowright',
-        'up': 'arrowup',
-        'down': 'arrowdown',
-        'esc': 'escape',
-        'return': 'enter',
-        'space': ' ',
-        'plus': '+',
-    };
-
-    const normalizedTarget = aliases[targetKey] || targetKey;
-    return shortcutMainKeyMatches(e, normalizedTarget, needsShift);
+    return shortcutMainKeyMatches(e, targetKey, needsShift);
 }

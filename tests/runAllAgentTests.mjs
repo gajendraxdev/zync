@@ -65,6 +65,7 @@ const tests = [
   'tests/workspaceRegionResize.test.mjs',
   'tests/workspaceRegionDropPointer.test.mjs',
   'tests/tabDrag.test.mjs',
+  'tests/workspaceShortcutActions.test.mjs',
   'tests/mainTabPresentation.test.mjs',
   'tests/paneHeader.test.mjs',
   'tests/displayAliasDialog.test.mjs',

@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 
 const { chromium } = await import(process.env.ZYNC_PLAYWRIGHT_MODULE || 'playwright');
 const modules = [
-  'features/shortcuts/route', 'features/shortcuts/catalog', 'features/shortcuts/policy', 'features/shortcuts/focus',
+  'features/shortcuts/route', 'features/shortcuts/catalog', 'features/shortcuts/policy', 'features/shortcuts/focus', 'features/shortcuts/bindings',
   'lib/shortcuts', 'lib/terminal/terminalKeyRouting', 'lib/terminal/ptyKeyTranslations',
   'lib/terminal/terminalInteraction', 'lib/terminal/terminalClipboard', 'lib/terminal/terminalShellContext',
   'lib/ghostSuggestions/inputTracker', 'lib/ghostSuggestions/escapeInput',
@@ -142,6 +142,16 @@ try {
   assert.equal(safety.paste, '\x1b[200~hello\rworld\x1b[201~', 'xterm bracketed paste preserved without auto-submit');
   assert.equal(safety.safe, false);
   assert.equal(safety.desynced, true);
+  // Explicit reservations work in alternate-screen applications too; keys not
+  // reserved keep their original xterm meaning. No process-name heuristic.
+  await page.evaluate(() => { inputTest.exceptions = ['navigationHosts']; inputTest.actions = []; inputTest.bytes = [[], []]; });
+  await page.keyboard.press(`${mod}+Alt+1`);
+  assert.deepEqual(await page.evaluate(() => inputTest.actions), ['navigationHosts']);
+  assert.deepEqual(await page.evaluate(() => inputTest.bytes), [[], []], 'reserved navigation never also writes bytes');
+  await page.locator('#field').focus();
+  await page.keyboard.press(`${mod}+Alt+1`);
+  assert.deepEqual(await page.evaluate(() => inputTest.actions), ['navigationHosts'], 'reserved navigation leaves fields alone');
+  await page.evaluate(() => inputTest.terms[0].focus());
   await page.keyboard.press('ArrowRight');
   assert.deepEqual(await page.evaluate(() => inputTest.bytes[0]), ['\x1b[C'], 'alternate-screen arrow cannot accept stale suggestion');
 

@@ -1,5 +1,7 @@
 import { useEffect, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import { isMatch } from '../../lib/keyboard';
+import { SHORTCUT_CATALOG } from '../../features/shortcuts/catalog';
+import { shortcutBindings } from '../../features/shortcuts/bindings';
 import type { AppSettings } from '../../store/settingsSlice';
 import type { FileEntry } from './types';
 
@@ -96,9 +98,12 @@ export function useFileKeyboard({
         if (!(isSearchInput && isNavigationKey)) return;
       }
 
-      const bindings = settings.keybindings || {};
+      const matches = (id: string) => {
+        const command = SHORTCUT_CATALOG.find(row => row.id === id && row.when === 'files');
+        return Boolean(command && shortcutBindings(command, settings.keybindings ?? {}).some(chord => isMatch(e, chord)));
+      };
 
-      if (isMatch(e, bindings.fmSelectAll || 'Mod+A')) {
+      if (matches('fmSelectAll')) {
         e.preventDefault();
         setSelectedFiles(paintedFiles.map((f) => f.name));
         return;
@@ -120,33 +125,33 @@ export function useFileKeyboard({
         return;
       }
 
-      if (isMatch(e, bindings.fmSearch || 'Mod+F')) {
+      if (matches('fmSearch')) {
         e.preventDefault();
         setIsSearchOpen(true);
         return;
       }
 
-      if (isMatch(e, bindings.fmListView || 'Mod+Shift+1')) {
+      if (matches('fmListView')) {
         e.preventDefault();
         setViewMode('list');
         return;
       }
-      if (isMatch(e, bindings.fmGridView || 'Mod+Shift+2')) {
+      if (matches('fmGridView')) {
         e.preventDefault();
         setViewMode('grid');
         return;
       }
-      if (isMatch(e, bindings.fmHidden || 'Mod+H')) {
+      if (matches('fmHidden')) {
         e.preventDefault();
         void updateFileManagerSettings({ showHiddenFiles: !settings.fileManager.showHiddenFiles });
         return;
       }
-      if (isMatch(e, bindings.fmBookmark || 'Mod+D')) {
+      if (matches('fmBookmark')) {
         e.preventDefault();
         toggleBookmark();
         return;
       }
-      if (isMatch(e, bindings.fmRefresh || 'F5') || isMatch(e, 'Mod+R')) {
+      if (matches('fmRefresh')) {
         e.preventDefault();
         if (activeConnectionId) void refreshFiles(activeConnectionId);
         return;
@@ -166,31 +171,31 @@ export function useFileKeyboard({
         }
       }
 
-      if (isMatch(e, bindings.fmBack || 'Alt+Left')) {
+      if (matches('fmBack')) {
         e.preventDefault();
         if (activeConnectionId) navigateBack(activeConnectionId);
         return;
       }
 
-      if (isMatch(e, bindings.fmForward || 'Alt+Right')) {
+      if (matches('fmForward')) {
         e.preventDefault();
         if (activeConnectionId) navigateForward(activeConnectionId);
         return;
       }
 
-      if (isMatch(e, bindings.fmUp || 'Backspace')) {
+      if (matches('fmUp')) {
         e.preventDefault();
         handleNavigate('..');
         return;
       }
 
-      if (isMatch(e, bindings.fmDelete || 'Delete') && selectedFiles.length > 0) {
+      if (matches('fmDelete') && selectedFiles.length > 0) {
         e.preventDefault();
         handleDelete();
         return;
       }
 
-      if (isMatch(e, bindings.fmRename || 'F2') && (focusedFile || selectedFiles.length === 1)) {
+      if (matches('fmRename') && (focusedFile || selectedFiles.length === 1)) {
         e.preventDefault();
         const fileToRename = focusedFile || selectedFiles[0];
         setRenameOldName(fileToRename);
@@ -199,7 +204,7 @@ export function useFileKeyboard({
         return;
       }
 
-      if (isMatch(e, bindings.fmEditPath || 'Mod+L')) {
+      if (matches('fmEditPath')) {
         e.preventDefault();
         setIsEditingPath(true);
         return;
@@ -214,7 +219,7 @@ export function useFileKeyboard({
         return;
       }
 
-      if (isMatch(e, bindings.fmOpen || 'Enter') && focusedFile) {
+      if (matches('fmOpen') && focusedFile) {
         e.preventDefault();
         handleNavigate(focusedFile);
         return;
@@ -231,19 +236,19 @@ export function useFileKeyboard({
         return;
       }
 
-      if (isMatch(e, bindings.fmCopy || 'Mod+C')) {
+      if (matches('fmCopy')) {
         e.preventDefault();
         handleCopy(false);
         return;
       }
 
-      if (isMatch(e, bindings.fmCut || 'Mod+X')) {
+      if (matches('fmCut')) {
         e.preventDefault();
         handleCopy(true);
         return;
       }
 
-      if (isMatch(e, bindings.fmPaste || 'Mod+V')) {
+      if (matches('fmPaste')) {
         e.preventDefault();
         handlePaste();
         return;

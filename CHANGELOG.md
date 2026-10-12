@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Implementation progress
 
+- Wire hybrid shortcut dispatch to workspace navigation and visible pane commands, with secondary bindings usable during terminal focus.
+
+### Implementation progress
+
 - Retain pane identities while rendering visible docking allocations, restoring plugin focus and terminal lifecycle behavior.
 
 ### Implementation progress
