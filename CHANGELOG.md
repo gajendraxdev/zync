@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Implementation progress
 
+- Add kind-agnostic docking capacity, visible-focus projection and registered panel capabilities.
+
+### Implementation progress
+
 - Preserve pane identities through restore/release and add kind-agnostic visibility, region and presentation models.
 
 ### Implementation progress

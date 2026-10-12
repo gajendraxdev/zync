@@ -181,7 +181,9 @@
         "src/lib/releaseNotes/mediaUrls.ts",
         "src/lib/releaseNotes/alerts.ts",
         "src/lib/releaseNotes/headings.ts",
+        "src/features/workspace/domain/registrations.ts",
         "src/features/workspace/domain/contentInventory.ts",
+        "src/features/workspace/application/viewRegistrationAdapters.ts",
         "src/components/layout/featureMeta.ts",
         "src/components/layout/featureTabInventory.ts",
         "src/lib/shells/types.ts",
@@ -253,6 +255,10 @@
         "src/lib/terminal/terminalOutputFrame.ts",
         "src/lib/terminal/terminalSnifferBytes.ts",
         "src/lib/terminal/terminalPanelRestore.ts",
-        "src/components/ui/surfaceStyles.ts"
+        "src/components/ui/surfaceStyles.ts",
+        "src/features/workspace/domain/docking.ts",
+        "src/lib/paneLayout/contentIdentity.ts",
+        "src/lib/paneLayout/regions.ts",
+        "src/features/workspace/domain/dockPresentation.ts"
     ]
 }
