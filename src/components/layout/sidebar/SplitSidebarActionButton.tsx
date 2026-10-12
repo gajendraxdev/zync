@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { cn } from '../../../lib/utils';
+import { CONTROL_INSET_FOCUS_CLASSES } from '../../ui/controlStyles';
+import { Tooltip } from '../../ui/Tooltip';
 
 export interface SplitSidebarActionButtonProps {
     icon: ReactNode;
@@ -42,7 +44,7 @@ export function SplitSidebarActionButton({
 
     const segmentClassName = cn(
         'group transition-all cursor-pointer select-none outline-none',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-accent focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg',
+        CONTROL_INSET_FOCUS_CLASSES,
         'text-app-muted hover:text-app-text hover:bg-app-surface/60',
     );
 
@@ -57,56 +59,59 @@ export function SplitSidebarActionButton({
 
     return (
         <div className={shellClassName}>
-            <button
-                type="button"
-                title={badgeTitle}
-                className={cn(
-                    segmentClassName,
-                    'flex flex-1 items-center py-2 px-3 min-w-0',
-                    active && 'text-app-text',
-                    attention === 'setup' && 'text-app-text/90',
-                    attention === 'secure' && 'text-app-text/90',
-                )}
-                onClick={onPrimaryClick}
-            >
-                <span
+            <Tooltip content={badgeTitle ?? label}>
+                <button
+                    type="button"
                     className={cn(
-                        'shrink-0 opacity-70 group-hover:opacity-100',
-                        attention === 'setup' && 'text-app-accent opacity-90',
-                        attention === 'secure' && 'text-[var(--color-app-warning)] opacity-90',
-                        attention === 'locked' && 'text-[var(--color-app-warning)] opacity-85',
-                        attention === 'ready' && 'text-emerald-600 dark:text-emerald-400 opacity-90',
+                        segmentClassName,
+                        'flex flex-1 items-center py-2 px-3 min-w-0',
+                        active && 'text-app-text',
+                        attention === 'setup' && 'text-app-text/90',
+                        attention === 'secure' && 'text-app-text/90',
                     )}
+                    onClick={onPrimaryClick}
                 >
-                    {icon}
-                </span>
-                <span className="ml-3 truncate font-medium text-[10px] uppercase tracking-wider opacity-80 group-hover:opacity-100">
-                    {label}
-                </span>
-                {badge != null && badge !== '' && (
-                    <span className={badgeClassName} title={badgeTitle}>
-                        {badge}
+                    <span
+                        className={cn(
+                            'shrink-0 opacity-70 group-hover:opacity-100',
+                            attention === 'setup' && 'text-app-accent opacity-90',
+                            attention === 'secure' && 'text-[var(--color-app-warning)] opacity-90',
+                            attention === 'locked' && 'text-[var(--color-app-warning)] opacity-85',
+                            attention === 'ready' && 'text-emerald-600 dark:text-emerald-400 opacity-90',
+                        )}
+                    >
+                        {icon}
                     </span>
-                )}
-            </button>
-            <button
-                type="button"
-                aria-expanded={expanded}
-                aria-label={toggleAriaLabel}
-                className={cn(
-                    segmentClassName,
-                    'flex w-8 shrink-0 items-center justify-center border-l border-app-border/25',
-                )}
-                onClick={onToggleClick}
-            >
-                <ChevronDown
-                    size={12}
-                    className={cn(
-                        'opacity-60 transition-transform duration-200 group-hover:opacity-100',
-                        expanded && 'rotate-180',
+                    <span className="ml-3 truncate font-medium text-[10px] uppercase tracking-wider opacity-80 group-hover:opacity-100">
+                        {label}
+                    </span>
+                    {badge != null && badge !== '' && (
+                        <span className={badgeClassName}>
+                            {badge}
+                        </span>
                     )}
-                />
-            </button>
+                </button>
+            </Tooltip>
+            <Tooltip content={toggleAriaLabel}>
+                <button
+                    type="button"
+                    aria-expanded={expanded}
+                    aria-label={toggleAriaLabel}
+                    className={cn(
+                        segmentClassName,
+                        'flex w-8 shrink-0 items-center justify-center border-l border-app-border/25',
+                    )}
+                    onClick={onToggleClick}
+                >
+                    <ChevronDown
+                        size={12}
+                        className={cn(
+                            'opacity-60 transition-transform duration-200 group-hover:opacity-100',
+                            expanded && 'rotate-180',
+                        )}
+                    />
+                </button>
+            </Tooltip>
         </div>
     );
 }

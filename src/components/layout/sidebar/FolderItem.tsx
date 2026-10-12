@@ -131,7 +131,7 @@ export const FolderItem = memo(function FolderItem({
                             <ChevronRight size={compactMode ? 12 : 14} />
                         </div>
                         {isExpanded ? <FolderOpen size={compactMode ? 14 : 16} className="text-app-accent/80" /> : <FolderIcon size={compactMode ? 14 : 16} />}
-                        <span className="font-semibold truncate flex-1 flex items-center gap-2">
+                        <span data-zync-color-label className="font-semibold truncate flex-1 flex items-center gap-2">
                             {node.name}
                         </span>
                         <span className="ml-auto text-[10px] opacity-0 group-hover:opacity-60 mr-2">{node.connections.length}</span>

@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Implementation progress
 
+- Standardize host rows and sidebar actions on shared focus, button and tooltip primitives.
+
+### Implementation progress
+
 - Share sidebar resize behavior and measure retained pane geometry before paint to prevent neighboring-content jitter.
 
 ### Implementation progress

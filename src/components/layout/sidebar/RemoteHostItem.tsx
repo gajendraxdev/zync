@@ -93,7 +93,7 @@ export const RemoteHostItem = memo(function RemoteHostItem({
 
       <div className="flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden">
         <div className="flex min-w-0 items-center justify-between gap-2">
-          <span className="min-w-0 truncate text-[13px] font-medium leading-tight text-app-text/90 group-hover:text-app-text">
+          <span data-zync-color-label className="min-w-0 truncate text-[13px] font-medium leading-tight text-app-text/90 group-hover:text-app-text">
             {primary}
           </span>
 
