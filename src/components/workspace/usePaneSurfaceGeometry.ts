@@ -54,7 +54,14 @@ export function usePaneSurfaceGeometry(container: RefObject<HTMLDivElement | nul
     }, [schedule]);
 
     useLayoutEffect(() => {
-        const resizeObserver = new ResizeObserver(schedule);
+        // Observer delivery already follows layout and precedes paint. Deferring
+        // again leaves retained content one frame behind its slots during resizing.
+        // Only the root/slots are observed; absolute content hosts cannot feed back.
+        const resizeObserver = new ResizeObserver(() => {
+            if (frame.current) cancelAnimationFrame(frame.current);
+            frame.current = 0;
+            measure();
+        });
         observer.current = resizeObserver;
         if (container.current) resizeObserver.observe(container.current);
         for (const node of slots.current.values()) resizeObserver.observe(node);
@@ -66,7 +73,7 @@ export function usePaneSurfaceGeometry(container: RefObject<HTMLDivElement | nul
             if (frame.current) cancelAnimationFrame(frame.current);
             frame.current = 0;
         };
-    }, [container, schedule]);
+    }, [container, measure, schedule]);
 
     // A committed owner change can move a slot without resizing it.
     useLayoutEffect(measure);

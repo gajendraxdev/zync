@@ -39,6 +39,7 @@
         "src/ai/types/agent.ts",
         "src/components/ai/providerCatalog.ts",
         "src/components/ai/sidebarSubmit.ts",
+        "src/components/ai/useAiSidebarWidth.ts",
         "src/components/dashboard/welcome/quick-connect/AuthPanel.tsx",
         "src/components/dashboard/welcome/QuickConnectBar.tsx",
         "src/components/dashboard/welcome/quick-connect/parsing.ts",
@@ -248,7 +249,6 @@
         "src/vault/syncPassphrase.ts",
         "src/vault/connectionsRestore.ts",
         "src/vault/vaultUnlockPrompt.ts",
-        "src/components/ai/useAiSidebarResize.ts",
         "src/features/connections/domain/authMethodTransition.ts",
         "src/features/connections/domain/importPlan.ts",
         "src/features/connections/domain/credentialAssignments.ts",
@@ -279,6 +279,7 @@
         "src/features/workspace/domain/presentation.ts",
         "src/features/workspace/domain/dockingTopology.ts",
         "src/features/workspace/domain/canvases.ts",
-        "src/components/settings/common/FontStackField.tsx"
+        "src/components/settings/common/FontStackField.tsx",
+        "src/components/layout/sidebar/useSidebarResize.ts"
     ]
 }

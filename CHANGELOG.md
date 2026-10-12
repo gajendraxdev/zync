@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Implementation progress
 
+- Share sidebar resize behavior and measure retained pane geometry before paint to prevent neighboring-content jitter.
+
+### Implementation progress
+
 - Organize layout and theme customization into focused settings sections with contextual previews and accessible controls.
 
 ### Implementation progress

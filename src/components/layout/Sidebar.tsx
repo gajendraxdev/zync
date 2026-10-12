@@ -1,20 +1,23 @@
-import { useState, useCallback, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
+import { useState, useCallback, useEffect, useMemo, lazy, Suspense } from 'react';
 import { useAppStore, Connection, Folder } from '../../store/useAppStore';
 import { Files, FolderPlus, Info, Link2, Monitor, Network, Pencil, Plus, Power, RefreshCw, Search, Server, Trash2 } from 'lucide-react';
 import { BetaBadge } from '../share/PublicUrlsLabel';
 import { cn } from '../../lib/utils';
 import { ContextMenu, type ContextMenuItem } from '../ui/ContextMenu';
 import { ConfirmModal } from '../ui/ConfirmModal';
+import { Tooltip } from '../ui/Tooltip';
+import { CONTROL_INSET_FOCUS_CLASSES } from '../ui/controlStyles';
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { buildTree } from './sidebar/buildTree';
 import { SidebarSection } from './sidebar/SidebarSection';
-import { useSidebarResize } from './sidebar/useSidebarResize';
+import { SidebarChrome, SidebarContent } from './sidebar/SidebarChrome';
 import { ConnectionItem } from './sidebar/ConnectionItem';
 import { ConnectedHostsGroup } from './sidebar/ConnectedHostsGroup';
 import { FolderItem } from './sidebar/FolderItem';
 import { FolderFormModal } from './sidebar/FolderFormModal';
 import { SidebarActionButton } from './sidebar/SidebarActionButton';
 import { VaultNavSection } from './sidebar/VaultNavSection';
+import { PluginsSidebar } from './sidebar/PluginsSidebar';
 import { RemoteHostItem } from './sidebar/RemoteHostItem';
 import { AddConnectionModal } from '../modals/AddConnectionModal';
 import { AddTunnelModal } from '../modals/AddTunnelModal';
@@ -31,6 +34,10 @@ import {
     type ConnectionExchangeExportFormat,
 } from '../../features/connections/infrastructure/connectionTransfer';
 import { FEATURE_META, type FeatureId } from './featureMeta';
+import { resolveWorkspaceNavigation } from '../../features/workspace/domain/navigation';
+import { GoogleMarkIcon } from '../icons/providerIcons';
+import { useWorkspaceSidebar } from './navigation/WorkspaceSidebarContext';
+import { sidebarPresentation } from '../../features/workspace/application/sidebarPresentation';
 
 // Lazy Load Modals
 const SettingsModal = lazy(() => import('../settings/SettingsModal').then(mod => ({ default: mod.SettingsModal })));
@@ -92,7 +99,12 @@ export function Sidebar({ className }: { className?: string }) {
 
     const [isRenameFolderModalOpen, setIsRenameFolderModalOpen] = useState(false);
     const [folderToRename, setFolderToRename] = useState<string | null>(null);
-    const isCollapsed = settings.sidebarCollapsed;
+    const globalSection = useAppStore(state => state.globalSidebarSection);
+    const navigation = resolveWorkspaceNavigation(settings.workspaceNavigation);
+    const navigationEnabled = navigation.visible;
+    const { section, position: sidebarPosition, collapsed: isCollapsed } = sidebarPresentation(settings.workspaceNavigation, globalSection, settings.sidebarCollapsed);
+    const workspaceSidebar = useWorkspaceSidebar();
+    const openSyncBackupTab = useAppStore(state => state.openSyncBackupTab);
 
     const [isAddTunnelModalOpen, setIsAddTunnelModalOpen] = useState(false);
     const [deletingConnection, setDeletingConnection] = useState<Connection | null>(null);
@@ -107,12 +119,6 @@ export function Sidebar({ className }: { className?: string }) {
         defaultFileBaseName: string;
         connections: Connection[];
     } | null>(null);
-
-    const { width, isResizing, handlers: resizeHandlers } = useSidebarResize(
-        settings.sidebarWidth || 288, nextWidth => updateSettings({ sidebarWidth: nextWidth }),
-    );
-
-    const sidebarRef = useRef<HTMLDivElement>(null);
 
 
     const hostCatalog = useHostCatalog(connections, searchTerm);
@@ -655,18 +661,20 @@ export function Sidebar({ className }: { className?: string }) {
                             </button>
                         ))}
                     </div>
-                    <button
-                        type="button"
-                        onClick={() => { void refreshInventory(); }}
-                        className={cn(
-                            'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md',
-                            'text-app-muted hover:bg-app-surface/60 hover:text-app-text',
-                        )}
-                        title="Refresh provider host list"
-                        aria-label="Refresh provider host list"
-                    >
-                        <RefreshCw size={13} className={cn(inventoryStatus === 'loading' && 'animate-spin')} />
-                    </button>
+                    <Tooltip content="Refresh provider host list">
+                        <button
+                            type="button"
+                            onClick={() => { void refreshInventory(); }}
+                            className={cn(
+                                'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md',
+                                CONTROL_INSET_FOCUS_CLASSES,
+                                'text-app-muted hover:bg-app-surface/60 hover:text-app-text',
+                            )}
+                            aria-label="Refresh provider host list"
+                        >
+                            <RefreshCw size={13} className={cn(inventoryStatus === 'loading' && 'animate-spin')} />
+                        </button>
+                    </Tooltip>
                 </div>
             )}
         </div>
@@ -821,72 +829,49 @@ export function Sidebar({ className }: { className?: string }) {
         : undefined;
 
     return (
-        <div
-            ref={sidebarRef}
-            className={cn(
-                "bg-app-panel flex flex-col h-full min-h-0 shrink-0 relative z-50 overflow-hidden",
-                !isCollapsed && "border-r border-app-border/50",
-                !isResizing ? "transition-[width] duration-300 ease-[cubic-bezier(0.2,0,0,1)]" : "",
-                className
-            )}
-            style={{
-                width: isCollapsed ? 0 : width,
-                willChange: isResizing ? 'auto' : 'width'
-            }}
-        >
-            {/* Resize Handle */}
-            {!isCollapsed && width >= 40 && (
-                <div
-                    className="absolute right-0 top-0 bottom-0 w-1 hover:w-1.5 cursor-col-resize hover:bg-app-accent/50 transition-all z-[100] group"
-                    {...resizeHandlers}
-                    role="separator"
-                    aria-label="Resize sidebar"
-                    aria-orientation="vertical"
-                    aria-valuemin={200}
-                    aria-valuemax={600}
-                    aria-valuenow={width}
-                    tabIndex={0}
-                    style={{ touchAction: 'none' }}
-                >
-                    <div className="absolute inset-y-0 right-0 w-4 -z-10" /> {/* Larger hit area */}
-                </div>
-            )}
-
+        <SidebarChrome position={sidebarPosition} collapsed={isCollapsed} savedWidth={settings.sidebarWidth || 288}
+            className={className} onResize={nextWidth => { void updateSettings({ sidebarWidth: nextWidth })
+                .catch(() => showToast('error', 'Could not save sidebar width.')); }}>
             {/* Content Wrapper */}
-            <div
-                style={{ width: width, minWidth: width }}
+            <SidebarContent
+                inert={isCollapsed}
                 className="flex flex-col flex-1 min-h-0 pt-1.5"
             >
                 {/* System Actions Column — top nav matches Terminal / Port Forwarding / Vault */}
-                <div className={cn(compactMode ? "px-3 pt-2 mb-2" : "px-4 pt-3 mb-2")}>
+                {section !== 'plugins' && section !== 'workspace' && <div className={cn(compactMode ? "px-3 pt-2 mb-2" : "px-4 pt-3 mb-2")}>
                     <div className="flex flex-col gap-1.5 w-full">
-                        <SidebarActionButton
+                        {section === 'hosts' && <SidebarActionButton
                             icon={<Monitor size={13} />}
                             label="New Terminal"
                             onClick={() => openTab('local')}
-                        />
+                        />}
 
-                        <SidebarActionButton
+                        {!navigationEnabled && <SidebarActionButton
                             icon={<Network size={13} />}
                             label="Port Forwarding"
                             onClick={() => openPortForwardingTab()}
-                        />
+                        />}
 
-                        <SidebarActionButton
+                        {!navigationEnabled && <SidebarActionButton
                             icon={<Link2 size={13} />}
                             label="Public URLs"
                             trailing={<BetaBadge className="text-[8px]" />}
                             onClick={() => openPublicUrlsTab()}
-                        />
+                        />}
 
-                        <VaultNavSection />
+                        {(!navigationEnabled || section === 'vaults') && <VaultNavSection />}
+                        {section === 'vaults' && <SidebarActionButton icon={<GoogleMarkIcon size={13} variant="mono" />}
+                            label="Google Drive collections" onClick={openSyncBackupTab} />}
                     </div>
-                </div>
+                </div>}
 
-                <div className="h-px bg-app-border/20 mb-2 mx-4" />
+                {section !== 'plugins' && section !== 'workspace' && <div className="h-px bg-app-border/20 mb-2 mx-4" />}
+                {section === 'plugins' && <PluginsSidebar />}
+                <div ref={workspaceSidebar?.setTarget} data-workspace-sidebar-slot hidden={section !== 'workspace'}
+                    className={cn('flex-1 min-h-0', section === 'workspace' && 'flex flex-col')} />
 
                 {/* Hosts list (Connected virtual folder sits at top of the list) */}
-                <div className={cn(
+                {section === 'hosts' && <div className={cn(
                     "flex-1 min-h-0 flex flex-col overflow-hidden pb-3",
                     compactMode ? "px-2 gap-1.5" : "px-3 gap-1.5"
                 )}>
@@ -905,8 +890,8 @@ export function Sidebar({ className }: { className?: string }) {
                     >
                         {allHostsContent}
                     </SidebarSection>
-                </div>
-            </div>
+                </div>}
+            </SidebarContent>
 
             {/* Modals */}
             {isAddConnectionModalOpen && (
@@ -1041,6 +1026,6 @@ export function Sidebar({ className }: { className?: string }) {
                 confirmLabel="Delete"
                 variant="danger"
             />
-        </div>
+        </SidebarChrome>
     );
 }
