@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Implementation progress
 
+- Define theme JSON validation, atomic import preferences, bounded file I/O and palette/contrast presentation.
+
+### Implementation progress
+
 - Add validated element-color contracts, contrast helpers and acknowledged preference updates with regression fixtures.
 
 ### Implementation progress

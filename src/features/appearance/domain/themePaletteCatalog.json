@@ -1,0 +1,9 @@
+{
+  "background": "--color-app-bg",
+  "panel": "--color-app-panel",
+  "surface": "--color-app-surface",
+  "border": "--color-app-border",
+  "text": "--color-app-text",
+  "muted": "--color-app-muted",
+  "accent": "--color-app-accent"
+}
