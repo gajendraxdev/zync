@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Implementation progress
 
+- Provide plugin actions and grouped built-in theme choices inside the sidebar without opening Settings automatically.
+
+### Implementation progress
+
 - Share plugin management between settings and sidebar-ready presentation, preserving install review and runtime recovery.
 
 ### Implementation progress
