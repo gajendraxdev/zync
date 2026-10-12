@@ -16,6 +16,7 @@ import {
 } from '../constants/defaults';
 import { TerminalRendererStatus } from './TerminalRendererStatus';
 import { TerminalTabIntro } from './TerminalTabIntro';
+import { TerminalAppearanceSection } from './terminal/TerminalAppearanceSection';
 
 function shellSelectIcon(shellId: string, detected?: ReadonlyArray<ShellEntry>) {
     return <ShellIcon shell={shellEntryForIcon(shellId, detected)} size={14} />;
@@ -25,8 +26,10 @@ interface TerminalTabProps {
     settings: AppSettings;
     wslDistros: string[];
     isWindows: boolean;
-    onOpenAppearanceTerminal: () => void;
-    onOpenAppearanceApp: () => void;
+    onOpenAppearance: () => void;
+    terminalFontDraft: string;
+    setTerminalFontDraft: (value: string) => void;
+    updateSettings: (updates: Partial<AppSettings>) => Promise<void>;
     updateTerminalSettings: (updates: Partial<AppSettings['terminal']>) => Promise<void>;
     updateLocalTermSettings: (updates: Partial<AppSettings['localTerm']>) => Promise<void>;
     setGhostSuggestionsField: (patch: Partial<AppSettings['ghostSuggestions']>) => void;
@@ -37,8 +40,10 @@ export function TerminalTab({
     settings,
     wslDistros,
     isWindows,
-    onOpenAppearanceTerminal,
-    onOpenAppearanceApp,
+    onOpenAppearance,
+    terminalFontDraft,
+    setTerminalFontDraft,
+    updateSettings,
     updateTerminalSettings,
     updateLocalTermSettings,
     setGhostSuggestionsField,
@@ -84,10 +89,10 @@ export function TerminalTab({
 
     return (
         <div className="space-y-6">
-            <TerminalTabIntro
-                onOpenAppearanceTerminal={onOpenAppearanceTerminal}
-                onOpenAppearanceApp={onOpenAppearanceApp}
-            />
+            <TerminalTabIntro onOpenAppearance={onOpenAppearance} />
+            <TerminalAppearanceSection settings={settings} terminalFontDraft={terminalFontDraft}
+                setTerminalFontDraft={setTerminalFontDraft} isWindows={isWindows}
+                updateSettings={updateSettings} updateTerminalSettings={updateTerminalSettings} />
 
             {isWindows && (
                 <>

@@ -4,7 +4,7 @@ import { Toggle } from '../../common/Toggle';
 
 const CURSOR_STYLES = ['block', 'bar', 'underline'] as const;
 
-export interface AppearanceTerminalViewportSectionProps {
+export interface TerminalViewportSectionProps {
     settings: AppSettings;
     draftOpacityPercent: number;
     onDraftOpacityPercentChange: (value: number) => void;
@@ -13,20 +13,20 @@ export interface AppearanceTerminalViewportSectionProps {
     onCursorStyleChange: (style: AppSettings['terminal']['cursorStyle']) => void;
 }
 
-export function AppearanceTerminalViewportSection({
+export function TerminalViewportSection({
     settings,
     draftOpacityPercent,
     onDraftOpacityPercentChange,
     onCommitTerminalOpacity,
     onTransparencyChange,
     onCursorStyleChange,
-}: AppearanceTerminalViewportSectionProps) {
+}: TerminalViewportSectionProps) {
     return (
         <Section title="Viewport">
             <div className="space-y-4 rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/40 p-4">
                 <p className="text-[11px] leading-relaxed text-[var(--color-app-muted)]">
                     Opacity and transparency only affect how see-through the terminal panel is.
-                    Colors follow the app theme (Appearance → App), not these controls.
+                    Colors follow the app theme in Appearance, not these controls.
                 </p>
 
                 <div className="space-y-3">

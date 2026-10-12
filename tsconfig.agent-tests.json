@@ -21,10 +21,13 @@
         "sourceMap": false
     },
     "include": [
+        "tests/themeFiles.browser.tsx",
+        "tests/settingsOrganization.browser.tsx",
         "src/features/appearance/domain/elementColors.ts",
         "src/features/appearance/application/updateElementColors.ts",
         "src/features/appearance/presentation/elementColorStyle.ts",
         "src/features/appearance/domain/colorContrast.ts",
+        "tests/elementColors.browser.tsx",
         "tests/colorPicker.browser.tsx",
         "src/global.d.ts",
         "src/vite-env.d.ts",
@@ -71,6 +74,9 @@
         "src/components/settings/common/SettingsGroup.tsx",
         "src/components/settings/SettingsNavigation.tsx",
         "src/components/settings/tabs/appearance/AppearanceInterfaceTypographySection.tsx",
+        "src/components/settings/tabs/terminal/TerminalTypographySection.tsx",
+        "src/components/settings/tabs/LayoutNavigationTab.tsx",
+        "src/components/settings/tabs/terminal/TerminalAppearanceSection.tsx",
         "src/components/ui/Input.tsx",
         "src/components/ui/Textarea.tsx",
         "src/components/ui/Select.tsx",
@@ -272,6 +278,7 @@
         "src/features/shortcuts/bindings.ts",
         "src/features/workspace/domain/presentation.ts",
         "src/features/workspace/domain/dockingTopology.ts",
-        "src/features/workspace/domain/canvases.ts"
+        "src/features/workspace/domain/canvases.ts",
+        "src/components/settings/common/FontStackField.tsx"
     ]
 }

@@ -619,7 +619,7 @@ export type SettingsTabId =
     | 'general'
     | 'terminal'
     | 'appearance'
-    | 'statusBar'
+    | 'layout'
     | 'fileManager'
     | 'shortcuts'
     | 'plugins'

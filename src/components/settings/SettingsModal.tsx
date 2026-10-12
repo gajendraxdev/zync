@@ -5,6 +5,7 @@ import { motion, useDragControls, useMotionValue } from 'framer-motion';
 import { ZPortal } from '../ui/ZPortal';
 import { IconButton } from '../ui/IconButton';
 import { PanelHeader } from '../ui/PanelHeader';
+import { consumeDialogEscape } from '../ui/dialogEscape';
 import { useAppStore } from '../../store/useAppStore'; // Updated Import
 import { usePlugins } from '../../context/PluginContext';
 
@@ -20,10 +21,10 @@ import { AiTab } from './tabs/AiTab';
 import { ShortcutsTab } from './tabs/ShortcutsTab';
 import { PluginsTab } from './tabs/PluginsTab';
 import { AboutTab } from './tabs/AboutTab';
-import { StatusBarTab } from './tabs/StatusBarTab';
+import { LayoutNavigationTab } from './tabs/LayoutNavigationTab';
 import { FeedbackTab } from './tabs/FeedbackTab';
 import { IconResolver } from './common/IconResolver';
-import { SettingsNavigation, settingsPanelId, settingsTabId, type SettingsSection as Tab } from './SettingsNavigation';
+import { SETTINGS_SECTIONS, SettingsNavigation, settingsPanelId, settingsTabId, type SettingsSection as Tab } from './SettingsNavigation';
 import { TiltLogo } from './common/TiltLogo';
 import { useSettingsPaths } from './hooks/useSettingsPaths';
 import { useSettingsUpdateFlow } from './hooks/useSettingsUpdateFlow';
@@ -34,6 +35,7 @@ import { PluginsInstalledTab } from './tabs/plugins/PluginsInstalledTab';
 import { PluginsMarketplaceTab } from './tabs/plugins/PluginsMarketplaceTab';
 import { PluginPermissionReview, PluginsDeveloperTab, type LocalInstallAction } from './tabs/plugins/PluginsDeveloperTab';
 import { useVaultStore } from '../../vault/useVaultStore';
+import type { ChromeActionArea } from '../../features/workspace/domain/chromeActions';
 
 
 interface SettingsModalProps {
@@ -67,6 +69,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     const requestVaultUnlock = useVaultStore(state => state.requestUnlock);
     const settings = useAppStore(state => state.settings);
     const settingsFocusTab = useAppStore(state => state.settingsFocusTab);
+    const settingsFocusChromeArea = useAppStore(state => state.settingsFocusChromeArea);
     const clearSettingsFocusTab = useAppStore(state => state.clearSettingsFocusTab);
     const updateSettings = useAppStore(state => state.updateSettings);
     const updateAiSettings = useAppStore(state => state.updateAiSettings);
@@ -145,7 +148,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     };
 
     const [activeTab, setActiveTab] = useState<Tab>('terminal');
-    const [appearanceView, setAppearanceView] = useState<'app' | 'terminal'>('app');
+    const [pendingChromeFocus, setPendingChromeFocus] = useState<ChromeActionArea | null>(null);
     const [pluginTab, setPluginTab] = useState<'installed' | 'marketplace' | 'developer'>('installed');
     const [isTransitioning, setIsTransitioning] = useState(false);
     const [wslDistros, setWslDistros] = useState<string[]>([]);
@@ -154,8 +157,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     useEffect(() => {
         if (!isOpen || !settingsFocusTab) return;
         setActiveTab(settingsFocusTab);
+        setPendingChromeFocus(settingsFocusChromeArea);
         clearSettingsFocusTab();
-    }, [isOpen, settingsFocusTab, clearSettingsFocusTab]);
+    }, [isOpen, settingsFocusTab, settingsFocusChromeArea, clearSettingsFocusTab]);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -176,6 +180,19 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             previouslyFocused?.focus();
         };
     }, [isOpen, x, y]);
+
+    // Wait for the requested tab to mount; run after the dialog's initial focus.
+    useEffect(() => {
+        if (!isOpen) { setPendingChromeFocus(null); return; }
+        if (!pendingChromeFocus || activeTab !== 'layout') return;
+        const frame = window.requestAnimationFrame(() => {
+            const section = dialogRef.current?.querySelector<HTMLElement>(`[data-chrome-customization="${pendingChromeFocus}"]`);
+            section?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+            section?.focus({ preventScroll: true });
+            setPendingChromeFocus(null);
+        });
+        return () => window.cancelAnimationFrame(frame);
+    }, [isOpen, pendingChromeFocus, activeTab]);
 
     // Global Update State
     const updateStatus = useAppStore(state => state.updateStatus);
@@ -363,6 +380,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         if (!isOpen) return;
 
         const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.defaultPrevented || e.isComposing) return;
             const target = e.target as HTMLElement | null;
             const isEditableTarget = !!target && (
                 target.tagName === 'INPUT' ||
@@ -376,15 +394,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
             // Escape: dismiss restart confirm first; otherwise close Settings.
             if (e.key === 'Escape') {
-                if (pendingPluginInspection) {
-                    void handleCancelLocalPluginReview();
-                    return;
-                }
-                if (showRestartConfirm) {
-                    setShowRestartConfirm(false);
-                    return;
-                }
-                onClose();
+                consumeDialogEscape(e, showRestartConfirm ? restartConfirmRef.current : dialogRef.current, true, () => {
+                    if (pendingPluginInspection) void handleCancelLocalPluginReview();
+                    else if (showRestartConfirm) setShowRestartConfirm(false);
+                    else onClose();
+                });
                 return;
             }
         };
@@ -408,13 +422,6 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             setActiveTab(newTab);
             setIsTransitioning(false);
         }, 150);
-    };
-
-    const openAppearance = (view: 'app' | 'terminal') => {
-        setAppearanceView(view);
-        if (activeTab !== 'appearance') {
-            handleTabChange('appearance');
-        }
     };
 
     const renderPluginInstalled = () => (
@@ -596,15 +603,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         className="border-app-border/30 cursor-move active:cursor-grabbing select-none"
                         onPointerDown={handleDragHandlePointerDown}
                         titleId={titleId}
-                        title={activeTab === 'fileManager'
-                                ? 'File Manager'
-                                : activeTab === 'statusBar'
-                                    ? 'Status Bar'
-                                : activeTab === 'ai'
-                                    ? 'AI Assistant'
-                                : activeTab === 'feedback'
-                                    ? 'Feedback'
-                                : activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}
+                        title={activeTab === 'ai' ? 'AI Assistant' : SETTINGS_SECTIONS.find(section => section.key === activeTab)!.label}
                         actions={<>
                             <GripHorizontal aria-hidden="true" className="mr-2 h-4 w-4 shrink-0 text-app-muted/45" />
                             <IconButton label="Close settings" icon={<X size={16} />} onClick={onClose} />
@@ -644,8 +643,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                 settings={settings}
                                 wslDistros={wslDistros}
                                 isWindows={isWindows}
-                                onOpenAppearanceTerminal={() => { openAppearance('terminal'); }}
-                                onOpenAppearanceApp={() => { openAppearance('app'); }}
+                                onOpenAppearance={() => { handleTabChange('appearance'); }}
+                                terminalFontDraft={terminalFontDraft}
+                                setTerminalFontDraft={setTerminalFontDraft}
+                                updateSettings={safeUpdateSettings}
                                 updateTerminalSettings={safeUpdateTerminalSettings}
                                 updateLocalTermSettings={safeUpdateLocalTermSettings}
                                 setGhostSuggestionsField={setGhostSuggestionsField}
@@ -653,9 +654,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             />
                         )}
 
-                        {activeTab === 'statusBar' && (
-                            <StatusBarTab
+                        {activeTab === 'layout' && (
+                            <LayoutNavigationTab
                                 settings={settings}
+                                updateSettings={safeUpdateSettings}
                                 updateStatusBarSettings={updateStatusBarSettings}
                             />
                         )}
@@ -666,13 +668,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                 plugins={plugins}
                                 globalFontDraft={globalFontDraft}
                                 setGlobalFontDraft={setGlobalFontDraft}
-                                terminalFontDraft={terminalFontDraft}
-                                setTerminalFontDraft={setTerminalFontDraft}
-                                isWindows={isWindows}
-                                activeView={appearanceView}
-                                onActiveViewChange={setAppearanceView}
                                 updateSettings={safeUpdateSettings}
-                                updateTerminalSettings={safeUpdateTerminalSettings}
                             />
                         )}
 

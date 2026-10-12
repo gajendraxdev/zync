@@ -1,5 +1,7 @@
 import type { AppSettings } from '../../../../store/settingsSlice';
+import { Button } from '../../../ui/Button';
 import { Select } from '../../../ui/Select';
+import { Toolbar } from '../../../ui/Toolbar';
 import { Section } from '../../common/Section';
 import { Toggle } from '../../common/Toggle';
 import {
@@ -17,8 +19,9 @@ import {
     type TerminalFontWeightSetting,
 } from '../../constants/defaults';
 import { resolveTerminalFontWeightBold } from '../../../../lib/terminal/terminalTypography';
+import { FontStackField } from '../../common/FontStackField';
 
-export interface AppearanceTerminalTypographySectionProps {
+export interface TerminalTypographySectionProps {
     settings: AppSettings;
     terminalFontDraft: string;
     isWindows: boolean;
@@ -26,13 +29,13 @@ export interface AppearanceTerminalTypographySectionProps {
     onUpdateTerminalSettings: (updates: Partial<AppSettings['terminal']>) => void;
 }
 
-export function AppearanceTerminalTypographySection({
+export function TerminalTypographySection({
     settings,
     terminalFontDraft,
     isWindows,
     onTerminalFontDraftChange,
     onUpdateTerminalSettings,
-}: AppearanceTerminalTypographySectionProps) {
+}: TerminalTypographySectionProps) {
     const recommendedTypography = resolveDefaultTerminalTypography();
     const recommendedFontStack = isWindows
         ? DEFAULT_TERMINAL_FONT_STACK_WIN32
@@ -97,39 +100,15 @@ export function AppearanceTerminalTypographySection({
                         options={[...fontOptions]}
                         triggerClassName="bg-app-bg/50"
                     />
-                    <div className="space-y-2">
-                        <label
-                            htmlFor="terminal-custom-font-stack-input"
-                            className="text-xs font-semibold uppercase tracking-wide text-[var(--color-app-muted)]"
-                        >
-                            Custom Font Stack
-                        </label>
-                        <div className="grid grid-cols-[1fr_auto] gap-2 items-stretch">
-                            <input
-                                id="terminal-custom-font-stack-input"
-                                type="text"
-                                value={terminalFontDraft}
-                                onChange={(e) => { onTerminalFontDraftChange(e.target.value); }}
-                                onKeyDown={(e) => {
-                                    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End') {
-                                        e.stopPropagation();
-                                    }
-                                    if (e.key === 'Enter') {
-                                        applyCustomFont();
-                                    }
-                                }}
-                                placeholder="e.g. 'Cascadia Code', Consolas, monospace"
-                                className="w-full min-h-[44px] bg-[var(--color-app-bg)] border border-[var(--color-app-border)] rounded-lg px-3 py-2.5 text-[14px] font-mono text-[var(--color-app-text)] focus:outline-none focus:border-[var(--color-app-accent)]"
-                            />
-                            <button
-                                type="button"
-                                onClick={applyCustomFont}
-                                className="min-w-[88px] px-4 py-2.5 rounded-lg text-sm font-semibold border border-[var(--color-app-border)] hover:bg-[var(--color-app-surface)]"
-                            >
-                                Apply
-                            </button>
-                        </div>
-                    </div>
+                    <FontStackField
+                        id="terminal-custom-font-stack-input"
+                        label="Custom Font Stack"
+                        value={terminalFontDraft}
+                        onChange={onTerminalFontDraftChange}
+                        onApply={applyCustomFont}
+                        placeholder="e.g. 'Cascadia Code', Consolas, monospace"
+                        monospace
+                    />
                 </div>
 
                 <div className="rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/40 p-4 space-y-4">
@@ -247,12 +226,14 @@ export function AppearanceTerminalTypographySection({
                     <span className="font-mono text-[var(--color-app-text)]/80">Fira Code VF</span>.
                 </div>
 
-                <div className="flex items-center justify-between rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/30 px-3 py-2.5">
-                    <p className="text-[11px] text-[var(--color-app-muted)]">
+                <Toolbar label="Terminal typography reset" className="justify-between rounded-xl border border-[var(--color-app-border)]/60 bg-[var(--color-app-surface)]/30 px-3 py-2.5">
+                    <p className="min-w-0 flex-1 text-[11px] text-[var(--color-app-muted)]">
                         Reset monospace font defaults.
                     </p>
-                    <button
+                    <Button
                         type="button"
+                        variant="secondary"
+                        size="sm"
                         onClick={() => {
                             onUpdateTerminalSettings({
                                 fontFamily: recommendedTypography.fontFamily,
@@ -264,11 +245,11 @@ export function AppearanceTerminalTypographySection({
                                 fontLigatures: DEFAULT_TERMINAL_LIGATURES,
                             });
                         }}
-                        className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-[var(--color-app-border)] hover:bg-[var(--color-app-surface)]"
+                        className="shrink-0"
                     >
                         Reset
-                    </button>
-                </div>
+                    </Button>
+                </Toolbar>
             </div>
         </Section>
     );

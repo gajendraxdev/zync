@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { Code, FileText, Info, Keyboard, MessageSquare, Monitor, Package, PanelBottom, Settings, Sparkles, Type } from 'lucide-react';
+import { Code, FileText, Info, Keyboard, MessageSquare, Monitor, Package, PanelsTopLeft, Settings, Sparkles, Type } from 'lucide-react';
 import { TabButton } from './common/TabButton.js';
 
 export const SETTINGS_SECTIONS = [
     { key: 'general', label: 'General', icon: Settings },
     { key: 'terminal', label: 'Terminal', icon: Type },
     { key: 'appearance', label: 'Appearance', icon: Monitor },
-    { key: 'statusBar', label: 'Status Bar', icon: PanelBottom },
+    { key: 'layout', label: 'Layout & Navigation', icon: PanelsTopLeft },
     { key: 'fileManager', label: 'File Manager', icon: FileText },
     { key: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
     { key: 'plugins', label: 'Plugins', icon: Package },

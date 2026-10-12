@@ -1,18 +1,21 @@
 import { useState } from 'react';
-import { DEFAULT_STATUS_BAR_SETTINGS } from '../../../features/statusBar/settings';
-import type { AppSettings } from '../../../store/settingsSlice';
-import { useAppStore } from '../../../store/useAppStore';
-import { Section } from '../common/Section';
-import { Toggle } from '../common/Toggle';
+import { DEFAULT_STATUS_BAR_SETTINGS } from '../../../../features/statusBar/settings';
+import type { AppSettings } from '../../../../store/settingsSlice';
+import { useAppStore } from '../../../../store/useAppStore';
+import { Section } from '../../common/Section';
+import { Toggle } from '../../common/Toggle';
+import { ChromeActionsSection } from './ChromeActionsSection';
 
-interface StatusBarTabProps {
+interface StatusBarSectionProps {
     settings: AppSettings;
     updateStatusBarSettings: (updates: Partial<AppSettings['statusBar']>) => Promise<void>;
 }
 
-export function StatusBarTab({ settings, updateStatusBarSettings }: StatusBarTabProps) {
+export function StatusBarSection({ settings, updateStatusBarSettings }: StatusBarSectionProps) {
     const [isUpdating, setIsUpdating] = useState(false);
     const showToast = useAppStore((state) => state.showToast);
+    const updateChromeActions = useAppStore(state => state.updateChromeActions);
+    const actionsLoading = useAppStore(state => state.isLoadingSettings || state.isReloadingSettings);
     const showConnectionLatency =
         settings.statusBar?.showConnectionLatency ?? DEFAULT_STATUS_BAR_SETTINGS.showConnectionLatency;
 
@@ -30,8 +33,8 @@ export function StatusBarTab({ settings, updateStatusBarSettings }: StatusBarTab
     };
 
     return (
-        <div className="space-y-6 animate-in fade-in duration-300">
-            <Section title="Connection">
+        <div className="space-y-6">
+            <Section title="Status bar">
                 <Toggle
                     label="Show connection latency"
                     description="Display live SSH round-trip time next to the connected host. Hidden for local terminals and while disconnected."
@@ -42,6 +45,7 @@ export function StatusBarTab({ settings, updateStatusBarSettings }: StatusBarTab
                     }}
                 />
             </Section>
+            <ChromeActionsSection value={settings.chromeActions} area="statusBar" loading={actionsLoading} onChange={updateChromeActions} />
         </div>
     );
 }
