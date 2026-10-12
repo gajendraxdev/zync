@@ -5,9 +5,36 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { IconButton } from '../.tmp-agent-tests/src/components/ui/IconButton.js';
 import { PanelHeader } from '../.tmp-agent-tests/src/components/ui/PanelHeader.js';
 import { Toolbar } from '../.tmp-agent-tests/src/components/ui/Toolbar.js';
+import { StateMessage } from '../.tmp-agent-tests/src/components/ui/StateMessage.js';
 
 const icon = h('svg', { 'data-fixture-icon': true });
 const render = (component, props) => renderToStaticMarkup(h(component, props));
+
+test('empty state text does not create a live region or a focus stop', () => {
+  const html = render(StateMessage, { variant: 'empty', children: 'No panes yet.' });
+  assert.match(html, /^<p /);
+  assert.match(html, /text-app-muted/);
+  assert.doesNotMatch(html, /role=|aria-live=|tabindex=|autofocus=|variant=/);
+});
+
+test('state messages share announcement semantics without implicit focus or actions', () => {
+  for (const [variant, role, color] of [['error', 'alert', 'text-control-danger'], ['status', 'status', 'text-app-muted']]) {
+    const html = render(StateMessage, { variant, children: 'Result' });
+    assert.match(html, new RegExp(`role="${role}"`));
+    assert.ok(html.includes(color));
+    assert.doesNotMatch(html, /aria-live=|tabindex=|autofocus=|<button/);
+  }
+});
+
+test('state messages escape text and preserve explicit native attributes and class overrides', () => {
+  const html = render(StateMessage, { variant: 'status', children: '<untrusted>', id: 'saved', tabIndex: -1,
+    'aria-describedby': 'layout-hint', className: 'text-xs mt-3' });
+  assert.match(html, /&lt;untrusted&gt;/);
+  assert.match(html, /id="saved" tabindex="-1" aria-describedby="layout-hint"/);
+  assert.match(html, /min-w-0 break-words/);
+  assert.match(html, /text-xs mt-3/);
+  assert.doesNotMatch(html, /text-sm/);
+});
 
 test('icon actions retain their accessible name without generating a duplicate title', () => {
   const html = render(IconButton, { label: 'Close settings', icon, 'aria-controls': 'settings' });

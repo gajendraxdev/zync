@@ -1,6 +1,7 @@
 import { forwardRef, useId, type InputHTMLAttributes, type ReactNode } from 'react';
 import { cn } from '../../lib/utils.js';
 import { CONTROL_BASE_CLASSES, CONTROL_LABEL_CLASSES } from './controlStyles.js';
+import { fieldDescriptionIds } from './fieldAccessibility.js';
 
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
@@ -23,10 +24,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(({
   const inputId = id ?? generatedId;
   const isNumber = props.type === 'number';
   const errorId = `${inputId}-error`;
-  const descriptionIds = [...new Set([
-    ...(describedBy?.split(/\s+/).filter(Boolean) ?? []),
-    ...(error ? [errorId] : []),
-  ])].join(' ') || undefined;
+  const descriptionIds = fieldDescriptionIds(describedBy, error ? errorId : undefined);
 
   return (
     <div className="space-y-1 w-full">
@@ -42,6 +40,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(({
         <input
           ref={ref}
           id={inputId}
+          data-zync-color="control"
           aria-invalid={error ? true : ariaInvalid}
           aria-describedby={descriptionIds}
           className={cn(

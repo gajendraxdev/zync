@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Implementation progress
 
+- Share accessible field descriptions, themed controls and empty-state presentation.
+
+### Implementation progress
+
 - Unify nested-menu focus, dialog Escape ownership, anchored popup placement and accessible tooltip triggers.
 
 ### Implementation progress

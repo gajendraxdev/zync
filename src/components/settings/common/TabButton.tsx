@@ -35,8 +35,8 @@ export function TabButton({
                 }`}
             disabled={dimmed}
         >
-            {icon}
-            <span>{label}</span>
+            <span className="shrink-0" aria-hidden="true">{icon}</span>
+            <span className="min-w-0 text-left">{label}</span>
             {badge && !active && (
                 <span className="absolute right-2 top-1/2 -translate-y-1/2">
                     <span className="sr-only">{badgeLabel || 'New notifications'}</span>

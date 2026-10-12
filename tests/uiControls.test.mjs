@@ -4,6 +4,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Button } from '../.tmp-agent-tests/src/components/ui/Button.js';
 import { Input } from '../.tmp-agent-tests/src/components/ui/Input.js';
+import { Textarea } from '../.tmp-agent-tests/src/components/ui/Textarea.js';
 
 const render = (component, props) => renderToStaticMarkup(createElement(component, props));
 
@@ -74,4 +75,50 @@ test('input retains native attributes, trailing content and caller style overrid
   assert.match(html, /pr-9/);
   assert.match(html, />Show<\/button>/);
   assert.doesNotMatch(html, /h-\[var\(--zync-control-height|rounded-\[var|text-\[length:/);
+});
+
+test('textarea associates its label and error without losing caller descriptions', () => {
+  const html = render(Textarea, { id: 'message', label: 'Message', error: 'Required', 'aria-invalid': false, 'aria-describedby': 'hint message-error hint', rows: 5, maxLength: 4000, required: true });
+  assert.match(html, /for="message"/);
+  assert.match(html, /id="message"/);
+  assert.match(html, /id="message-error"/);
+  assert.match(html, /aria-invalid="true"/);
+  assert.match(html, /aria-describedby="hint message-error"/);
+  assert.match(html, /rows="5"/);
+  assert.match(html, /maxLength="4000"/);
+  assert.match(html, /required=""/);
+});
+
+test('textarea preserves native values, caller aria state and disabled/read-only semantics', () => {
+  const html = render(Textarea, { defaultValue: 'First line\nSecond line', name: 'notes', form: 'feedback', disabled: true, readOnly: true, 'aria-invalid': 'spelling', 'aria-describedby': 'hint' });
+  assert.match(html, />First line\nSecond line<\/textarea>/);
+  assert.match(html, /name="notes"/);
+  assert.match(html, /form="feedback"/);
+  assert.match(html, /disabled=""/);
+  assert.match(html, /readOnly=""/);
+  assert.match(html, /aria-invalid="spelling"/);
+  assert.match(html, /aria-describedby="hint"/);
+  assert.doesNotMatch(render(Textarea, {}), /aria-describedby|aria-invalid/);
+});
+
+test('textarea generated labels and validation IDs are unique', () => {
+  const html = renderToStaticMarkup(createElement('div', null,
+    createElement(Textarea, { label: 'First', error: 'Missing first' }),
+    createElement(Textarea, { label: 'Second', error: 'Missing second' }),
+  ));
+  const ids = [...html.matchAll(/<textarea[^>]* id="([^"]+)"/g)].map(match => match[1]);
+  assert.equal(new Set(ids).size, 2);
+  for (const id of ids) {
+    assert.ok(html.includes(`for="${id}"`));
+    assert.ok(html.includes(`aria-describedby="${id}-error"`));
+    assert.ok(html.includes(`id="${id}-error"`));
+  }
+});
+
+test('textarea caller geometry and resize overrides win over defaults', () => {
+  const html = render(Textarea, { className: 'min-h-0 rounded-none text-xs resize-none' });
+  assert.match(html, /min-h-0/);
+  assert.match(html, /rounded-none/);
+  assert.match(html, /resize-none/);
+  assert.doesNotMatch(html, /min-h-\[var|rounded-\[var|text-\[length:|resize-y/);
 });

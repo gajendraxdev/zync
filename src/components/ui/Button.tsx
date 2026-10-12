@@ -37,6 +37,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(({
     return (
         <button
             ref={ref}
+            data-zync-color={variant === 'secondary' ? 'control' : undefined}
             disabled={disabled || isLoading}
             aria-busy={isLoading || ariaBusy}
             className={cn(
