@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Implementation progress
 
+- Compose navigation destinations, host-strip placement and global utility actions from shared customization policies.
+
+### Implementation progress
+
 - Expose searchable shortcut bindings, recording and terminal routing controls through one reusable editor and modal.
 
 ### Implementation progress
