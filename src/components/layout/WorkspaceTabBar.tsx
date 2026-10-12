@@ -165,6 +165,7 @@ export const WorkspaceTabBar = memo(function WorkspaceTabBar({
         }
         const canvasTermId = activeTerminalId;
         const termId = createTerminal(connectionId, { shellOverride: shell.id, title: shell.label });
+        if (!termId) return;
         reportDockResult(dockInSplit(connectionId, { kind: 'term', termId }, edge, null, canvasTermId));
     };
 

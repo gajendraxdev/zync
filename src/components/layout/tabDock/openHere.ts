@@ -207,10 +207,12 @@ export async function openTerminalHere(
             if (refuseSplitIfCapped(connectionId, snapshot.alreadyInSplit, wantsSplit)) return;
         }
     } else {
-        termId = store.createTerminal(connectionId, {
+        const createdId = store.createTerminal(connectionId, {
             initialPath: spawnPath,
             isSynced: synced || undefined,
         });
+        if (!createdId) return;
+        termId = createdId;
         if (spawnPath) store.setTerminalCwd(connectionId, termId, spawnPath);
     }
 

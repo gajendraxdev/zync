@@ -22,14 +22,14 @@ const paneMoveStart = source.indexOf('// Dropping onto another pane relocates th
 const paneMoveEnd = source.indexOf("if (payload.kind === 'term')", paneMoveStart);
 assert.ok(paneMoveStart >= 0 && paneMoveEnd > paneMoveStart, 'pane-header move branch not found');
 const paneMove = source.slice(paneMoveStart, paneMoveEnd);
-assert.match(paneMove, /sourcePaneId !== paneId/, 'dropping a pane onto a different pane must use move behavior');
+assert.match(paneMove, /!selfTarget/, 'self detection must use stable content identity, not a colliding local leaf ID');
 assert.match(paneMove, /unsplitPane\(sourceLayout, sourcePaneId\)/, 'moving must detach the exact source pane');
 assert.match(paneMove, /sourceOwner === owner \? withoutSource : groups\?\.\[owner\]/, 'cross-group moves must resolve the hovered layout');
-assert.match(paneMove, /dockIntoLayout\(targetLayout, sourceNode\.content, edge, undefined, paneId, sourcePaneId\)/, 'moving must preserve the original content and pane identity at the hovered pane');
+assert.match(paneMove, /dockIntoLayout\(targetLayout, sourceNode\.content, edge, undefined, paneId, incomingPaneId\)/, 'moving must preserve original content and resolve container collisions at the hovered pane');
 assert.match(paneMove, /if \(sourceOwner !== owner\)/, 'pane moves between Split tabs must update both layouts');
 assert.match(paneMove, /isKeepableRemainder\(withoutSource\)/, 'source remainders use the same retention policy as session persistence');
 assert.match(paneMove, /ownerForLayout\(withoutSource, sourceOwner\)/, 'surviving content determines the new owner');
-assert.match(paneMove, /activePaneGroupOwner:[\s\S]*?\[connectionId\]: owner/, 'a cross-group move must activate its target group');
+assert.match(paneMove, /commitDockPlan\(nextGroups, nextTabs, owner/, 'cross-group movement must share atomic allocation and focus publication');
 
 const activateGroupStart = source.indexOf('activatePaneGroup: (connectionId, owner) =>');
 const activateGroupEnd = source.indexOf('closePaneGroup:', activateGroupStart);
@@ -70,7 +70,7 @@ assert.match(
 );
 
 const resolveOwnerStart = source.indexOf('function resolveDockOwner(');
-const resolveOwnerEnd = source.indexOf('/** Header drags send sourcePaneId', resolveOwnerStart);
+const resolveOwnerEnd = source.indexOf('function writeConnectionGroups(', resolveOwnerStart);
 assert.ok(resolveOwnerStart >= 0 && resolveOwnerEnd > resolveOwnerStart, 'dock-owner resolver not found');
 const resolveOwner = source.slice(resolveOwnerStart, resolveOwnerEnd);
 assert.match(
@@ -109,8 +109,8 @@ assert.match(
 );
 assert.match(
   tabBarSource,
-  /const label = `Split \$\{splitIndex >= 0 \? splitIndex \+ 1 : 1\}`/,
-  'split tabs must use neutral numbered names rather than content names',
+  /describePaneGroup\(members, leaves\.length - members\.length\)/,
+  'split tab chrome must describe visible members without changing canonical group membership',
 );
 assert.match(
   tabBarSource,
@@ -159,8 +159,13 @@ assert.match(
 );
 assert.match(
   paneViewSource,
-  /onWheelCapture=\{\(\) => \{[\s\S]*?if \(!focused\) focusPane\(connectionId, node\.id\)/,
+  /onWheelCapture=\{\(\) => \{[\s\S]*?if \(!focused\) requestFocus\(\)/,
   'wheel input over terminal content must activate and scroll the pane under the pointer',
+);
+assert.match(
+  paneViewSource,
+  /const requestFocus = onFocusContent \?\? \(\(\) => focusPane\(connectionId, node\.id\)\)/,
+  'exact content-key focus overrides legacy local-pane focus when supplied by the host',
 );
 
 const workspaceTabBarSource = fs.readFileSync(
@@ -174,7 +179,7 @@ assert.match(
 );
 assert.match(
   workspaceTabBarSource,
-  /onSplitClose=\{\(owner\) => onPaneGroupClose\(owner\)\}/,
+  /onPaneGroupClose=\{onPaneGroupClose\}/,
   'the Split-tab close button must close the whole group',
 );
 assert.match(
@@ -204,8 +209,8 @@ assert.match(
 );
 assert.match(
   tabBarSource,
-  /onContextMenu=\{\(event\) => \{[\s\S]*?target: \{ type: 'split', owner, paneId: layout\.activePaneId \}/,
-  'generic split tabs must suppress the WebView menu and open the Zync split menu',
+  /onContextMenu=\{\(event\) => \{[\s\S]*?event\.preventDefault\(\);[\s\S]*?target: \{ type: 'split', owner, paneId: interactivePaneId \}/,
+  'generic split tabs must suppress the WebView menu and open the Zync split menu for its visible interaction target',
 );
 assert.match(
   tabBarSource,
@@ -234,8 +239,22 @@ assert.doesNotMatch(
 );
 assert.match(
   mainLayoutSource,
-  /state\.activePaneGroupOwner\[tab\.connectionId\]/,
-  'canvas state must follow the explicitly active pane group',
+  /usePluginPaneNavigation\(\{ connectionId: tab\.connectionId, view: tab\.view, pinnedFeatures, isActive,[\s\S]*?groups: paneGroups, getState: useAppStore\.getState/,
+  'plugin navigation must reconcile the canonical canvas inventory through the shared hook',
+);
+const pluginNavigationSource = fs.readFileSync(
+  path.join(process.cwd(), 'src', 'components', 'layout', 'usePluginPaneNavigation.ts'),
+  'utf8',
+);
+assert.match(
+  pluginNavigationSource,
+  /layoutForPlugin\(currentGroups, view\.slice\('plugin:'\.length\), state\.activePaneGroupOwner\[connectionId\]\)/,
+  'plugin canvas resolution must prefer the explicitly active instance owner',
+);
+assert.match(
+  pluginNavigationSource,
+  /else if \(state\.activePaneGroupOwner\[connectionId\] !== owner\) state\.activatePaneGroup\(connectionId, owner\)/,
+  'navigation must activate the resolved existing owner only when it changes',
 );
 assert.match(
   mainLayoutSource,
@@ -244,8 +263,8 @@ assert.match(
 );
 assert.match(
   mainLayoutSource,
-  /closedFeatureInstances[\s\S]*?if \(!store\.closePaneGroup\(tab\.connectionId, owner\)\) return;[\s\S]*?setFeatureTabs\(remainingFeatureTabs\)/,
-  'closing a Split tab must remove its inventory only after its pane closes',
+  /const featureTabs = useMemo\(\(\) => featureTabsFromPaneGroups\(paneGroups\), \[paneGroups\]\)/,
+  'Split-tab feature inventory must derive from canonical groups, with no independent removal before guarded close',
 );
 assert.match(
   mainLayoutSource,

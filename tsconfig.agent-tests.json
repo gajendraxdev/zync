@@ -269,6 +269,9 @@
         "src/components/ui/ColorPicker.tsx",
         "src/features/appearance/presentation/ElementColorPreview.tsx",
         "src/features/appearance/presentation/elementColorBindings.ts",
-        "src/features/shortcuts/bindings.ts"
+        "src/features/shortcuts/bindings.ts",
+        "src/features/workspace/domain/presentation.ts",
+        "src/features/workspace/domain/dockingTopology.ts",
+        "src/features/workspace/domain/canvases.ts"
     ]
 }

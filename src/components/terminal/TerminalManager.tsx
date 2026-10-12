@@ -141,6 +141,7 @@ export function TerminalManager({
             if (targetConnId === activeConnectionId && activeConnectionId) {
                 // `createTerminal` takes only `connectionId` and returns the newly created `termId`.
                 const newId = createTerminal(activeConnectionId);
+                if (!newId) return;
 
                 // If a command was passed (e.g., from a plugin like PM2 logs), execute it in the new tab after it's ready
                 if (command) {

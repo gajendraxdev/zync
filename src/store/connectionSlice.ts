@@ -1,6 +1,9 @@
 import { StateCreator } from 'zustand';
+import { terminalForConnectionStartup } from '../features/workspace/application/reconnectTerminal';
 import type { AppStore } from './useAppStore';
 import { scheduleSaveSession } from './sessionSlice';
+import { normalizeDisplayAlias } from '../features/workspace/domain/presentation';
+import { assertSupportedMainTabPresentations, changeMainTabPresentation, parseMainTabPresentation, reorderMainTabsById, stablePinnedMainTabs, type MainTabPresentationAction } from '../features/workspace/domain/mainTabPresentation';
 import { isPaneLayoutCloseBlocked } from '../lib/paneCloseBlockers';
 import type { Connection, CoreTabView, Folder, Tab } from '../features/connections/domain/types.js';
 import {
@@ -181,6 +184,14 @@ export interface ConnectionSlice {
 
     // Tab Reordering
     reorderTabs: (oldIndex: number, newIndex: number) => void;
+    /** Stable-ID action shared by pointer and keyboard presentation controls. */
+    reorderWorkspaceTab: (sourceId: string, targetId: string) => void;
+    /** Pin visual order only; explicit close and retained content lifetime stay unchanged. */
+    setTabPinned: (tabId: string, pinned: boolean) => boolean;
+    /** Accept a display-only edit; persistence acknowledgement remains owned by session saving. */
+    updateTabPresentation: (tabId: string, action: MainTabPresentationAction) => boolean;
+    /** Empty/omitted alias restores the current feature-owned title. */
+    setTabDisplayAlias: (tabId: string, alias: string | undefined) => boolean;
 
     // Session Restore
     /**
@@ -635,9 +646,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                 resetTerminalPtyForReconnect(termId);
             }
             const primaryTermId = get().ensureTerminal(id);
-            const activeWorkspace = get().tabs.find(tab => tab.id === get().activeTabId);
-            const terminalWillMount = activeWorkspace?.connectionId === id
-                && activeWorkspace.view === 'terminal';
+            const startupTermId = terminalForConnectionStartup(get(), id, primaryTermId);
 
             set(state => {
                 if (cancelledConnectAttempts.has(attemptId)) {
@@ -672,8 +681,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
 
             // Give a visible terminal the first SSH session channel. Ubuntu's
             // PAM MOTD is one-shot and would otherwise be consumed by SFTP.
-            const terminalReady = !terminalWillMount
-                || await waitForTerminalStartup(primaryTermId);
+            const terminalReady = !startupTermId || await waitForTerminalStartup(startupTermId);
             if (await finishCancelledConnect(true)) return;
 
             const applyHomePath = async () => {
@@ -713,8 +721,8 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
 
             if (terminalReady) {
                 await applyHomePath();
-            } else if (terminalWillMount) {
-                void waitForTerminalStartup(primaryTermId, 20_000).then((ready) => {
+            } else if (startupTermId) {
+                void waitForTerminalStartup(startupTermId, 20_000).then((ready) => {
                     if (ready) return applyHomePath();
                     return undefined;
                 });
@@ -1165,9 +1173,13 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
     },
 
     setTabView: (tabId, view) => {
-        set(state => ({
-            tabs: state.tabs.map(t => t.id === tabId ? { ...t, view } : t)
-        }));
+        set(state => {
+            const scope = state.tabs.find(tab => tab.id === tabId)?.connectionId;
+            return {
+                tabs: state.tabs.map(t => t.id === tabId ? { ...t, view } : t),
+                ...(scope && state.workspaceDockFocus?.[scope] && { workspaceDockFocus: { ...state.workspaceDockFocus, [scope]: null } }),
+            };
+        });
         const feature = usageFeatureForTabView(view);
         if (feature) track(feature);
     },
@@ -1216,19 +1228,68 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
     },
 
     reorderTabs: (oldIndex, newIndex) => {
+        const tabs = get().tabs;
+        if (!Number.isInteger(oldIndex) || !Number.isInteger(newIndex)) return;
+        const source = tabs[oldIndex];
+        const target = tabs[newIndex];
+        if (source && target) get().reorderWorkspaceTab(source.id, target.id);
+    },
+
+    reorderWorkspaceTab: (sourceId, targetId) => {
+        if (!get().sessionLoaded || get().isRestoring || get().sessionPersistenceBlocked) return;
+        try { assertSupportedMainTabPresentations(get().tabs); }
+        catch { void get().saveSession(); return; }
         set(state => {
-            const newTabs = [...state.tabs];
-            const [movedTab] = newTabs.splice(oldIndex, 1);
-            newTabs.splice(newIndex, 0, movedTab);
-            return { tabs: newTabs };
+            const tabs = reorderMainTabsById(state.tabs, sourceId, targetId);
+            return tabs === state.tabs ? state : { tabs };
         });
         // Dirty-checked in sessionSlice — redundant calls are harmless.
         get().saveSession();
     },
 
+    setTabPinned: (tabId, pinned) => get().updateTabPresentation(tabId, { type: 'set-pinned', pinned }),
+
+    updateTabPresentation: (tabId, action) => {
+        const state = get();
+        if (!state.sessionLoaded || state.isRestoring || state.sessionPersistenceBlocked) return false;
+        try { assertSupportedMainTabPresentations(state.tabs); }
+        catch { void get().saveSession(); return false; }
+        const target = state.tabs.find(tab => tab.id === tabId);
+        if (!target || state.tabs.filter(tab => tab.id === tabId).length !== 1) return false;
+        const result = changeMainTabPresentation(target.presentation, action);
+        if (!result.ok) return false;
+        if (!result.changed) return true;
+        const tabs = state.tabs.map<Tab>(tab => {
+            if (tab !== target) return tab;
+            if (result.value) return { ...tab, presentation: result.value };
+            const { presentation: _presentation, ...undecorated } = tab;
+            return undecorated;
+        });
+        set({ tabs: stablePinnedMainTabs(tabs) });
+        void get().saveSession();
+        return true;
+    },
+
+    setTabDisplayAlias: (tabId, alias) => {
+        const state = get();
+        if (!state.sessionLoaded || state.isRestoring || state.sessionPersistenceBlocked) return false;
+        try { assertSupportedMainTabPresentations(state.tabs); }
+        catch { void get().saveSession(); return false; }
+        const target = state.tabs.find(tab => tab.id === tabId);
+        if (!target || state.tabs.filter(tab => tab.id === tabId).length !== 1) return false;
+        const displayAlias = normalizeDisplayAlias(alias);
+        if (target.displayAlias === displayAlias) return true;
+        set({ tabs: state.tabs.map(tab => tab === target ? { ...tab, displayAlias } : tab) });
+        void get().saveSession();
+        return true;
+    },
+
     restoreTabState: (snapshots, activeTabId, activeConnectionId, showWelcomeScreen = false) => {
+        assertSupportedMainTabPresentations(snapshots);
         set(state => {
-            const tabs: Tab[] = snapshots
+            const seen = new Set<string>();
+            const tabs: Tab[] = stablePinnedMainTabs(snapshots
+                .filter(s => s && typeof s.id === 'string' && s.id.trim())
                 .filter(s => RESTORABLE_TAB_TYPES.has(s.tabType))
                 .filter(s => {
                     // Drop connection tabs whose connection was deleted.
@@ -1238,7 +1299,14 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                     }
                     return true;
                 })
+                .filter(s => {
+                    if (seen.has(s.id)) return false;
+                    seen.add(s.id);
+                    return true;
+                })
                 .map(s => {
+                    const parsed = parseMainTabPresentation(s.presentation);
+                    const presentation = parsed.ok ? parsed.value : undefined;
                     const isLegacySnippetsTab = s.tabType === 'snippets';
                     const isPluginView = typeof s.view === 'string' && s.view.startsWith('plugin:');
                     const view: Tab['view'] = isLegacySnippetsTab
@@ -1250,6 +1318,8 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                         id: s.id,
                         type: isLegacySnippetsTab ? 'connection' : s.tabType as Tab['type'],
                         title: s.title,
+                        displayAlias: normalizeDisplayAlias(s.displayAlias),
+                        ...(presentation && { presentation }),
                         connectionId: isLegacySnippetsTab
                             ? GLOBAL_SNIPPETS_CONNECTION_ID
                             : s.connectionId,
@@ -1260,7 +1330,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                             : undefined,
                         view,
                     };
-                });
+                }));
 
             if (tabs.length === 0) {
                 return {

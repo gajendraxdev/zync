@@ -12,6 +12,8 @@ import { UiSlice, createUiSlice } from './uiSlice';
 import { AiSlice, createAiSlice } from './aiSlice';
 import { AiUiSlice, createAiUiSlice } from '../ai/store/agentStore';
 import { SessionSlice, createSessionSlice } from './sessionSlice';
+import { WorkspacePresentationSlice, createWorkspacePresentationSlice } from './workspacePresentationSlice';
+import { createWorkspaceDockingSlice, type WorkspaceDockingSlice } from './workspaceDockingSlice';
 
 export type { Connection, Folder, Tab } from './connectionSlice';
 export type { AppSettings } from './settingsSlice';
@@ -34,6 +36,8 @@ export type AppStore =
     UiSlice &
     AiUiSlice &
     AiSlice &
+    WorkspacePresentationSlice &
+    WorkspaceDockingSlice &
     SessionSlice & {
         lastAction: { message: string; type: 'success' | 'date' | 'info' | 'error' } | null;
         setLastAction: (message: string, type?: 'success' | 'info' | 'error') => void;
@@ -54,6 +58,8 @@ export const useAppStore = create<AppStore>()(
         ...createAiUiSlice(...a),
         ...createAiSlice(...a),
         ...createSessionSlice(...a),
+        ...createWorkspacePresentationSlice(...a),
+        ...createWorkspaceDockingSlice(...a),
 
         lastAction: null,
         setLastAction: (message, type = 'info') => {

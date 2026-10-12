@@ -28,6 +28,9 @@ function close(groups, activeOwner, terminals = []) {
         get: () => state,
         set: update => { state = { ...state, ...update(state) }; },
         scheduleSaveSession: () => {},
+        // Presentation cleanup is covered by workspaceContentLifecycle's full-slice harness.
+        connectionContentKeys: () => new Set(),
+        forgetClosedContent: () => {},
         writeConnectionGroups: (layouts, connectionId, next) => ({ ...layouts, [connectionId]: next }),
     };
     runInNewContext(outputText, context);

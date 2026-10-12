@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Implementation progress
 
+- Integrate canonical pane docking, guarded lifecycle operations and presentation metadata into session/store state.
+
+### Implementation progress
+
 - Add catalog-driven hybrid shortcut reservations, independent alternatives, conflict validation and shared binding labels.
 
 ### Implementation progress
