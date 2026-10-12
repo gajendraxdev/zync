@@ -178,6 +178,7 @@ const tests = [
   'tests/shortcuts.test.mjs',
   'tests/shortcutRouting.test.mjs',
   'tests/shortcutBindings.test.mjs',
+  'tests/shortcutUpgradeCompatibility.test.mjs',
   'tests/terminalInteraction.test.mjs',
   'tests/terminalShellContext.test.mjs',
   'tests/terminalImage.test.mjs',

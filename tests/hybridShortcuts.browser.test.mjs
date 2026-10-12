@@ -38,7 +38,12 @@ export const useAppStore = create((set, get) => ({
   updateKeyboardSettings: ${updaters.updateKeyboardSettings},
   updateKeybindings: ${updaters.updateKeybindings},
 }));
-window.hybridTest = { store: useAppStore, writes: [], toasts: [], actions: [], bytes: [] };
+window.hybridTest = { store: useAppStore, writes: [], toasts: [], actions: [], bytes: [], terminalKeys: [],
+  loadLegacyShortcuts: () => useAppStore.setState(state => ({ settings: { ...state.settings,
+    keybindings: { ...state.settings.keybindings, toggleSettings: 'Mod+Alt+3', commandPalette: 'Mod+Shift+B' },
+    keyboard: normalizeKeyboardSettings({ terminalFocusPolicy: 'shell', terminalShortcutExceptions: [] }),
+  } })),
+};
 `;
 const bundle = await build({
   stdin: { contents: `
@@ -63,7 +68,11 @@ const bundle = await build({
     }
     const term = window.hybridTest.term = new Terminal();
     term.open(document.getElementById('terminal'));
-    term.attachCustomKeyEventHandler(event => routeTerminalKey(event, bytes => window.hybridTest.bytes.push(bytes)));
+    term.attachCustomKeyEventHandler(event => {
+      const allowed = routeTerminalKey(event, bytes => window.hybridTest.bytes.push(bytes));
+      if (event.type === 'keydown') window.hybridTest.terminalKeys.push({ key: event.key, allowed });
+      return allowed;
+    });
     term.onData(bytes => window.hybridTest.bytes.push(bytes));
     window.addEventListener('keydown', event => {
       if (ownsLocalKeyboard(event)) return;
@@ -266,6 +275,55 @@ try {
   await dialogSearch.focus();
   await page.keyboard.press('Escape');
   await dialog.waitFor({ state: 'hidden' });
+  // Upgrade conflicts use the same settings UI and real xterm path, without
+  // modifying the saved custom key or clearing its terminal-first policy.
+  await page.setViewportSize({ width: 1000, height: 850 });
+  await page.evaluate(() => {
+    hybridTest.loadLegacyShortcuts(); hybridTest.actions.length = 0; hybridTest.bytes.length = 0; hybridTest.terminalKeys.length = 0;
+  });
+  await page.evaluate(() => { document.body.tabIndex = -1; document.body.focus(); });
+  await page.keyboard.press('Control+Alt+3');
+  assert.deepEqual(await page.evaluate(() => hybridTest.actions), ['toggleSettings'], 'custom Settings wins over new Public URLs default');
+  await page.evaluate(() => { hybridTest.actions.length = 0; hybridTest.term.focus(); });
+  await page.keyboard.press('Control+Shift+b');
+  assert.deepEqual(await page.evaluate(() => hybridTest.actions), [], 'a secondary cannot take over an unreserved custom key');
+  assert.deepEqual(await page.evaluate(() => hybridTest.terminalKeys.filter(({ key }) => key.toLowerCase() === 'b')
+    .map(({ key, allowed }) => ({ key: key.toLowerCase(), allowed }))),
+    [{ key: 'b', allowed: true }], 'the original terminal input handler receives the key exactly once; encoding remains xterm-owned');
+  await page.keyboard.press('Control+Shift+Space');
+  assert.deepEqual(await page.evaluate(() => hybridTest.actions), ['commandPaletteAlternative'], 'non-conflicting secondary stays automatic');
+  await search.fill('Toggle Hosts / Sidebar (alternative)');
+  const sidebarAlternative = row('Toggle Hosts / Sidebar (alternative)');
+  await sidebarAlternative.getByRole('status').filter({ hasText: 'Inactive:' }).waitFor();
+  assert.equal(await sidebarAlternative.getByRole('switch').isDisabled(), true);
+  assert.equal(await sidebarAlternative.getByRole('switch').getAttribute('aria-checked'), 'false');
+  assert.ok(await page.evaluate(() => hybridTest.store.getState().settings.keyboard.terminalShortcutExceptions.includes('toggleSidebarAlternative')),
+    'inactive defaults keep their saved reservations');
+  await page.evaluate(() => hybridTest.store.setState(state => ({ settings: { ...state.settings,
+    keybindings: { ...state.settings.keybindings, toggleSidebarAlternative: 'Mod+Alt+J' },
+  } })));
+  await sidebarAlternative.getByRole('button', { name: 'Reset shortcut for Toggle Hosts / Sidebar (alternative)', exact: true }).click();
+  await page.evaluate(() => hybridTest.save.resolve());
+  await page.waitForFunction(() => hybridTest.store.getState().pendingKeybindingWrites === 0);
+  await sidebarAlternative.getByRole('status').filter({ hasText: 'Inactive:' }).waitFor();
+  assert.equal(await page.evaluate(() => hybridTest.store.getState().settings.keybindings.commandPalette), 'Mod+Shift+B',
+    'resetting a default never overwrites its custom blocker');
+  for (const action of ['Reset', 'Remove']) {
+    await page.evaluate(() => hybridTest.store.setState(state => ({ settings: { ...state.settings,
+      keybindings: { ...state.settings.keybindings, commandPalette: 'Mod+Shift+B' },
+    } })));
+    await search.fill('Command Palette');
+    await row('Command Palette').getByRole('button', { name: action + ' shortcut for Command Palette', exact: true }).click();
+    await page.evaluate(() => hybridTest.save.resolve());
+    await page.waitForFunction(() => hybridTest.store.getState().pendingKeybindingWrites === 0);
+    await search.fill('Toggle Hosts / Sidebar (alternative)');
+    assert.equal(await sidebarAlternative.getByRole('switch').isDisabled(), false);
+    assert.equal(await sidebarAlternative.getByRole('switch').getAttribute('aria-checked'), 'true');
+    await page.evaluate(() => { hybridTest.actions.length = 0; hybridTest.term.focus(); });
+    await page.keyboard.press('Control+Shift+b');
+    assert.deepEqual(await page.evaluate(() => hybridTest.actions), ['toggleSidebarAlternative'], action + ' revives the configured secondary');
+    assert.equal(await page.evaluate(() => hybridTest.store.getState().settings.keybindings.toggleSettings), 'Mod+Alt+3');
+  }
   assert.deepEqual(errors, []);
-  console.log('Hybrid settings: reservations, real xterm ownership, scoped conflicts, recording focus/Escape, rollback, remove/reset, aliases, search and narrow layout passed.');
+  console.log('Hybrid settings: reservations, real xterm ownership, upgrade conflicts, inactive defaults, recording focus/Escape, rollback, remove/reset, aliases, search and narrow layout passed.');
 } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }

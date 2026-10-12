@@ -155,7 +155,12 @@ All notable changes to Zync are documented in this file. The format is based on 
   alternatives in shared hints, and retain existing saved keyboard preferences.
   Fresh installations save the recommended preset once. Existing profiles gain
   secondary reservations automatically, without a preset click; versioned adoption
-  preserves later opt-outs and custom primary bindings. ([338c397], [5fde763])
+  preserves later opt-outs and custom primary bindings. Saved custom chords take
+  priority over conflicting defaults, including terminal pass-through for an
+  unreserved custom key. Inactive defaults remain visible and configurable;
+  resetting or removing their custom blocker reactivates them automatically.
+  Routing, hints, File Manager and plugin chrome share this resolution rule.
+  ([338c397], [5fde763])
 
 - **Shortcut editor quick access:** Profile → Keyboard shortcuts now offers
   “View & edit shortcuts…” in a modal using the same searchable Settings editor,

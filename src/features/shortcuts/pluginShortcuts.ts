@@ -1,5 +1,5 @@
 import { SHORTCUT_CATALOG } from './catalog';
-import { shortcutBindings } from './bindings';
+import { resolveShortcutBindings } from './bindings';
 
 // Payloads are untrusted requests, NOT evidence of user keyboard input.
 // Only presentation/navigation actions are permitted. Never route persisted
@@ -27,7 +27,7 @@ export interface PluginShortcutBinding {
 
 export function pluginShortcutBindings(overrides: Record<string, string> | null | undefined, isMac: boolean): PluginShortcutBinding[] {
     return SHORTCUT_CATALOG.filter(command => PLUGIN_CHROME_COMMANDS.has(command.actionId ?? command.id)).flatMap(command => {
-        return shortcutBindings(command, overrides ?? {}).map(chord => {
+        return resolveShortcutBindings(command, overrides ?? {}, SHORTCUT_CATALOG, isMac).active.map(chord => {
             const parts = chord.toLowerCase().split('+');
             const key = parts[parts.length - 1];
             return {

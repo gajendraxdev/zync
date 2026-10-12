@@ -1,7 +1,7 @@
 import { useEffect, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import { isMatch } from '../../lib/keyboard';
 import { SHORTCUT_CATALOG } from '../../features/shortcuts/catalog';
-import { shortcutBindings } from '../../features/shortcuts/bindings';
+import { resolveShortcutBindings } from '../../features/shortcuts/bindings';
 import type { AppSettings } from '../../store/settingsSlice';
 import type { FileEntry } from './types';
 
@@ -100,7 +100,7 @@ export function useFileKeyboard({
 
       const matches = (id: string) => {
         const command = SHORTCUT_CATALOG.find(row => row.id === id && row.when === 'files');
-        return Boolean(command && shortcutBindings(command, settings.keybindings ?? {}).some(chord => isMatch(e, chord)));
+        return Boolean(command && resolveShortcutBindings(command, settings.keybindings ?? {}, SHORTCUT_CATALOG).active.some(chord => isMatch(e, chord)));
       };
 
       if (matches('fmSelectAll')) {

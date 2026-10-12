@@ -15,6 +15,8 @@ const { parseWorkspaceNavigation, resolveWorkspaceNavigation } = load('features/
 const { sidebarPresentation, setSidebarVisibility } = load('features/workspace/application/sidebarPresentation.ts');
 const { createUiSlice } = load('store/uiSlice.ts');
 const { DEFAULT_KEYBOARD_SETTINGS, normalizeKeyboardSettings } = load('features/shortcuts/policy.ts');
+const { SHORTCUT_CATALOG } = load('features/shortcuts/catalog.ts');
+const { resolveShortcutBindings } = load('features/shortcuts/bindings.ts');
 // Retired data is deliberately opaque; neither renderer nor native code decodes it.
 const fixture = { version: 99, opaque: ['retain', null] };
 const copy = value => structuredClone(value);
@@ -35,7 +37,8 @@ function realStore(invoke, persistSettings = () => assert.fail('generic settings
     const module = { exports: {} };
     const identity = value => value;
     runInNewContext(outputText, { module, exports: module.exports, invoke, createPreferencesQueue, createNavigationUpdater, createElementColorUpdater, createThemeImportUpdater, themeSettingsSnapshot, sameThemeSettings, createChromeActionUpdater, parseWorkspaceNavigation, resolveWorkspaceNavigation,
-        console: { error() {} }, defaultSettings: { theme: 'default', terminal: {}, privacy: {}, ghostSuggestions: { providers: {} } },
+        console: { error() {} }, defaultSettings: { theme: 'default', terminal: {}, privacy: {}, ghostSuggestions: { providers: {} },
+            keybindings: Object.fromEntries(SHORTCUT_CATALOG.filter(row => row.settingsKey).map(row => [row.settingsKey, row.defaultKeys])) },
         normalizeTerminalFontFamily: identity, normalizeTerminalFontSize: identity, normalizeTerminalFontWeight: identity,
         normalizeTerminalFontWeightBold: identity, resolveTerminalFontWeightBold: identity, normalizeIdleHostPtySuspendMinutes: identity,
         DEFAULT_KEYBOARD_SETTINGS, normalizeKeyboardSettings, normalizeNotificationSettings: identity, normalizeStatusBarSettings: identity, normalizeSurveySettings: identity,
@@ -66,6 +69,30 @@ test('fresh settings persist recommended reservations once; saved and legacy cho
     await store.get().updateKeyboardSettings({ terminalShortcutExceptions: [] });
     await store.get().loadSettings();
     assert.equal(store.get().settings.keyboard.terminalShortcutExceptions.length, 0, 'a post-migration opt-out survives a real save and reload');
+});
+
+test('loading an older custom profile preserves bindings and unrelated overrides without saving a conflicting default', async () => {
+    const disk = { theme: 'light', accentColor: '#abcdef', sidebarWidth: 431, compactMode: false,
+        terminal: { fontSize: 19, fontFamily: 'User Mono, monospace' },
+        keybindings: { toggleSettings: 'Ctrl+Alt+3', commandPalette: 'Ctrl+Shift+B', newHostTerminal: '' },
+        keyboard: { terminalFocusPolicy: 'app', terminalShortcutExceptions: [] } };
+    const before = JSON.stringify(disk);
+    const writes = [];
+    const store = realStore(async () => structuredClone(disk), async patch => writes.push(patch));
+    for (let i = 0; i < 2; i++) {
+        await store.get().loadSettings();
+        const settings = store.get().settings;
+        for (const [id, value] of Object.entries(disk.keybindings)) assert.equal(settings.keybindings[id], value);
+        for (const key of ['theme', 'accentColor', 'sidebarWidth', 'compactMode']) assert.equal(settings[key], disk[key]);
+        assert.equal(settings.terminal.fontSize, disk.terminal.fontSize);
+        assert.equal(settings.terminal.fontFamily, disk.terminal.fontFamily);
+        assert.equal(settings.keyboard.terminalFocusPolicy, 'app');
+        for (const id of ['navigationPublicUrls', 'toggleSidebarAlternative']) {
+            assert.equal(resolveShortcutBindings(SHORTCUT_CATALOG.find(row => row.id === id), settings.keybindings, SHORTCUT_CATALOG, false).active.length, 0);
+        }
+    }
+    assert.equal(JSON.stringify(disk), before);
+    assert.equal(writes.length, 0, 'upgrading a non-empty settings profile performs no load-time save');
 });
 
 test('chrome settings deep links are transient and clear on regular opening, consumption and close', () => {

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { defaultSettings, type AppSettings } from '../../../store/settingsSlice';
 import { useAppStore } from '../../../store/useAppStore';
 import { SHORTCUT_CATALOG, SHORTCUT_SECTIONS, type ShortcutCommand } from '../../../features/shortcuts';
-import { shortcutBindings, shortcutBindingLabel, shortcutConflicts, shortcutBindingIssue } from '../../../features/shortcuts/bindings';
+import { shortcutBindings, shortcutBindingLabel, shortcutBindingIssue, shortcutBindingWarning, resolveShortcutBindings } from '../../../features/shortcuts/bindings';
 import { RECOMMENDED_TERMINAL_SHORTCUT_EXCEPTIONS } from '../../../features/shortcuts/policy';
 import { KeybindingRow } from '../common/KeybindingRow';
 import { Section } from '../common/Section';
@@ -64,19 +64,20 @@ export function ShortcutsTab({ settings, updateKeybindings }: ShortcutsTabProps)
             return rows.length ? <Section key={section.id} title={section.title}>
                 <div className="space-y-2">{rows.map(command => {
                     const reserved = keyboard.terminalShortcutExceptions.includes(command.id);
-                    const conflicts = shortcutConflicts(command, keybindings, SHORTCUT_CATALOG);
                     const keys = shortcutBindings(command, keybindings);
+                    const activeKeys = resolveShortcutBindings(command, keybindings, SHORTCUT_CATALOG).active;
                     return <KeybindingRow key={command.id} label={command.label} binding={keys[0] ?? ''}
-                        defaultBinding={command.defaultKeys} aliases={command.extraKeys} disabled={locked}
+                        defaultBinding={command.defaultKeys} aliases={command.extraKeys?.filter(chord => activeKeys.includes(chord))} disabled={locked}
                         readOnly={!command.configurable} onChange={value => { void changeBinding(command, value); }}
                         validate={value => shortcutBindingIssue(command, value, keybindings, SHORTCUT_CATALOG)}
-                        warning={conflicts.length ? 'Overlapping binding: ' + conflicts.map(row => row.label).join(', ') + '. The first applicable command wins.' : undefined}>
+                        warning={shortcutBindingWarning(command, keybindings, SHORTCUT_CATALOG)}>
                         {command.actionId && <p className="text-xs text-app-muted">Same action as {SHORTCUT_CATALOG.find(row => row.id === command.actionId)?.label}; this binding and its terminal permission are independent.</p>}
                         {(command.id === 'toggleSidebar' || command.actionId === 'toggleSidebar') && <p className="text-xs text-app-muted">Toggles Hosts when navigation is visible; otherwise toggles the current sidebar.</p>}
                         {command.terminalReservation ? <Toggle label={'Available in terminal: ' + command.label}
-                            checked={appFirst ? keys.length > 0 : reserved} disabled={locked || appFirst || !keys.length}
+                            checked={activeKeys.length > 0 && (appFirst || reserved)} disabled={locked || appFirst || !activeKeys.length}
                             onChange={checked => { void reserve(command.id, checked); }}
                             description={!keys.length ? 'Assign a shortcut first. Your reservation selection is retained.'
+                                : !activeKeys.length ? 'Inactive because a custom shortcut takes priority. Your reservation selection is retained.'
                                 : appFirst ? 'Zync first already prioritizes this command; your hybrid selection is retained.'
                                 : reserved ? 'Reserved for Zync, including inside terminal editors. This overrides the same terminal key.'
                                 : 'Passed to terminal while it is focused; available in the app when its context allows.'} />

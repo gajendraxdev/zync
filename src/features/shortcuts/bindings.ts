@@ -9,7 +9,7 @@ export function shortcutBindings(command: ShortcutCommand, overrides: ShortcutOv
     return primary ? [primary, ...(command.extraKeys ?? [])] : [];
 }
 
-/** Labels and fixed aliases always describe the bindings the dispatcher actually uses. */
+/** Configured chords stay visible in the editor even when a default is inactive. */
 export function shortcutBindingLabel(command: ShortcutCommand, overrides: ShortcutOverrides): string {
     return shortcutBindings(command, overrides).map(chord => formatShortcutLabel(chord)).join(' / ') || 'Not set';
 }
@@ -36,6 +36,77 @@ function scopesOverlap(a: ShortcutCommand, b: ShortcutCommand): boolean {
     return true;
 }
 
+export interface ShortcutBindingResolution {
+    active: readonly string[];
+    /** Defaults remain configured; no migration or settings write disables them. */
+    inactive: readonly { chord: string; overriddenBy: readonly ShortcutCommand[] }[];
+}
+
+function hasCustomPrimary(command: ShortcutCommand, overrides: ShortcutOverrides, isMac: boolean): boolean {
+    const value = command.settingsKey ? overrides[command.settingsKey] : undefined;
+    // Loaded settings include materialized defaults, so property presence alone
+    // cannot distinguish a user remap from an inherited binding.
+    return Boolean(value && value !== command.defaultKeys
+        && canonicalShortcut(value, isMac) !== canonicalShortcut(command.defaultKeys, isMac));
+}
+
+/**
+ * Resolve inherited chords against user remaps before focus/terminal ownership.
+ * A custom app key still protects its terminal pass-through when unreserved;
+ * a newly reserved default must not steal it. Fixed aliases remain defaults.
+ * Removing/resetting the custom binding automatically revives displaced defaults.
+ */
+export function resolveShortcutBindings(
+    command: ShortcutCommand,
+    overrides: ShortcutOverrides,
+    catalog: readonly ShortcutCommand[],
+    isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform),
+): ShortcutBindingResolution {
+    const configured = shortcutBindings(command, overrides);
+    const customPrimary = hasCustomPrimary(command, overrides, isMac);
+    if (!configured.length || (configured.length === 1 && customPrimary)) return { active: configured, inactive: [] };
+    const customPeers = catalog.filter(other => other.id !== command.id && scopesOverlap(command, other)
+        && hasCustomPrimary(other, overrides, isMac));
+    const active: string[] = [];
+    const inactive: { chord: string; overriddenBy: readonly ShortcutCommand[] }[] = [];
+    configured.forEach((chord, index) => {
+        const overriddenBy = index === 0 && customPrimary ? [] : customPeers.filter(other =>
+            canonicalShortcut(shortcutBindings(other, overrides)[0], isMac) === canonicalShortcut(chord, isMac));
+        if (overriddenBy.length) inactive.push({ chord, overriddenBy });
+        else active.push(chord);
+    });
+    return { active, inactive };
+}
+
+/** Describe effective terminal bindings without advertising displaced defaults. */
+export function activeShortcutBindingLabel(command: ShortcutCommand, overrides: ShortcutOverrides,
+    catalog: readonly ShortcutCommand[], isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform)): string {
+    const resolved = resolveShortcutBindings(command, overrides, catalog, isMac);
+    return resolved.active.map(chord => formatShortcutLabel(chord, isMac)).join(' / ')
+        || (resolved.inactive.length ? 'Inactive (custom shortcut conflict)' : 'Not set');
+}
+
+/** Editor warnings explain precedence while preserving the configured binding. */
+export function shortcutBindingWarning(command: ShortcutCommand, overrides: ShortcutOverrides,
+    catalog: readonly ShortcutCommand[], isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform)): string | undefined {
+    const resolved = resolveShortcutBindings(command, overrides, catalog, isMac);
+    if (resolved.inactive.length) {
+        const blockers = [...new Set(resolved.inactive.flatMap(binding => binding.overriddenBy.map(other => other.label)))];
+        return `Inactive: ${resolved.inactive.map(binding => formatShortcutLabel(binding.chord, isMac)).join(', ')}. Custom shortcuts for ${blockers.join(', ')} take priority. Remap this binding, or reset/remove the conflicting custom shortcut.`;
+    }
+    const conflicts = shortcutConflicts(command, overrides, catalog, isMac);
+    if (!conflicts.length) return undefined;
+    const activeKeys = new Set(resolved.active.map(chord => canonicalShortcut(chord, isMac)));
+    const activeConflicts = conflicts.filter(other => resolveShortcutBindings(other, overrides, catalog, isMac).active
+        .some(chord => activeKeys.has(canonicalShortcut(chord, isMac))));
+    if (activeConflicts.length) {
+        return `Overlapping binding: ${activeConflicts.map(other => other.label).join(', ')}. Remap one of these shortcuts to remove the conflict.`;
+    }
+    return hasCustomPrimary(command, overrides, isMac)
+        ? `Your custom shortcut takes priority over conflicting defaults for ${conflicts.map(other => other.label).join(', ')}.`
+        : undefined;
+}
+
 /** Include fixed aliases and hidden commands; duplicate keys are only conflicts in overlapping scopes. */
 export function shortcutConflicts(
     command: ShortcutCommand,
@@ -60,6 +131,12 @@ export function shortcutBindingIssue(command: ShortcutCommand, value: string, ov
         && !/^F\d{1,2}$/i.test(value)) {
         return 'Use Ctrl, Command or Alt, or a function key, so ordinary typing stays available.';
     }
+    // Reset may restore an inactive default, but never replaces another command's
+    // custom choice. Re-recording an existing remap also keeps upgrade conflicts
+    // visible without rejecting the user's settled configuration.
+    const current = shortcutBindings(command, overrides)[0];
+    if (canonicalShortcut(value, isMac) === canonicalShortcut(command.defaultKeys, isMac)
+        || (current && canonicalShortcut(value, isMac) === canonicalShortcut(current, isMac))) return undefined;
     const next = command.settingsKey ? { ...overrides, [command.settingsKey]: value } : overrides;
     const conflicts = shortcutConflicts(command, next, catalog, isMac);
     return conflicts.length ? `Already used by ${conflicts.map(row => row.label).join(', ')} in an overlapping context. Remove or change that binding first.` : undefined;

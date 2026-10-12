@@ -3,7 +3,7 @@ import { Keyboard } from 'lucide-react';
 import { TerminalShortcutMenu } from './TerminalShortcutMenu';
 import { normalizeTerminalFocusPolicy } from '../../../features/shortcuts/policy';
 import { SHORTCUT_CATALOG } from '../../../features/shortcuts/catalog';
-import { shortcutBindingLabel } from '../../../features/shortcuts/bindings';
+import { activeShortcutBindingLabel, resolveShortcutBindings } from '../../../features/shortcuts/bindings';
 import { useKeyboardShortcutSettings } from './useKeyboardShortcutSettings';
 import { useAppStore } from '../../../store/useAppStore';
 import { Select } from '../../ui/Select';
@@ -16,9 +16,10 @@ export function TerminalShortcutControl({ compact = false, showExceptions = fals
     const overrides = useAppStore(state => state.settings.keybindings) ?? {};
     const enabled = keyboard.terminalFocusPolicy === 'app';
     const choices = SHORTCUT_CATALOG.filter(command => command.terminalReservation);
-    const reserved = choices.filter(command => keyboard.terminalShortcutExceptions.includes(command.id));
+    const reserved = choices.filter(command => keyboard.terminalShortcutExceptions.includes(command.id)
+        && resolveShortcutBindings(command, overrides, SHORTCUT_CATALOG).active.length > 0);
     const reservation = reserved.length
-        ? `Kept for Zync: ${reserved.map(command => `${shortcutBindingLabel(command, overrides)} (${command.label})`).join(', ')}.`
+        ? `Kept for Zync: ${reserved.map(command => `${activeShortcutBindingLabel(command, overrides, SHORTCUT_CATALOG)} (${command.label})`).join(', ')}.`
         : 'No app shortcuts are reserved.';
     const description = enabled
         ? 'Zync shortcuts take priority in the focused terminal.'
@@ -58,17 +59,21 @@ export function TerminalShortcutControl({ compact = false, showExceptions = fals
                         <fieldset disabled={pending || enabled} className="mt-2 space-y-2 disabled:opacity-60">
                             <legend className="sr-only">Zync shortcut exceptions</legend>
                             <p className="text-xs text-app-muted">Keep the checked shortcuts for Zync. Uncheck all to pass app shortcuts to the terminal; terminal copy/paste remain available. Choose Terminal first to edit.</p>
-                            {choices.map(command => (
-                                <label key={command.id} className="flex flex-wrap items-center gap-2 text-xs text-app-text">
-                                    <input
-                                        type="checkbox"
-                                        checked={keyboard.terminalShortcutExceptions.includes(command.id)}
-                                        onChange={event => { void reserve(command.id, event.target.checked); }}
-                                    />
-                                    <span>{command.label}</span>
-                                    <span className="ml-auto break-words text-app-muted">{shortcutBindingLabel(command, overrides)}</span>
-                                </label>
-                            ))}
+                            {choices.map(command => {
+                                const active = resolveShortcutBindings(command, overrides, SHORTCUT_CATALOG).active.length > 0;
+                                return (
+                                    <label key={command.id} className="flex flex-wrap items-center gap-2 text-xs text-app-text">
+                                        <input
+                                            type="checkbox"
+                                            checked={active && keyboard.terminalShortcutExceptions.includes(command.id)}
+                                            disabled={!active}
+                                            onChange={event => { void reserve(command.id, event.target.checked); }}
+                                        />
+                                        <span>{command.label}</span>
+                                        <span className="ml-auto break-words text-app-muted">{activeShortcutBindingLabel(command, overrides, SHORTCUT_CATALOG)}</span>
+                                    </label>
+                                );
+                            })}
                         </fieldset>
                     </details>
                 ) : <p className="text-[10px] text-app-muted">Choose exceptions in Settings → Shortcuts.</p>
