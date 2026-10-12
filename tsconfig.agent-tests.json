@@ -22,6 +22,7 @@
     },
     "include": [
         "tests/themeFiles.browser.tsx",
+        "tests/chromeActions.browser.tsx",
         "tests/settingsOrganization.browser.tsx",
         "src/components/layout/WorkspaceTabAppearanceDialog.tsx",
         "src/components/layout/useWorkspaceTabCloseFocus.ts",

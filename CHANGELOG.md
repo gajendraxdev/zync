@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Implementation progress
 
+- Share toolbar and status visibility menus, preserve required status indicators and expose workspace commands in the palette.
+
+### Implementation progress
+
 - Compose navigation destinations, host-strip placement and global utility actions from shared customization policies.
 
 ### Implementation progress
