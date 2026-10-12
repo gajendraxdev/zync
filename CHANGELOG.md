@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Implementation progress
 
+- Unify nested-menu focus, dialog Escape ownership, anchored popup placement and accessible tooltip triggers.
+
+### Implementation progress
+
 - Keep imported custom theme selectors device-local on settings upload and restore, with compatibility regression tests.
 
 ### Implementation progress

@@ -11,6 +11,8 @@ interface TooltipProps {
   disabled?: boolean;
   dismissOnClick?: boolean;
   asChild?: boolean;
+  /** Wrap only disabled native controls for pointer hover. Enabled children stay the accessible trigger. */
+  disabledTrigger?: boolean;
 }
 
 function shouldDismissTooltip(open: boolean, dismissOnClick: boolean): boolean {
@@ -26,6 +28,7 @@ export function Tooltip({
   disabled = false,
   dismissOnClick = true,
   asChild = true,
+  disabledTrigger = false,
 }: TooltipProps) {
   const [open, setOpen] = useState(false);
 
@@ -39,7 +42,8 @@ export function Tooltip({
     if (!shouldDismissTooltip(open, dismissOnClick)) return;
     setOpen(false);
   };
-  const shouldUseAsChild = asChild && isValidElement(children);
+  const triggerChild = disabledTrigger ? <span className="inline-flex max-w-full">{children}</span> : children;
+  const shouldUseAsChild = asChild && isValidElement(triggerChild);
 
   return (
     <RadixTooltip.Root
@@ -53,7 +57,7 @@ export function Tooltip({
         className={shouldUseAsChild ? className : cn("relative inline-flex items-center justify-center", className)}
         onClickCapture={handleDismissCapture}
       >
-        {children}
+        {triggerChild}
       </RadixTooltip.Trigger>
 
       {!disabled && (

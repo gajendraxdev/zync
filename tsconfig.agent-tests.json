@@ -259,6 +259,7 @@
         "src/features/workspace/domain/docking.ts",
         "src/lib/paneLayout/contentIdentity.ts",
         "src/lib/paneLayout/regions.ts",
-        "src/features/workspace/domain/dockPresentation.ts"
+        "src/features/workspace/domain/dockPresentation.ts",
+        "src/components/ui/menuFocus.ts"
     ]
 }

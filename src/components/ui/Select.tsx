@@ -43,6 +43,7 @@ interface BoundsRect {
 
 interface DropdownCoords {
     top: number;
+    bottom: number;
     left: number;
     width: number;
     maxHeight: number;
@@ -88,12 +89,11 @@ const calculateDropdownCoords = (
     const availableAbove = Math.max(0, triggerRect.top - bounds.top - DROPDOWN_GAP);
     const openUpward = availableBelow < MIN_PANEL_HEIGHT && availableAbove > availableBelow;
 
-    const top = openUpward
-        ? Math.max(bounds.top + DROPDOWN_GAP, triggerRect.top - DROPDOWN_GAP - Math.min(Math.max(MIN_LIST_HEIGHT, availableAbove), MAX_PANEL_HEIGHT))
-        : triggerRect.bottom + DROPDOWN_GAP;
-
     return {
-        top,
+        top: triggerRect.bottom + DROPDOWN_GAP,
+        // Anchor the real popup's bottom, not an estimated maximum-height box.
+        // Short or filtered menus must stay next to the trigger when opening up.
+        bottom: window.innerHeight - triggerRect.top + DROPDOWN_GAP,
         left: Math.max(bounds.left + DROPDOWN_GAP, triggerRect.left),
         width: Math.min(triggerRect.width, bounds.width - DROPDOWN_GAP * 2),
         maxHeight: Math.min(openUpward ? availableAbove : availableBelow, MAX_PANEL_HEIGHT),
@@ -128,14 +128,14 @@ export function Select({
     const containerRef = useRef<HTMLDivElement>(null);
     const triggerRef = useRef<HTMLButtonElement>(null);
     const commandRef = useRef<HTMLDivElement>(null);
-    const [coords, setCoords] = useState<DropdownCoords>({ top: 0, left: 0, width: 0, maxHeight: MIN_LIST_HEIGHT, openUpward: false });
+    const [coords, setCoords] = useState<DropdownCoords>({ top: 0, bottom: 0, left: 0, width: 0, maxHeight: MIN_LIST_HEIGHT, openUpward: false });
 
     const selectedOption = options.find(opt => opt.value === value);
 
     useLayoutEffect(() => {
-        if (!(isOpen && portal && containerRef.current)) return;
+        if (!(isOpen && portal && triggerRef.current)) return;
 
-        setCoords(calculateDropdownCoords(containerRef.current, true));
+        setCoords(calculateDropdownCoords(triggerRef.current, true));
     }, [isOpen, portal]);
 
     useLayoutEffect(() => {
@@ -180,10 +180,10 @@ export function Select({
             window.addEventListener('keydown', handleEscClose, { capture: true });
             document.addEventListener('mousedown', handleClickOutside);
             let updateCoords: (() => void) | null = null;
-            if (portal && containerRef.current) {
+            if (portal && triggerRef.current) {
                 updateCoords = () => {
-                    if (!containerRef.current) return;
-                    setCoords(calculateDropdownCoords(containerRef.current, true));
+                    if (!triggerRef.current) return;
+                    setCoords(calculateDropdownCoords(triggerRef.current, true));
                 };
                 window.addEventListener('resize', updateCoords);
                 window.addEventListener('scroll', updateCoords, true);
@@ -211,8 +211,9 @@ export function Select({
             exit={{ opacity: 0, y: reduceMotion ? 0 : coords.openUpward ? -2 : 2, scale: reduceMotion ? 1 : 0.995 }}
             transition={{ duration: reduceMotion ? 0 : 0.15, ease: [0.16, 1, 0.3, 1] }}
             style={portal ? {
-                position: 'absolute',
-                top: coords.top || 0,
+                position: 'fixed',
+                top: coords.openUpward ? undefined : coords.top,
+                bottom: coords.openUpward ? coords.bottom : undefined,
                 left: coords.left || 0,
                 width: coords.width > 0 ? coords.width : 'auto',
                 minWidth: '160px',
@@ -303,6 +304,7 @@ export function Select({
             <button
                 ref={triggerRef}
                 id={triggerId}
+                data-zync-color="control"
                 type="button"
                 role={ariaLabel ? 'combobox' : undefined}
                 aria-label={ariaLabel}

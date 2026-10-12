@@ -5,6 +5,7 @@ import { motion, AnimatePresence, useDragControls, useMotionValue, useReducedMot
 import { cn } from '../../lib/utils';
 import { Button } from './Button';
 import { DIALOG_SURFACE_CLASSES } from './surfaceStyles';
+import { consumeDialogEscape } from './dialogEscape';
 
 const FOCUSABLE_SELECTOR = [
   'a[href]',
@@ -123,14 +124,13 @@ export function Modal({
 
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
-      if (document.querySelector('[data-zync-select-open="true"]')) return;
-      if (e.key === 'Escape') onClose();
+      consumeDialogEscape(e, dialogElement, effectiveCloseOnEsc, onClose);
     };
-    if (isOpen && effectiveCloseOnEsc) {
+    if (isOpen) {
       window.addEventListener('keydown', handleEsc, { capture: true });
     }
     return () => window.removeEventListener('keydown', handleEsc, { capture: true });
-  }, [effectiveCloseOnEsc, isOpen, onClose]);
+  }, [dialogElement, effectiveCloseOnEsc, isOpen, onClose]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -152,7 +152,11 @@ export function Modal({
     if (!isOpen || !dialogElement) return;
     const previouslyFocused = openerRef.current;
     const frame = window.requestAnimationFrame(() => {
-      for (const control of getFocusableControls(dialogElement)) {
+      const controls = getFocusableControls(dialogElement);
+      // A child or a quick user action may have already established valid focus
+      // while the portal mounted. Delayed initialization must not steal it back.
+      if (controls.some(control => control === dialogElement.ownerDocument.activeElement)) return;
+      for (const control of controls) {
         control.focus();
         // Some rendered candidates still reject focus (e.g. closed content).
         if (dialogElement.ownerDocument.activeElement === control) return;
