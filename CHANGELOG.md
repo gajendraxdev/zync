@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Implementation progress
 
+- Integrate main-tab appearance, ordering and close-focus controls while sharing utility actions and tab chrome.
+
+### Implementation progress
+
 - Share toolbar and status visibility menus, preserve required status indicators and expose workspace commands in the palette.
 
 ### Implementation progress

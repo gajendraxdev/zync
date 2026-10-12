@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Workspace tab controls</title></head>
+  <body>
+    <h1>Workspace tab controls</h1>
+    <button id="run" type="button">Run keyboard checks</button>
+    <button id="theme" type="button">Switch theme</button>
+    <!-- Stable output height prevents test logging from scrolling/dismissing live menus. -->
+    <pre id="results" aria-live="polite" class="h-48 overflow-auto whitespace-pre-wrap text-xs">Ready</pre>
+    <div id="root"></div>
+    <script type="module" src="./workspaceTabs.browser.tsx"></script>
+  </body>
+</html>

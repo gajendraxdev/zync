@@ -26,6 +26,8 @@
         "tests/settingsOrganization.browser.tsx",
         "src/components/layout/WorkspaceTabAppearanceDialog.tsx",
         "src/components/layout/useWorkspaceTabCloseFocus.ts",
+        "tests/workspaceTabs.browser.tsx",
+        "tests/workspaceTabRetention.browser.tsx",
         "src/features/appearance/domain/elementColors.ts",
         "src/features/appearance/application/updateElementColors.ts",
         "src/features/appearance/presentation/elementColorStyle.ts",
