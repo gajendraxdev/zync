@@ -61,6 +61,7 @@ const tests = [
   'tests/contentPresentation.test.mjs',
   'tests/customizationSettingsStorage.test.mjs',
   'tests/workspaceDocking.test.mjs',
+  'tests/tabDrag.test.mjs',
   'tests/mainTabPresentation.test.mjs',
   'tests/sessionRestore.test.mjs',
   'tests/pluginPaneClose.test.mjs',

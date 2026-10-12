@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Implementation progress
 
+- Share pointer drag sessions, insertion feedback and click suppression across workspace tab strips.
+
+### Implementation progress
+
 - Standardize host rows and sidebar actions on shared focus, button and tooltip primitives.
 
 ### Implementation progress
