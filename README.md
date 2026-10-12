@@ -228,7 +228,14 @@ Operator details: [`packaging/arch/README.md`](packaging/arch/README.md).
 
 - **Sidebar:** hosts, folders, Vault, Sync & Backup, snippets, and release notes as first-class tabs
 - **Host panels:** Terminal, Files, Dashboard, Tunnels, Port Forwarding; shells stay alive when you switch
-- **Settings:** General, Terminal, Appearance, File Manager, AI, Shortcuts, Plugins, About (+ in-app `settings.json` editor)
+- **Settings:** General, Terminal, Appearance, Layout & Navigation, File Manager, AI, Shortcuts, Plugins, About (+ in-app `settings.json` editor)
+- **Theme JSON:** In Settings → Appearance → Theme files, export current colors,
+  edit the JSON, then import to validate and preview before Apply. This section is
+  at the bottom of Appearance; View theme keys lists every supported key with a
+  copyable example. Omitted element keys inherit the theme. Only palette and
+  global element-color overrides are replaced; host-specific colors, fonts, layout
+  and connections stay unchanged. Version 1 supports opaque `#rrggbb` colors, not
+  arbitrary CSS, gradients, images or plugin code. Cancel leaves the current theme intact.
 
 ## Documentation
 
