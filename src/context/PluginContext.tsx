@@ -8,6 +8,7 @@ import {
     rejectPendingPluginNotifyActionsForPlugin,
 } from '../features/notifications/pluginNotifyAction';
 import { useAppStore } from '../store/useAppStore';
+import { buildWorkspaceViewRegistrations } from '../features/workspace/application/viewRegistrationAdapters';
 import { confirmPluginTerminalAction } from '../features/plugins/confirmPluginTerminalAction';
 import {
     filterUnsupportedHostThemes,
@@ -395,6 +396,11 @@ export const PluginProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const [loaded, setLoaded] = useState(false);
     const [commands, setCommands] = useState<PluginCommandContribution[]>([]);
     const [panels, setPanels] = useState<PluginPanelContribution[]>([]);
+    useEffect(() => {
+        // A single transient metadata snapshot serves UI and store-level split guards.
+        // This never opens panels, persists plugin runtime data or grants permissions.
+        useAppStore.getState().setWorkspaceViewRegistry(buildWorkspaceViewRegistrations(panels, plugins));
+    }, [panels, plugins]);
     const [runtimeHealth, setRuntimeHealth] = useState<PluginRuntimeHealth[]>([]);
     const [pluginSafeMode, setPluginSafeMode] = useState(false);
     const runtimeSupervisor = useRef(new PluginRuntimeSupervisor<Worker>());

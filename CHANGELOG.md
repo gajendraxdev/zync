@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Implementation progress
 
+- Integrate workspace navigation, grouped content tabs, docking, hide/reveal recovery and kind-agnostic plugin registration.
+
+### Implementation progress
+
 - Integrate main-tab appearance, ordering and close-focus controls while sharing utility actions and tab chrome.
 
 ### Implementation progress

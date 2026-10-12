@@ -294,6 +294,7 @@
         "src/components/layout/WorkspaceTabDecoration.tsx",
         "src/components/layout/workspaceTabContextMenu.ts",
         "src/features/workspace/domain/dockingProjection.ts",
-        "src/components/workspace/paneSurfaces.ts"
+        "src/components/workspace/paneSurfaces.ts",
+        "src/features/workspace/domain/dockingView.ts"
     ]
 }

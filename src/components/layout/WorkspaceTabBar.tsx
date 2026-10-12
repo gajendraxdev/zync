@@ -1,13 +1,16 @@
-import { memo } from 'react';
+import { memo, type ReactNode } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import { useAvailableShells } from '../../hooks/useAvailableShells';
 import { LOCAL_TERMINAL_CONNECTION_ID } from '../../features/connections/application/tabService';
 import { CombinedTabBar } from './CombinedTabBar';
-import { overlayPaneId, overlayPluginPaneId, type DockTabPointerHandlers } from './tabDock';
+import { overlayPluginPaneId, type DockTabPointerHandlers } from './tabDock';
 import type { ShellEntry } from '../../lib/shells/types';
 import type { FeatureId, WorkspaceFeatureTab } from './featureMeta';
+import { findWorkspaceContentPane } from '../../features/workspace/domain/contentInventory';
+import { hiddenWorkspaceContent } from '../../features/workspace/domain/visibleContent';
+import { workspaceSplitTarget } from '../../features/workspace/domain/dockingView';
+import { allowsAdditionalPaneBeside } from '../../features/workspace/domain/dockingTopology';
 import {
-    canSplit,
     findNode,
     isFeatureContent,
     isPaneLeaf,
@@ -15,6 +18,11 @@ import {
     isSplitFeatureId,
     isSplitLayout,
     layoutForCanvas,
+    layoutForPlugin,
+    collectLeaves,
+    paneContentKey,
+    paneDockPayload,
+    projectVisiblePaneLayout,
     splitFromDockEdge,
     type DockEdge,
     type SplitFeatureId,
@@ -24,13 +32,14 @@ export interface WorkspaceTabBarProps {
     connectionId: string;
     tabId: string;
     activeView: string;
-    openFeatures: string[];
     featureTabs: WorkspaceFeatureTab[];
     activeFeatureTabId: string | null;
     pinnedFeatures: string[];
-    pluginPanels: { id: string; title: string }[];
+    pluginPanels: { id: string; title: string; allowMultiple: boolean }[];
+    contentActions?: ReactNode;
     onTabSelect: (view: string, termId?: string) => void;
-    onFeatureClose: (feature: string) => void;
+    onPluginTabSelect: (contentId: string) => void;
+    onPluginTabClose: (contentId: string) => void;
     onFeatureTabSelect: (tabId: string, featureId: FeatureId) => void;
     onFeatureTabClose: (tabId: string, featureId: FeatureId) => void;
     onTerminalClose: (termId: string) => void;
@@ -52,13 +61,14 @@ export const WorkspaceTabBar = memo(function WorkspaceTabBar({
     connectionId,
     tabId,
     activeView,
-    openFeatures,
     featureTabs,
     activeFeatureTabId,
     pinnedFeatures,
     pluginPanels,
+    contentActions,
     onTabSelect,
-    onFeatureClose,
+    onPluginTabSelect,
+    onPluginTabClose,
     onFeatureTabSelect,
     onFeatureTabClose,
     onTerminalClose,
@@ -74,29 +84,32 @@ export const WorkspaceTabBar = memo(function WorkspaceTabBar({
     const activeTerminalId = useAppStore(
         state => state.activeTerminalIds[connectionId] ?? null,
     );
-    const isSplit = useAppStore((state) => {
-        const activeId = state.activeTerminalIds[connectionId];
-        const owner = state.activePaneGroupOwner[connectionId];
-        return isSplitLayout(layoutForCanvas(state.paneLayouts[connectionId], activeId, owner));
-    });
+    const canvasSelection = {
+        featureInstanceId: isSplitFeatureId(activeView) ? featureTabs.find(item => item.id === activeFeatureTabId)?.instanceId : undefined,
+        pluginPanelId: activeView.startsWith('plugin:') ? activeView.slice('plugin:'.length) : undefined,
+        featureId: isSplitFeatureId(activeView) ? activeView : undefined,
+    };
+    const isSplit = useAppStore(state => isSplitLayout(workspaceSplitTarget(state, connectionId, canvasSelection)?.layout));
     const canSplitPanes = useAppStore((state) => {
-        const activeId = state.activeTerminalIds[connectionId];
-        const owner = state.activePaneGroupOwner[connectionId];
-        return canSplit(layoutForCanvas(state.paneLayouts[connectionId], activeId, owner) ?? null);
+        const target = workspaceSplitTarget(state, connectionId, canvasSelection);
+        return Boolean(target && allowsAdditionalPaneBeside(state, connectionId, { contentId: paneContentKey(target.leaf.content, target.leaf.id) }));
     });
     const splitPanes = useAppStore(state => state.splitPanes);
     const activatePaneGroup = useAppStore(state => state.activatePaneGroup);
-    const closePaneInSplit = useAppStore(state => state.closePaneInSplit);
+    const releasePaneFromSplit = useAppStore(state => state.releasePaneFromSplit);
     const openFeatureInSplit = useAppStore(state => state.openFeatureInSplit);
     const dockInSplit = useAppStore(state => state.dockInSplit);
-    const createTerminal = useAppStore(state => state.createTerminal);
     const setTabView = useAppStore(state => state.setTabView);
     const showToast = useAppStore(state => state.showToast);
 
     const reportDockResult = (result: string) => {
         if (result === 'refused-cap') {
-            showToast('info', 'This tab already has 4 panes.');
+            showToast('info', 'There is no room for another pane. Move a docked pane back to the workspace or close a pane first.');
         }
+    };
+
+    const showSplitCanvas = () => {
+        if (!useAppStore.getState().workspaceDockFocus?.[connectionId]) setTabView(tabId, 'terminal');
     };
 
     const handleOpenSplitFeature = (featureId: SplitFeatureId, edge: DockEdge = 'right') => {
@@ -104,18 +117,22 @@ export const WorkspaceTabBar = memo(function WorkspaceTabBar({
             item.id === activeFeatureTabId && item.featureId === featureId
         ));
         if (activeView === featureId && activeFeatureTab) {
+            const groups = useAppStore.getState().paneLayouts[connectionId];
+            const matches = Object.values(groups ?? {}).flatMap(layout => collectLeaves(layout.root)).filter(pane =>
+                isFeatureContent(pane.content) && pane.content.featureId === featureId
+                && pane.content.instanceId === activeFeatureTab.instanceId);
+            if (matches.length !== 1) return;
+            const source = matches[0];
             const result = dockInSplit(
                 connectionId,
-                { kind: 'feature', featureId, instanceId: activeFeatureTab.instanceId },
+                paneDockPayload(source),
                 edge,
-                overlayPaneId(featureId),
-                undefined,
-                { kind: 'feature', featureId, instanceId: activeFeatureTab.instanceId },
+                { contentId: paneContentKey(source.content, source.id) },
             );
             reportDockResult(result);
             if (result === 'refused-cap' || result === 'no-target') return;
             onFeaturePaneOpened?.(featureId);
-            setTabView(tabId, 'terminal');
+            showSplitCanvas();
             return;
         }
         const result = openFeatureInSplit(connectionId, featureId, edge);
@@ -124,7 +141,7 @@ export const WorkspaceTabBar = memo(function WorkspaceTabBar({
         }
         reportDockResult(result);
         if (result !== 'refused-cap' && result !== 'no-target') {
-            setTabView(tabId, 'terminal');
+            showSplitCanvas();
         }
     };
 
@@ -132,57 +149,67 @@ export const WorkspaceTabBar = memo(function WorkspaceTabBar({
         const result = dockInSplit(connectionId, { kind: 'term', termId }, edge);
         reportDockResult(result);
         if (result !== 'refused-cap' && result !== 'no-target') {
-            setTabView(tabId, 'terminal');
+            showSplitCanvas();
         }
     };
 
-    const handleOpenSplitPlugin = (pluginId: string, edge: DockEdge = 'right') => {
+    const handleOpenSplitPlugin = (pluginId: string, edge: DockEdge = 'right', contentId?: string) => {
+        const state = useAppStore.getState();
+        const groups = state.paneLayouts[connectionId];
+        const source = contentId ? findWorkspaceContentPane(groups, contentId)?.pane : undefined;
+        if (contentId && (!source || !isPluginContent(source.content) || source.content.pluginId !== pluginId)) return;
+        const existing = source ?? (() => {
+            const layout = layoutForPlugin(groups, pluginId, state.activePaneGroupOwner[connectionId]);
+            if (!layout) return undefined;
+            const focused = findNode(layout.root, layout.activePaneId);
+            return focused && isPaneLeaf(focused) && isPluginContent(focused.content) && focused.content.pluginId === pluginId
+                ? focused : collectLeaves(layout.root).find(leaf => isPluginContent(leaf.content) && leaf.content.pluginId === pluginId);
+        })();
         const result = dockInSplit(
             connectionId,
-            { kind: 'plugin', pluginId },
+            existing ? paneDockPayload(existing) : { kind: 'plugin', pluginId },
             edge,
-            overlayPluginPaneId(pluginId),
+            existing ? { contentId: paneContentKey(existing.content, existing.id) } : overlayPluginPaneId(pluginId),
             undefined,
-            { kind: 'plugin', pluginId },
+            existing?.content ?? { kind: 'plugin', pluginId },
         );
         reportDockResult(result);
         if (result === 'refused-cap' || result === 'no-target') return;
-        setTabView(tabId, 'terminal');
+        showSplitCanvas();
     };
 
     const handleSplitNewShell = (edge: DockEdge, shell?: ShellEntry) => {
-        if (activeView !== 'terminal') {
-            setTabView(tabId, 'terminal');
-        }
-        if (!canSplitPanes) {
-            reportDockResult('refused-cap');
+        const state = useAppStore.getState();
+        const target = workspaceSplitTarget(state, connectionId, canvasSelection);
+        const addressed = target && { contentId: paneContentKey(target.leaf.content, target.leaf.id) };
+        if (!addressed || !allowsAdditionalPaneBeside(state, connectionId, addressed)) {
+            reportDockResult(addressed ? 'refused-cap' : 'no-target');
             return;
         }
-        if (!shell) {
-            const { direction, insert } = splitFromDockEdge(edge);
-            splitPanes(connectionId, direction, insert);
-            return;
+        const { direction, insert } = splitFromDockEdge(edge);
+        if (splitPanes(connectionId, direction, insert, addressed,
+            shell ? { shellOverride: shell.id, title: shell.label } : undefined) && activeView !== 'terminal') {
+            showSplitCanvas();
         }
-        const canvasTermId = activeTerminalId;
-        const termId = createTerminal(connectionId, { shellOverride: shell.id, title: shell.label });
-        if (!termId) return;
-        reportDockResult(dockInSplit(connectionId, { kind: 'term', termId }, edge, null, canvasTermId));
     };
 
     const handleUnsplit = (paneId?: string, owner?: string) => {
         const state = useAppStore.getState();
         const groups = state.paneLayouts[connectionId];
-        const layout = (owner ? groups?.[owner] : undefined)
-            ?? layoutForCanvas(
+        const dockId = !owner && !paneId ? state.workspaceDockFocus?.[connectionId] : undefined;
+        const docked = dockId ? findWorkspaceContentPane(groups, dockId) : undefined;
+        if (dockId && !docked) return;
+        const layout = owner ? groups?.[owner] : docked ? groups?.[docked.owner] : layoutForCanvas(
                 groups,
                 state.activeTerminalIds[connectionId],
                 state.activePaneGroupOwner[connectionId],
             );
-        const focused = layout ? findNode(layout.root, paneId ?? layout.activePaneId) : null;
+        const visible = layout && projectVisiblePaneLayout(layout, hiddenWorkspaceContent(state, connectionId));
+        const focused = visible ? findNode(visible.root, paneId ?? docked?.pane.id ?? visible.activePaneId) : null;
         if (!focused || !isPaneLeaf(focused)) return;
         const released = focused.content;
 
-        if (!closePaneInSplit(connectionId, focused.id)) return;
+        if (!releasePaneFromSplit(connectionId, { contentId: paneContentKey(focused.content, focused.id) })) return;
 
         if (isFeatureContent(released)) {
             onFeaturePaneOpened?.(released.featureId);
@@ -196,7 +223,7 @@ export const WorkspaceTabBar = memo(function WorkspaceTabBar({
                 onTabSelect(released.featureId);
             }
         } else if (isPluginContent(released)) {
-            onTabSelect(`plugin:${released.pluginId}`);
+            onPluginTabSelect(paneContentKey(released, focused.id));
         } else {
             onTabSelect('terminal', released.termId);
         }
@@ -219,17 +246,18 @@ export const WorkspaceTabBar = memo(function WorkspaceTabBar({
             tabId={tabId}
             activeView={activeView}
             activeTerminalId={activeTerminalId}
-            openFeatures={openFeatures}
             featureTabs={featureTabs}
             activeFeatureTabId={activeFeatureTabId}
             pinnedFeatures={pinnedFeatures}
             pluginPanels={pluginPanels}
+            contentActions={contentActions}
             availableShells={availableShells}
             shellsLoading={shellsLoading}
             shellsError={shellsError}
             onRefetchShells={refetchShells}
             onTabSelect={onTabSelect}
-            onFeatureClose={onFeatureClose}
+            onPluginTabSelect={onPluginTabSelect}
+            onPluginTabClose={onPluginTabClose}
             onFeatureTabSelect={onFeatureTabSelect}
             onFeatureTabClose={onFeatureTabClose}
             onTerminalClose={onTerminalClose}
@@ -241,28 +269,20 @@ export const WorkspaceTabBar = memo(function WorkspaceTabBar({
             isSplit={isSplit}
             canSplit={canSplitPanes}
             onSplit={(direction) => {
-                if (isSplitFeatureId(activeView)) {
-                    const instanceId = featureTabs.find(item => item.id === activeFeatureTabId)?.instanceId;
-                    reportDockResult(
-                        useAppStore.getState().splitFeaturePane(connectionId, activeView, direction, instanceId),
-                    );
-                    return;
+                // Use the same fresh visible target as availability and keyboard
+                // splitting; center selection is independent from dock focus.
+                const target = workspaceSplitTarget(useAppStore.getState(), connectionId, canvasSelection);
+                if (!target) return;
+                if (splitPanes(connectionId, direction, 'after', { contentId: paneContentKey(target.leaf.content, target.leaf.id) })) {
+                    showSplitCanvas();
                 }
-                if (activeView.startsWith('plugin:')) {
-                    handleOpenSplitPlugin(
-                        activeView.slice('plugin:'.length),
-                        direction === 'horizontal' ? 'right' : 'bottom',
-                    );
-                    return;
-                }
-                splitPanes(connectionId, direction);
             }}
             onUnsplit={() => handleUnsplit()}
             onSplitSelect={(owner) => {
                 activatePaneGroup(connectionId, owner);
-                setTabView(tabId, 'terminal');
+                showSplitCanvas();
             }}
-            onSplitClose={(owner) => onPaneGroupClose(owner)}
+            onPaneGroupClose={onPaneGroupClose}
             onSplitUnsplit={(owner, paneId) => handleUnsplit(paneId, owner)}
             onOpenSplitFeature={handleOpenSplitFeature}
             onOpenSplitPlugin={handleOpenSplitPlugin}
