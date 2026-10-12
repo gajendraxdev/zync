@@ -7,6 +7,7 @@ import type { PluginRuntimeHealth, PluginRuntimeStatus } from '../../../../featu
 import type { IconResolverProps } from '../../common/IconResolver';
 import { getPluginCategory, getPluginCategoryLabel } from '../../../editor/providers';
 import { PluginDetailsDialog } from './PluginDetailsDialog';
+import { openBuiltinThemePicker } from '../../../../features/plugins/presentation/themePicker';
 
 interface PluginsInstalledTabProps {
     plugins: InstalledPlugin[];
@@ -16,7 +17,6 @@ interface PluginsInstalledTabProps {
     processingId: string | null;
     activeMenu: string | null;
     setActiveMenu: Dispatch<SetStateAction<string | null>>;
-    executeCommand: (commandId: string) => Promise<unknown> | unknown;
     onClose: () => void;
     onTogglePlugin: (id: string, enabled: boolean) => Promise<void>;
     onUpdatePlugin: (plugin: RegistryPlugin) => Promise<void>;
@@ -77,7 +77,6 @@ export function PluginsInstalledTab({
     processingId,
     activeMenu,
     setActiveMenu,
-    executeCommand,
     onClose,
     onTogglePlugin,
     onUpdatePlugin,
@@ -114,7 +113,7 @@ export function PluginsInstalledTab({
                         </div>
                     </div>
                     <button
-                        onClick={() => executeCommand('workbench.action.selectTheme')}
+                        onClick={() => openBuiltinThemePicker(plugins)}
                         className="px-3 py-1 bg-[var(--color-app-accent)] hover:bg-[var(--color-app-accent)]/80 text-white rounded text-[10px] font-medium transition-colors"
                     >
                         Select Theme

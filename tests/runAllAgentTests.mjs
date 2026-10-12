@@ -91,6 +91,7 @@ const tests = [
   'tests/pluginIconPath.test.mjs',
   'tests/pluginPaneRetention.test.mjs',
   'tests/pluginDeveloperMode.test.mjs',
+  'tests/pluginManagementController.test.mjs',
   'tests/pluginBrokerBoundary.test.mjs',
   'tests/pluginSshCommand.test.mjs',
   'tests/pluginTerminalFoundation.test.mjs',

@@ -11,11 +11,13 @@ import {
     type InstalledPlugin,
 } from '../../../../features/plugins/types';
 import type { PluginRuntimeHealth } from '../../../../features/plugins/runtime/pluginRuntimeSupervisor';
+import { Modal } from '../../../ui/Modal';
 
 interface PluginDetailsDialogProps {
     plugin: InstalledPlugin;
     health?: PluginRuntimeHealth;
     isProcessing: boolean;
+    standalone?: boolean;
     onClose: () => void;
     onSaveOptionalPermissions: (pluginId: string, permissionIds: string[]) => Promise<boolean>;
     onClearData: (plugin: InstalledPlugin) => Promise<boolean>;
@@ -31,6 +33,7 @@ export function PluginDetailsDialog({
     plugin,
     health,
     isProcessing,
+    standalone = false,
     onClose,
     onSaveOptionalPermissions,
     onClearData,
@@ -105,22 +108,23 @@ export function PluginDetailsDialog({
         ...(plugin.manifest.editor ? ['File editor'] : []),
     ];
 
-    return (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/65 p-4" role="dialog" aria-modal="true" aria-labelledby="plugin-details-title">
+    const content = (
+        <div className={standalone ? 'contents' : 'fixed inset-0 z-[120] flex items-center justify-center bg-black/65 p-4'}
+            role={standalone ? undefined : 'dialog'} aria-modal={standalone ? undefined : true} aria-labelledby={standalone ? undefined : 'plugin-details-title'}>
             <div className="flex max-h-[min(760px,92vh)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-[var(--color-app-border)] bg-[var(--color-app-bg)] shadow-2xl">
                 <div className="flex items-start gap-3 border-b border-[var(--color-app-border)]/60 p-5">
                     <div className="rounded-lg bg-[var(--color-app-accent)]/10 p-2 text-[var(--color-app-accent)]">
                         <IconResolver name={plugin.manifest.icon} path={plugin.path} size={19} />
                     </div>
                     <div className="min-w-0 flex-1">
-                        <h3 id="plugin-details-title" className="text-sm font-semibold text-[var(--color-app-text)]">
+                        <h3 id="plugin-details-title" aria-hidden={standalone || undefined} className="text-sm font-semibold text-[var(--color-app-text)]">
                             {plugin.manifest.name}
                         </h3>
                         <p className="mt-1 text-xs text-[var(--color-app-muted)]">
                             {plugin.manifest.id} · v{plugin.manifest.version}
                         </p>
                     </div>
-                    <button type="button" onClick={onClose} className="rounded-md p-1.5 text-[var(--color-app-muted)] hover:bg-[var(--color-app-surface)] hover:text-[var(--color-app-text)]" aria-label="Close plugin details">
+                    <button type="button" onClick={onClose} disabled={isProcessing} className="rounded-md p-1.5 text-[var(--color-app-muted)] hover:bg-[var(--color-app-surface)] hover:text-[var(--color-app-text)] disabled:opacity-50" aria-label="Close plugin details">
                         <X size={16} />
                     </button>
                 </div>
@@ -269,6 +273,9 @@ export function PluginDetailsDialog({
             </div>
         </div>
     );
+    return standalone ? <Modal isOpen title={`Details for ${plugin.manifest.name}`} onClose={onClose}
+        width="max-w-2xl" headerClassName="sr-only" contentClassName="p-0" showCloseButton={false}
+        explicitDismissOnly={isProcessing}>{content}</Modal> : content;
 }
 
 function Detail({ label, value }: { label: string; value: string }) {

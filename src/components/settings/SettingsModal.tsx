@@ -211,7 +211,6 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     };
 
     const {
-        executeCommand,
         editorProviders,
         reloadPlugins,
         retryPluginRuntime,
@@ -427,7 +426,6 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             processingId={processingId}
             activeMenu={activeMenu}
             setActiveMenu={setActiveMenu}
-            executeCommand={executeCommand}
             onClose={onClose}
             onTogglePlugin={handleTogglePlugin}
             onUpdatePlugin={handleUpdatePlugin}
@@ -449,6 +447,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             betaPluginIds={betaPluginIds}
             onSetPluginBeta={handleSetPluginBeta}
             onInspectPlugin={handleInspectMarketplacePlugin}
+            onUninstallPlugin={plugin => handleUninstallPlugin(plugin, false)}
         />
     );
 

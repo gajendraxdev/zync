@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Implementation progress
 
+- Share plugin management between settings and sidebar-ready presentation, preserving install review and runtime recovery.
+
+### Implementation progress
+
 - Serialize appearance and keyboard saves, preserve newer preferences on failure and expose acknowledged customization actions.
 
 ### Implementation progress
