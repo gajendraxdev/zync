@@ -21,6 +21,7 @@
         "sourceMap": false
     },
     "include": [
+        "tests/paneTabRelease.browser.tsx",
         "tests/themeFiles.browser.tsx",
         "tests/chromeActions.browser.tsx",
         "tests/settingsOrganization.browser.tsx",
@@ -252,6 +253,8 @@
         "src/features/usage/types.ts",
         "src/store/sessionPersistence.ts",
         "src/components/workspace/workspaceDockingSurfaces.ts",
+        "tests/paneMaximize.browser.tsx",
+        "tests/workspaceContents.browser.tsx",
         "tests/settingsPopups.browser.tsx",
         "src/vault/credentialTypes.ts",
         "src/vault/profileTypes.ts",

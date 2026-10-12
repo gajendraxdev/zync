@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Drag pane back to tabs</title></head>
+  <body style="background:var(--color-app-bg);color:var(--color-app-text)">
+    <header style="background:var(--color-app-panel)">
+      <button id="run" type="button" class="m-2 px-3 py-1 border border-app-border rounded">Run drag-back checks</button>
+      <button id="example" type="button" class="m-2 px-3 py-1 border border-app-border rounded">Show docked panes</button>
+      <button id="theme" type="button" class="m-2 px-3 py-1 border border-app-border rounded">Toggle light/dark theme</button>
+      <pre id="results" aria-live="polite" class="px-6 text-xs" style="height:8rem;overflow:auto">Ready</pre>
+    </header>
+    <div id="root"></div><script type="module" src="./paneTabRelease.browser.tsx"></script>
+  </body>
+</html>
