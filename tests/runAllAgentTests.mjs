@@ -42,6 +42,7 @@ const tests = [
   'tests/uiLayoutPrimitives.test.mjs',
   'tests/uiSwitch.test.mjs',
   'tests/settingsNavigation.test.mjs',
+  'tests/terminalIdlePtyPolicy.test.mjs',
   'tests/pluginPaneClose.test.mjs',
   'tests/paneSurfaces.test.mjs',
   'tests/pluginFallbacks.test.mjs',

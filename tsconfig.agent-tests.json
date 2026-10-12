@@ -22,6 +22,7 @@
     },
     "include": [
         "src/global.d.ts",
+        "src/vite-env.d.ts",
         "src/features/feedbackInbox/protocol.ts",
         "src/ai/lib/redactContext.ts",
         "src/ai/lib/requestContext.ts",
@@ -30,7 +31,6 @@
         "src/ai/types/agent.ts",
         "src/components/ai/providerCatalog.ts",
         "src/components/ai/sidebarSubmit.ts",
-        "src/components/ai/useAiSidebarResize.ts",
         "src/components/dashboard/welcome/quick-connect/AuthPanel.tsx",
         "src/components/dashboard/welcome/QuickConnectBar.tsx",
         "src/components/dashboard/welcome/quick-connect/parsing.ts",
@@ -64,6 +64,7 @@
         "src/components/settings/common/Toggle.tsx",
         "src/components/settings/common/SettingsGroup.tsx",
         "src/components/settings/SettingsNavigation.tsx",
+        "src/components/settings/tabs/appearance/AppearanceInterfaceTypographySection.tsx",
         "src/components/ui/Input.tsx",
         "src/components/ui/Select.tsx",
         "src/components/ui/TopbarDropdown.tsx",
@@ -195,7 +196,6 @@
         "src/lib/terminal/rendererSession.ts",
         "src/lib/terminal/rendererController.ts",
         "src/lib/terminal/rendererDiagnostics.ts",
-        "src/lib/terminal/terminalCache.ts",
         "src/lib/terminal/ligatures.ts",
         "src/lib/terminal/terminalImage.ts",
         "src/lib/terminal/xtermOptions.ts",
@@ -218,7 +218,6 @@
         "src/lib/terminal/terminalLazyPty.ts",
         "src/lib/terminal/terminalConnectionWakeup.ts",
         "src/lib/terminal/index.ts",
-
         "src/features/usage/catalog.ts",
         "src/features/usage/flush.ts",
         "src/features/usage/payload.ts",
@@ -231,6 +230,7 @@
         "src/vault/syncError.ts",
         "src/vault/syncPassphrase.ts",
         "src/vault/connectionsRestore.ts",
-        "src/vault/vaultUnlockPrompt.ts"
+        "src/vault/vaultUnlockPrompt.ts",
+        "src/components/ai/useAiSidebarResize.ts"
     ]
 }

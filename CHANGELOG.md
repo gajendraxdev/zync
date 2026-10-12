@@ -4,6 +4,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Implementation progress
+
+- Extract the idle-terminal policy into a side-effect-free module while preserving existing runtime exports.
+
 ### Added
 
 - **Shared switches:** Add compact and labeled switches with native keyboard

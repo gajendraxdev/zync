@@ -10,7 +10,7 @@ export const DEFAULT_TERMINAL_FONT_STACK_WIN32 =
     "Consolas, 'Cascadia Mono', 'Cascadia Code', ui-monospace, monospace";
 export const DEFAULT_TERMINAL_FONT_SIZE = 14;
 export const DEFAULT_TERMINAL_FONT_SIZE_WIN32 = 15;
-/** Matches terminal zoom (Ctrl/Cmd + / -) and Appearance font size slider. */
+/** Matches terminal zoom (Ctrl/Cmd + / -) and Terminal settings font size slider. */
 export const TERMINAL_FONT_SIZE_MIN = 8;
 export const TERMINAL_FONT_SIZE_MAX = 32;
 export const DEFAULT_TERMINAL_FONT_WEIGHT = 'normal' satisfies FontWeight;
@@ -82,4 +82,4 @@ export function resolveDefaultTerminalTypography(): {
 export {
     DEFAULT_SUSPEND_IDLE_HOST_PTYS,
     DEFAULT_IDLE_HOST_PTY_SUSPEND_MINUTES,
-} from '../../../lib/terminal/terminalIdlePty.js';
+} from '../../../lib/terminal/terminalIdlePtyPolicy.js';
