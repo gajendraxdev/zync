@@ -45,6 +45,7 @@ const tests = [
   'tests/elementColors.test.mjs',
   'tests/themeDocument.test.mjs',
   'tests/themeFiles.test.mjs',
+  'tests/chromeActions.test.mjs',
   'tests/elementColorPresentation.test.mjs',
   'tests/terminalIdlePtyPolicy.test.mjs',
   'tests/workspaceRegistrations.test.mjs',

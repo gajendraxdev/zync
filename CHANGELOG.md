@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Implementation progress
 
+- Define navigation and toolbar visibility preferences with shared validation and acknowledged updates.
+
+### Implementation progress
+
 - Add kind-agnostic docking capacity, visible-focus projection and registered panel capabilities.
 
 ### Implementation progress
