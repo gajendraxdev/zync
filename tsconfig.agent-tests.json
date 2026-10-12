@@ -25,6 +25,7 @@
         "src/features/appearance/application/updateElementColors.ts",
         "src/features/appearance/presentation/elementColorStyle.ts",
         "src/features/appearance/domain/colorContrast.ts",
+        "tests/colorPicker.browser.tsx",
         "src/global.d.ts",
         "src/vite-env.d.ts",
         "src/features/feedbackInbox/protocol.ts",
@@ -262,6 +263,8 @@
         "src/lib/paneLayout/contentIdentity.ts",
         "src/lib/paneLayout/regions.ts",
         "src/features/workspace/domain/dockPresentation.ts",
-        "src/components/ui/menuFocus.ts"
+        "src/components/ui/menuFocus.ts",
+        "src/components/ui/colorPickerMath.ts",
+        "src/components/ui/ColorPicker.tsx"
     ]
 }

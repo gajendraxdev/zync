@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "./theme/controls.css";
+@import "./theme/colorPicker.css";
 
 @theme {
     /* Standard Dark Theme (Default) */

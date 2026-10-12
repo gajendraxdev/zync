@@ -1,0 +1,49 @@
+/* A native range keeps keyboard/assistive input; only the hue track is visual.
+ * Spectrum stops describe HSV, not app theme colors or persisted preferences.
+ */
+.zync-color-picker-hue {
+    appearance: none;
+    padding: 0;
+    border: 0;
+    background: transparent;
+}
+
+.zync-color-picker-hue::-webkit-slider-runnable-track {
+    height: 0.625rem;
+    border-radius: var(--zync-control-radius);
+    background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+}
+
+.zync-color-picker-hue::-moz-range-track {
+    height: 0.625rem;
+    border-radius: var(--zync-control-radius);
+    background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+}
+
+.zync-color-picker-hue::-webkit-slider-thumb {
+    appearance: none;
+    width: 0.875rem;
+    height: 0.875rem;
+    margin-top: -0.125rem;
+    border: 2px solid var(--color-app-text);
+    border-radius: 50%;
+    background: var(--color-app-panel);
+    box-shadow: 0 0 0 1px var(--color-app-panel);
+}
+
+.zync-color-picker-hue::-moz-range-thumb {
+    width: 0.625rem;
+    height: 0.625rem;
+    border: 2px solid var(--color-app-text);
+    border-radius: 50%;
+    background: var(--color-app-panel);
+    box-shadow: 0 0 0 1px var(--color-app-panel);
+}
+
+@media (forced-colors: active) {
+    .zync-color-picker-hue { appearance: auto; }
+    .zync-color-picker-hue::-webkit-slider-runnable-track { background: Canvas; }
+    .zync-color-picker-hue::-moz-range-track { background: Canvas; }
+    .zync-color-picker-hue::-webkit-slider-thumb { appearance: auto; background: ButtonText; border-color: Canvas; box-shadow: none; }
+    .zync-color-picker-hue::-moz-range-thumb { background: ButtonText; border-color: Canvas; box-shadow: none; }
+}
