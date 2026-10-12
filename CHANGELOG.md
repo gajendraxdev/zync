@@ -145,7 +145,7 @@ All notable changes to Zync are documented in this file. The format is based on 
   protected; shared save controls lock pending writes and report rollback errors.
   Shortcut recording cancels on Escape or focus loss; directional pane focus
   requires an arrow key. No process detection, extra global router or SSH polling.
-  ([338c397], [5fde763])
+  ([338c397], [5fde763], [acd9f33])
 
 - **Terminal-accessible shortcut alternatives:** Add independently editable and
   reservable alternatives for Hosts/sidebar, palette, AI and navigation sections.
@@ -2663,3 +2663,4 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [e3a0783]: https://github.com/zync-sh/zync/commit/e3a0783aedc10db482566ac2030f5438e30d00e6
 [d3cf693]: https://github.com/zync-sh/zync/commit/d3cf693e623a71e84ca198a33360342aaef8c12c
 [2e9c615]: https://github.com/zync-sh/zync/commit/2e9c6154e8849dc4454ae948e4f29a49d34eb28b
+[acd9f33]: https://github.com/zync-sh/zync/commit/acd9f33dcc20ff92e175e6b0d8e9dac1f2496c4c
