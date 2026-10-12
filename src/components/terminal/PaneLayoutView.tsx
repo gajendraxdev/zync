@@ -52,17 +52,16 @@ function SplitBranch({
     );
 }
 
-function layoutHasSplitNode(connectionId: string, splitId: string): boolean {
+function layoutHasSplitNode(connectionId: string, splitId: string, layoutOwner?: string): boolean {
     const groups = useAppStore.getState().paneLayouts[connectionId];
     if (!groups) return false;
-    for (const layout of Object.values(groups)) {
-        if (findNode(layout.root, splitId)) return true;
-    }
-    return false;
+    return Object.entries(groups).some(([owner, layout]) =>
+        (layoutOwner === undefined || owner === layoutOwner) && findNode(layout.root, splitId)?.type === 'split');
 }
 
 function SplitFrame({
     connectionId,
+    layoutOwner,
     splitId,
     direction,
     sizes,
@@ -73,6 +72,7 @@ function SplitFrame({
     onEqualize,
 }: {
     connectionId: string;
+    layoutOwner?: string;
     splitId: string;
     direction: SplitDirection;
     sizes: [number, number];
@@ -139,12 +139,12 @@ function SplitFrame({
             if (!finished) {
                 endPaneSplitIntro(introHoldRef.current);
                 introHoldRef.current = null;
-                if (layoutHasSplitNode(connectionId, splitId)) {
+                if (layoutHasSplitNode(connectionId, splitId, layoutOwner)) {
                     markSplitIntro(splitId, taken.incomingIndex);
                 }
             }
         };
-    }, [connectionId, splitId]);
+    }, [connectionId, splitId, layoutOwner]);
 
     const stopIntro = useCallback(() => {
         cancelIntroRef.current?.();
@@ -260,31 +260,36 @@ function SplitFrame({
 export function PaneLayoutView({
     connectionId,
     layout,
+    layoutOwner,
     registerSlot,
 }: {
     connectionId: string;
     layout: PaneLayout;
+    /** Address real split IDs inside their canonical owner, not another visible dock. */
+    layoutOwner?: string;
     registerSlot: (key: string, node: HTMLDivElement | null) => void;
 }) {
     const resizePanes = useAppStore(state => state.resizePanes);
 
     const onDrag = useCallback((splitId: string, firstRatio: number) => {
-        resizePanes(connectionId, splitId, [firstRatio, 1 - firstRatio], false);
-    }, [connectionId, resizePanes]);
+        resizePanes(connectionId, splitId, [firstRatio, 1 - firstRatio], false, layoutOwner);
+    }, [connectionId, layoutOwner, resizePanes]);
 
     const onDragEnd = useCallback((splitId: string) => {
         const groups = useAppStore.getState().paneLayouts[connectionId];
-        const current = Object.values(groups ?? {}).find((group) => findNode(group.root, splitId));
+        const matching = Object.entries(groups ?? {}).filter(([owner, group]) =>
+            (layoutOwner === undefined || owner === layoutOwner) && findNode(group.root, splitId)?.type === 'split');
+        const current = matching.length === 1 ? matching[0][1] : undefined;
         const node = current ? findNode(current.root, splitId) : null;
         if (node && isPaneSplit(node)) {
-            resizePanes(connectionId, splitId, node.sizes, true);
+            resizePanes(connectionId, splitId, node.sizes, true, layoutOwner);
         }
-    }, [connectionId, resizePanes]);
+    }, [connectionId, layoutOwner, resizePanes]);
 
     const onEqualize = useCallback((splitId: string) => {
-        resizePanes(connectionId, splitId, [0.5, 0.5], true);
+        resizePanes(connectionId, splitId, [0.5, 0.5], true, layoutOwner);
         window.dispatchEvent(new Event('zync:pane-resize-end'));
-    }, [connectionId, resizePanes]);
+    }, [connectionId, layoutOwner, resizePanes]);
 
     const renderNode = (node: PaneNode): ReactNode => {
         if (isPaneLeaf(node)) {
@@ -303,6 +308,7 @@ export function PaneLayoutView({
             <SplitFrame
                 key={node.id}
                 connectionId={connectionId}
+                layoutOwner={layoutOwner}
                 splitId={node.id}
                 direction={node.direction}
                 sizes={node.sizes}

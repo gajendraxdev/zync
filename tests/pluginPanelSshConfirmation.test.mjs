@@ -23,7 +23,7 @@ const confirmationSource = fs.readFileSync(
   'utf8',
 );
 const settingsPluginsSource = fs.readFileSync(
-  path.join(process.cwd(), 'src', 'components', 'settings', 'hooks', 'useSettingsPlugins.ts'),
+  path.join(process.cwd(), 'src', 'features', 'plugins', 'presentation', 'usePluginManagement.ts'),
   'utf8',
 );
 const marketplaceSource = fs.readFileSync(
@@ -194,7 +194,7 @@ assert.match(workerSource, /requester,[\s\S]{0,160}'api:window:showQuickPick'/, 
 assert.match(workerSource, /if \(!isTrustedBuiltinTheme\(plugin\) \|\| !plugin\.style\) return;[\s\S]{0,300}applyCspStyleNonce\(style\);[\s\S]{0,160}document\.head\.appendChild\(style\)/, 'only app-owned built-in theme CSS may enter the host document with the release nonce');
 assert.match(workerSource, /Third-party manifest\.style is never injected/, 'the third-party CSS compatibility boundary must remain documented');
 assert.match(workerSource, /filterTrustedBuiltinThemeChoices/, 'theme-manager choices must be backed by trusted built-in packages');
-assert.match(settingsPluginsSource, /activeTab === 'appearance'[\s\S]{0,100}filterUnsupportedHostThemes\(plugins\)\.filter\(plugin => plugin\.enabled\)/, 'Appearance must advertise only enabled trusted themes');
+assert.match(settingsPluginsSource, /plugins: appearanceOnly[\s\S]{0,100}filterUnsupportedHostThemes\(plugins\)\.filter\(plugin => plugin\.enabled\)/, 'Appearance must advertise only enabled trusted themes');
 assert.match(settingsPluginsSource, /plugins:inspect_local/, 'local packages must be inspected before installation');
 assert.match(settingsPluginsSource, /plugins:install_inspected[\s\S]{0,700}reloadPluginRuntime\(activation\.pluginId\)/, 'approved installs must health-check the new Worker generation');
 assert.match(settingsPluginsSource, /!runtimeReloaded[\s\S]{0,300}plugins:rollback_activation/, 'failed plugin activation must restore the previous package');
@@ -221,6 +221,8 @@ assert.match(settingsPluginsSource, /plugins:registry_load/, 'marketplace must a
 assert.match(marketplaceSource, /Legacy catalog · publisher not verified/, 'unsigned fallback catalog must be visibly unverified');
 assert.match(settingsPluginsSource, /plugins:inspect_marketplace/, 'marketplace packages must enter native inspection by registry identity');
 assert.doesNotMatch(marketplaceSource, /plugins_install/, 'marketplace UI must not install an arbitrary presentation URL');
+assert.doesNotMatch(marketplaceSource, /plugins_uninstall|\bconfirm\(/, 'marketplace uninstall must reuse Zync management confirmation');
+assert.match(marketplaceSource, /await onUninstallPlugin\(plugin\)/, 'marketplace uninstall delegates to the shared controller');
 assert.match(marketplaceSource, /disabled=\{processing \|\| !plugin\.registryVerified \|\| revoked\}/, 'legacy and revoked catalog entries must not be installable');
 assert.match(installedPluginsSource, /const hasUpdate = Boolean\([\s\S]{0,120}registryItem\.registryVerified[\s\S]{0,120}!registryItem\.revokedReason/, 'installed plugins must not offer unsigned catalog updates');
 assert.match(marketplaceSource, /Revoked · \$\{plugin\.revokedReason\}/, 'signed registry revocations must be visible in marketplace UI');

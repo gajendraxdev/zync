@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { retainLiveItems } from './retainedItems';
 
-/** Retain visited items only while they remain in the live inventory. */
+/** Retain live visited IDs in mount order, independently of their presentation order. */
 export function useRetainedItems(available: readonly string[], active: string | null): ReadonlySet<string> {
     const [visited, setVisited] = useState<ReadonlySet<string>>(new Set());
     const retained = retainLiveItems(available, visited, active);

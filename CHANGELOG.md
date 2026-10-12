@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Implementation progress
 
+- Retain pane identities while rendering visible docking allocations, restoring plugin focus and terminal lifecycle behavior.
+
+### Implementation progress
+
 - Resolve open-here split actions against stable visible content and respect docking capacity and persistence gates.
 
 ### Implementation progress

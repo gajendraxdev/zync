@@ -1,4 +1,5 @@
 import { isPaneLeaf, type PaneLayout, type PaneLeaf, type PaneNode } from '../../lib/paneLayout';
+import { paneContentKey } from '../../lib/paneLayout/contentIdentity';
 
 export interface InternalEdges {
     top?: boolean;
@@ -10,18 +11,20 @@ export interface InternalEdges {
 export interface PaneSurface {
     key: string;
     node: PaneLeaf;
+    /** Canonical resource topology, never the pruned geometry projection. */
     layout: PaneLayout;
+    /** Effective visible focus may differ while the saved focused leaf is hidden. */
+    focusedPaneId?: string;
+    /** Connection-wide allocation can override local canvas focus without ambiguous IDs. */
+    focused?: boolean;
     edges: InternalEdges;
     split: boolean;
     visible: boolean;
 }
 
-/** Identity is independent of split paths, layout owners and leaf IDs. */
+/** Compatibility entry point for geometry callers; identity lives in the layout domain. */
 export function paneSurfaceKey(node: PaneLeaf): string {
-    const content = node.content;
-    if (content.kind === 'term') return JSON.stringify([content.kind, content.termId]);
-    const reference = content.kind === 'feature' ? content.featureId : content.pluginId;
-    return JSON.stringify([content.kind, reference, content.instanceId ?? node.id]);
+    return paneContentKey(node.content, node.id);
 }
 
 export function layoutSurfaces(layout: PaneLayout, visible: boolean): PaneSurface[] {
@@ -38,6 +41,25 @@ export function layoutSurfaces(layout: PaneLayout, visible: boolean): PaneSurfac
     };
     visit(layout.root, {});
     return result;
+}
+
+/**
+ * Allocate visible geometry while retaining every canonical content identity.
+ * Hidden/unselected content stays in the surface inventory with visibility off;
+ * only the projection supplies visible edges, split chrome and effective focus.
+ */
+export function projectedLayoutSurfaces(
+    canonical: PaneLayout,
+    projected: PaneLayout | null,
+    visible: boolean,
+): PaneSurface[] {
+    const surfaces = layoutSurfaces(canonical, false);
+    if (!visible || !projected) return surfaces;
+    const shown = new Map(layoutSurfaces(projected, true).map(surface => [surface.key, surface]));
+    return surfaces.map(surface => {
+        const allocation = shown.get(surface.key);
+        return allocation ? { ...allocation, layout: canonical, focusedPaneId: projected.activePaneId } : surface;
+    });
 }
 
 /** Retain visited live content, not its former owner. */

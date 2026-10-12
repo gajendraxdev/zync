@@ -24,6 +24,8 @@ export function PaneSurfaceLayer({
                 key={surface.key}
                 ref={node => registerHost(surface.key, node)}
                 data-pane-surface={surface.key}
+                inert={!surface.visible}
+                aria-hidden={!surface.visible}
                 className="absolute z-10 overflow-hidden"
                 style={{ display: surface.visible ? undefined : 'none', visibility: 'hidden' }}
             >
