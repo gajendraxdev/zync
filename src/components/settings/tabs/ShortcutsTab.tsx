@@ -1,52 +1,92 @@
+import { useState } from 'react';
 import { defaultSettings, type AppSettings } from '../../../store/settingsSlice';
 import { useAppStore } from '../../../store/useAppStore';
-import {
-    SHORTCUT_SECTIONS,
-    catalogBySection,
-} from '../../../features/shortcuts';
+import { SHORTCUT_CATALOG, SHORTCUT_SECTIONS, type ShortcutCommand } from '../../../features/shortcuts';
+import { shortcutBindings, shortcutBindingLabel, shortcutConflicts, shortcutBindingIssue } from '../../../features/shortcuts/bindings';
+import { RECOMMENDED_TERMINAL_SHORTCUT_EXCEPTIONS } from '../../../features/shortcuts/policy';
 import { KeybindingRow } from '../common/KeybindingRow';
 import { Section } from '../common/Section';
 import { TerminalShortcutControl } from '../common/TerminalShortcutControl';
+import { useKeyboardShortcutSettings } from '../common/useKeyboardShortcutSettings';
+import { Button } from '../../ui/Button';
+import { Input } from '../../ui/Input';
+import { Toggle } from '../common/Toggle';
 
 interface ShortcutsTabProps {
     settings: AppSettings;
     updateKeybindings: (updates: Partial<AppSettings['keybindings']>) => Promise<void>;
 }
 
+/** Catalog-driven editor; binding scope, aliases and terminal ownership share runtime policy. */
 export function ShortcutsTab({ settings, updateKeybindings }: ShortcutsTabProps) {
-    const showToast = useAppStore((state) => state.showToast);
+    const showToast = useAppStore(state => state.showToast);
+    const { keyboard, pending, save, reserve } = useKeyboardShortcutSettings();
+    const [query, setQuery] = useState('');
+    const bindingPending = useAppStore(state => state.pendingKeybindingWrites > 0);
     const keybindings = settings.keybindings ?? defaultSettings.keybindings;
-    const handleKeybindingChange = (updates: Partial<AppSettings['keybindings']>) => {
-        void updateKeybindings(updates).catch((error) => {
-            console.error('Failed to update keybinding', error);
-            const message = error instanceof Error ? error.message : String(error);
-            showToast('error', `Failed to save keybinding: ${message}`);
-        });
-    };
+    const appFirst = keyboard.terminalFocusPolicy === 'app';
+    const locked = pending || bindingPending;
 
-    return (
-        <div className="space-y-6 animate-in fade-in duration-300">
-            <Section title="When a terminal is focused">
-                <TerminalShortcutControl showExceptions />
-            </Section>
-            {SHORTCUT_SECTIONS.map((section) => {
-                const rows = catalogBySection(section.id);
-                if (rows.length === 0) return null;
-                return (
-                    <Section key={section.id} title={section.title}>
-                        <div className="space-y-2">
-                            {rows.map((row) => (
-                                <KeybindingRow
-                                    key={row.id}
-                                    label={row.label}
-                                    binding={keybindings[row.settingsKey!]}
-                                    onChange={(val) => handleKeybindingChange({ [row.settingsKey!]: val })}
-                                />
-                            ))}
-                        </div>
-                    </Section>
-                );
-            })}
-        </div>
-    );
+    const changeBinding = async (command: ShortcutCommand, value: string) => {
+        if (!command.settingsKey || locked) return;
+        try { await updateKeybindings({ [command.settingsKey]: value }); }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            showToast('error', 'Failed to save keybinding: ' + message);
+        }
+    };
+    const sections = [...SHORTCUT_SECTIONS, { id: 'hidden', title: 'Host features' }];
+    const needle = query.trim().toLowerCase();
+    const rowsFor = (section: string) => SHORTCUT_CATALOG.filter(command => command.section === section
+        && (command.configurable || command.terminalReservation)
+        && (command.label + ' ' + shortcutBindingLabel(command, keybindings)).toLowerCase().includes(needle));
+    return <div className="space-y-6">
+        <Section title="When a terminal is focused">
+            <TerminalShortcutControl showHelp={false} />
+            <p className="mb-2 text-xs text-app-muted">
+                Available in terminal reserves a shortcut for Zync, including inside Vim, nano and tmux.
+                Other keys stay with the terminal.
+            </p>
+            <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="secondary" size="sm" disabled={locked || appFirst}
+                    onClick={() => { void save({ terminalShortcutExceptions: [...RECOMMENDED_TERMINAL_SHORTCUT_EXCEPTIONS] }); }}>
+                    Use recommended reservations
+                </Button>
+                <Button type="button" variant="secondary" size="sm" disabled={locked || appFirst}
+                    onClick={() => { void save({ terminalShortcutExceptions: [] }); }}>Pass app shortcuts to terminal</Button>
+            </div>
+            <p className="mt-2 text-xs text-app-muted">The preset reserves navigation, tab and pane controls, Settings, host features, zoom and alternative bindings. Replaces reservations, not bindings. Plain Ctrl+B/P/I remain with the terminal. Terminal copy/paste stay available.</p>
+        </Section>
+        <Input label="Find a shortcut" placeholder="Search actions or keys…" value={query} onChange={event => setQuery(event.target.value)} />
+        {bindingPending && <p role="status" className="text-xs text-app-muted">Saving shortcut…</p>}
+        {sections.map(section => {
+            const rows = rowsFor(section.id);
+            return rows.length ? <Section key={section.id} title={section.title}>
+                <div className="space-y-2">{rows.map(command => {
+                    const reserved = keyboard.terminalShortcutExceptions.includes(command.id);
+                    const conflicts = shortcutConflicts(command, keybindings, SHORTCUT_CATALOG);
+                    const keys = shortcutBindings(command, keybindings);
+                    return <KeybindingRow key={command.id} label={command.label} binding={keys[0] ?? ''}
+                        defaultBinding={command.defaultKeys} aliases={command.extraKeys} disabled={locked}
+                        readOnly={!command.configurable} onChange={value => { void changeBinding(command, value); }}
+                        validate={value => shortcutBindingIssue(command, value, keybindings, SHORTCUT_CATALOG)}
+                        warning={conflicts.length ? 'Overlapping binding: ' + conflicts.map(row => row.label).join(', ') + '. The first applicable command wins.' : undefined}>
+                        {command.actionId && <p className="text-xs text-app-muted">Same action as {SHORTCUT_CATALOG.find(row => row.id === command.actionId)?.label}; this binding and its terminal permission are independent.</p>}
+                        {(command.id === 'toggleSidebar' || command.actionId === 'toggleSidebar') && <p className="text-xs text-app-muted">Toggles Hosts when navigation is visible; otherwise toggles the current sidebar.</p>}
+                        {command.terminalReservation ? <Toggle label={'Available in terminal: ' + command.label}
+                            checked={appFirst ? keys.length > 0 : reserved} disabled={locked || appFirst || !keys.length}
+                            onChange={checked => { void reserve(command.id, checked); }}
+                            description={!keys.length ? 'Assign a shortcut first. Your reservation selection is retained.'
+                                : appFirst ? 'Zync first already prioritizes this command; your hybrid selection is retained.'
+                                : reserved ? 'Reserved for Zync, including inside terminal editors. This overrides the same terminal key.'
+                                : 'Passed to terminal while it is focused; available in the app when its context allows.'} />
+                            : <p className="text-xs text-app-muted">{!keys.length ? 'No keyboard binding; visible app controls remain available.' : command.terminalUtility
+                                ? 'Terminal clipboard utility; available whenever the terminal is focused.'
+                                : 'File Manager only; does not send commands to a background terminal.'}</p>}
+                    </KeybindingRow>;
+                })}</div>
+            </Section> : null;
+        })}
+        {!sections.some(section => rowsFor(section.id).length) && <p role="status" className="text-sm text-app-muted">No matching shortcuts.</p>}
+    </div>;
 }

@@ -25,7 +25,7 @@ const persistSettings = async patch => {
 };
 export const useAppStore = create((set, get) => ({
   settings: { keyboard: normalizeKeyboardSettings(undefined), terminal: { fontSize: 14, gpuAcceleration: true, cursorStyle: 'block' } },
-  terminals: { local: [] }, paneLayouts: { local: {} }, activePaneGroupOwner: {},
+  terminals: { local: [] }, paneLayouts: { local: {} }, activePaneGroupOwner: {}, contentPresentation: {}, workspaceDockFocus: {},
   updateTerminalSettings: async () => {},
   showToast: (kind, text) => window.controlsTest.toasts.push({ kind, text }),
   updateKeyboardSettings: ${updaters[0]},
@@ -62,8 +62,9 @@ const bundle = await build({
     function BarFixture() {
       const [bar, setBar] = useState({ activeView: 'terminal', activeTerminalId: 'find-one' });
       window.controlsTest.setBar = setBar;
-      return <CombinedTabBar connectionId="local" tabId="test-bar" {...bar} openFeatures={[]} featureTabs={[]}
-        activeFeatureTabId={null} pinnedFeatures={[]} onTabSelect={() => {}} onFeatureClose={() => {}}
+      return <CombinedTabBar connectionId="local" tabId="test-bar" {...bar} featureTabs={[]}
+        activeFeatureTabId={null} pinnedFeatures={[]} onTabSelect={() => {}}
+        onPluginTabSelect={() => {}} onPluginTabClose={() => {}}
         onFeatureTabSelect={() => {}} onFeatureTabClose={() => {}} onTerminalClose={() => {}}
         onNewTerminal={() => {}} onTogglePin={() => {}} />;
     }
@@ -99,7 +100,7 @@ const bundle = await build({
     </TooltipProvider>);
   `, resolveDir: path('../'), loader: 'tsx' },
   bundle: true, write: false, format: 'esm', platform: 'browser', jsx: 'automatic',
-  define: { 'process.env.NODE_ENV': '"test"' },
+  define: { 'process.env.NODE_ENV': '"test"', 'import.meta.env.BASE_URL': '"/"' },
   plugins: [{ name: 'test-settings-store', setup(builder) {
     builder.onResolve({ filter: /store\/useAppStore$/ }, () => ({ path: 'settings-store', namespace: 'test-store' }));
     builder.onLoad({ filter: /.*/, namespace: 'test-store' }, () => ({ contents: storeModule, loader: 'ts', resolveDir: path('../') }));
@@ -124,7 +125,7 @@ try {
   browser = await chromium.launch({ headless: true, ...(process.platform === 'win32' ? { channel: 'msedge' } : {}) });
   const page = await browser.newPage();
   const errors = [];
-  page.on('pageerror', error => errors.push(error.message));
+  page.on('pageerror', error => { errors.push(error.message); console.error('Shortcut fixture page error:', error.message); });
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   const find = page.getByRole('button', { name: 'Find in terminal', exact: true });
   await find.click();
@@ -164,8 +165,8 @@ try {
   assert.equal(await page.getByText('Give keys to the shell').count(), 0);
   assert.deepEqual(await controls.allTextContents(), ['Terminal first', 'Terminal first', 'Terminal first']);
   await page.getByText('Customize terminal-first shortcuts', { exact: true }).click();
-  const palette = page.getByRole('checkbox', { name: /Command Palette/ });
-  const snippets = page.getByRole('checkbox', { name: /Snippets/ });
+  const palette = page.getByRole('checkbox', { name: /^Command Palette \(commands\)/ });
+  const snippets = page.getByRole('checkbox', { name: /^Snippets/ });
   assert.equal(await palette.isChecked(), true);
   assert.equal(await snippets.isChecked(), true);
 
@@ -185,6 +186,13 @@ try {
   await palette.uncheck();
   await page.evaluate(() => controlsTest.save.resolve());
   await page.waitForFunction(() => !document.querySelector('#settings fieldset').disabled);
+  // Secondary bindings are now enabled automatically; explicitly opt those out too.
+  const remaining = page.locator('#settings input[type="checkbox"]:checked');
+  while (await remaining.count()) {
+    await remaining.first().uncheck();
+    await page.evaluate(() => controlsTest.save.resolve());
+    await page.waitForFunction(() => !document.querySelector('#settings fieldset').disabled);
+  }
   assert.deepEqual(await page.evaluate(() => controlsTest.writes.at(-1).keyboard.terminalShortcutExceptions), []);
 
   // Quick settings must use the same named policy, without erasing exceptions.

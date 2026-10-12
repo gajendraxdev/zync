@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Implementation progress
 
+- Expose searchable shortcut bindings, recording and terminal routing controls through one reusable editor and modal.
+
+### Implementation progress
+
 - Wire hybrid shortcut dispatch to workspace navigation and visible pane commands, with secondary bindings usable during terminal focus.
 
 ### Implementation progress
