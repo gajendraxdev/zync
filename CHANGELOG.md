@@ -4,56 +4,17 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
-### Implementation references
-
-The reviewed customization work is recorded in the following dependency-ordered
-commits. These references identify implementation history, not a released version.
-
-- [09253a0](https://github.com/gajendraxdev/zync/commit/09253a075d41e827bdab203298528e30e8e273fc) — refactor(terminal): isolate idle PTY settings policy
-- [2d5cd09](https://github.com/gajendraxdev/zync/commit/2d5cd098857a1bed35a6bcef1f79917d86e6d3d1) — feat(appearance): add validated element color foundations
-- [930ac9f](https://github.com/gajendraxdev/zync/commit/930ac9f4028af4a6508a8a06a0258be8c06a6893) — feat(themes): define validated JSON import and export contracts
-- [1cac232](https://github.com/gajendraxdev/zync/commit/1cac2327e6de4d7ec11935612a8eacb03d3f5127) — feat(workspace): add stable pane identity and presentation models
-- [e84221b](https://github.com/gajendraxdev/zync/commit/e84221b36fca926ac3d3754c75cf68c3e1c4bc7e) — feat(workspace): model docking topology and visible focus
-- [28306b2](https://github.com/gajendraxdev/zync/commit/28306b27f4f40eae18e5ee6440077e03bad32244) — feat(navigation): define acknowledged chrome preferences
-- [194f3cc](https://github.com/gajendraxdev/zync/commit/194f3cca5105f80700781e20575a9f6b2d67995b) — feat(settings): enforce native customization persistence contracts
-- [75a2b87](https://github.com/gajendraxdev/zync/commit/75a2b874f553fd4af0473e8b40df2dfa4617b919) — feat(session): preserve workspace presentation and docking safely
-- [0f28ce5](https://github.com/gajendraxdev/zync/commit/0f28ce5a5c11e4928326b1d044cfc36f51be8ec8) — fix(sync): exclude device-local custom theme selectors
-- [8e2cd22](https://github.com/gajendraxdev/zync/commit/8e2cd2272703053605bc2eccf12b14df970a3cab) — fix(ui): coordinate menu focus and popup placement
-- [654a8d7](https://github.com/gajendraxdev/zync/commit/654a8d7a4d43ed25f892b3795042ea1c8f9ed74c) — refactor(ui): unify accessible fields and state messages
-- [df363b4](https://github.com/gajendraxdev/zync/commit/df363b4dcb5c3a6fa1f83e22f5fb3eab7346ddb8) — feat(ui): add reusable color picker with spectrum controls
-- [125df46](https://github.com/gajendraxdev/zync/commit/125df46ad57c854f6a2d4cdee78b6a3707a2bf8e) — feat(themes): add contextual previews and JSON key reference
-- [338c397](https://github.com/gajendraxdev/zync/commit/338c39735d7fbd865694c63739361062dcf56f92) — feat(shortcuts): add hybrid reservations and independent bindings
-- [b1f5608](https://github.com/gajendraxdev/zync/commit/b1f560868c03174acf5384f87b75534882eed3f5) — feat(workspace): integrate guarded pane lifecycle and session state
-- [4f3ea03](https://github.com/gajendraxdev/zync/commit/4f3ea037d7e6a8502b83161ed719be19f4a33d0a) — fix(settings): serialize customization and shortcut preference writes
-- [a2261b6](https://github.com/gajendraxdev/zync/commit/a2261b61ca962312d167369196df9a11c4ff9733) — refactor(plugins): share management and package presentation
-- [db959c9](https://github.com/gajendraxdev/zync/commit/db959c98759c81d37f0fbe52addc17dd4453fd7e) — feat(plugins): add actionable sidebar package views
-- [ff68187](https://github.com/gajendraxdev/zync/commit/ff68187d95cbfff9f069c892c939276de6c4965d) — feat(settings): organize layout and theme customization controls
-- [c426235](https://github.com/gajendraxdev/zync/commit/c42623525bbd527817eacc6b3abc7adaaaf8732f) — fix(sidebar): unify resizing and synchronize adjacent pane geometry
-- [f7827ea](https://github.com/gajendraxdev/zync/commit/f7827ea7d2f0472e09ad872b75fc4ae2a04a6b0a) — refactor(sidebar): standardize accessible row actions
-- [b72eaae](https://github.com/gajendraxdev/zync/commit/b72eaae5a2939168e67c6b5d22ef65de299ae4b0) — refactor(tabs): centralize pointer drag and reorder behavior
-- [8bc3ecc](https://github.com/gajendraxdev/zync/commit/8bc3ecc6fa2931845f7c098713397a1afb6505f9) — feat(tabs): add consistent presentation and close-focus controls
-- [7f76bde](https://github.com/gajendraxdev/zync/commit/7f76bdefa65cc9c45a5596c8dc187e48e22511ad) — feat(docking): add resizable regions and explicit drop targets
-- [5d825c3](https://github.com/gajendraxdev/zync/commit/5d825c3d682e3873f5a64ae9d8d75f6e01b8d48c) — fix(workspace): target open-here actions by visible content identity
-- [567989d](https://github.com/gajendraxdev/zync/commit/567989d7e16879f7910540bab05bb434d4151036) — fix(workspace): retain pane surfaces and respect rendered focus
-- [5fde763](https://github.com/gajendraxdev/zync/commit/5fde7634fafdab1996b1325e421d934eefa266e4) — feat(shortcuts): activate terminal-safe aliases and workspace commands
-- [e4ed903](https://github.com/gajendraxdev/zync/commit/e4ed9035f4a432c7621d300e1c69fdd53a6b0b2c) — feat(shortcuts): add shared binding editor and quick-access modal
-- [c06c5f9](https://github.com/gajendraxdev/zync/commit/c06c5f91a55ebc9d8243b93ebc45e145f5ee3677) — feat(navigation): add activity bar and host strip placement controls
-- [c7edbd9](https://github.com/gajendraxdev/zync/commit/c7edbd9a30dc888204be6ab28e5aa0cab258d3e1) — feat(chrome): unify toolbar and status visibility controls
-- [740c8a5](https://github.com/gajendraxdev/zync/commit/740c8a513ed6cb90dee540683bc816f30587d174) — feat(tabs): integrate main-tab customization and stable ordering
-- [2963282](https://github.com/gajendraxdev/zync/commit/2963282975ae2f405f8620778d55d17cd750e1da) — feat(workspace): integrate content tabs docking and visibility recovery
-- [e3a0783](https://github.com/gajendraxdev/zync/commit/e3a0783aedc10db482566ac2030f5438e30d00e6) — refactor(settings): finish shared control and popup consistency
-- [d3cf693](https://github.com/gajendraxdev/zync/commit/d3cf693e623a71e84ca198a33360342aaef8c12c) — test(workspace): cover docking interaction and presentation regressions
-- [2e9c615](https://github.com/gajendraxdev/zync/commit/2e9c6154e8849dc4454ae948e4f29a49d34eb28b) — docs(testing): document theme files and finalize regression harness
-
 ### Fixed
 
 - **Dock-aware workspace commands:** Toolbar Split and Find now follow the
   visible focused dock instead of the selected center tab. Disconnected plugin
   panels use renderer-owned focus and visibility for reconnect interaction.
+  ([2963282], [567989d])
 - **Custom theme sync safety:** Keep imported theme documents and their `custom`
   selector device-local on upload and restore, including older sync records.
   Other allowlisted settings still merge normally. Correct shortcut documentation
   for recommended defaults, automatic secondary reservations and editable host keys.
+  ([0f28ce5])
 
 - **Shortcut editor quick access:** Profile → Keyboard shortcuts now offers
   “View & edit shortcuts…” in a modal using the same searchable Settings editor,
@@ -62,6 +23,7 @@ commits. These references identify implementation history, not a released versio
   Binding writes are serialized with shared pending state across editor reopenings;
   failed saves restore the settled baseline. Recording retains keyboard focus
   during saving, and Remove clarifies that independent bindings are preserved.
+  ([e4ed903])
 
 - **Terminal-accessible shortcut alternatives:** Add independently editable and
   reservable alternatives for Hosts/sidebar, palette, AI and navigation sections.
@@ -71,7 +33,7 @@ commits. These references identify implementation history, not a released versio
   alternatives in shared hints, and retain existing saved keyboard preferences.
   Fresh installations save the recommended preset once. Existing profiles gain
   secondary reservations automatically, without a preset click; versioned adoption
-  preserves later opt-outs and custom primary bindings.
+  preserves later opt-outs and custom primary bindings. ([338c397], [5fde763])
 
 - **Hybrid terminal shortcuts:** Expand catalog-driven terminal reservations to
   navigation, tab, pane and view commands without changing existing preferences.
@@ -82,21 +44,25 @@ commits. These references identify implementation history, not a released versio
   protected; shared save controls lock pending writes and report rollback errors.
   Shortcut recording cancels on Escape or focus loss; directional pane focus
   requires an arrow key. No process detection, extra global router or SSH polling.
+  ([338c397], [5fde763])
 
 - **Dock return focus and header tooltips:** Coordinate context-menu dismissal
   and dock-return focus in one post-commit path, so removing a standalone header
   focuses the returned pane's own tab instead of the first tab. Preserve outside
   focus and discard consumed requests. Maximize, Restore and Close now use Zync
   tooltips on their existing named buttons, without native tooltip duplication.
+  ([8bc3ecc], [2963282])
 
 - **Docked-tab focus and drop clarity:** Selecting a docked shell, plugin or
   entirely docked group focuses its existing pane without replacing the selected
   center canvas. Keep neighboring panes and retained resources intact. Shared
   drag previews distinguish a tab-group split from a persistent side/bottom dock.
+  ([7f76bde], [2963282])
 
 - **Shell-tab close isolation:** Closing a shell no longer removes unrelated
   single-pane feature or plugin tabs. Keep neighboring canvases and their
   presentation metadata intact; existing explicit group-close behavior remains.
+  ([b1f5608])
 
 - **Theme save and preview consistency:** Serialize theme, accent, import and
   element-color writes in one acknowledged queue, so rapid failed saves cannot
@@ -106,8 +72,13 @@ commits. These references identify implementation history, not a released versio
   area and warn about low contrast in pane headers, active tabs, navigation hover
   and terminal selection. Use Zync's color picker for custom accents with explicit
   Apply, and attach keyboard tooltip descriptions to enabled action buttons.
+  ([4f3ea03], [125df46], [ff68187])
 
 ### Added
+
+- **Customization regression coverage:** Add browser fixtures for docking,
+  maximization, pane drag-back, content menus and workspace presentation, plus
+  a projection benchmark and final test-harness registration. ([d3cf693], [2e9c615])
 
 - **Drag panes back to tabs:** Drag a grouped pane header onto its host's pane-tab
   strip to return that exact pane as a separate tab at the insertion marker.
@@ -115,7 +86,7 @@ commits. These references identify implementation history, not a released versio
   layout/order updates, pin boundaries and cancellation. Keep sessions and
   content identity intact; horizontal and sidebar tab strips share the gesture.
   Drops over the + button or trailing space append the pane without opening the
-  tab menu; workspace action buttons remain outside the drop area.
+  tab menu; workspace action buttons remain outside the drop area. ([7f76bde], [2963282])
 
 - **Theme JSON import/export:** Export the current app palette and supported global
   element-color overrides from Appearance. Edit the versioned JSON file, validate it,
@@ -125,31 +96,32 @@ commits. These references identify implementation history, not a released versio
   layout and connections. Keep one reusable imported palette without editing built-ins.
   Version 1 accepts opaque six-digit hex colors only, not arbitrary CSS, images,
   gradients or executable plugins. Theme/accent save guards protect against stale
-  requests and late failures overwriting an import.
+  requests and late failures overwriting an import. ([930ac9f], [ff68187])
 
 ### Changed
 
 - **Consistent tab add buttons:** Main and pane strips share one themed add-button
   component, with matching size, icon weight, hover/menu states and Zync tooltips.
   Remove the pane trigger's extra boxed background; preserve both menus' existing
-  actions, placement, focus recovery and drag/drop handling.
+  actions, placement, focus recovery and drag/drop handling. ([8bc3ecc], [740c8a5])
 
 - **Grouped-tab labels:** Keep the existing member icons and use a middle dot
   between two pane names, without a redundant count badge. Larger groups show
   the first name and visible-pane count in one label. Drag previews share that
   label; Zync tooltips retain every visible name and hidden-member counts.
+  ([8bc3ecc], [2963282])
 
 - **Docking feedback and recovery:** Mark docked pane tabs with shared location
   icons and Zync tooltips explaining persistent visibility. Highlight the focused
   dock without replacing center-tab selection. Return an existing pane to tabs
   from its shared header or context menu, preserving content and recovering
-  keyboard focus through the guarded, kind-agnostic release action.
+  keyboard focus through the guarded, kind-agnostic release action. ([8bc3ecc], [2963282])
 
 - **Theme customization clarity:** Move Theme files to the bottom of Appearance.
   Add a grouped, read-only theme-key reference and copyable elements example using
   the editor/validator catalogs. Keep exports limited to actual saved overrides
   so inherited colors remain flexible. Show complete wrapping color-action labels
-  with Zync tooltips explaining Apply and per-color/area/all resets.
+  with Zync tooltips explaining Apply and per-color/area/all resets. ([125df46], [ff68187])
 
 - **Settings organization:** Keep themes, interface typography, compact mode and
   element colors in Appearance. Group navigation, pane-tab placement, main-tab
@@ -157,17 +129,18 @@ commits. These references identify implementation history, not a released versio
   Move terminal fonts, cursor, opacity and transparency directly into Terminal,
   with one link to the shared Appearance color editor. Update contextual settings
   shortcuts without changing saved preference keys or reset/save behavior.
+  ([ff68187])
 
 ### Removed
 
 - **Pane Arrange submenu:** Remove pane-menu Move earlier/later, Move to and
   order/docking reset rows. Keep tab dragging, pane splits, ungrouping, existing
-  docking state and hidden-pane recovery unchanged.
+  docking state and hidden-pane recovery unchanged. ([2963282])
 
 - **Saved layout presets:** Remove the unreleased preset manager, preview, save/apply
   commands and Layouts submenu. Keep tab dragging, splits, docking, visibility and
   normal per-host session restoration. Preserve existing preset settings as opaque
-  data; unrelated preference saves do not erase them.
+  data; unrelated preference saves do not erase them. ([2963282])
 
 ### Added
 
@@ -176,17 +149,19 @@ commits. These references identify implementation history, not a released versio
   Show a workspace icon with the selected host's badge only while docked. Hosts,
   Plugins and workspace tabs share one panel; returning to Current position restores
   the horizontal strip without duplicating tabs or restarting pane resources.
+  ([c06c5f9], [2963282])
 
 - **Navigation context menu:** Show registered destinations as checked visibility
   options with current shortcut hints, plus left/right placement and hide/reset
   actions. Keep Settings/Profile protected and reuse confirmed preference saves.
   Right-click no longer auto-focuses a row; keyboard opening and menu arrow keys
-  retain visible focus through shared menu navigation.
+  retain visible focus through shared menu navigation. ([c06c5f9], [8e2cd22])
 - **Icon-only global navigation:** Remove the name-display toggle, use Zync's
   themed tooltips with current shortcut hints, and add configurable shortcuts for
   Hosts, workspace, Public URLs, global forwarding, Snippets, Vaults, Plugins and
   Profile. Clicking and keyboard navigation share the same destination actions;
   terminal-first routing and existing host-feature shortcuts remain unchanged.
+  ([c06c5f9], [338c397])
 - **Grouped pane tabs:** Replace generic Split-number labels with visible member
   names, readable resource icons in one shared frame and a compact pane count. Share the group treatment
   with drag previews; expose all visible names and hidden counts accessibly, while
@@ -196,6 +171,7 @@ commits. These references identify implementation history, not a released versio
   Center group-tab items with consistent gaps, a fixed-size close slot and bounded
   long labels; share compact row geometry with the drag preview.
   Explicitly label group close as closing all members, including hidden panes.
+  ([8bc3ecc], [2963282])
 - **Pane-tab accessibility and recovery:** Share native selection buttons across
   shell, feature, plugin and grouped tabs, with selected-state announcements and
   separate close controls. Preserve pointer dragging, F2, contextual menus and focus
@@ -203,10 +179,11 @@ commits. These references identify implementation history, not a released versio
   instead of incorrectly claiming its visibility remained unchanged.
   When a menu hides its pane tab, recover keyboard focus to a surviving selection
   button, or the empty strip if no tabs remain, without activating or closing panes.
+  ([8bc3ecc], [2963282])
 - **Pane maximize/restore:** Temporarily expand a terminal, built-in or plugin pane
   from its shared header or the configurable “Toggle maximized pane” command.
   Restore the existing split and dock geometry without moving retained content
-  hosts, closing siblings or saving a replacement layout.
+  hosts, closing siblings or saving a replacement layout. ([e84221b], [567989d])
 - **Toolbar and status customization:** Show or hide optional registered controls
   and reset each area independently, without action-reordering controls or dragging.
   Keep connection status, recovery and required indicators available; retain existing
@@ -221,6 +198,7 @@ commits. These references identify implementation history, not a released versio
   menus rather than presenting disabled choices; their status-bar behavior is unchanged.
   Settings lists only configurable actions using the same full-row switches as
   navigation, with one note instead of separate non-editable status rows.
+  ([28306b2], [c7edbd9])
 - **Element colors:** Add validated semantic overrides and an Appearance editor
   with explicit Apply, individual/area/all resets, retained drafts after failed
   saves and advisory contrast previews. Unset colors inherit the selected theme.
@@ -234,11 +212,12 @@ commits. These references identify implementation history, not a released versio
   Apply and existing reset/save guards. Preview colors in a lightweight sample
   workspace with host/navigation chrome, active tabs, terminal cursor/selection,
   split headers and file-list controls, without mounting live sessions or changing
-  the opaque-color storage contract.
+  the opaque-color storage contract. ([2d5cd09], [194f3cc], [df363b4], [125df46])
 - **Multiline controls:** Add a reusable, accessible textarea with shared focus,
   validation and theme styling; extend the control gallery and regression coverage.
+  ([654a8d7])
 - **Shared state messages:** Add reusable wrapping empty, error and result styling
-  with explicit focus behavior.
+  with explicit focus behavior. ([654a8d7])
 - **Workspace tab customization:** Add display-only names with reset, Unicode
   validation in a name-only Rename dialog (F2). Right-click a main tab for
   Pin/Unpin, Appearance and guarded Close; keyboard opening uses Shift+F10 or
@@ -252,24 +231,29 @@ commits. These references identify implementation history, not a released versio
   gesture, with Alt+Shift+Left/Right for keyboard reordering and no Arrange
   submenu on main tabs. Keep host names,
   canonical feature titles, connection IDs and running content unchanged.
+  ([8bc3ecc], [740c8a5])
 - **Pane display names:** Rename individual terminal, built-in and plugin panes
   from tab/header context menus or F2. Labels follow the same content
   instance through layout changes and can be reset without renaming its resource.
+  ([1cac232], [b1f5608])
 - **Pane pins and ordering:** Pin individual content instances and move them within
   pinned/unpinned groups by dragging tabs, with keyboard alternatives under Arrange.
   Remove the extra Workspace contents button and inventory modal; share Rename,
   Pin/Unpin, Hide and Move to actions through contextual menus. Mixed tab order follows these
   preferences without reordering resource hosts; resetting order keeps names and pins.
+  ([1cac232], [b1f5608])
 - **Pane visibility:** Hide or show individual panes and recover all hidden panes
   from tab-bar context menus or the Show hidden panes command without closing sessions. Hidden panes keep their saved
-  split positions and count toward the existing four-pane limit.
+  split positions and count toward the existing four-pane limit. ([b1f5608], [2963282])
 - **Main-tab pins:** Pin workspace tabs and reorder inside pinned/unpinned groups
   without changing running content or explicit close/disconnect actions.
+  ([740c8a5])
 - **Shared tab dragging:** Host tabs and pane tabs now use one pointer controller,
   inert preview and sorting animation, with overflow edge scrolling and common
   cancellation/cleanup. Keep close actions out of drag previews, preserve pinned
   groups and revalidate live identities on drop. Host reordering and pane docking
   retain their separate guarded actions without moving running resource hosts.
+  ([b72eaae], [7f76bde])
 - **Main-tab appearance:** Customize built-in icons, optional accent markers and
   legacy close-button overrides from a compact appearance-only editor. Set the
   app-wide close-button default in Settings → Appearance; per-tab overrides
@@ -279,9 +263,10 @@ commits. These references identify implementation history, not a released versio
   across pin edits, migrate old pin-only metadata and keep a separate recovery copy.
   Existing default rendering is unchanged; obsolete all-in-one customization
   controls are removed. Menu/rename/appearance focus and inheritance regressions
-  replace tests for the old dialog.
+  replace tests for the old dialog. ([8bc3ecc], [740c8a5])
 - **Workspace commands:** Discover tab customization, Show hidden panes and Show
   all panes in the command palette, with optional user-configured shortcuts.
+  ([c7edbd9], [5fde763])
 - **Global navigation:** Enable the optional left/right activity bar for Hosts,
   Host workspace, Public URLs, global Port Forwarding, Snippets, Command Palette,
   Vaults and plugin management. Reorder items with shared pointer dragging or
@@ -289,61 +274,72 @@ commits. These references identify implementation history, not a released versio
   themed tooltips with configured shortcut hints.
   Settings and Profile stay at the bottom, moving to the title bar when hidden.
   Host-bound plugin panes stay in their host workspace; global plugin views are
-  deferred rather than granting host plugins global authority.
+  deferred rather than granting host plugins global authority. ([c06c5f9])
 - **Movable host navigation:** Keep the host's existing Shell/Files/plugin tab
   strip in its current position or place that same inventory on the left/right.
   Main host tabs, pane layouts and running content remain unchanged. Shared drag
   geometry supports both axes; navigation saves publish after acknowledgement,
   preserve unknown formats and migrate older mixed navigation only on an edit.
+  ([c06c5f9], [2963282])
 - **Acknowledged workspace saving:** Report explicit session-save outcomes to
   layout actions, preserve a rapid change-and-undo while writes are pending, and
   invalidate the save cache after uncertain write results. Unknown snapshot
   envelopes remain protected rather than clearing the persistence guard.
+  ([b1f5608], [75a2b87])
 - **Portable workspace recovery copies:** Publish complete pre-upgrade snapshots
   without overwriting the first copy, using platform no-overwrite operations instead
   of requiring hard links. Invalid destinations still stop migration safely.
+  ([75a2b87])
 - **Docking lifecycle groundwork:** Add geometry-only region allocation and a
   development fixture covering retained iframe state, focus, visibility and close
-  behavior. Docking controls remain under development.
+  behavior. Docking controls remain under development. ([e84221b], [567989d])
 - **Docking recovery groundwork:** Validate bounded allocation metadata during
   session save/restore, preserve unsupported formats and secure a separate original
   session recovery copy before first use. Docking controls remain under development.
+  ([75a2b87])
 - **Docking capacity safeguards:** Reserve docked panes before creating or splitting
   content, without leaving refused shells or file listings behind. Open Files beside
   a shell navigates the accepted Files instance instead of the default listing.
+  ([b1f5608], [5d825c3])
 - **Docking renderer and focus:** Allocate saved connection-wide docks through the
   existing retained hosts, preserve center selection while focusing a dock, and
   navigate visible regions with directional shortcuts. Known invalid allocations
-  offer a metadata-only reset; unknown formats remain protected.
+  offer a metadata-only reset; unknown formats remain protected. ([567989d])
 - **Dock region resizing:** Resize occupied sidebars and the bottom panel with
   pointer, wheel or keyboard controls; reset each region's size or cancel a draft.
   Coalesce previews and save only accepted size changes without remounting content.
+  ([7f76bde])
 - **Empty-region docking:** Drag existing content into an empty sidebar or bottom
   panel, or return it to the workspace, using visible destination guides. Recheck
   source identity, capacity and target on release without reopening content;
   keyboard users can use the same location choices in pane context menus.
+  ([7f76bde], [2963282])
 - **Docking action consistency:** Address split, close and edge-drop targets by
   stable content identity and dividers by their canonical owner. Docked duplicates
   stay in their region; moving into a dock preserves center selection. Refused
   actions leave resources unchanged, and guarded closes remove only disposed
   allocation metadata. Closing a shell pane retains its existing tab/session.
+  ([b1f5608], [2963282])
 - **Docked reconnect and ungroup:** Give a visible docked shell the first reconnect
   channel even beside Files or plugins. Ungroup addresses the exact resource and
   returns it to its own tab without recreating its content, retaining names/pins
   and unrelated saved placements. Hidden, stale and protected requests are refused.
+  ([b1f5608], [567989d])
 - **Atomic split launches:** Insert a requested shell directly beside the exact
   pane, keeping its dock placement and center selection without a temporary shell
   tab. Open Files here retains its target across directory lookups and loads only
   the accepted new listing. Feature-only moves retain the remembered shell.
+  ([b1f5608], [5d825c3])
 - **Exact Files-to-terminal launches:** Open a new or synced shell beside the
   addressed Files instance, including docked panes. New split shells publish
   atomically; reused shells move only after layout validation and are rechecked
   around directory navigation. Concurrent requests reuse the enrolled synced
-  shell, and stale or hidden sessions are not replaced or navigated.
+  shell, and stale or hidden sessions are not replaced or navigated. ([5d825c3])
 - **Pane docking controls:** Choose supported sidebar, bottom-panel or workspace
   locations from pane context menus. Reset just that connection's docking locations
   and sizes while retaining names, pins, hidden state and running content. Failed
   moves report an inline error; unsupported saved formats remain protected.
+  ([2963282])
 - **Shared switches:** Add compact and labeled switches with native keyboard
   activation, accessible descriptions, shared theme tokens and track-relative
   thumb geometry. Existing settings callbacks continue to own persistence.
@@ -365,13 +361,13 @@ commits. These references identify implementation history, not a released versio
 
 - **Workspace rendering:** Reuse validated, unchanged docking preferences during
   allocation updates instead of revalidating every workspace's metadata on each
-  focus or tab change. Actions and saves still validate fresh state.
+  focus or tab change. Actions and saves still validate fresh state. ([567989d])
 - **Settings consistency:** Use shared inputs, buttons and wrapping action rows
   in AI, Feedback, File Manager, typography and settings.json controls while
-  retaining existing save, consent and validation behavior.
+  retaining existing save, consent and validation behavior. ([ff68187], [e3a0783])
 - **Workspace view contracts:** Compose validated, bounded built-in/plugin view
   metadata separately from live content. Keep plugin instances distinct in the tab
-  inventory and retain installed labels while plugin workers reload.
+  inventory and retain installed labels while plugin workers reload. ([e84221b], [2963282])
 - **Settings and connection controls:** Adopt shared switches and action groups in
   General Settings, plus named icon buttons and wrapping footer actions in Add
   Connection. Existing save, test and confirmation handlers are retained.
@@ -392,105 +388,125 @@ commits. These references identify implementation history, not a released versio
 - **Sidebar/navigation regression coverage:** Promote the four audit TODOs to
   passing regression checks. Cover hidden-bar destinations, refused visibility
   saves, malformed placement values and late failures after rapid navigation,
-  settings reloads or strip placement changes.
+  settings reloads or strip placement changes. ([28306b2], [c06c5f9])
 - **Sidebar navigation boundaries:** Keep Vaults/Plugins shortcuts working when
   the icon rail is hidden. Restore transient selection on refused visibility saves
   without undoing newer navigation or reloads; buttons, sidebar shortcut and
   small-screen backdrop share the same visibility action. Reject non-string strip
   placement values consistently with native validation, preserving malformed data
-  read-only rather than making it editable through string coercion.
+  read-only rather than making it editable through string coercion. ([28306b2], [c06c5f9])
 - **Sidebar navigation toggles:** Pressing the selected Hosts, Vaults, Plugins or
   docked Host workspace button again closes its sidebar. Pressing it while closed
   reopens it; selecting another sidebar destination switches sections. Buttons
   and shortcuts share this action without changing host sessions or saved width.
+  ([28306b2], [c06c5f9])
 - **Hosts sidebar resize cost:** Size the shared sidebar content wrapper directly
   instead of updating an inherited width variable across every host row. Reduce
   per-frame style/layout work for large host lists; retain the same sizing contract
-  for navigation and AI, without changing sessions or host actions.
+  for navigation and AI, without changing sessions or host actions. ([c426235])
 - **Pane resize alignment:** Update retained pane allocations during resize-observer
   delivery instead of delaying another animation frame. Keep neighbouring panes
   aligned with sidebar resizing without remounting content or changing sessions.
+  ([c426235])
 - **Shared sidebar resizing:** Primary navigation and AI now reuse one sidebar
   shell and resize controller. Paint live widths without per-frame React updates,
   preserve the grab offset and subpixel motion, and save whole pixels once on
   release. Share mirrored keyboard resizing and defer restoring transitions until
   the final width is painted; keep each panel's content, limits and storage separate.
+  ([c426235])
 - **Sidebar width saving:** Round fractional resize measurements to whole pixels
   on both sidebar edges so increasing or decreasing width does not fail native
-  settings validation.
+  settings validation. ([c426235])
 - **Tab switching:** Remove stale entry-animation classes and broad tab-body
   transitions from global and host workspace tabs. Selection only changes
   visibility; retain visited content and first-open loading boundaries. This
   cleanup does not claim to resolve unmeasured rendering or native-loading delays.
+  ([2963282])
 - **Plugins navigation:** Show searchable Installed and Marketplace views in the
   sidebar without automatically opening Settings. Add compact plugin menus for
   details, enable/disable, reviewed updates, retry and confirmed uninstall; share
   the existing management controller and permission review. Group app-owned
   themes under Zync Built-in Themes with a shared, Worker-independent theme picker.
-  Keep Developer options behind the explicit Plugin settings action.
+  Keep Developer options behind the explicit Plugin settings action. ([a2261b6], [db959c9])
 - **Navigation focus and tooltips:** Share a thinner, inset keyboard-focus ring
   across activity-bar and sidebar controls so it cannot overflow or be clipped.
   Use Zync's themed tooltips for host Edit/Disconnect/status, section Create,
   split sidebar actions and provider refresh instead of native browser titles.
+  ([f7827ea], [c06c5f9])
 - **Popup positioning:** Open shared toolbar/profile dropdowns instantly at their
   trigger without animating viewport placement from an edge of the window.
+  ([8e2cd22])
 - **Host-tab drops:** Restore whole-slot sorting so adjacent forward/backward drops
   do not snap back on the near/far half of a tab. Accept drops across the strip's
   full height, including padding; share target geometry between preview and drop
   while preserving pane insertion, pin boundaries and live-session guards.
+  ([b72eaae])
 - **Pane drag feedback:** Share the host-tab preview (icon and title, without a close symbol),
   keep the grabbed point under the cursor, and animate neighbouring tab chrome into
   its proposed position. Use one visual update per animation frame, dim the source,
   hide docking hints during tab
   reordering, and soften destination hints/previews without bright borders. Preserve
-  final-drop validation, cancellation and retained pane resources.
+  final-drop validation, cancellation and retained pane resources. ([b72eaae], [7f76bde])
 - Keep the workspace content-tab bar out of native window dragging so right-clicking
   its empty area opens pane recovery actions instead of the Windows system menu.
   Window dragging remains on the top title bar; tab reordering and docking are unchanged.
+  ([2963282])
 - **Customization menus:** Float tab icon/close-button, navigation-position and
   element-color selectors outside scrolling surfaces so narrow layouts do not
   clip their options. Keep nested Escape dismissal and focus restoration intact.
+  ([8e2cd22], [8bc3ecc], [ff68187])
 - **Pane metadata safety:** Refuse presentation edits while sessions are loading,
   restoring or protected from persistence, including resets and close cleanup.
+  ([b1f5608])
 - **Single docked panes:** Ungroup a single-pane dock back to its existing tab
   without rebuilding the canvas or restarting terminal/plugin content.
+  ([b1f5608], [2963282])
 - **Open Files here guidance:** Distinguish a missing split destination from a
   pane-capacity refusal, without loading files or changing resources in either case.
+  ([5d825c3])
 - **Short dropdown placement:** Keep portaled menus beside their actual trigger,
   including short menus opening upward and selectors inside scrolling dialogs.
+  ([8e2cd22])
 - **Workspace recovery message:** Show all-hidden recovery only when every
   canonical canvas is hidden, not while a docked or unselected pane remains visible.
+  ([2963282])
 - **Mixed-pane shortcuts:** Split and focus the selected visible workspace canvas,
   including feature/plugin groups, while preserving input ownership and pane limits.
   A directional focus action now repairs a hidden origin and reaches its visible
-  neighbor in the same keystroke.
+  neighbor in the same keystroke. ([5fde763])
 - **Main-tab metadata safety:** Guard customization during session restore and
   preserve a separate original-session recovery copy before saving the first pin.
+  ([75a2b87], [b1f5608])
 - **Navigation save safety:** Preserve unsupported preference formats, serialize
   rapid edits and keep a failed save from replacing newer reloaded settings.
+  ([28306b2], [4f3ea03])
 - **Split close target:** Address the visible pane when a split's remembered focus
-  points to hidden content.
+  points to hidden content. ([b1f5608])
 - **Hidden-pane routing:** Keep focus, split and docking targets on visible content,
   prevent implicit commands reaching user-hidden shells, and skip reconnect waits
   for terminals that will not render. Feature tabs now derive from live panes so
-  later updates cannot recreate a pane closed from its header.
+  later updates cannot recreate a pane closed from its header. ([b1f5608], [2963282])
 - **Plugin pane identity:** Preserve the selected plugin instance when switching
   canvases or unsplitting, and give supported duplicates independent identities.
   Respect single-instance declarations without blocking moves of existing panes.
+  ([e84221b], [b1f5608])
 - **Pane metadata recovery:** Keep aliases separate from live session inventory and
   preserve unsupported future presentation formats instead of overwriting them.
   Preserve an original-session recovery copy before upgrading saved pane preferences.
+  ([1cac232], [75a2b87])
 - **Dialog focus:** Preserve valid focus already established inside a dialog while
-  its initial portal-focus step is pending.
+  its initial portal-focus step is pending. ([8e2cd22])
 
 - **Settings dependency isolation:** Keep idle-terminal defaults and normalization
   independent of terminal scheduling, avoiding a settings/store initialization cycle.
+  ([09253a0])
 - **Workspace content retention:** Reordering main tabs preserves mounted content
   order, preventing retained plugin iframes from reloading during tab movement.
+  ([567989d], [740c8a5])
 - **Session recovery:** Restore feature/plugin-only layouts, preserve vault-profile
   and tab-alias metadata, and refuse overwriting unsupported future session files.
   Serialize native saves and suppress pre-restore/stale writes; release notes open
-  only after workspace restoration has completed.
+  only after workspace restoration has completed. ([75a2b87], [b1f5608])
 - **Settings switch alignment:** Give boxed, plain and nested Terminal settings
   rows a consistent gutter; use the same grouping for Compact Mode. ([c502279])
 - **Settings keyboard navigation:** Scope Up/Down and Home/End to the vertical
@@ -2542,3 +2558,39 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [3a47a70]: https://github.com/zync-sh/zync/commit/3a47a70
 [4a679a5]: https://github.com/zync-sh/zync/commit/4a679a5
 [b6cbb16]: https://github.com/zync-sh/zync/commit/b6cbb16
+
+[09253a0]: https://github.com/zync-sh/zync/commit/09253a075d41e827bdab203298528e30e8e273fc
+[2d5cd09]: https://github.com/zync-sh/zync/commit/2d5cd098857a1bed35a6bcef1f79917d86e6d3d1
+[930ac9f]: https://github.com/zync-sh/zync/commit/930ac9f4028af4a6508a8a06a0258be8c06a6893
+[1cac232]: https://github.com/zync-sh/zync/commit/1cac2327e6de4d7ec11935612a8eacb03d3f5127
+[e84221b]: https://github.com/zync-sh/zync/commit/e84221b36fca926ac3d3754c75cf68c3e1c4bc7e
+[28306b2]: https://github.com/zync-sh/zync/commit/28306b27f4f40eae18e5ee6440077e03bad32244
+[194f3cc]: https://github.com/zync-sh/zync/commit/194f3cca5105f80700781e20575a9f6b2d67995b
+[75a2b87]: https://github.com/zync-sh/zync/commit/75a2b874f553fd4af0473e8b40df2dfa4617b919
+[0f28ce5]: https://github.com/zync-sh/zync/commit/0f28ce5a5c11e4928326b1d044cfc36f51be8ec8
+[8e2cd22]: https://github.com/zync-sh/zync/commit/8e2cd2272703053605bc2eccf12b14df970a3cab
+[654a8d7]: https://github.com/zync-sh/zync/commit/654a8d7a4d43ed25f892b3795042ea1c8f9ed74c
+[df363b4]: https://github.com/zync-sh/zync/commit/df363b4dcb5c3a6fa1f83e22f5fb3eab7346ddb8
+[125df46]: https://github.com/zync-sh/zync/commit/125df46ad57c854f6a2d4cdee78b6a3707a2bf8e
+[338c397]: https://github.com/zync-sh/zync/commit/338c39735d7fbd865694c63739361062dcf56f92
+[b1f5608]: https://github.com/zync-sh/zync/commit/b1f560868c03174acf5384f87b75534882eed3f5
+[4f3ea03]: https://github.com/zync-sh/zync/commit/4f3ea037d7e6a8502b83161ed719be19f4a33d0a
+[a2261b6]: https://github.com/zync-sh/zync/commit/a2261b61ca962312d167369196df9a11c4ff9733
+[db959c9]: https://github.com/zync-sh/zync/commit/db959c98759c81d37f0fbe52addc17dd4453fd7e
+[ff68187]: https://github.com/zync-sh/zync/commit/ff68187d95cbfff9f069c892c939276de6c4965d
+[c426235]: https://github.com/zync-sh/zync/commit/c42623525bbd527817eacc6b3abc7adaaaf8732f
+[f7827ea]: https://github.com/zync-sh/zync/commit/f7827ea7d2f0472e09ad872b75fc4ae2a04a6b0a
+[b72eaae]: https://github.com/zync-sh/zync/commit/b72eaae5a2939168e67c6b5d22ef65de299ae4b0
+[8bc3ecc]: https://github.com/zync-sh/zync/commit/8bc3ecc6fa2931845f7c098713397a1afb6505f9
+[7f76bde]: https://github.com/zync-sh/zync/commit/7f76bdefa65cc9c45a5596c8dc187e48e22511ad
+[5d825c3]: https://github.com/zync-sh/zync/commit/5d825c3d682e3873f5a64ae9d8d75f6e01b8d48c
+[567989d]: https://github.com/zync-sh/zync/commit/567989d7e16879f7910540bab05bb434d4151036
+[5fde763]: https://github.com/zync-sh/zync/commit/5fde7634fafdab1996b1325e421d934eefa266e4
+[e4ed903]: https://github.com/zync-sh/zync/commit/e4ed9035f4a432c7621d300e1c69fdd53a6b0b2c
+[c06c5f9]: https://github.com/zync-sh/zync/commit/c06c5f91a55ebc9d8243b93ebc45e145f5ee3677
+[c7edbd9]: https://github.com/zync-sh/zync/commit/c7edbd9a30dc888204be6ab28e5aa0cab258d3e1
+[740c8a5]: https://github.com/zync-sh/zync/commit/740c8a513ed6cb90dee540683bc816f30587d174
+[2963282]: https://github.com/zync-sh/zync/commit/2963282975ae2f405f8620778d55d17cd750e1da
+[e3a0783]: https://github.com/zync-sh/zync/commit/e3a0783aedc10db482566ac2030f5438e30d00e6
+[d3cf693]: https://github.com/zync-sh/zync/commit/d3cf693e623a71e84ca198a33360342aaef8c12c
+[2e9c615]: https://github.com/zync-sh/zync/commit/2e9c6154e8849dc4454ae948e4f29a49d34eb28b
