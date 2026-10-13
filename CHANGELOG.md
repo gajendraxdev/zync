@@ -10,7 +10,7 @@ All notable changes to Zync are documented in this file. The format is based on 
   has been saved. Preserve existing visible/hidden choices, including older supported
   settings; keep unsupported preferences read-only with a hidden fallback. Reset
   navigation restores the visible default. Host workspace tab-strip sidebar placement
-  remains opt-in, and no load-time preference rewrite is introduced.
+  remains opt-in, and no load-time preference rewrite is introduced. ([905f8eb])
 
 ## [2.35.0] - 2026-10-12
 
@@ -2672,3 +2672,4 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [d3cf693]: https://github.com/zync-sh/zync/commit/d3cf693e623a71e84ca198a33360342aaef8c12c
 [2e9c615]: https://github.com/zync-sh/zync/commit/2e9c6154e8849dc4454ae948e4f29a49d34eb28b
 [acd9f33]: https://github.com/zync-sh/zync/commit/acd9f33dcc20ff92e175e6b0d8e9dac1f2496c4c
+[905f8eb]: https://github.com/zync-sh/zync/commit/905f8eb304391ffdb135c207167a767512d62b11
