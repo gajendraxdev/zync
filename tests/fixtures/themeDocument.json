@@ -1,0 +1,37 @@
+{
+  "theme": {
+    "format": "zync-theme",
+    "version": 1,
+    "name": "Ocean",
+    "mode": "dark",
+    "palette": {
+      "background": "#101827", "panel": "#172033", "surface": "#243047",
+      "border": "#41516b", "text": "#f0f4ff", "muted": "#a8b8d0", "accent": "#60a5fa"
+    },
+    "elements": { "version": 1, "overrides": { "terminal.cursor": "#ABCDEF" } }
+  },
+  "names": [
+    { "input": "\u0085Ocean\u0085", "output": "\u0085Ocean\u0085" },
+    { "input": "\ufeffOcean\ufeff", "output": "Ocean" },
+    { "input": "\u00a0\u2007Ocean\u202f ", "output": "Ocean" }
+  ],
+  "invalid": [
+    { "path": ["format"], "value": "settings" },
+    { "path": ["version"], "value": 2 },
+    { "path": ["mode"], "value": "system" },
+    { "path": ["name"], "value": "  " },
+    { "path": ["name"], "value": "bad\nname" },
+    { "path": ["palette", "accent"], "value": "red" },
+    { "path": ["palette", "text"], "value": "#fff" },
+    { "path": ["palette", "background"], "value": "#00000080" },
+    { "path": ["palette", "surface"], "value": "url(https://evil.example)" },
+    { "path": ["palette", "text"], "value": "#ffffff;display:none" },
+    { "path": ["palette", "selector"], "value": "body" },
+    { "path": ["elements", "version"], "value": 99 },
+    { "path": ["elements", "overrides", "dialog.background"], "value": "#000000" },
+    { "path": ["elements", "overrides", "__proto__"], "value": "#000000" },
+    { "path": ["elements", "overrides", "terminal.cursor"], "value": "#abcdef80" },
+    { "path": ["connections"], "value": [] },
+    { "path": ["script"], "value": "alert(1)" }
+  ]
+}

@@ -8,7 +8,7 @@ use super::collection::{
 };
 use super::domain_hosts::{apply_hosts_restore_records, load_hosts_sync_records, HostSyncRecord};
 use super::domain_settings::{
-    load_allowlisted_settings, SettingsSyncRecord, SETTINGS_ALLOWLIST_KEYS,
+    load_allowlisted_settings, project_syncable_settings, SettingsSyncRecord,
 };
 use super::domain_snippets::{
     apply_snippet_restore_records, load_snippet_sync_records, snippet_record_logical_id,
@@ -3357,13 +3357,7 @@ pub async fn sync_settings_restore(
     for parsed in collected.records {
         let settings: serde_json::Value = crate::commands::settings_get(app.clone()).await?;
         let mut merged = settings.as_object().cloned().unwrap_or_default();
-        if let Some(obj) = parsed.payload.as_object() {
-            for key in SETTINGS_ALLOWLIST_KEYS {
-                if let Some(value) = obj.get(*key) {
-                    merged.insert((*key).to_string(), value.clone());
-                }
-            }
-        }
+        merged.extend(project_syncable_settings(&parsed.payload));
         crate::commands::settings_set(app.clone(), serde_json::Value::Object(merged)).await?;
     }
 

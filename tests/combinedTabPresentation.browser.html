@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Workspace content tab ordering</title></head>
+  <body>
+    <main class="min-h-screen bg-app-bg text-app-text" style="padding:24px">
+      <h1>Workspace content tab ordering</h1>
+      <p>This production-chrome fixture uses in-memory records only; it does not start terminals, plugins, or native sessions.</p>
+      <button id="run" type="button">Run tab ordering checks</button>
+      <button id="theme" type="button">Toggle theme</button>
+      <button id="preview" type="button">Preview grouped tab</button>
+      <div id="root" style="margin-top:20px;max-width:850px"></div>
+      <p>Tab activations: <output id="activations">0</output></p>
+      <pre id="results" aria-live="polite">Ready</pre>
+    </main>
+    <script type="module" src="./combinedTabPresentation.browser.tsx"></script>
+  </body>
+</html>

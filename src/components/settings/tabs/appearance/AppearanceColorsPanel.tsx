@@ -1,4 +1,3 @@
-import type { FocusEvent } from 'react';
 import type { AppSettings } from '../../../../store/settingsSlice';
 import { AppearanceAccentSection } from './AppearanceAccentSection';
 import { AppearanceThemeSection } from './AppearanceThemeSection';
@@ -16,7 +15,6 @@ export interface AppearanceColorsPanelProps {
     onTempAccentColorChange: (color: string) => void;
     onSelectPresetAccent: (color: string | null) => void;
     onCommitAccentColor: () => void;
-    onColorInputBlur: (event: FocusEvent<HTMLInputElement>) => void;
 }
 
 export function AppearanceColorsPanel({
@@ -31,7 +29,6 @@ export function AppearanceColorsPanel({
     onTempAccentColorChange,
     onSelectPresetAccent,
     onCommitAccentColor,
-    onColorInputBlur,
 }: AppearanceColorsPanelProps) {
     return (
         <>
@@ -51,7 +48,6 @@ export function AppearanceColorsPanel({
                 onTempAccentColorChange={onTempAccentColorChange}
                 onSelectPresetAccent={onSelectPresetAccent}
                 onCommitAccentColor={onCommitAccentColor}
-                onColorInputBlur={onColorInputBlur}
             />
         </>
     );

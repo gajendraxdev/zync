@@ -1,33 +1,34 @@
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { PaneSurfaceLayer } from '../workspace/PaneSurfaceLayer';
-import { layoutSurfaces, paneSurfaceKey } from '../workspace/paneSurfaces';
+import { workspaceDockingSurfaces } from '../workspace/workspaceDockingSurfaces';
+import { WorkspaceDockingFrame } from '../workspace/WorkspaceDockingFrame';
+import { WorkspaceRegionDropTargets } from '../workspace/WorkspaceRegionDropTargets';
+import { workspaceDockingView, projectWorkspaceDockingView } from '../../features/workspace/domain/dockingView';
+import { parseWorkspaceDocking } from '../../features/workspace/domain/docking';
+import type { WorkspaceDockingProjection } from '../../features/workspace/domain/dockingProjection';
 import { usePaneSurfaceGeometry } from '../workspace/usePaneSurfaceGeometry';
 import { useAppStore } from '../../store/useAppStore';
 import { useShallow } from 'zustand/react/shallow';
-import { Terminal as TerminalIcon, Plus, X, Zap, Loader2 } from 'lucide-react';
+import { Terminal as TerminalIcon, Plus, X, Zap } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { once, type UnlistenFn } from '@tauri-apps/api/event';
 import { queueTerminalInput } from '../../lib/terminal/inputPipeline';
-import {
-    findLayoutOwner,
-    isFeatureContent,
-    isPaneLeaf,
-    isPluginContent,
-    isSplitLayout,
-    layoutForCanvas,
-    layoutForFeatureInstance,
-    layoutForPlugin,
-    collectLeaves,
-    isTermContent,
-    singlePane,
-} from '../../lib/paneLayout';
+import { implicitTerminalTarget } from '../../features/workspace/domain/visibleContent';
+import { findLayoutOwner, projectVisiblePaneLayout } from '../../lib/paneLayout';
 import { PaneLayoutView } from './PaneLayoutView';
 import { PaneLeafView } from './PaneLeafView';
 import type { DockTabPointerHandlers } from '../layout/tabDock';
+import { Button } from '../ui/Button';
+import { listenWorkspacePresentationActions } from '../../features/shortcuts/workspacePresentation';
 
 // TerminalTab interface is now in store/terminalSlice
 // export interface TerminalTab ... removed
+
+const EMPTY_HIDDEN_CONTENT: ReadonlySet<string> = new Set();
+const EMPTY_DOCK_PROJECTION: WorkspaceDockingProjection = {
+    regions: { workspace: [], 'primary-sidebar': [], 'secondary-sidebar': [], 'bottom-panel': [] }, focusedContentId: null,
+};
 
 export function TerminalManager({
     connectionId,
@@ -38,6 +39,9 @@ export function TerminalManager({
     dockPointer,
     featureInstanceId,
     pluginPanelId,
+    featureView,
+    hiddenContentIds = EMPTY_HIDDEN_CONTENT,
+    hiddenContentFallback,
 }: {
     connectionId?: string;
     isVisible?: boolean;
@@ -51,6 +55,12 @@ export function TerminalManager({
     featureInstanceId?: string;
     /** A plugin view selects its own canvas, never the last active shell's canvas. */
     pluginPanelId?: string;
+    /** Kind fallback for restored legacy feature panes without an instance ID. */
+    featureView?: import('../../lib/paneLayout').SplitFeatureId;
+    /** Presentation-only hidden identities; canonical layouts still own their content. */
+    hiddenContentIds?: ReadonlySet<string>;
+    /** Reachable recovery for a selected canvas whose panes are all hidden. */
+    hiddenContentFallback?: ReactNode;
 }) {
     const workspaceActive = isWorkspaceActive ?? (isVisible !== false);
     const terminalView = isTerminalView ?? (isVisible !== false);
@@ -71,36 +81,74 @@ export function TerminalManager({
     const visibleActiveTabId = activeTabId
         ? (findLayoutOwner(paneGroups, activeTabId) ?? activeTabId)
         : null;
-    const paneLayout = useAppStore((state) => {
-        if (!activeConnectionId) return undefined;
-        const groups = state.paneLayouts[activeConnectionId];
-        const groupOwner = state.activePaneGroupOwner[activeConnectionId];
-        if (pluginPanelId) return layoutForPlugin(groups, pluginPanelId);
-        if (featureInstanceId) {
-            return layoutForFeatureInstance(groups, featureInstanceId)
-                ?? layoutForCanvas(groups, state.activeTerminalIds[activeConnectionId], groupOwner);
+    // Subscribe to this connection's resources, not terminal output or unrelated UI
+    // state. All canvases feed one allocation and one stable retained host layer.
+    const dockingInputs = useAppStore(useShallow(state => ({
+        terminals: activeConnectionId ? state.terminals[activeConnectionId] : undefined,
+        owner: activeConnectionId ? state.activePaneGroupOwner[activeConnectionId] : undefined,
+        presentation: activeConnectionId ? state.contentPresentation[activeConnectionId] : undefined,
+        focus: activeConnectionId ? state.workspaceDockFocus[activeConnectionId] : undefined,
+        maximized: activeConnectionId ? state.maximizedWorkspacePanes[activeConnectionId] : undefined,
+        preferences: state.workspaceDocking,
+    })));
+    // Preferences are immutable store snapshots. Validate the complete envelope
+    // only when it changes, not for terminal titles, focus or center selection.
+    const dockingPreferences = useMemo(() => parseWorkspaceDocking(dockingInputs.preferences), [dockingInputs.preferences]);
+    const view = useMemo(() => {
+        const scope = activeConnectionId ?? '';
+        // Derive from the subscribed render snapshot, not a newer imperative
+        // store read that could disagree with this render's selection/resources.
+        return projectWorkspaceDockingView({
+            terminals: { [scope]: dockingInputs.terminals ?? [] },
+            paneLayouts: { [scope]: paneGroups },
+            activeTerminalIds: { [scope]: activeTabId },
+            activePaneGroupOwner: { [scope]: dockingInputs.owner ?? null },
+            contentPresentation: dockingInputs.presentation ? { [scope]: dockingInputs.presentation } : {},
+            workspaceDockFocus: { [scope]: dockingInputs.focus ?? null },
+            maximizedWorkspacePanes: { [scope]: dockingInputs.maximized },
+        }, scope, dockingPreferences, {
+        featureInstanceId, pluginPanelId, featureId: featureView,
+        }, hiddenContentIds);
+    }, [activeConnectionId, paneGroups, activeTabId, dockingInputs, dockingPreferences, featureInstanceId, pluginPanelId, featureView, hiddenContentIds]);
+    const projection = view.projection.ok ? view.projection.value : EMPTY_DOCK_PROJECTION;
+    const allCanvasesHidden = useMemo(() => {
+        const hidden = new Set(hiddenContentIds);
+        for (const [id, preferences] of Object.entries(dockingInputs.presentation?.items ?? {})) {
+            if (preferences.hidden) hidden.add(id);
         }
-        const activeId = state.activeTerminalIds[activeConnectionId];
-        return layoutForCanvas(groups, activeId, groupOwner);
-    });
-    const canvasLayouts = useMemo(() => Object.entries(paneGroups ?? {}).filter(([, layout]) =>
-        isSplitLayout(layout)
-        || (isPaneLeaf(layout.root) && (isFeatureContent(layout.root.content) || isPluginContent(layout.root.content))),
-    ), [paneGroups]);
-    const selectedCanvas = canvasLayouts.find(([, layout]) => layout === paneLayout)?.[0] ?? null;
-    const standaloneLayouts = useMemo(() => {
-        const groupedTerms = new Set(canvasLayouts.flatMap(([, layout]) =>
-            collectLeaves(layout.root).flatMap(leaf => isTermContent(leaf.content) ? [leaf.content.termId] : []),
-        ));
-        return tabs.filter(tab => !groupedTerms.has(tab.id)).map(tab => singlePane(tab.id, tab.id));
-    }, [canvasLayouts, tabs]);
-    const standaloneLayout = standaloneLayouts.find(layout => layout.activePaneId === activeTabId);
-    const standalonePane = standaloneLayout && isPaneLeaf(standaloneLayout.root) ? standaloneLayout.root : undefined;
-    const standaloneVisible = panelVisible && !selectedCanvas && !pluginPanelId;
-    const surfaces = useMemo(() => [
-        ...canvasLayouts.flatMap(([owner, layout]) => layoutSurfaces(layout, panelVisible && owner === selectedCanvas)),
-        ...standaloneLayouts.flatMap(layout => layoutSurfaces(layout, standaloneVisible && layout === standaloneLayout)),
-    ], [canvasLayouts, panelVisible, selectedCanvas, standaloneLayouts, standaloneLayout, standaloneVisible]);
+        return view.canvases.length > 0 && view.canvases.every(({ layout }) => !projectVisiblePaneLayout(layout, hidden));
+    }, [view.canvases, hiddenContentIds, dockingInputs.presentation]);
+    const surfaces = useMemo(() => workspaceDockingSurfaces(view.canvases, projection, panelVisible), [view, projection, panelVisible]);
+    const focusWorkspaceContent = useAppStore(state => state.focusWorkspaceContent);
+    const resetWorkspaceDocking = useAppStore(state => state.resetWorkspaceDocking);
+    const restoreWorkspacePane = useAppStore(state => state.restoreWorkspacePane);
+    // Restore immediately in projection, then discard stale requests. Comparing
+    // the captured object prevents cleanup from cancelling a newer maximize.
+    // Unmount also releases its request without retaining closed workspace scopes.
+    useEffect(() => {
+        const request = dockingInputs.maximized;
+        if (!activeConnectionId || !request) return;
+        if (!panelVisible || !projection.maximizedContentId) restoreWorkspacePane(activeConnectionId, request);
+        return () => restoreWorkspacePane(activeConnectionId, request);
+    }, [activeConnectionId, dockingInputs.maximized, panelVisible, projection.maximizedContentId, restoreWorkspacePane]);
+    useEffect(() => {
+        if (!activeConnectionId || !panelVisible) return;
+        return listenWorkspacePresentationActions(useAppStore.getState,
+            target => target.action === 'maximize-pane' && target.connectionId === activeConnectionId,
+            () => {
+                const state = useAppStore.getState();
+                const selection = { featureInstanceId, pluginPanelId, featureId: featureView };
+                const current = workspaceDockingView(state, activeConnectionId, selection);
+                if (current.projection.ok && current.projection.value.maximizedContentId) state.restoreWorkspacePane(activeConnectionId);
+                else {
+                    const id = current.projection.ok ? current.projection.value.focusedContentId : null;
+                    if (!id || !state.maximizeWorkspacePane(activeConnectionId, id, selection)) {
+                        state.showToast('info', 'Open at least two visible panes to maximize one.');
+                    }
+                }
+            });
+    }, [activeConnectionId, panelVisible, featureInstanceId, pluginPanelId, featureView]);
+    const canResetDocking = useAppStore(state => state.sessionLoaded && !state.isRestoring && !state.sessionPersistenceBlocked);
 
     // Actions (stable)
     const createTerminal = useAppStore(state => state.createTerminal);
@@ -112,12 +160,6 @@ export function TerminalManager({
     const terminalContentRef = useRef<HTMLDivElement>(null);
     const { registerSlot, registerHost } = usePaneSurfaceGeometry(terminalContentRef);
     const pendingReadyRef = useRef<Record<string, { timeoutId: any; unlistenFn?: UnlistenFn; sent?: boolean }>>({});
-    const activeTabIdRef = useRef(activeTabId);
-
-    // Update ref when activeTabId changes
-    useEffect(() => {
-        activeTabIdRef.current = activeTabId;
-    }, [activeTabId]);
 
 
     const handleNewTab = () => {
@@ -131,8 +173,9 @@ export function TerminalManager({
     useEffect(() => {
         const handleRunCommand = (e: any) => {
             const { connectionId: targetConnId, command } = e.detail;
-            if (targetConnId === activeConnectionId && activeTabIdRef.current) {
-                queueTerminalInput(activeTabIdRef.current, command);
+            const target = activeConnectionId && implicitTerminalTarget(useAppStore.getState(), activeConnectionId);
+            if (targetConnId === activeConnectionId && target) {
+                queueTerminalInput(target, command);
             }
         };
 
@@ -141,6 +184,7 @@ export function TerminalManager({
             if (targetConnId === activeConnectionId && activeConnectionId) {
                 // `createTerminal` takes only `connectionId` and returns the newly created `termId`.
                 const newId = createTerminal(activeConnectionId);
+                if (!newId) return;
 
                 // If a command was passed (e.g., from a plugin like PM2 logs), execute it in the new tab after it's ready
                 if (command) {
@@ -191,7 +235,7 @@ export function TerminalManager({
 
         const handleTriggerCloseTab = (e: any) => {
             const { connectionId: targetConnId } = e.detail;
-            const currentActiveTabId = activeTabIdRef.current;
+            const currentActiveTabId = activeConnectionId && implicitTerminalTarget(useAppStore.getState(), activeConnectionId);
             if (targetConnId === activeConnectionId && currentActiveTabId) {
                 const store = useAppStore.getState();
                 const owner = findLayoutOwner(
@@ -205,8 +249,12 @@ export function TerminalManager({
         const handlePluginTerminalSend = (e: any) => {
             const { connectionId: targetConnId, text } = (e as CustomEvent).detail;
             // If the plugin didn't provide a connectionId, or it matches ours, and we have an active terminal
-            if ((!targetConnId || targetConnId === activeConnectionId) && activeTabIdRef.current) {
-                queueTerminalInput(activeTabIdRef.current, text);
+            const state = useAppStore.getState();
+            // Unaddressed sends belong only to the active workspace, not every retained host.
+            const addressedHere = targetConnId ? targetConnId === activeConnectionId : state.activeConnectionId === activeConnectionId;
+            const target = activeConnectionId && implicitTerminalTarget(state, activeConnectionId);
+            if (addressedHere && target) {
+                queueTerminalInput(target, text);
             }
         };
 
@@ -305,15 +353,26 @@ export function TerminalManager({
 
             {/* Terminal Content Area */}
             <div ref={terminalContentRef} className={cn("flex-1 overflow-hidden relative", terminalTransparencyEnabled ? "bg-transparent" : "bg-app-bg")}>
-                {canvasLayouts.filter(([owner]) => owner === selectedCanvas).map(([owner, layout]) => (
-                    <div key={owner} className={cn('absolute inset-0', !panelVisible && 'hidden')}>
-                        <PaneLayoutView
-                            connectionId={activeConnectionId}
-                            layout={layout}
-                            registerSlot={registerSlot}
-                        />
-                    </div>
-                ))}
+                <div className={cn('absolute inset-0', !panelVisible && 'hidden')}>
+                    {view.projection.ok ? <WorkspaceDockingFrame key={activeConnectionId} projection={projection} sizes={view.preferences?.sizes}
+                        onResize={canResetDocking && panelVisible ? (region, size) => useAppStore.getState().resizeWorkspaceDockRegion(activeConnectionId, region, size) : undefined}
+                        onResizeRefused={() => useAppStore.getState().showToast('warning', 'This region could not be resized. It may have closed or workspace saving may be unavailable.')}
+                        renderAllocation={allocation => <PaneLayoutView connectionId={activeConnectionId}
+                            layout={allocation.layout} layoutOwner={allocation.owner} registerSlot={registerSlot} />}
+                        emptyWorkspace={<div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center text-sm text-app-muted">
+                            {pluginPanelId && !view.selectedOwner ? <span role="status">Preparing plugin pane...</span>
+                                : allCanvasesHidden && hiddenContentFallback ? hiddenContentFallback : <>
+                                <span>{view.canvases.length ? 'No panes in the center workspace. Select a tab or right-click the tab bar for pane actions.' : 'No active terminals'}</span>
+                                {!view.canvases.length && <Button variant="secondary" onClick={handleNewTab}>Open New Terminal</Button>}
+                            </>}
+                        </div>} /> : <div role="status" className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center text-sm text-app-muted">
+                        <span>This saved docking layout cannot be displayed. Your panes have not been closed.</span>
+                        {view.projection.reason !== 'unsupported-docking' && <Button variant="secondary" disabled={!canResetDocking}
+                            onClick={() => {
+                                if (!resetWorkspaceDocking(activeConnectionId)) useAppStore.getState().showToast('warning', 'Docking settings could not be reset. Check that workspace saving is available.');
+                            }}>Reset docking locations</Button>}
+                    </div>}
+                </div>
                 <PaneSurfaceLayer
                     key={activeConnectionId}
                     surfaces={surfaces}
@@ -323,34 +382,30 @@ export function TerminalManager({
                             connectionId={activeConnectionId}
                             node={surface.node}
                             layout={surface.layout}
+                            focusedPaneId={surface.focusedPaneId}
+                            focused={surface.focused}
+                            dockRegion={view.preferences?.placements[surface.key]}
+                            onFocusContent={() => focusWorkspaceContent(activeConnectionId, surface.key)}
                             split={surface.split}
                             edges={surface.edges}
                             workspaceActive={workspaceActive}
                             panelVisible={surface.visible}
                             dockPointer={dockPointer}
+                            maximized={projection.maximizedContentId === surface.key}
+                            onToggleMaximize={() => {
+                                const state = useAppStore.getState();
+                                if (projection.maximizedContentId === surface.key) state.restoreWorkspacePane(activeConnectionId);
+                                else if (!state.maximizeWorkspacePane(activeConnectionId, surface.key,
+                                    { featureInstanceId, pluginPanelId, featureId: featureView })) {
+                                    state.showToast('info', 'This pane can no longer be maximized.');
+                                }
+                            }}
                         />
                     )}
                 />
-                {terminalView && selectedCanvas ? null : terminalView && pluginPanelId ? (
-                    <div role="status" className="flex h-full items-center justify-center gap-2 text-sm text-app-muted">
-                        <Loader2 size={16} className="animate-spin" aria-hidden="true" />
-                        <span>Preparing plugin pane…</span>
-                    </div>
-                ) : tabs.length === 0 ? (
-                    <div className={cn(
-                        "h-full flex flex-col items-center justify-center text-app-muted z-20",
-                        terminalTransparencyEnabled ? "bg-app-bg/80 backdrop-blur-xl" : "bg-app-bg"
-                    )}>
-                        <TerminalIcon size={48} className="mb-4 opacity-20" />
-                        <p>No active terminals</p>
-                        <button onClick={handleNewTab} className="mt-4 text-app-accent hover:underline">Open New Terminal</button>
-                    </div>
-                ) : standalonePane && terminalView ? (
-                    <div
-                        ref={node => registerSlot(paneSurfaceKey(standalonePane), node)}
-                        className={cn('absolute inset-0', !panelVisible && 'hidden')}
-                    />
-                ) : null}
+                {view.projection.ok && panelVisible && canResetDocking && dockPointer &&
+                    <WorkspaceRegionDropTargets scope={activeConnectionId} contextId={dockPointer.contextId}
+                        projection={projection} sizes={view.preferences?.sizes} />}
             </div>
         </div>
     );

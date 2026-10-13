@@ -11,9 +11,12 @@ function loadSource(path, dependencies, globals = {}) {
     return context.exports;
 }
 
-const { paneSurfaceKey, layoutSurfaces, retainPaneSurfaces } = loadSource(
+const { paneSurfaceKey, layoutSurfaces, projectedLayoutSurfaces, retainPaneSurfaces } = loadSource(
     'src/components/workspace/paneSurfaces.ts',
-    { '../../lib/paneLayout': { isPaneLeaf: node => node.type === 'pane' } },
+    {
+        '../../lib/paneLayout': { isPaneLeaf: node => node.type === 'pane' },
+        '../../lib/paneLayout/contentIdentity': loadSource('src/lib/paneLayout/contentIdentity.ts', {}),
+    },
 );
 const plugin = { type: 'pane', id: 'pane-a', content: { kind: 'plugin', pluginId: 'plugin', instanceId: 'instance-a' } };
 const files = { type: 'pane', id: 'pane-b', content: { kind: 'feature', featureId: 'files', instanceId: 'instance-b' } };
@@ -48,6 +51,33 @@ const nested = split(files, split(plugin, shell, 'vertical').root);
 assert.equal(layoutSurfaces(nested, true).find(surface => surface.node === plugin).edges.bottom, true);
 assert.equal(layoutSurfaces(nested, true).find(surface => surface.node === plugin).edges.left, true);
 
+const types = loadSource('src/lib/paneLayout/types.ts', {});
+const query = loadSource('src/lib/paneLayout/query.ts', { './types': types });
+const { projectVisiblePaneLayout } = loadSource('src/lib/paneLayout/visibility.ts', {
+    './contentIdentity': loadSource('src/lib/paneLayout/contentIdentity.ts', {}), './query': query,
+});
+const canonical = split(plugin, files);
+const projected = projectVisiblePaneLayout(canonical, new Set([paneSurfaceKey(plugin)]));
+const hiddenSurfaces = projectedLayoutSurfaces(canonical, projected, true);
+assert.equal(hiddenSurfaces.length, 2, 'Projection must retain the complete canonical content inventory');
+assert.equal(hiddenSurfaces[0].node, plugin);
+assert.equal(hiddenSurfaces[0].layout, canonical);
+assert.equal(hiddenSurfaces[0].visible, false);
+assert.equal(hiddenSurfaces[1].layout, canonical, 'Visible hosts retain canonical resource topology');
+assert.equal(hiddenSurfaces[1].focusedPaneId, projected.activePaneId, 'Effective focus comes from visible allocation');
+assert.equal(hiddenSurfaces[1].split, false, 'Surviving content receives collapsed geometry/header state');
+assert.equal(hiddenSurfaces[1].focusedPaneId, files.id, 'Visible focus follows projected geometry');
+const canonicalVisited = new Set(hiddenSurfaces.map(surface => surface.key));
+assert.equal(retainPaneSurfaces(hiddenSurfaces, canonicalVisited).length, 2, 'Partial hiding must not dispose visited content');
+const allHiddenSurfaces = projectedLayoutSurfaces(canonical, null, true);
+assert.equal(allHiddenSurfaces.length, 2);
+assert.ok(allHiddenSurfaces.every(surface => !surface.visible));
+assert.equal(retainPaneSurfaces(allHiddenSurfaces, canonicalVisited).length, 2, 'All-hidden retains every visited content host');
+assert.equal(retainPaneSurfaces(allHiddenSurfaces, new Set()).length, 0, 'All-hidden never mounts unvisited content');
+assert.ok(projectedLayoutSurfaces(canonical, projected, false).every(surface => !surface.visible), 'Inactive canvases remain invisible');
+assert.deepEqual(projectedLayoutSurfaces(canonical, canonical, true).map(surface => surface.key), layoutSurfaces(canonical, true).map(surface => surface.key),
+    'Revealing restores geometry without replacing identity');
+
 // Exercise the geometry adapter with disposable slots and persistent host nodes.
 const effects = [];
 const callbacks = new Map();
@@ -55,13 +85,14 @@ const cancelled = [];
 const observed = new Set();
 const listeners = new Set();
 let nextFrame = 0;
+let resizeObserver;
 const react = {
     useCallback: callback => callback,
     useRef: current => ({ current }),
     useLayoutEffect: effect => effects.push(effect),
 };
 class FakeObserver {
-    constructor(callback) { this.callback = callback; }
+    constructor(callback) { this.callback = callback; resizeObserver = this; }
     observe(node) { observed.add(node); }
     unobserve(node) { observed.delete(node); }
     disconnect() { observed.clear(); }
@@ -85,6 +116,12 @@ effects[1]();
 assert.equal(host.style.left, '20px');
 assert.equal(host.style.top, '30px');
 assert.equal(host.style.width, '200px');
+rectangle = { left: 45.25, top: 50, width: 184.75, height: 100 };
+resizeObserver.callback();
+assert.equal(host.style.left, '35.25px', 'Observer delivery updates allocation before paint, without another frame');
+assert.equal(host.style.width, '184.75px', 'Live fractional widths follow the slot in the same observer delivery');
+assert.equal(callbacks.size, 0, 'Observer delivery cancels redundant pending geometry work');
+assert.equal(observed.has(host), false, 'Allocated content is not observed, avoiding resize feedback');
 geometry.registerSlot('pane', null);
 effects[1]();
 assert.equal(host.style.visibility, 'hidden', 'Detached slots cannot leave ghost content visible');
@@ -102,6 +139,8 @@ assert.ok(cancelled.length > 0);
 const leafSource = readFileSync('src/components/terminal/PaneLeafView.tsx', 'utf8');
 assert.doesNotMatch(leafSource, /key=\{node.id\}/, 'Leaf geometry changes must not recreate the body');
 assert.match(leafSource, /isActiveTab=\{panelVisible\}/, 'Retained hidden terminals cannot activate PTYs');
+const layerSource = readFileSync('src/components/workspace/PaneSurfaceLayer.tsx', 'utf8');
+assert.match(layerSource, /inert=\{!surface\.visible\}/, 'Hidden retained hosts cannot receive focus');
 const layoutSource = readFileSync('src/components/terminal/PaneLayoutView.tsx', 'utf8');
 assert.doesNotMatch(layoutSource, /<TerminalComponent|<FeaturePaneBody|<PluginPanel/, 'Split trees allocate space, not content lifetimes');
 console.log('Stable pane identity, retention, geometry and cleanup tests passed.');

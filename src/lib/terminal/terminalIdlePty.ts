@@ -2,36 +2,19 @@ import { LOCAL_TERMINAL_CONNECTION_ID } from './connectionIds.js';
 import { getLatestTerminalActivityAt, isTerminalBusyForIdleSuspend } from './terminalActivity.js';
 import { isTerminalSessionProcessBusy } from './terminalProcessActivity.js';
 import { suspendAllTerminalsForConnection } from './suspendAllTerminals.js';
+import { DEFAULT_IDLE_PTY_SUSPEND_MS, MIN_IDLE_SUSPEND_BUSY_RETRY_MS } from './terminalIdlePtyPolicy.js';
 
-/** Default delay before suspending PTYs on a background workspace host. */
-export const DEFAULT_IDLE_PTY_SUSPEND_MS = 120_000;
-export const DEFAULT_SUSPEND_IDLE_HOST_PTYS = false;
-export const DEFAULT_IDLE_HOST_PTY_SUSPEND_MINUTES = 2;
-export const MIN_IDLE_HOST_PTY_SUSPEND_MINUTES = 1;
-export const MAX_IDLE_HOST_PTY_SUSPEND_MINUTES = 60;
-/** Minimum delay before retrying idle suspend when tabs stay process-busy. */
-export const MIN_IDLE_SUSPEND_BUSY_RETRY_MS = 1_000;
-
-export function normalizeIdleHostPtySuspendMinutes(minutes: number | undefined): number {
-  if (minutes == null || !Number.isFinite(minutes)) {
-    return DEFAULT_IDLE_HOST_PTY_SUSPEND_MINUTES;
-  }
-  return Math.max(
-    MIN_IDLE_HOST_PTY_SUSPEND_MINUTES,
-    Math.min(MAX_IDLE_HOST_PTY_SUSPEND_MINUTES, Math.round(minutes)),
-  );
-}
-
-export function resolveIdleHostPtySuspendDelayMs(
-  enabled: boolean,
-  minutes: number | undefined,
-): number | null {
-  if (!enabled) {
-    return null;
-  }
-  const resolvedMinutes = normalizeIdleHostPtySuspendMinutes(minutes);
-  return resolvedMinutes * 60_000;
-}
+// Retain existing imports while settings consumers use the side-effect-free policy module.
+export {
+  DEFAULT_IDLE_PTY_SUSPEND_MS,
+  DEFAULT_SUSPEND_IDLE_HOST_PTYS,
+  DEFAULT_IDLE_HOST_PTY_SUSPEND_MINUTES,
+  MIN_IDLE_HOST_PTY_SUSPEND_MINUTES,
+  MAX_IDLE_HOST_PTY_SUSPEND_MINUTES,
+  MIN_IDLE_SUSPEND_BUSY_RETRY_MS,
+  normalizeIdleHostPtySuspendMinutes,
+  resolveIdleHostPtySuspendDelayMs,
+} from './terminalIdlePtyPolicy.js';
 
 export type ProcessBusyChecker = (termId: string) => Promise<boolean>;
 

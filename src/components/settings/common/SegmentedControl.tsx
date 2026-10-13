@@ -1,5 +1,6 @@
 import { clsx } from 'clsx';
 import type { KeyboardEvent } from 'react';
+import { CONTROL_INSET_FOCUS_CLASSES } from '../../ui/controlStyles';
 
 export interface SegmentedOption<T extends string> {
     key: T;
@@ -73,8 +74,9 @@ export function SegmentedControl<T extends string>({
                     onKeyDown={(event) => handleKeyDown(event, index)}
                     className={clsx(
                         'flex-1 py-1.5 text-xs font-medium rounded-md transition-all',
+                        CONTROL_INSET_FOCUS_CLASSES,
                         value === option.key
-                            ? 'bg-[var(--color-app-accent)] text-white shadow-sm'
+                            ? 'bg-[var(--color-app-accent)] text-control-on-primary shadow-sm'
                             : 'text-[var(--color-app-muted)] hover:text-[var(--color-app-text)] hover:bg-[var(--color-app-surface)]',
                     )}
                 >

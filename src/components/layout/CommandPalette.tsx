@@ -22,7 +22,8 @@ import { clsx } from "clsx";
 import { OSIcon } from "../icons/OSIcon";
 import { GoogleMarkIcon } from "../icons/providerIcons";
 import { useConnectionDisplayLabels } from "../../features/connections/presentation/useConnectionDisplayLabels";
-import { getBuiltinThemeChoices } from '../../features/plugins/pluginCommandBridge';
+import { openBuiltinThemePicker } from '../../features/plugins/presentation/themePicker';
+import { WorkspaceCommandItems } from './WorkspaceCommandItems';
 
 interface QuickPickItem {
     id: string;
@@ -278,6 +279,7 @@ export function CommandPalette() {
                         {/* COMMAND MODE ITEMS (Plugins, Actions, Tools) */}
                         {commandMode && !quickPickMode && (
                             <>
+                                <WorkspaceCommandItems runCommand={runCommand} />
                                 {/* Plugin Commands */}
                                 <Command.Group heading="Plugins" className="text-[10px] font-semibold text-app-muted uppercase tracking-wider mb-1 px-2">
                                     <Command.Item
@@ -315,14 +317,7 @@ export function CommandPalette() {
                                         value="Preferences: Color Theme"
                                         onSelect={() => {
                                             // Stay in the palette; host theme selection must not depend on a plugin Worker.
-                                            window.dispatchEvent(new CustomEvent('zync:quick-pick', {
-                                                detail: {
-                                                    items: getBuiltinThemeChoices(plugins.filter(plugin => plugin.enabled)),
-                                                    options: { placeHolder: 'Select Color Theme' },
-                                                    requestId: 'color-theme-select',
-                                                    pluginId: 'system',
-                                                },
-                                            }));
+                                            openBuiltinThemePicker(plugins);
                                         }}
                                         className="relative flex cursor-pointer select-none items-center rounded-lg px-2 py-1.5 text-sm outline-none data-[selected=true]:bg-app-accent/20 data-[selected=true]:text-app-accent text-app-text transition-colors group mb-0.5"
                                     >

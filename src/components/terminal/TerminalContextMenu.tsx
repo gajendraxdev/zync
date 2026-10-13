@@ -2,7 +2,7 @@ import { memo, type RefObject } from 'react';
 import { Copy, Clipboard as ClipboardIcon, Trash2, Scissors, FolderOpen } from 'lucide-react';
 import type { Terminal as XTerm } from '@xterm/xterm';
 import { ContextMenu } from '../ui/ContextMenu';
-import { canDockHere, filesAlreadyInSplit, openFilesHere, openHerePlacementItems, pickFilesOpenPath } from '../layout/tabDock';
+import { canDockHere, openFilesHere, openHerePlacementItems, pickFilesOpenPath } from '../layout/tabDock';
 import type { AppSettings } from '../../store/settingsSlice';
 import { useAppStore } from '../../store/useAppStore';
 import { terminalCache } from '../../lib/terminal';
@@ -100,7 +100,7 @@ export const TerminalContextMenu = memo(function TerminalContextMenu({
             (edge) => {
               void openFilesHere(connectionId, filesPathHere(connectionId, sessionId), edge, sessionId);
             },
-            !canDockHere(connectionId, filesAlreadyInSplit(connectionId)),
+            !canDockHere(connectionId, sessionId),
           ),
         },
         {

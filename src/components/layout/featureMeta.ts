@@ -1,6 +1,8 @@
 import { Braces, FolderOpen, LayoutDashboard, Waypoints, type LucideIcon } from 'lucide-react';
+import { builtinWorkspaceViewLabel } from '../../features/workspace/domain/registrations';
+import type { SplitFeatureId } from '../../lib/paneLayout/types';
 
-export type FeatureId = 'files' | 'port-forwarding' | 'snippets' | 'dashboard';
+export type FeatureId = SplitFeatureId;
 
 export interface WorkspaceFeatureTab {
     id: string;
@@ -16,10 +18,10 @@ export interface FeatureMeta {
 }
 
 export const FEATURE_META: Record<FeatureId, FeatureMeta> = {
-    'files': { icon: FolderOpen, label: 'Files', keys: ['mod', 'shift', 'f'] },
-    'port-forwarding': { icon: Waypoints, label: 'Port Forwarding', keys: ['mod', 'shift', 'n'] },
-    'snippets': { icon: Braces, label: 'Snippets', keys: ['mod', 'shift', 's'] },
-    'dashboard': { icon: LayoutDashboard, label: 'Dashboard', keys: ['mod', 'shift', 'd'] },
+    'files': { icon: FolderOpen, label: builtinWorkspaceViewLabel('files'), keys: ['mod', 'shift', 'f'] },
+    'port-forwarding': { icon: Waypoints, label: builtinWorkspaceViewLabel('port-forwarding'), keys: ['mod', 'shift', 'n'] },
+    'snippets': { icon: Braces, label: builtinWorkspaceViewLabel('snippets'), keys: ['mod', 'shift', 's'] },
+    'dashboard': { icon: LayoutDashboard, label: builtinWorkspaceViewLabel('dashboard'), keys: ['mod', 'shift', 'd'] },
 };
 
 let cachedIsMac: boolean | null = null;

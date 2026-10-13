@@ -284,6 +284,13 @@ fn validate_settings_schema(settings: &Value) -> Result<(), String> {
             );
         }
     }
+    if let Some(mode) = obj.get("mainTabCloseButton") {
+        if !matches!(mode.as_str(), Some("hover" | "always" | "active" | "hidden")) {
+            return Err(
+                "Invalid \"mainTabCloseButton\": expected hover, always, active, or hidden.".to_string(),
+            );
+        }
+    }
     if let Some(data_path) = obj.get("dataPath") {
         if !(data_path.is_null() || data_path.is_string()) {
             return Err("Invalid \"dataPath\": expected string or null.".to_string());
@@ -334,6 +341,23 @@ fn validate_settings_schema(settings: &Value) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tab_chrome_settings_tests {
+    use super::validate_settings_schema;
+    use serde_json::json;
+
+    #[test]
+    fn close_button_default_is_optional_and_strict() {
+        assert!(validate_settings_schema(&json!({})).is_ok());
+        for mode in ["hover", "always", "active", "hidden"] {
+            assert!(validate_settings_schema(&json!({"mainTabCloseButton": mode})).is_ok());
+        }
+        for mode in [json!(null), json!(false), json!(1), json!("future"), json!({})] {
+            assert!(validate_settings_schema(&json!({"mainTabCloseButton": mode})).is_err());
+        }
+    }
 }
 
 /// Read + parse + validate a settings file from disk.
@@ -5534,14 +5558,102 @@ pub async fn settings_get(app: AppHandle) -> Result<serde_json::Value, String> {
 
 #[tauri::command]
 pub async fn settings_set(app: AppHandle, settings: serde_json::Value) -> Result<(), String> {
+    persist_settings_patch(&app, settings, None).await
+}
+
+/// UI theme/accent edits compare against import-owned fields; restore callers retain their existing contract.
+#[tauri::command]
+pub async fn settings_theme_set(
+    app: AppHandle,
+    settings: Value,
+    expected: Value,
+) -> Result<(), String> {
+    persist_settings_patch(&app, settings, Some(&expected)).await
+}
+
+async fn persist_settings_patch(
+    app: &AppHandle,
+    settings: Value,
+    expected_theme: Option<&Value>,
+) -> Result<(), String> {
     let _mutation_guard = SETTINGS_MUTATION_LOCK.lock().await;
-    let current = read_effective_settings(&app)?;
+    let current = read_effective_settings(app)?;
+    if expected_theme.is_some() {
+        crate::theme_settings::validate_theme_patch(&current, &settings, expected_theme)?;
+    }
+    crate::navigation_settings::validate_patch(&current, &settings)?;
+    // Retired preset metadata remains opaque and cannot be replaced by stale clients.
+    crate::preference_settings::validate_preserved_patch(&current, &settings, "workspaceLayoutPresets")?;
+    crate::element_color_settings::validate_managed_patch(&current, &settings)?;
+    crate::theme_settings::validate_managed_patch(&current, &settings)?;
+    crate::chrome_action_settings::validate_managed_patch(&current, &settings)?;
     let current_data_path = data_path_from_settings(&current);
     let merged = ensure_object_settings(merge_json_values(current, settings))?;
     let next_data_path = data_path_from_settings(&merged);
-    persist_settings_json(&app, &merged)?;
+    persist_settings_json(app, &merged)?;
     if current_data_path != next_data_path {
         clear_data_dir_cache();
+    }
+    Ok(())
+}
+
+/// Replace only global navigation chrome and host tab placement; never session geometry or resources.
+#[tauri::command]
+pub async fn settings_navigation_save(
+    app: AppHandle,
+    expected: serde_json::Value,
+    value: serde_json::Value,
+) -> Result<(), String> {
+    let _mutation_guard = SETTINGS_MUTATION_LOCK.lock().await;
+    let current = read_effective_settings(&app)?;
+    if let Some(next) = crate::navigation_settings::replacement(&current, &expected, &value)? {
+        persist_settings_json(&app, &next)?;
+    }
+    Ok(())
+}
+
+/// Replace only semantic element colors. No CSS, plugin or resource operations are exposed.
+#[tauri::command]
+pub async fn settings_element_colors_save(
+    app: AppHandle,
+    expected: serde_json::Value,
+    value: serde_json::Value,
+) -> Result<(), String> {
+    let _mutation_guard = SETTINGS_MUTATION_LOCK.lock().await;
+    let current = read_effective_settings(&app)?;
+    if let Some(next) = crate::element_color_settings::replacement(&current, &expected, &value)? {
+        persist_settings_json(&app, &next)?;
+    }
+    Ok(())
+}
+
+/// Apply a validated portable theme in one atomic save after comparing affected fields.
+#[tauri::command]
+pub async fn settings_theme_import(
+    app: AppHandle,
+    expected: Value,
+    value: Value,
+) -> Result<(), String> {
+    let _mutation_guard = SETTINGS_MUTATION_LOCK.lock().await;
+    let current = read_effective_settings(&app)?;
+    if let Some(next) = crate::theme_settings::replacement(&current, &expected, &value)? {
+        persist_settings_json(&app, &next)?;
+    }
+    Ok(())
+}
+
+/// Replace only host toolbar/status presentation under the existing settings mutation lock.
+/// The fixed codec rejects attempts to hide mandatory indicators or create new commands.
+#[tauri::command]
+pub async fn settings_chrome_actions_save(
+    app: AppHandle,
+    expected: serde_json::Value,
+    value: serde_json::Value,
+) -> Result<(), String> {
+    let _mutation_guard = SETTINGS_MUTATION_LOCK.lock().await;
+    let current = read_effective_settings(&app)?;
+    if let Some(next) = crate::chrome_action_settings::replacement(&current, &expected, &value)? {
+        persist_settings_json(&app, &next)?;
     }
     Ok(())
 }

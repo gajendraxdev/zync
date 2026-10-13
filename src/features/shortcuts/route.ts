@@ -1,5 +1,6 @@
 import { matchShortcut } from '../../lib/shortcuts.js';
-import { allowsWhen, DEFAULT_TERMINAL_SHORTCUT_EXCEPTIONS, TERMINAL_SHORTCUT_EXCEPTION_IDS, type TerminalFocusShortcutPolicy } from './policy.js';
+import { allowsWhen, DEFAULT_TERMINAL_SHORTCUT_EXCEPTIONS, type TerminalFocusShortcutPolicy } from './policy.js';
+import { resolveShortcutBindings, shortcutBindings } from './bindings.js';
 import type { KeyboardFocus, ShortcutCommand } from './types.js';
 
 /** Composition and AltGraph input belong to the text/terminal input engine. */
@@ -21,11 +22,12 @@ export function routeShortcut(
 ): boolean {
     if (!isShortcutInput(event)) return false;
     for (const command of catalog) {
-        const reserved = TERMINAL_SHORTCUT_EXCEPTION_IDS.some(id => id === command.id)
-            && terminalExceptions.includes(command.id);
+        const reserved = Boolean(command.terminalReservation) && terminalExceptions.includes(command.id);
         if (!allowsWhen(command.when, focus, policy, command.terminalUtility || reserved)) continue;
-        const primary = command.settingsKey ? overrides[command.settingsKey] || command.defaultKeys : command.defaultKeys;
-        if (![primary, ...(command.extraKeys ?? [])].some(chord => chord && matchShortcut(event, chord))) continue;
+        // Ordinary typing pays no conflict-resolution cost. Resolve only a
+        // matching chord, before an inherited default can claim the event.
+        const matching = shortcutBindings(command, overrides).filter(chord => matchShortcut(event, chord));
+        if (!matching.length || !resolveShortcutBindings(command, overrides, catalog).active.some(chord => matching.includes(chord))) continue;
         // Consume repeats of an owned app chord without sending them to the PTY.
         if (event.repeat && !command.repeatable) return true;
         return run(command.id, event);

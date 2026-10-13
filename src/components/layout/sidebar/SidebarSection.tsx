@@ -3,6 +3,8 @@ import { useAppStore } from '../../../store/useAppStore';
 import { ChevronRight, Plus } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 import { ZPortal } from '../../ui/ZPortal';
+import { Tooltip } from '../../ui/Tooltip';
+import { CONTROL_INSET_FOCUS_CLASSES } from '../../ui/controlStyles';
 
 export interface SidebarSectionCreateItem {
     id: string;
@@ -140,7 +142,7 @@ export function SidebarSection({
                     aria-expanded={isExpanded}
                     className={cn(
                         'flex min-w-0 flex-1 items-center outline-none transition-all',
-                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-accent focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg',
+                        CONTROL_INSET_FOCUS_CLASSES,
                         isAction
                             ? cn(
                                 'gap-0 rounded-lg py-2 px-3',
@@ -161,6 +163,7 @@ export function SidebarSection({
                                 </span>
                             )}
                             <span
+                                data-zync-color-label
                                 className={cn(
                                     'truncate font-medium text-[10px] uppercase tracking-wider opacity-80 group-hover:opacity-100',
                                     icon ? 'ml-3' : undefined,
@@ -205,26 +208,27 @@ export function SidebarSection({
                 </button>
 
                 {hasCreateMenu && (
-                    <button
-                        ref={plusRef}
-                        type="button"
-                        aria-haspopup="menu"
-                        aria-expanded={menuOpen}
-                        aria-label={`Create in ${title}`}
-                        title="Create"
-                        className={cn(
-                            'mr-1.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md outline-none transition-colors',
-                            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-accent',
-                            'text-app-muted hover:bg-app-surface hover:text-app-text',
-                            menuOpen && 'bg-app-surface text-app-text',
-                        )}
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            setMenuOpen((open) => !open);
-                        }}
-                    >
-                        <Plus size={14} />
-                    </button>
+                    <Tooltip content={`Create in ${title}`} disabled={menuOpen}>
+                        <button
+                            ref={plusRef}
+                            type="button"
+                            aria-haspopup="menu"
+                            aria-expanded={menuOpen}
+                            aria-label={`Create in ${title}`}
+                            className={cn(
+                                'mr-1.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md outline-none transition-colors',
+                                CONTROL_INSET_FOCUS_CLASSES,
+                                'text-app-muted hover:bg-app-surface hover:text-app-text',
+                                menuOpen && 'bg-app-surface text-app-text',
+                            )}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setMenuOpen((open) => !open);
+                            }}
+                        >
+                            <Plus size={14} />
+                        </button>
+                    </Tooltip>
                 )}
             </div>
 
@@ -253,7 +257,7 @@ export function SidebarSection({
                                 className={cn(
                                     'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[12px] font-medium',
                                     'text-app-text/90 hover:bg-app-surface/70',
-                                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-app-accent',
+                                    CONTROL_INSET_FOCUS_CLASSES,
                                 )}
                                 onClick={() => {
                                     setMenuOpen(false);

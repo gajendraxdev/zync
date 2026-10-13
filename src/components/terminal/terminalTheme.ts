@@ -4,6 +4,7 @@ import { LOCAL_TERMINAL_CONNECTION_ID } from '../../lib/terminal/connectionIds.j
 import { resolveZyncThemeMode } from '../../lib/themePayload.js';
 import { terminalCache } from '../../lib/terminal/terminalCache.js';
 import { useAppStore } from '../../store/useAppStore';
+import { normalizeElementColor } from '../../features/appearance/domain/elementColors';
 
 export const THEME_PRESETS: Record<string, Record<string, string>> = {
   red: { background: '#1a0b0b', cursor: '#ef4444', selectionBackground: 'rgba(239, 68, 68, 0.3)' },
@@ -71,7 +72,7 @@ export function withAlpha(color: string, alpha: number): string {
 
 export function buildTerminalHostBackground(opacity: number): string {
   const clampedPercent = Math.max(0, Math.min(100, Math.round(opacity * 100)));
-  return `color-mix(in srgb, var(--color-app-bg) ${clampedPercent}%, transparent)`;
+  return `color-mix(in srgb, var(--zync-element-terminal-background, var(--color-app-bg)) ${clampedPercent}%, transparent)`;
 }
 
 export function buildTerminalHostStyle(transparency: TerminalTransparencyState): CSSProperties | undefined {
@@ -80,7 +81,7 @@ export function buildTerminalHostStyle(transparency: TerminalTransparencyState):
   }
 
   return {
-    backgroundColor: 'var(--color-app-bg)',
+    backgroundColor: 'var(--zync-element-terminal-background, var(--color-app-bg))',
     background: buildTerminalHostBackground(transparency.opacity),
   };
 }
@@ -257,23 +258,29 @@ function readAppCssColors(container: HTMLElement | null | undefined) {
     appBg: readVar('--color-app-bg'),
     appText: readVar('--color-app-text'),
     appAccent: readVar('--color-app-accent'),
+    terminalBackground: normalizeElementColor(readVar('--zync-element-terminal-background')),
+    terminalForeground: normalizeElementColor(readVar('--zync-element-terminal-foreground')),
+    terminalCursor: normalizeElementColor(readVar('--zync-element-terminal-cursor')),
+    terminalSelection: normalizeElementColor(readVar('--zync-element-terminal-selection')),
   };
 }
 
-/** Resolves the xterm theme from CSS variables and optional connection preset. */
+/** Theme < global semantic defaults < connection preset. ANSI palette remains theme-owned. */
 export function resolveXtermTheme(
   container: HTMLElement | null | undefined,
   connectionTheme: string | undefined,
   transparency: TerminalTransparencyState,
 ): ITheme {
-  const { appBg, appText, appAccent } = readAppCssColors(container);
+  const { appBg, appText, appAccent, terminalBackground, terminalForeground, terminalCursor, terminalSelection } = readAppCssColors(container);
   const base = buildXtermTheme(
-    appBg,
-    appText,
+    terminalBackground ?? appBg,
+    terminalForeground ?? appText,
     appAccent,
     transparency.opacity,
     transparency.enabled,
   );
+  if (terminalCursor) base.cursor = terminalCursor;
+  if (terminalSelection) base.selectionBackground = terminalSelection;
 
   const preset = connectionTheme && THEME_PRESETS[connectionTheme]
     ? THEME_PRESETS[connectionTheme]

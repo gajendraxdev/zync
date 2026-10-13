@@ -1,10 +1,11 @@
 import { Sparkles } from 'lucide-react';
-import { clsx } from 'clsx';
 import { useEffect, useRef, useState, type FocusEvent } from 'react';
 import { DEFAULT_MODEL, type ProviderValue } from '../../ai/providerCatalog';
 import type { AppSettings } from '../../../store/settingsSlice';
 import { useAppStore } from '../../../store/useAppStore';
 import { Select } from '../../ui/Select';
+import { Button } from '../../ui/Button';
+import { Input } from '../../ui/Input';
 import { Section } from '../common/Section';
 import { Toggle } from '../common/Toggle';
 
@@ -135,15 +136,15 @@ export function AiTab({
                     {(settings.ai?.provider === 'ollama' || !settings.ai?.provider) && (
                         <div>
                             <label htmlFor="ollama-url-input" className="text-sm font-medium text-[var(--color-app-text)] mb-1 block">Ollama URL</label>
-                            <input
+                            <Input
                                 id="ollama-url-input"
                                 type="text"
                                 value={ollamaUrlDraft}
                                 onChange={(e) => setOllamaUrlDraft(e.target.value)}
                                 onBlur={handleOllamaUrlBlur}
-                                className="w-full bg-[var(--color-app-bg)] border border-[var(--color-app-border)] rounded-lg px-3 py-1.5 text-sm text-[var(--color-app-text)] focus:outline-none focus:border-[var(--color-app-accent)]"
+                                aria-describedby="ollama-url-help"
                             />
-                            <p className="text-xs text-[var(--color-app-muted)] mt-1">
+                            <p id="ollama-url-help" className="text-xs text-[var(--color-app-muted)] mt-1">
                                 Runs fully locally - no API key needed.{' '}
                                 <a href="https://ollama.com" target="_blank" rel="noopener noreferrer" className="text-[var(--color-app-accent)] hover:underline">
                                     Install Ollama</a>
@@ -159,37 +160,34 @@ export function AiTab({
                                     <span className="text-xs text-emerald-400 flex items-center gap-1 animate-in fade-in duration-150"> Saved </span>
                                 )}
                             </div>
-                            <div className="flex gap-2">
-                                <input
-                                    id="provider-api-key-input"
-                                    type="password"
-                                    value={apiKeyDraft}
-                                    onChange={(e) => {
-                                        setApiKeyDraft(e.target.value);
-                                        if (apiKeyError) setApiKeyError(null);
-                                    }}
-                                    onBlur={handleApiKeyBlur}
-                                    placeholder={`Paste your ${settings.ai?.provider} API key...`}
-                                    className={clsx(
-                                        "flex-1 bg-[var(--color-app-bg)] border rounded-lg px-3 py-1.5 text-sm text-[var(--color-app-text)] focus:outline-none transition-colors",
-                                        apiKeyError ? "border-red-500/50 focus:border-red-500" : "border-[var(--color-app-border)] focus:border-[var(--color-app-accent)]"
-                                    )}
-                                />
-                                <button
+                            <div className="flex items-start gap-2">
+                                <div className="min-w-0 flex-1">
+                                    <Input
+                                        id="provider-api-key-input"
+                                        type="password"
+                                        value={apiKeyDraft}
+                                        onChange={(e) => {
+                                            setApiKeyDraft(e.target.value);
+                                            if (apiKeyError) setApiKeyError(null);
+                                        }}
+                                        onBlur={handleApiKeyBlur}
+                                        placeholder={`Paste your ${settings.ai?.provider} API key...`}
+                                        error={apiKeyError ?? undefined}
+                                        aria-describedby="provider-api-key-help"
+                                    />
+                                </div>
+                                <Button
                                     ref={saveButtonRef}
+                                    type="button"
                                     onClick={() => { void handleSaveApiKey(); }}
                                     disabled={!canSubmitApiKey || isSavingApiKey || normalizedApiKeyDraft === apiKeyPersistedValue.trim()}
-                                    className="px-3 py-1.5 text-xs font-medium rounded-lg bg-[var(--color-app-accent)] text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity shrink-0"
+                                    isLoading={isSavingApiKey}
+                                    className="shrink-0 px-3 text-xs"
                                 >
                                     {isSavingApiKey ? 'Saving…' : 'Save'}
-                                </button>
+                                </Button>
                             </div>
-                            {apiKeyError && (
-                                <p className="text-[10px] text-red-500 mt-1 animate-in fade-in slide-in-from-top-1">
-                                    {apiKeyError}
-                                </p>
-                            )}
-                            <p className="text-xs text-[var(--color-app-muted)] mt-1">
+                            <p id="provider-api-key-help" className="text-xs text-[var(--color-app-muted)] mt-1">
                                 {settings.ai?.provider === 'gemini' && (
                                     <>Free tier available, no credit card needed.{' '}
                                         <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-[var(--color-app-accent)] hover:underline">Get Gemini API key</a></>

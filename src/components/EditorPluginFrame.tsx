@@ -85,6 +85,7 @@ export function EditorPluginFrame({
   const statusSourceRef = useRef(createEditorStatusSource(`plugin-editor:${plugin.manifest.id}`));
   const theme = useAppStore((state) => state.settings.theme);
   const accentColor = useAppStore((state) => state.settings.accentColor);
+  const customTheme = useAppStore((state) => state.settings.customTheme);
   const showToast = useAppStore((state) => state.showToast);
   const showConfirmDialog = useAppStore((state) => state.showConfirmDialog);
   const saveStateRef = useRef(new PluginSaveState(initialContent));
@@ -176,7 +177,7 @@ export function EditorPluginFrame({
 
   // Always compute the current theme payload at send-time so we don't
   // accidentally capture stale CSS variable values.
-  const getThemePayload = useCallback(() => getZyncThemePayload(theme), [theme, accentColor]);
+  const getThemePayload = useCallback(() => getZyncThemePayload(theme), [theme, accentColor, customTheme]);
 
   const sendTheme = useCallback(() => {
     const themePayload = getThemePayload();

@@ -29,6 +29,7 @@ const FEATURE_ICON: Record<FeatureId, typeof FolderOpen> = {
 };
 
 export function WorkspaceOpenMenu({
+    anchor,
     align,
     shells,
     shellsLoading,
@@ -47,6 +48,7 @@ export function WorkspaceOpenMenu({
     canSplitPane = true,
     onClose,
 }: {
+    anchor?: HTMLElement | null;
     align: 'left' | 'right';
     shells: readonly ShellEntry[];
     shellsLoading: boolean;
@@ -224,6 +226,7 @@ export function WorkspaceOpenMenu({
     return (
         <>
         <TopbarDropdown
+            anchor={anchor}
             widthClass="w-72"
             align={align}
             className="p-0 flex flex-col shadow-xl"

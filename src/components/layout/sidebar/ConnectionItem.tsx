@@ -7,6 +7,9 @@ import { cn } from '../../../lib/utils';
 import { useConnectionDisplayLabels } from '../../../features/connections/presentation/useConnectionDisplayLabels';
 import type { HostLocationTag } from '../../../features/connections/domain/hostCatalog';
 import { HostLocationChips } from './HostLocationChips';
+import { IconButton } from '../../ui/IconButton';
+import { Tooltip } from '../../ui/Tooltip';
+import { CONTROL_INSET_FOCUS_CLASSES } from '../../ui/controlStyles';
 
 
 interface ConnectionItemComponentProps {
@@ -108,6 +111,7 @@ export const ConnectionItem = memo(function ConnectionItem({ conn, isCollapsed, 
                 ref={rowRef}
                 className={cn(
                     "group relative flex cursor-pointer items-center select-none rounded-lg transition-colors",
+                    CONTROL_INSET_FOCUS_CLASSES,
                     isCollapsed
                         ? "mx-auto h-10 w-10 justify-center p-2"
                         : compactMode
@@ -182,21 +186,18 @@ export const ConnectionItem = memo(function ConnectionItem({ conn, isCollapsed, 
                     />
 
                     {(conn.status === 'connected' || conn.status === 'connecting' || conn.status === 'error') && (
-                        <div
-                            className={cn(
-                                "absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-app-panel",
-                                conn.status === 'connected' && (hasTab ? "bg-app-success" : "bg-app-success/70"),
-                                conn.status === 'connecting' && "bg-amber-400",
-                                conn.status === 'error' && "bg-app-danger",
-                            )}
-                            title={
-                                conn.status === 'connected'
-                                    ? (hasTab ? "Connected" : "Connected (background)")
-                                    : conn.status === 'connecting'
-                                        ? "Connecting…"
-                                        : "Connection error"
-                            }
-                        />
+                        <Tooltip content={conn.status === 'connected'
+                            ? (hasTab ? 'Connected' : 'Connected (background)')
+                            : conn.status === 'connecting' ? 'Connecting…' : 'Connection error'}>
+                            <div
+                                className={cn(
+                                    "absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full ring-2 ring-app-panel",
+                                    conn.status === 'connected' && (hasTab ? "bg-app-success" : "bg-app-success/70"),
+                                    conn.status === 'connecting' && "bg-amber-400",
+                                    conn.status === 'error' && "bg-app-danger",
+                                )}
+                            />
+                        </Tooltip>
                     )}
                 </div>
 
@@ -204,6 +205,7 @@ export const ConnectionItem = memo(function ConnectionItem({ conn, isCollapsed, 
                     <div className="flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden">
                         <div className="flex min-w-0 items-center justify-between gap-2">
                             <span
+                                data-zync-color-label
                                 className={cn(
                                     "min-w-0 truncate text-[13px] font-medium leading-tight",
                                     isActive ? "text-app-text" : "text-app-text/90 group-hover:text-app-text",
@@ -214,31 +216,27 @@ export const ConnectionItem = memo(function ConnectionItem({ conn, isCollapsed, 
 
                             <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
                                 {conn.status === 'connected' && (
-                                    <button
-                                        type="button"
-                                        className="rounded-md p-1 text-app-muted transition-colors hover:bg-app-surface hover:text-red-400"
+                                    <Tooltip content="Disconnect">
+                                        <IconButton label="Disconnect" icon={<Unplug size={12} />}
+                                            className={cn('h-5 w-5 rounded-md p-1 text-app-muted hover:bg-app-surface hover:text-red-400', CONTROL_INSET_FOCUS_CLASSES)}
+                                            onKeyDown={e => e.stopPropagation()}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                void disconnect(conn.id);
+                                            }}
+                                        />
+                                    </Tooltip>
+                                )}
+                                <Tooltip content="Edit connection">
+                                    <IconButton label="Edit connection" icon={<Settings size={12} />}
+                                        className={cn('h-5 w-5 rounded-md p-1 text-app-muted hover:bg-app-surface hover:text-app-text', CONTROL_INSET_FOCUS_CLASSES)}
+                                        onKeyDown={e => e.stopPropagation()}
                                         onClick={(e) => {
                                             e.stopPropagation();
-                                            void disconnect(conn.id);
+                                            onEdit(conn);
                                         }}
-                                        aria-label="Disconnect"
-                                        title="Disconnect"
-                                    >
-                                        <Unplug size={12} />
-                                    </button>
-                                )}
-                                <button
-                                    type="button"
-                                    className="rounded-md p-1 text-app-muted transition-colors hover:bg-app-surface hover:text-app-text"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        onEdit(conn);
-                                    }}
-                                    aria-label="Edit connection"
-                                    title="Edit connection"
-                                >
-                                    <Settings size={12} />
-                                </button>
+                                    />
+                                </Tooltip>
                             </div>
                         </div>
                         <div className="flex min-w-0 items-center gap-1.5">

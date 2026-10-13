@@ -1,0 +1,295 @@
+[
+  {
+    "name": "default inherited order",
+    "valid": true,
+    "value": {
+      "version": 1,
+      "workspaceToolbar": {
+        "order": [],
+        "hidden": []
+      },
+      "statusBar": {
+        "order": [],
+        "hidden": []
+      }
+    }
+  },
+  {
+    "name": "partial reordered toolbar",
+    "valid": true,
+    "value": {
+      "version": 1,
+      "workspaceToolbar": {
+        "order": [
+          "workspace.sessionTools",
+          "terminal.find"
+        ],
+        "hidden": []
+      },
+      "statusBar": {
+        "order": [],
+        "hidden": []
+      }
+    }
+  },
+  {
+    "name": "hidden unavailable actions",
+    "valid": true,
+    "value": {
+      "version": 1,
+      "workspaceToolbar": {
+        "order": [],
+        "hidden": [
+          "terminal.find"
+        ]
+      },
+      "statusBar": {
+        "order": [],
+        "hidden": []
+      }
+    }
+  },
+  {
+    "name": "hidden optional status",
+    "valid": true,
+    "value": {
+      "version": 1,
+      "workspaceToolbar": {
+        "order": [],
+        "hidden": []
+      },
+      "statusBar": {
+        "order": [],
+        "hidden": [
+          "status.ai",
+          "status.editor"
+        ]
+      }
+    }
+  },
+  {
+    "name": "mandatory reorder",
+    "valid": true,
+    "value": {
+      "version": 1,
+      "workspaceToolbar": {
+        "order": [],
+        "hidden": []
+      },
+      "statusBar": {
+        "order": [
+          "status.updates",
+          "status.editor"
+        ],
+        "hidden": []
+      }
+    }
+  },
+  {
+    "name": "null",
+    "valid": false,
+    "value": null
+  },
+  {
+    "name": "missing areas",
+    "valid": false,
+    "value": {
+      "version": 1
+    }
+  },
+  {
+    "name": "future version",
+    "valid": false,
+    "value": {
+      "version": 2,
+      "workspaceToolbar": {
+        "order": [],
+        "hidden": []
+      },
+      "statusBar": {
+        "order": [],
+        "hidden": []
+      }
+    }
+  },
+  {
+    "name": "null area",
+    "valid": false,
+    "value": {
+      "version": 1,
+      "workspaceToolbar": {
+        "order": [],
+        "hidden": []
+      },
+      "statusBar": null
+    }
+  },
+  {
+    "name": "extra field",
+    "valid": false,
+    "value": {
+      "version": 1,
+      "workspaceToolbar": {
+        "order": [],
+        "hidden": []
+      },
+      "statusBar": {
+        "order": [],
+        "hidden": []
+      },
+      "unknown": true
+    }
+  },
+  {
+    "name": "nested extra",
+    "valid": false,
+    "value": {
+      "version": 1,
+      "workspaceToolbar": {
+        "order": [],
+        "hidden": []
+      },
+      "statusBar": {
+        "order": [],
+        "hidden": [],
+        "future": true
+      }
+    }
+  },
+  {
+    "name": "duplicate order",
+    "valid": false,
+    "value": {
+      "version": 1,
+      "workspaceToolbar": {
+        "order": [
+          "terminal.find",
+          "terminal.find"
+        ],
+        "hidden": []
+      },
+      "statusBar": {
+        "order": [],
+        "hidden": []
+      }
+    }
+  },
+  {
+    "name": "duplicate hidden",
+    "valid": false,
+    "value": {
+      "version": 1,
+      "workspaceToolbar": {
+        "order": [],
+        "hidden": []
+      },
+      "statusBar": {
+        "order": [],
+        "hidden": [
+          "status.ai",
+          "status.ai"
+        ]
+      }
+    }
+  },
+  {
+    "name": "cross area",
+    "valid": false,
+    "value": {
+      "version": 1,
+      "workspaceToolbar": {
+        "order": [],
+        "hidden": []
+      },
+      "statusBar": {
+        "order": [
+          "terminal.find"
+        ],
+        "hidden": []
+      }
+    }
+  },
+  {
+    "name": "unknown item",
+    "valid": false,
+    "value": {
+      "version": 1,
+      "workspaceToolbar": {
+        "order": [],
+        "hidden": []
+      },
+      "statusBar": {
+        "order": [
+          "future.action"
+        ],
+        "hidden": []
+      }
+    }
+  },
+  {
+    "name": "prototype key",
+    "valid": false,
+    "value": {
+      "version": 1,
+      "workspaceToolbar": {
+        "order": [],
+        "hidden": []
+      },
+      "statusBar": {
+        "order": [],
+        "hidden": [
+          "__proto__"
+        ]
+      }
+    }
+  },
+  {
+    "name": "null id",
+    "valid": false,
+    "value": {
+      "version": 1,
+      "workspaceToolbar": {
+        "order": [],
+        "hidden": []
+      },
+      "statusBar": {
+        "order": [
+          null
+        ],
+        "hidden": []
+      }
+    }
+  },
+  {
+    "name": "protected indicator",
+    "valid": false,
+    "value": {
+      "version": 1,
+      "workspaceToolbar": {
+        "order": [],
+        "hidden": []
+      },
+      "statusBar": {
+        "order": [],
+        "hidden": [
+          "status.updates"
+        ]
+      }
+    }
+  },
+  {
+    "name": "numeric version spelling",
+    "valid": true,
+    "value": {
+      "version": 1.0,
+      "workspaceToolbar": {
+        "order": [],
+        "hidden": []
+      },
+      "statusBar": {
+        "order": [],
+        "hidden": []
+      }
+    }
+  }
+]

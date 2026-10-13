@@ -11,7 +11,6 @@ import { usePlugins } from '../../context/PluginContext';
 import { isPluginShortcutCommandAllowed, matchPluginShortcut, pluginShortcutBindings, pluginShortcutBridgeScript } from '../../features/shortcuts/pluginShortcuts';
 import { runShortcutCommand } from '../../features/shortcuts/actions';
 import { TerminalDisconnectedView } from '../terminal/TerminalDisconnectedView';
-import { findNode, layoutForCanvas, layoutForPlugin } from '../../lib/paneLayout';
 import { PluginTerminalLayer } from './PluginTerminalLayer';
 
 interface PluginPanelProps {
@@ -22,6 +21,8 @@ interface PluginPanelProps {
     legacyAccess: boolean;
     paneInstanceId: string;
     visible: boolean;
+    /** Renderer-owned focus includes docking, hiding and maximization. */
+    focused: boolean;
 }
 
 /**
@@ -34,16 +35,6 @@ export function PluginPanel(props: PluginPanelProps) {
     const pendingRestore = useAppStore(s => Boolean(props.connectionId && s.terminals[props.connectionId]?.some(t => t.pendingRestore)));
     const connect = useAppStore(s => s.connect);
     const editHost = useAppStore(s => s.openConnectionModal);
-    const isSurfaceActive = useAppStore(s => {
-        const tab = s.tabs.find(t => t.id === s.activeTabId);
-        if (!props.connectionId || tab?.connectionId !== props.connectionId) return false;
-        const groups = s.paneLayouts[props.connectionId];
-        const layout = tab.view.startsWith('plugin:')
-            ? layoutForPlugin(groups, tab.view.slice('plugin:'.length))
-            : layoutForCanvas(groups, s.activeTerminalIds[props.connectionId], s.activePaneGroupOwner[props.connectionId]);
-        const focused = layout && findNode(layout.root, layout.activePaneId);
-        return focused?.type === 'pane' && focused.content.kind === 'plugin' && focused.content.instanceId === props.paneInstanceId;
-    });
     const plugin = plugins.find(p => p.manifest.id === props.pluginId);
     const requiresSsh = plugin?.manifest.permissions?.required?.some(permission => permission.id.startsWith('ssh.'));
     // Connection UX belongs to the host. Network-only plugins still work offline.
@@ -54,7 +45,7 @@ export function PluginPanel(props: PluginPanelProps) {
             activeConnectionId={props.connectionId}
             isPendingRestore={pendingRestore}
             surface="plugin"
-            isSurfaceActive={isSurfaceActive}
+            isSurfaceActive={props.visible && props.focused}
             onReconnect={() => { void connect(props.connectionId!); }}
             onEditHost={() => editHost(props.connectionId)}
         />;

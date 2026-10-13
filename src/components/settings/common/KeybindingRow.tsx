@@ -1,106 +1,104 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { recordedShortcut } from '../../../features/shortcuts/bindings';
+import { formatShortcutLabel } from '../../../lib/shortcuts';
+import { Button } from '../../ui/Button';
+import { Tooltip } from '../../ui/Tooltip';
 
-export function KeybindingRow({
-    label,
-    binding,
-    onChange
-}: {
+interface KeybindingRowProps {
     label: string;
     binding: string;
-    onChange: (val: string) => void;
-}) {
-    const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().includes('MAC');
+    onChange: (value: string) => void;
+    defaultBinding?: string;
+    aliases?: readonly string[];
+    disabled?: boolean;
+    readOnly?: boolean;
+    warning?: string;
+    validate?: (value: string) => string | undefined;
+    children?: ReactNode;
+}
+
+/** Record a chord, never shell text. Persistence/conflicts are owned by the parent. */
+export function KeybindingRow({ label, binding, onChange, defaultBinding, aliases = [], disabled = false,
+    readOnly = false, warning, validate, children }: KeybindingRowProps) {
+    const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform);
     const [isRecording, setIsRecording] = useState(false);
-    const onChangeRef = useRef(onChange);
-    const displayBinding = binding || '';
-    const bindingParts = displayBinding
-        ? displayBinding.split('+').map((part) => part === 'Plus' ? '+' : part)
-        : [];
-    const displayText = isRecording
-        ? 'Recording...'
-        : bindingParts.length === 0
-            ? 'Not set'
-            : bindingParts.join('+');
+    const [error, setError] = useState<string>();
+    const buttonRef = useRef<HTMLButtonElement>(null);
+    const changeRef = useRef({ onChange, validate });
+    const messageId = useId();
+    const displayText = isRecording ? 'Recording…' : formatShortcutLabel(binding) || 'Not set';
+    useEffect(() => { changeRef.current = { onChange, validate }; }, [onChange, validate]);
 
+    const apply = (value: string) => {
+        const issue = changeRef.current.validate?.(value);
+        setError(issue);
+        if (!issue) changeRef.current.onChange(value);
+    };
     useEffect(() => {
-        onChangeRef.current = onChange;
-    }, [onChange]);
-
-    useEffect(() => {
-        if (!isRecording) return;
-
-        const handleKeyDown = (e: KeyboardEvent) => {
-            e.preventDefault();
-            e.stopPropagation();
-
-            if (e.key === 'Escape') {
-                setIsRecording(false);
-                return;
-            }
-
-            const parts: string[] = [];
-            if ((isMac && e.metaKey) || (!isMac && e.ctrlKey)) parts.push('Mod');
-            if (isMac && e.ctrlKey && !e.metaKey) parts.push('Ctrl');
-            if (e.altKey) parts.push('Alt');
-            if (e.shiftKey) parts.push('Shift');
-
-            if (['Control', 'Meta', 'Alt', 'Shift'].includes(e.key)) return;
-
-            let key = e.key;
-            if (key === ' ') key = 'Space';
-            if (key === '+') key = 'Plus';
-            if (key.length === 1) key = key.toUpperCase();
-            parts.push(key);
-
-            onChangeRef.current(parts.join('+'));
-            setIsRecording(false);
+        if (!isRecording || disabled) return;
+        const stop = () => setIsRecording(false);
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.isComposing || event.keyCode === 229 || event.getModifierState?.('AltGraph')) return;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            if (event.key === 'Escape') { stop(); return; }
+            const chord = recordedShortcut(event, isMac);
+            if (!chord || event.repeat) return;
+            const issue = changeRef.current.validate?.(chord);
+            setError(issue);
+            stop();
+            if (!issue) changeRef.current.onChange(chord);
+            buttonRef.current?.focus();
         };
-
-        const stopRecording = () => setIsRecording(false);
-        const handleVisibilityChange = () => {
-            if (document.visibilityState !== 'visible') {
-                setIsRecording(false);
-            }
-        };
-        const timeoutId = window.setTimeout(() => setIsRecording(false), 8000);
-
+        const visibility = () => { if (document.visibilityState !== 'visible') stop(); };
+        const timeout = window.setTimeout(stop, 8000);
         window.addEventListener('keydown', handleKeyDown, { capture: true });
-        window.addEventListener('blur', stopRecording);
-        document.addEventListener('visibilitychange', handleVisibilityChange);
+        window.addEventListener('blur', stop);
+        document.addEventListener('visibilitychange', visibility);
         return () => {
             window.removeEventListener('keydown', handleKeyDown, { capture: true });
-            window.removeEventListener('blur', stopRecording);
-            document.removeEventListener('visibilitychange', handleVisibilityChange);
-            window.clearTimeout(timeoutId);
+            window.removeEventListener('blur', stop);
+            document.removeEventListener('visibilitychange', visibility);
+            window.clearTimeout(timeout);
         };
-    }, [isRecording]);
+    }, [isRecording, disabled, isMac]);
 
-    return (
-        <div className="flex items-center justify-between p-3 bg-[var(--color-app-bg)]/30 rounded-lg border border-[var(--color-app-border)] hover:border-[var(--color-app-accent)]/50 transition-colors">
-            <span className="text-[var(--color-app-text)] font-medium">{label}</span>
-            <button
-                type="button"
-                data-zync-shortcuts={isRecording ? 'local' : undefined}
-                data-zync-shortcut-recording={isRecording ? 'true' : undefined}
-                onClick={() => setIsRecording(true)}
-                aria-label={`${label}: ${displayText}`}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-mono border transition-all min-w-[100px] justify-center
-                    ${isRecording
-                        ? 'bg-[var(--color-app-accent)] text-white border-[var(--color-app-accent)] animate-pulse'
-                        : 'bg-[var(--color-app-surface)] border-[var(--color-app-border)] text-[var(--color-app-text)] hover:border-[var(--color-app-accent)]'
-                    }`}
-            >
-                {isRecording
-                    ? 'Recording...'
-                    : bindingParts.length === 0
-                        ? 'Not set'
-                        : bindingParts.map((k, i) => (
-                            <span key={i} className="flex items-center">
-                                {k}
-                                {i < bindingParts.length - 1 && <span className="mx-1 opacity-50">+</span>}
-                            </span>
-                        ))}
-            </button>
+    return <div data-shortcut-label={label} className="space-y-2 rounded-lg border border-app-border bg-app-bg/30 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="min-w-0 text-sm font-medium text-app-text">{label}</span>
+            <div className="flex flex-wrap items-center gap-1">
+                <Tooltip content={readOnly ? 'Built-in shortcut' : 'Press a shortcut. Escape cancels.'}>
+                    {/* Keep focus during a save; guard activation without disabling the focused DOM node.
+                        No deferred focus restoration can steal focus after the user moves elsewhere. */}
+                    <Button ref={buttonRef} type="button" variant="secondary" size="sm" disabled={readOnly}
+                        aria-disabled={disabled || readOnly}
+                        data-zync-shortcuts={isRecording ? 'local' : undefined}
+                        data-zync-shortcut-recording={isRecording ? 'true' : undefined}
+                        aria-label={label + ': ' + displayText} aria-describedby={messageId}
+                        onClick={() => { if (!disabled && !readOnly) { setError(undefined); setIsRecording(true); } }}
+                        onBlur={() => setIsRecording(false)}
+                        className="max-w-full whitespace-normal font-mono aria-disabled:opacity-50 aria-disabled:cursor-not-allowed">
+                        {displayText}
+                    </Button>
+                </Tooltip>
+                {!readOnly && <>
+                    <Tooltip content={aliases.length ? 'Remove this binding and its fixed aliases. Independent secondary bindings are unchanged.' : 'Remove only this binding. Other bindings for this action are unchanged.'}>
+                        <Button type="button" variant="ghost" size="sm" disabled={disabled || isRecording || !binding}
+                            aria-label={'Remove shortcut for ' + label} onClick={() => apply('')}>Remove</Button>
+                    </Tooltip>
+                    {defaultBinding !== undefined && <Tooltip content="Restore the default shortcut">
+                        <Button type="button" variant="ghost" size="sm" disabled={disabled || isRecording || binding === defaultBinding}
+                            aria-label={'Reset shortcut for ' + label} onClick={() => apply(defaultBinding)}>Reset</Button>
+                    </Tooltip>}
+                </>}
+            </div>
         </div>
-    );
+        {binding && aliases.length > 0 && <p className="text-xs text-app-muted">
+            Also works with: {aliases.map(chord => formatShortcutLabel(chord)).join(' / ')} (built-in alternates).
+        </p>}
+        {children}
+        <p id={messageId} role="status" aria-live="polite" className="text-xs text-app-muted">
+            {error || warning || (isRecording ? 'Press a shortcut; Escape cancels. Recording ends after 8 seconds.' : readOnly ? 'Built-in binding; terminal availability can be customized below.' : '')}
+        </p>
+    </div>;
 }

@@ -71,8 +71,6 @@ assetImage.props.onError();
 assert.equal(assetContext.renderAsset(assetProps), fallback, 'The local image error handler renders the thumbnail');
 assert.equal(context.renderImage({ url: thumbnail }).type, 'div', 'Local failure cannot reset thumbnail failure state');
 
-const manager = readFileSync('src/components/terminal/TerminalManager.tsx', 'utf8');
-assert.match(manager, /terminalView && selectedCanvas \? null : terminalView && pluginPanelId \? \(/);
-assert.match(manager, /role="status"[\s\S]*?Preparing plugin pane/);
-assert.doesNotMatch(manager, /terminalView && \(pluginPanelId \|\| selectedCanvas\) \? null/);
-console.log('Plugin thumbnail and missing-canvas fallback tests passed.');
+// The real manager's pending-plugin fallback is exercised behaviorally in
+// workspaceDockingActions.test.mjs, without depending on surrounding JSX shape.
+console.log('Plugin thumbnail fallback tests passed.');

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 
-const source = readFileSync('src/components/layout/tabDock/suppressDropClick.ts', 'utf8');
+const source = readFileSync('src/components/layout/tabDrag/suppressDropClick.ts', 'utf8');
 const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext } });
 const { suppressDropClick } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
 

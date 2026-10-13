@@ -3,9 +3,8 @@ import { Search, Download, Trash2, Loader2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { usePlugins } from '../../context/PluginContext';
 import { formatEditorCapabilities, getPluginCategory, getPluginCategoryLabel, type PluginCategory } from '../editor/providers';
-import { ipcRenderer } from '../../lib/tauri-ipc';
 import { Select } from '../ui/Select';
-import type { RegistryPlugin } from '../../features/plugins/types';
+import type { InstalledPlugin, RegistryPlugin } from '../../features/plugins/types';
 import { compareVersion } from '../../features/plugins/marketplace/releases';
 import { IconResolver } from './common/IconResolver';
 
@@ -15,6 +14,7 @@ interface MarketplaceProps {
     betaPluginIds: ReadonlySet<string>;
     onSetPluginBeta: (pluginId: string, enabled: boolean) => Promise<void>;
     onInspectPlugin: (plugin: RegistryPlugin) => Promise<void>;
+    onUninstallPlugin: (plugin: InstalledPlugin) => Promise<void>;
 }
 
 // Robust Image component with fallback to IconResolver
@@ -47,8 +47,8 @@ const PluginImage = ({ url, icon, localIcon, path, name, size = 20 }: { url?: st
     );
 };
 
-export function Marketplace({ registry, selectedRegistry, betaPluginIds, onSetPluginBeta, onInspectPlugin }: MarketplaceProps) {
-    const { plugins: installedPlugins, reloadPlugins } = usePlugins();
+export function Marketplace({ registry, selectedRegistry, betaPluginIds, onSetPluginBeta, onInspectPlugin, onUninstallPlugin }: MarketplaceProps) {
+    const { plugins: installedPlugins } = usePlugins();
     const [installingId, setInstallingId] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState('');
     const [categoryFilter, setCategoryFilter] = useState<'all' | PluginCategory>('all');
@@ -67,17 +67,11 @@ export function Marketplace({ registry, selectedRegistry, betaPluginIds, onSetPl
     };
 
     const handleUninstall = async (id: string) => {
-        if (!confirm("Are you sure you want to uninstall this plugin?")) return;
+        const plugin = installedPlugins.find(item => item.manifest.id === id);
+        if (!plugin || plugin.path.startsWith('builtin://')) return;
         setInstallingId(id); // Use same loading state
         try {
-            await ipcRenderer.invoke('plugins_uninstall', { id });
-            const reloaded = await reloadPlugins();
-            if (!reloaded) {
-                throw new Error('Plugin uninstalled, but its runtime could not be reloaded');
-            }
-        } catch (err: any) {
-            console.error(err);
-            alert(`Failed to uninstall: ${err.message || err}`);
+            await onUninstallPlugin(plugin);
         } finally {
             setInstallingId(null);
         }
@@ -203,7 +197,7 @@ export function Marketplace({ registry, selectedRegistry, betaPluginIds, onSetPl
                                                         Update
                                                     </button>
                                                 )}
-                                                <button
+                                                {!localPlugin?.path.startsWith('builtin://') && <button
                                                     onClick={() => handleUninstall(plugin.id)}
                                                     disabled={processing}
                                                     className={clsx(
@@ -214,7 +208,7 @@ export function Marketplace({ registry, selectedRegistry, betaPluginIds, onSetPl
                                                 >
                                                     {processing && !installingId ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
                                                     Uninstall
-                                                </button>
+                                                </button>}
                                             </div>
                                         ) : (
                                             <button

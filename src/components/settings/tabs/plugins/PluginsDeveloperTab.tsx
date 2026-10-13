@@ -9,6 +9,7 @@ import {
     type PluginPermissionRequest,
 } from '../../../../features/plugins/types';
 import { Toggle } from '../../common/Toggle';
+import { Modal } from '../../../ui/Modal';
 
 export interface LocalInstallAction {
     mode: 'zip' | 'folder';
@@ -118,6 +119,7 @@ export function PluginsDeveloperTab({
 }
 
 interface PluginPermissionReviewProps {
+    standalone?: boolean;
     inspection: PluginInstallInspection;
     isApproving: boolean;
     onApprove: (optionalPermissionIds: string[]) => Promise<void>;
@@ -174,6 +176,7 @@ export function PluginPermissionReview({
     isApproving,
     onApprove,
     onCancel,
+    standalone = false,
 }: PluginPermissionReviewProps) {
     const permissions = getDeclaredPluginPermissions(inspection.manifest);
     const optional = permissions.filter((permission) => !permission.required);
@@ -200,15 +203,16 @@ export function PluginPermissionReview({
         });
     };
 
-    return (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/65 p-4" role="dialog" aria-modal="true" aria-labelledby="plugin-review-title">
+    const content = (
+        <div className={standalone ? 'contents' : 'fixed inset-0 z-[120] flex items-center justify-center bg-black/65 p-4'}
+            role={standalone ? undefined : 'dialog'} aria-modal={standalone ? undefined : true} aria-labelledby={standalone ? undefined : 'plugin-review-title'}>
             <div className="flex max-h-[min(720px,90vh)] w-full max-w-xl flex-col overflow-hidden rounded-xl border border-[var(--color-app-border)] bg-[var(--color-app-bg)] shadow-2xl">
                 <div className="flex items-start gap-3 border-b border-[var(--color-app-border)]/60 p-5">
                     <div className="rounded-lg bg-[var(--color-app-accent)]/10 p-2 text-[var(--color-app-accent)]">
                         <ShieldCheck size={19} />
                     </div>
                     <div className="min-w-0 flex-1">
-                        <h3 id="plugin-review-title" className="text-sm font-semibold text-[var(--color-app-text)]">
+                        <h3 id="plugin-review-title" aria-hidden={standalone || undefined} className="text-sm font-semibold text-[var(--color-app-text)]">
                             {isUpdate ? 'Review plugin update' : 'Review plugin permissions'}
                         </h3>
                         <p className="mt-1 text-xs text-[var(--color-app-muted)]">
@@ -323,4 +327,7 @@ export function PluginPermissionReview({
             </div>
         </div>
     );
+    return standalone ? <Modal isOpen title={isUpdate ? 'Review plugin update' : 'Review plugin permissions'}
+        onClose={() => { void onCancel(); }} width="max-w-xl" headerClassName="sr-only" contentClassName="p-0"
+        showCloseButton={false} explicitDismissOnly={isApproving}>{content}</Modal> : content;
 }

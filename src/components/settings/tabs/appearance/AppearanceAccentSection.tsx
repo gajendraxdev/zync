@@ -1,6 +1,9 @@
-import type { FocusEvent } from 'react';
 import type { AppSettings } from '../../../../store/settingsSlice';
 import { Section } from '../../common/Section';
+import { ColorPicker } from '../../../ui/ColorPicker';
+import { Button } from '../../../ui/Button';
+import { Tooltip } from '../../../ui/Tooltip';
+import { normalizeHexColor } from './themeHelpers';
 
 export interface AppearanceAccentSectionProps {
     settings: AppSettings;
@@ -9,7 +12,6 @@ export interface AppearanceAccentSectionProps {
     onTempAccentColorChange: (color: string) => void;
     onSelectPresetAccent: (color: string | null) => void;
     onCommitAccentColor: () => void;
-    onColorInputBlur: (event: FocusEvent<HTMLInputElement>) => void;
 }
 
 const PRESET_ACCENT_COLORS = ['#6366f1', '#0969da', '#10b981', '#ef4444', '#f59e0b', '#8b5cf6', '#ec4899'] as const;
@@ -21,7 +23,6 @@ export function AppearanceAccentSection({
     onTempAccentColorChange,
     onSelectPresetAccent,
     onCommitAccentColor,
-    onColorInputBlur,
 }: AppearanceAccentSectionProps) {
     return (
         <Section title="Accent">
@@ -36,51 +37,46 @@ export function AppearanceAccentSection({
                         )}
                     </div>
                     <div className="flex gap-2 flex-wrap" role="group" aria-label="Accent color presets">
-                        <button
+                        <Tooltip content="Use the selected theme's default accent."><button
                             onClick={() => { onSelectPresetAccent(null); }}
                             className={`w-8 h-8 rounded-full border-2 transition-all relative ${!settings.accentColor
                                 ? 'border-[var(--color-app-text)] scale-110 shadow-lg shadow-[var(--color-app-accent)]/20'
                                 : 'border-transparent hover:scale-110'
                                 }`}
-                            title="Theme Default"
                             aria-label="Use theme default accent color"
                             aria-pressed={!settings.accentColor}
                             type="button"
                         >
                             <div className="absolute inset-0.5 rounded-full" style={{ backgroundColor: themeAccent }} />
-                        </button>
+                        </button></Tooltip>
 
                         {PRESET_ACCENT_COLORS.map((color) => (
-                            <button
-                                key={color}
+                            <Tooltip key={color} content={`Use accent ${color}.`}><button
                                 onClick={() => { onSelectPresetAccent(color); }}
                                 className={`w-8 h-8 rounded-full border-2 transition-all ${settings.accentColor === color
                                     ? 'border-[var(--color-app-text)] scale-110'
                                     : 'border-transparent hover:scale-110'
                                     }`}
                                 style={{ backgroundColor: color }}
-                                title={`Accent ${color}`}
                                 aria-label={`Select accent color ${color}`}
                                 aria-pressed={settings.accentColor === color}
                                 type="button"
-                            />
+                            /></Tooltip>
                         ))}
-                        <input
-                            type="color"
-                            value={tempAccentColor}
-                            onChange={(e) => { onTempAccentColorChange(e.target.value); }}
-                            onBlur={onColorInputBlur}
-                            onKeyDown={(event) => {
-                                if (event.key === 'Enter') {
-                                    onCommitAccentColor();
-                                }
-                            }}
-                            className="w-8 h-8 rounded-lg overflow-hidden border-0 p-0 cursor-pointer"
-                            title="Custom accent color"
-                            aria-label="Choose custom accent color"
-                        />
+                        <ColorPicker label="Accent" value={tempAccentColor} referenceColor={themeAccent}
+                            onChange={onTempAccentColorChange} className="h-auto min-h-8 whitespace-normal"
+                            palette={[{ label: 'Theme default', color: themeAccent }]}>
+                            <span aria-hidden="true" className="mr-2 h-4 w-4 shrink-0 rounded border border-app-border"
+                                style={{ backgroundColor: normalizeHexColor(tempAccentColor) ?? themeAccent }} />Custom accent
+                        </ColorPicker>
+                        <Tooltip content="Save your custom accent draft. Closing the picker does not save it."
+                            contentClassName="max-w-xs whitespace-normal" disabledTrigger={!normalizeHexColor(tempAccentColor)}>
+                            <Button type="button" variant="secondary" disabled={!normalizeHexColor(tempAccentColor)}
+                                onClick={onCommitAccentColor}>Apply accent</Button>
+                        </Tooltip>
                     </div>
                 </div>
+                <p className="text-xs text-app-muted">Presets save directly. Custom colors stay a draft until you apply the accent.</p>
             </div>
         </Section>
     );

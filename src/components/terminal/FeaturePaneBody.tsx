@@ -20,12 +20,14 @@ export function FeaturePaneBody({
     pluginId,
     instanceId,
     visible,
+    focused,
 }: {
     connectionId: string;
     featureId?: SplitFeatureId;
     pluginId?: string;
     instanceId?: string;
     visible: boolean;
+    focused: boolean;
 }) {
     const { panels, loaded } = usePlugins();
     const plugin = pluginId ? panels.find((panel) => panel.id === pluginId) : undefined;
@@ -54,6 +56,7 @@ export function FeaturePaneBody({
                     legacyAccess={plugin.legacyAccess}
                     paneInstanceId={instanceId ?? `plugin:${plugin.id}`}
                     visible={visible}
+                    focused={focused}
                 />
             )}
             {pluginId && !plugin && (loaded ? <PluginUnavailable panelId={pluginId} /> : <FeaturePaneFallback />)}

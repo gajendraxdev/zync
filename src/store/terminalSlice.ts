@@ -5,6 +5,13 @@ import { terminalService } from '../lib/terminal';
 import type { TerminalTabSnapshot } from './sessionPersistence';
 import { scheduleSaveSession } from './sessionSlice';
 import { isPaneCloseBlocked, isPaneLayoutCloseBlocked, paneCloseScope } from '../lib/paneCloseBlockers';
+import { releasePaneFromGroups } from '../lib/paneLayout/groups';
+import { registrationForContent } from '../features/workspace/application/viewRegistrationAdapters';
+import { allowsDockingTopology, dockingBesideTarget, dockingForDuplicate } from '../features/workspace/domain/dockingTopology';
+import { findWorkspacePane, workspaceCanvases, workspacePaneForDockPayload, type WorkspacePaneTarget } from '../features/workspace/domain/canvases';
+import { withoutWorkspaceDocking } from '../features/workspace/domain/docking';
+import { planPaneTabInsertion, type PaneTabInsertion } from '../features/workspace/domain/paneTabRelease';
+import { CONTENT_PRESENTATION_VERSION, MAX_PRESENTATION_SCOPES, isPresentationScopeId, parseContentPresentation } from '../features/workspace/domain/contentPresentation';
 import {
     canSplit,
     collectLeaves,
@@ -28,6 +35,7 @@ import {
     detachTermFromGroups,
     featurePaneContent,
     newFeatureInstanceId,
+    paneContentKey,
     pluginPaneContent,
     isPaneSplit,
     layoutHasFeature,
@@ -39,6 +47,7 @@ import {
     dropSplitIntro,
     neighborPaneId,
     parsePaneLayoutGroups,
+    projectVisiblePaneLayout,
     sameGroupTermDock,
     setSplitSizes,
     singleFeaturePane,
@@ -53,6 +62,7 @@ import {
     type DockResult,
     type OpenSplitFeatureResult,
     type PaneContent,
+    type PaneLayout,
     type PaneLayoutGroups,
     type PaneNavDirection,
     type SplitDirection,
@@ -75,6 +85,14 @@ export interface TerminalTab {
     tabVisible?: boolean;
 }
 
+/** Launch metadata shared by standalone creation and atomic split insertion. */
+export interface TerminalLaunchOptions {
+    initialPath?: string;
+    isSynced?: boolean;
+    shellOverride?: string;
+    title?: string;
+}
+
 export interface TerminalSlice {
     /** Keyed by connectionId, stores the list of terminal tabs for each connection */
     terminals: Record<string, TerminalTab[]>;
@@ -92,17 +110,20 @@ export interface TerminalSlice {
      * Creates a new terminal tab for a specific connection.
      * @param connectionId The ID of the connection to create the terminal for.
      * @param opts Optional creation options.
-     * @returns The generated ID of the new terminal.
+     * @returns The generated ID, or null if docking reservations leave no room.
      */
-    createTerminal: (connectionId: string, opts?: { initialPath?: string; isSynced?: boolean; shellOverride?: string; title?: string }) => string;
+    createTerminal: (connectionId: string, opts?: TerminalLaunchOptions) => string | null;
+    /** Insert a new shell and its destination together; refused plans never publish a shell tab. */
+    openTerminalInSplit: (connectionId: string, edge: DockEdge, target: WorkspacePaneTarget,
+        launch?: TerminalLaunchOptions, seed?: PaneContent) => DockResult;
 
     /**
      * Ensures at least one terminal exists for a connection. Creates one if none exist.
      * @param connectionId The ID of the connection to check.
      * @param initialPath Optional starting directory for the new terminal if one is created.
-     * @returns The ID of the ensured terminal.
+     * @returns The existing/new ID, or null if a new canvas cannot be opened.
      */
-    ensureTerminal: (connectionId: string, initialPath?: string) => string;
+    ensureTerminal: (connectionId: string, initialPath?: string) => string | null;
 
     /**
      * Closes a specific terminal tab and cleans up associated backend processes and AI history.
@@ -117,6 +138,7 @@ export interface TerminalSlice {
 
     /**
      * Sets a specific terminal as the active one for a connection.
+     * A persistent dock receives input focus without replacing the center selection.
      * @param connectionId The ID of the connection.
      * @param termId The ID of the terminal to make active.
      */
@@ -157,19 +179,21 @@ export interface TerminalSlice {
         paneLayout?: unknown,
     ) => void;
 
-    splitPanes: (connectionId: string, direction?: SplitDirection, insert?: SplitInsert) => void;
+    /** An explicit target must still exist and be visible; refusal never changes selection. */
+    /** Duplicate the target, or atomically insert a new shell when launch options are supplied. */
+    splitPanes: (connectionId: string, direction?: SplitDirection, insert?: SplitInsert, target?: WorkspacePaneTarget, terminal?: TerminalLaunchOptions) => boolean;
     /** Split the current feature pane (Files | Files, etc.) even when no shell is open. */
     splitFeaturePane: (connectionId: string, featureId: SplitFeatureId, direction?: SplitDirection, instanceId?: string) => DockResult;
     /** Ungrouped Files/Dashboard/… is a real pane, not an overlay. */
-    ensureFeaturePane: (connectionId: string, featureId: SplitFeatureId, instanceId: string) => void;
-    ensurePluginPane: (connectionId: string, pluginId: string) => void;
+    ensureFeaturePane: (connectionId: string, featureId: SplitFeatureId, instanceId: string) => boolean;
+    ensurePluginPane: (connectionId: string, pluginId: string) => boolean;
     closePluginPanes: (connectionId: string, pluginId: string) => void;
     unsplitPanes: (connectionId: string) => void;
     togglePanes: (connectionId: string) => void;
-    resizePanes: (connectionId: string, splitId: string, sizes: [number, number], persist?: boolean) => void;
+    resizePanes: (connectionId: string, splitId: string, sizes: [number, number], persist?: boolean, layoutOwner?: string) => void;
     focusPane: (connectionId: string, paneId: string) => void;
     /** Move keyboard focus to the neighboring pane. False if there is no split. */
-    focusPaneInDirection: (connectionId: string, direction: PaneNavDirection) => boolean;
+    focusPaneInDirection: (connectionId: string, direction: PaneNavDirection, targetPaneId?: string) => boolean;
     /** Open or focus a split-capable feature beside the focused pane. Never replaces a shell. */
     openFeatureInSplit: (connectionId: string, featureId: SplitFeatureId, edge?: DockEdge) => OpenSplitFeatureResult;
     /** Dock a feature tab or move a shell tab into this group's split. */
@@ -177,16 +201,21 @@ export interface TerminalSlice {
         connectionId: string,
         payload: DockPayload,
         edge: DockEdge,
-        targetPaneId?: string | null,
+        targetPaneId?: WorkspacePaneTarget | null,
         canvasTermId?: string | null,
         targetContent?: PaneContent,
+        /** Internal creation path; must reference a new terminal ID with no drag-source hint. */
+        launch?: TerminalLaunchOptions,
     ) => DockResult;
     /** Remove a feature leaf; leftover shells stay. */
     closeFeatureInSplit: (connectionId: string, featureId: SplitFeatureId) => void;
     /** Remove a plugin leaf; leftover shells stay. */
     closePluginInSplit: (connectionId: string, pluginId: string) => void;
     /** Close one split pane by id (feature, plugin, or extra shell). */
-    closePaneInSplit: (connectionId: string, paneId: string) => boolean;
+    closePaneInSplit: (connectionId: string, target: WorkspacePaneTarget) => boolean;
+    /** Detach content without closing/remounting it. Optional strip insertion commits
+     * layout and validated rank metadata together; refusal changes neither. */
+    releasePaneFromSplit: (connectionId: string, target: WorkspacePaneTarget, insertion?: PaneTabInsertion) => boolean;
 
     /**
      * Clears the pendingRestore flag on all terminal tabs for a connection.
@@ -213,6 +242,70 @@ function nextShellTitle(tabs: readonly TerminalTab[]): string {
     return `Shell ${n}`;
 }
 
+/** Discard animation markers from a refused plan, without altering live resources. */
+function discardPlannedSplitIntros(state: AppStore, scope: string, groups: PaneLayoutGroups | undefined): void {
+    const prior = new Set<string>();
+    const visit = (node: import('../lib/paneLayout').PaneNode, accept: (id: string) => void) => {
+        if (!isPaneSplit(node)) return;
+        accept(node.id);
+        for (const child of node.children) visit(child, accept);
+    };
+    for (const layout of Object.values(state.paneLayouts[scope] ?? {})) visit(layout.root, id => prior.add(id));
+    for (const layout of Object.values(groups ?? {})) visit(layout.root, id => { if (!prior.has(id)) dropSplitIntro(id); });
+}
+
+function acceptsDockingTopology(state: AppStore, scope: string, terminals: readonly TerminalTab[], groups: PaneLayoutGroups | undefined): boolean {
+    if (allowsDockingTopology(state, scope, terminals, groups)) return true;
+    discardPlannedSplitIntros(state, scope, groups);
+    return false;
+}
+
+function reportDockingReservation(state: AppStore): void {
+    state.showToast('info', 'There is no room for another pane. Move a docked pane back to the workspace or close a pane first.');
+}
+
+function connectionContentKeys(state: AppStore, connectionId: string): Set<string> {
+    return new Set([
+        ...(state.terminals[connectionId] ?? []).map(tab => paneContentKey(termPaneContent(tab.id), tab.id)),
+        ...Object.values(state.paneLayouts[connectionId] ?? {}).flatMap(layout =>
+            collectLeaves(layout.root).map(pane => paneContentKey(pane.content, pane.id))),
+    ]);
+}
+
+/** Presentation visibility never changes the canonical resource inventory. */
+function isContentHidden(state: AppStore, connectionId: string, content: PaneContent, paneId: string): boolean {
+    return state.contentPresentation?.[connectionId]?.items[paneContentKey(content, paneId)]?.hidden === true;
+}
+
+/** Repair effective focus over visible geometry while keeping the saved tree intact. */
+function visibleLayout(state: AppStore, connectionId: string, layout: PaneLayout): PaneLayout | null {
+    const hidden = new Set(Object.entries(state.contentPresentation?.[connectionId]?.items ?? {})
+        .filter(([, item]) => item.hidden === true).map(([id]) => id));
+    return projectVisiblePaneLayout(layout, hidden);
+}
+
+/** An implicit operation must not seed a replacement for an all-hidden workspace. */
+function allContentHidden(state: AppStore, connectionId: string): boolean {
+    const keys = connectionContentKeys(state, connectionId);
+    return keys.size > 0 && [...keys].every(key => state.contentPresentation?.[connectionId]?.items[key]?.hidden === true);
+}
+
+function forgetClosedContent(get: () => AppStore, connectionId: string, before: ReadonlySet<string>): void {
+    const state = get();
+    const live = connectionContentKeys(state, connectionId);
+    const removed = [...before].filter(key => !live.has(key));
+    if (removed.length > 0) {
+        state.forgetClosedWorkspaceDocking(connectionId, removed);
+        get().forgetContentPresentation(connectionId, removed);
+    }
+}
+
+function permitsPluginDuplicate(state: AppStore, content: PaneContent): boolean {
+    if (content.kind !== 'plugin' || registrationForContent(state.workspaceViewRegistry, content)?.multiplicity === 'multiple') return true;
+    state.showToast('info', 'This plugin panel does not support multiple instances.');
+    return false;
+}
+
 function resolveDockOwner(
     groups: PaneLayoutGroups | undefined,
     activeId: string | null | undefined,
@@ -234,40 +327,6 @@ function resolveDockOwner(
     }
     if (groups?.[WORKSPACE_PANE_OWNER]) return WORKSPACE_PANE_OWNER;
     return activeId ?? WORKSPACE_PANE_OWNER;
-}
-
-/** Header drags send sourcePaneId; tab drags of an already-mounted pane must resolve it. */
-function sourcePaneIdForPayload(
-    groups: PaneLayoutGroups | undefined,
-    payload: DockPayload,
-): string | undefined {
-    if (payload.sourcePaneId) return payload.sourcePaneId;
-    if (!groups) return undefined;
-    for (const layout of Object.values(groups)) {
-        for (const leaf of collectLeaves(layout.root)) {
-            if (payload.kind === 'term' && isTermContent(leaf.content) && leaf.content.termId === payload.termId) {
-                return leaf.id;
-            }
-            if (
-                payload.kind === 'feature'
-                && isFeatureContent(leaf.content)
-                && leaf.content.featureId === payload.featureId
-                && payload.instanceId
-                && leaf.content.instanceId === payload.instanceId
-            ) {
-                return leaf.id;
-            }
-            if (
-                payload.kind === 'plugin'
-                && isPluginContent(leaf.content)
-                && leaf.content.pluginId === payload.pluginId
-                && (!payload.instanceId || leaf.content.instanceId === payload.instanceId)
-            ) {
-                return leaf.id;
-            }
-        }
-    }
-    return undefined;
 }
 
 function writeConnectionGroups(
@@ -296,6 +355,11 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
         const initialPath = opts?.initialPath;
         const isSynced = opts?.isSynced ?? false;
         const newId = `term-${crypto.randomUUID()}`;
+        const current = get();
+        if (!allowsDockingTopology(current, connectionId, [...(current.terminals[connectionId] ?? []), { id: newId }], current.paneLayouts[connectionId])) {
+            reportDockingReservation(current);
+            return null;
+        }
         set(state => {
             const currentTabs = state.terminals[connectionId] || [];
             const defaultTitle = nextShellTitle(currentTabs);
@@ -323,6 +387,8 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                     ...state.activeTerminalIds,
                     [connectionId]: newId
                 },
+                activePaneGroupOwner: { ...state.activePaneGroupOwner, [connectionId]: null },
+                ...(state.workspaceDockFocus?.[connectionId] && { workspaceDockFocus: { ...state.workspaceDockFocus, [connectionId]: null } }),
                 syncedTerminalId: nextSyncedIds,
             };
         });
@@ -335,27 +401,25 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
     ensureTerminal: (connectionId, initialPath) => {
         const state = get();
         const currentTabs = state.terminals[connectionId] || [];
-        const barTabs = currentTabs.filter(isTabVisible);
-        if (barTabs.length === 0) {
+        if (currentTabs.length === 0) {
             return get().createTerminal(connectionId, { initialPath });
         }
+        const visibleTabs = currentTabs.filter(tab => !isContentHidden(state, connectionId, termPaneContent(tab.id), tab.id));
         const activeId = state.activeTerminalIds[connectionId];
-        if (activeId && currentTabs.some((tab) => tab.id === activeId)) {
+        if (activeId && visibleTabs.some((tab) => tab.id === activeId)) {
             return activeId;
         }
-        const fallbackId = barTabs[0].id;
-        set(prev => ({
-            activeTerminalIds: {
-                ...prev.activeTerminalIds,
-                [connectionId]: fallbackId,
-            },
-        }));
-        scheduleSaveSession(() => get().saveSession());
+        // Hidden/split-only terminals still exist. Do not create or select another
+        // resource just because none currently has a visible tab-strip entry.
+        if (visibleTabs.length === 0) return currentTabs.find(tab => tab.id === activeId)?.id ?? currentTabs[0].id;
+        const fallbackId = visibleTabs.find(isTabVisible)?.id ?? visibleTabs[0].id;
+        get().setActiveTerminal(connectionId, fallbackId);
         return fallbackId;
     },
 
     /** @inheritdoc */
     closeTerminalGroup: (connectionId, termId) => {
+        const before = connectionContentKeys(get(), connectionId);
         const owner = findLayoutOwner(get().paneLayouts[connectionId], termId) ?? termId;
         const owned = get().paneLayouts[connectionId]?.[owner];
         if (owned && isPaneLayoutCloseBlocked(connectionId, owned)) {
@@ -404,6 +468,9 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
             delete nextGroups[groupId];
             for (const [layoutOwner, layout] of Object.entries(nextGroups)) {
                 const contained = visibleTermIds(layout).includes(groupId);
+                // Single-pane canvases are valid tabs. Never prune a layout that
+                // does not contain the closed shell, or dispose its content metadata.
+                if (!contained) continue;
                 const dropped = dropTerm(layout, groupId);
                 if (dropped && isSplitLayout(dropped)) {
                     nextGroups[layoutOwner] = dropped;
@@ -441,11 +508,17 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                 aiDisplayHistory: nextDisplay,
             };
         });
+        forgetClosedContent(get, connectionId, before);
         get().saveSession();
     },
 
+    openTerminalInSplit: (connectionId, edge, target, launch = {}, seed) => get().dockInSplit(
+        connectionId, { kind: 'term', termId: `term-${crypto.randomUUID()}` }, edge, target, undefined, seed, launch,
+    ),
+
     /** @inheritdoc */
     closeTerminal: (connectionId, termId) => {
+        const before = connectionContentKeys(get(), connectionId);
         const owner = findLayoutOwner(get().paneLayouts[connectionId], termId);
         const layout = owner ? get().paneLayouts[connectionId]?.[owner] : undefined;
         if (!owner || !layout || !isSplitLayout(layout)) {
@@ -522,6 +595,7 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                 aiDisplayHistory: nextDisplay,
             };
         });
+        forgetClosedContent(get, connectionId, before);
         get().saveSession();
     },
 
@@ -545,18 +619,33 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
 
     /** @inheritdoc */
     setActiveTerminal: (connectionId, termId) => {
+        const current = get();
+        if (!(current.terminals[connectionId] ?? []).some(tab => tab.id === termId)
+            || isContentHidden(current, connectionId, termPaneContent(termId), termId)) return;
+        // A dock is already visible beside the selected center. Activation owns
+        // input focus only; selecting its empty center canvas would hide neighbors.
+        const contentId = paneContentKey(termPaneContent(termId), termId);
+        if (current.workspaceDocking?.[connectionId]?.placements[contentId]) {
+            current.focusWorkspaceContent(connectionId, contentId);
+            return;
+        }
         set(state => {
             const groups = state.paneLayouts[connectionId];
             const tab = (state.terminals[connectionId] || []).find(t => t.id === termId);
             let nextActive = termId;
+            let repairedLayout: PaneLayout | undefined;
             if (tab && isTabVisible(tab)) {
                 const layout = groups?.[termId];
                 if (layout && isSplitLayout(layout)) {
-                    nextActive = layoutActiveTermId(layout) ?? termId;
+                    const visible = visibleLayout(state, connectionId, layout);
+                    if (!visible) return state;
+                    nextActive = layoutActiveTermId(visible) ?? termId;
+                    if (visible.activePaneId !== layout.activePaneId) repairedLayout = focusPaneInLayout(layout, visible.activePaneId);
                 }
             }
             const groupOwner = findLayoutOwner(groups, nextActive);
             return {
+                ...(state.workspaceDockFocus?.[connectionId] && { workspaceDockFocus: { ...state.workspaceDockFocus, [connectionId]: null } }),
                 activeTerminalIds: {
                     ...state.activeTerminalIds,
                     [connectionId]: nextActive
@@ -565,6 +654,10 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                     ...state.activePaneGroupOwner,
                     [connectionId]: groupOwner,
                 },
+                ...(repairedLayout && { paneLayouts: {
+                    ...state.paneLayouts,
+                    [connectionId]: { ...groups, [termId]: repairedLayout },
+                } }),
             };
         });
         scheduleSaveSession(() => get().saveSession());
@@ -753,110 +846,159 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
         });
     },
 
-    splitPanes: (connectionId, direction = 'horizontal', insert = 'after') => {
+    splitPanes: (connectionId, direction = 'horizontal', insert = 'after', requestedTarget, terminal) => {
         const state = get();
         const tabs = state.terminals[connectionId] || [];
         const activeId = state.activeTerminalIds[connectionId] ?? tabs.find(isTabVisible)?.id ?? null;
         const groups = state.paneLayouts[connectionId];
-        const owner = resolveDockOwner(
+        const dockFocus = state.workspaceDockFocus?.[connectionId];
+        const requested = requestedTarget ?? (dockFocus ? { contentId: dockFocus } : undefined);
+        const exact = requested !== undefined ? findWorkspacePane(workspaceCanvases(tabs, groups), requested) : undefined;
+        if (requested !== undefined && !exact) return false;
+        const targetPaneId = exact?.leaf.id;
+        const standaloneTargetId = exact && !groups?.[exact.owner] && isTermContent(exact.leaf.content)
+            ? exact.leaf.content.termId : undefined;
+        const owner = exact?.owner ?? resolveDockOwner(
             groups,
             activeId,
-            undefined,
+            targetPaneId,
             state.activePaneGroupOwner[connectionId],
         );
-        const layout = owner
-            ? groups?.[owner] ?? (activeId ? singlePane(activeId) : undefined)
-            : undefined;
-        if (!owner || !layout || !canSplit(layout)) return;
+        if (targetPaneId !== undefined && !standaloneTargetId) {
+            const requested = owner && groups?.[owner] ? findNode(groups[owner].root, targetPaneId) : undefined;
+            if (!requested || !isPaneLeaf(requested)) return false;
+        }
+        const seedTermId = standaloneTargetId ?? activeId;
+        const layout = exact?.layout ?? (owner
+            ? groups?.[owner] ?? (seedTermId && tabs.some(tab => tab.id === seedTermId)
+                ? singlePane(seedTermId, standaloneTargetId) : undefined)
+            : undefined);
+        if (!owner || !layout || !canSplit(layout)) return false;
 
-        const target = findNode(layout.root, layout.activePaneId) ?? firstLeaf(layout.root);
-        if (!isPaneLeaf(target)) return;
+        const visible = visibleLayout(state, connectionId, layout);
+        if (!visible) return false;
+        const target = findNode(layout.root, targetPaneId ?? visible.activePaneId);
+        if (!target || !isPaneLeaf(target) || isContentHidden(state, connectionId, target.content, target.id)) return false;
+        if (!terminal && !permitsPluginDuplicate(state, target.content)) return false;
+        if (state.workspaceDocking?.[connectionId]?.placements?.[paneContentKey(target.content, target.id)]
+            && (!state.sessionLoaded || state.isRestoring || state.sessionPersistenceBlocked)) return false;
 
         let nextTabs = tabs;
         let nextContent = target.content;
         let nextActiveId = activeId;
-        if (isTermContent(target.content)) {
-            const sourceTermId = target.content.termId;
+        if (terminal || isTermContent(target.content)) {
+            const sourceTermId = isTermContent(target.content) ? target.content.termId : undefined;
             const sourceTab = tabs.find(tab => tab.id === sourceTermId);
-            if (!sourceTab) return;
+            if (!terminal && !sourceTab) return false;
             const duplicateId = `term-${crypto.randomUUID()}`;
             nextContent = termPaneContent(duplicateId);
             nextTabs = [
                 ...tabs,
                 {
                     id: duplicateId,
-                    title: nextShellTitle(tabs),
+                    title: terminal?.title ?? (terminal?.isSynced ? 'Synced Terminal' : nextShellTitle(tabs)),
                     tabVisible: false,
-                    shellOverride: sourceTab.shellOverride,
-                    initialPath: sourceTab.lastKnownCwd ?? sourceTab.initialPath,
-                    lastKnownCwd: sourceTab.lastKnownCwd,
+                    shellOverride: terminal ? terminal.shellOverride : sourceTab?.shellOverride,
+                    initialPath: terminal ? terminal.initialPath : sourceTab?.lastKnownCwd ?? sourceTab?.initialPath,
+                    lastKnownCwd: terminal ? terminal.initialPath : sourceTab?.lastKnownCwd,
+                    ...(terminal?.isSynced && { isSynced: true }),
                 },
             ];
             nextActiveId = duplicateId;
         } else if (target.content.kind === 'feature') {
             const instanceId = newFeatureInstanceId(target.content.featureId);
-            if (target.content.featureId === 'files') {
-                get().copyFilesListing(connectionId, target.content.instanceId, instanceId);
-            }
             nextContent = featurePaneContent(target.content.featureId, instanceId);
+        } else if (target.content.kind === 'plugin') {
+            nextContent = pluginPaneContent(target.content.pluginId);
         }
 
         const result = splitPane(layout, target.id, direction, nextContent, undefined, insert);
-        if (!result.ok) return;
-        const focused = focusPaneInLayout(result.layout, result.newPaneId);
+        if (!result.ok) return false;
+        const duplicateKey = paneContentKey(nextContent, result.newPaneId);
+        const allocation = dockingForDuplicate(state.workspaceDocking, connectionId, paneContentKey(target.content, target.id), duplicateKey);
+        if (!allocation.ok) {
+            discardPlannedSplitIntros(state, connectionId, { [owner]: result.layout });
+            return false;
+        }
+        const destination = allocation.value[connectionId]?.placements[duplicateKey];
+        if (destination && !registrationForContent(state.workspaceViewRegistry, nextContent)?.allowedLocations.includes(destination)) {
+            discardPlannedSplitIntros(state, connectionId, { [owner]: result.layout });
+            return false;
+        }
+        const docked = Boolean(destination);
+        const focused = docked ? { ...result.layout, activePaneId: layout.activePaneId } : focusPaneInLayout(result.layout, result.newPaneId);
+        if (!acceptsDockingTopology({ ...state, workspaceDocking: allocation.value },
+            connectionId, nextTabs, { ...(groups ?? {}), [owner]: focused })) return false;
+        if (target.content.kind === 'feature' && target.content.featureId === 'files' && nextContent.kind === 'feature') {
+            get().copyFilesListing(connectionId, target.content.instanceId, nextContent.instanceId);
+        }
         set({
             terminals: { ...state.terminals, [connectionId]: nextTabs },
+            ...(terminal?.isSynced && { syncedTerminalId: { ...state.syncedTerminalId, [connectionId]: nextActiveId } }),
             paneLayouts: {
                 ...state.paneLayouts,
                 [connectionId]: { ...(groups ?? {}), [owner]: focused },
             },
-            activeTerminalIds: nextActiveId
+            ...(docked && { workspaceDocking: allocation.value,
+                workspaceDockFocus: { ...state.workspaceDockFocus, [connectionId]: duplicateKey } }),
+            ...(!docked && state.workspaceDockFocus?.[connectionId] && { workspaceDockFocus: { ...state.workspaceDockFocus, [connectionId]: null } }),
+            activeTerminalIds: !docked && nextActiveId
                 ? { ...state.activeTerminalIds, [connectionId]: nextActiveId }
                 : state.activeTerminalIds,
+            ...(!docked && targetPaneId !== undefined && { activePaneGroupOwner: { ...state.activePaneGroupOwner, [connectionId]: owner } }),
         });
         scheduleSaveSession(() => get().saveSession());
         track('split');
+        if (terminal) track('terminal');
         if (nextContent.kind === 'feature' && nextContent.featureId === 'files') track('split_files');
+        return true;
     },
 
     ensureFeaturePane: (connectionId, featureId, instanceId) => {
         const state = get();
         const groups = state.paneLayouts[connectionId];
-        if (layoutForFeatureInstance(groups, instanceId)) return;
+        if (layoutForFeatureInstance(groups, instanceId)) return true;
+        const nextGroups = { ...(groups ?? {}), [instanceId]: singleFeaturePane(featureId, undefined, instanceId) };
+        if (!allowsDockingTopology(state, connectionId, state.terminals[connectionId] ?? [], nextGroups)) {
+            reportDockingReservation(state);
+            return false;
+        }
         if (featureId === 'files') {
             get().copyFilesListing(connectionId, undefined, instanceId);
         }
         set({
             paneLayouts: {
                 ...state.paneLayouts,
-                [connectionId]: {
-                    ...(groups ?? {}),
-                    [instanceId]: singleFeaturePane(featureId, undefined, instanceId),
-                },
+                [connectionId]: nextGroups,
             },
         });
         scheduleSaveSession(() => get().saveSession());
+        return true;
     },
 
     ensurePluginPane: (connectionId, pluginId) => {
         const state = get();
         const groups = state.paneLayouts[connectionId];
-        if (layoutForPlugin(groups, pluginId)) return;
+        if (layoutForPlugin(groups, pluginId)) return true;
         const content = pluginPaneContent(pluginId);
         const owner = content.instanceId!;
+        const nextGroups = { ...(groups ?? {}), [owner]: singlePluginPane(pluginId, undefined, owner) };
+        if (!allowsDockingTopology(state, connectionId, state.terminals[connectionId] ?? [], nextGroups)) {
+            reportDockingReservation(state);
+            return false;
+        }
         set({
             paneLayouts: {
                 ...state.paneLayouts,
-                [connectionId]: {
-                    ...(groups ?? {}),
-                    [owner]: singlePluginPane(pluginId, undefined, owner),
-                },
+                [connectionId]: nextGroups,
             },
         });
         scheduleSaveSession(() => get().saveSession());
+        return true;
     },
 
     closePluginPanes: (connectionId, pluginId) => {
+        const before = connectionContentKeys(get(), connectionId);
         set(state => {
             const groups = state.paneLayouts[connectionId];
             if (!groups) return state;
@@ -893,15 +1035,31 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                 },
             };
         });
+        forgetClosedContent(get, connectionId, before);
         scheduleSaveSession(() => get().saveSession());
     },
 
     activatePaneGroup: (connectionId, owner) => {
+        const current = get();
+        const canonical = current.paneLayouts[connectionId]?.[owner];
+        const visible = canonical && visibleLayout(current, connectionId, canonical);
+        if (!visible) return;
+        const leaves = collectLeaves(visible.root);
+        const placements = current.workspaceDocking?.[connectionId]?.placements;
+        // An entirely docked group has no center allocation to select.
+        if (leaves.every(leaf => placements?.[paneContentKey(leaf.content, leaf.id)])) {
+            const focused = leaves.find(leaf => leaf.id === visible.activePaneId) ?? leaves[0];
+            current.focusWorkspaceContent(connectionId, paneContentKey(focused.content, focused.id));
+            return;
+        }
         set(state => {
             const layout = state.paneLayouts[connectionId]?.[owner];
             if (!layout) return state;
-            const termId = layoutActiveTermId(layout);
+            const visible = visibleLayout(state, connectionId, layout);
+            if (!visible) return state;
+            const termId = layoutActiveTermId(visible);
             return {
+                ...(state.workspaceDockFocus?.[connectionId] && { workspaceDockFocus: { ...state.workspaceDockFocus, [connectionId]: null } }),
                 activePaneGroupOwner: {
                     ...state.activePaneGroupOwner,
                     [connectionId]: owner,
@@ -909,11 +1067,16 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                 activeTerminalIds: termId
                     ? { ...state.activeTerminalIds, [connectionId]: termId }
                     : state.activeTerminalIds,
+                ...(visible.activePaneId !== layout.activePaneId && { paneLayouts: {
+                    ...state.paneLayouts,
+                    [connectionId]: { ...state.paneLayouts[connectionId], [owner]: focusPaneInLayout(layout, visible.activePaneId) },
+                } }),
             };
         });
     },
 
     closePaneGroup: (connectionId, owner) => {
+        const before = connectionContentKeys(get(), connectionId);
         const layout = get().paneLayouts[connectionId]?.[owner];
         if (!layout) return false;
         if (isPaneLayoutCloseBlocked(connectionId, layout)) {
@@ -976,15 +1139,25 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                 aiDisplayHistory: nextDisplay,
             };
         });
+        forgetClosedContent(get, connectionId, before);
         scheduleSaveSession(() => get().saveSession());
         return true;
     },
 
     splitFeaturePane: (connectionId, featureId, direction = 'horizontal', instanceId) => {
         const state = get();
+        const pendingFilesCopies: Array<[string | undefined, string]> = [];
+        if (allContentHidden(state, connectionId)) return 'no-target';
         const groups = state.paneLayouts[connectionId];
         const activeId = state.activeTerminalIds[connectionId];
+        const matchingFeatures = Object.values(groups ?? {}).flatMap(group => collectLeaves(group.root)).filter(pane =>
+            isFeatureContent(pane.content) && pane.content.featureId === featureId
+            && (!instanceId || pane.content.instanceId === instanceId));
+        if (matchingFeatures.length > 0 && matchingFeatures.every(pane => isContentHidden(state, connectionId, pane.content, pane.id))) return 'no-target';
         const instanceLayout = layoutForFeatureInstance(groups, instanceId);
+        if (instanceId && instanceLayout && collectLeaves(instanceLayout.root).some(pane =>
+            isFeatureContent(pane.content) && pane.content.instanceId === instanceId
+            && isContentHidden(state, connectionId, pane.content, pane.id))) return 'no-target';
         let owner = instanceId && groups?.[instanceId] ? instanceId : WORKSPACE_PANE_OWNER;
         let layout = instanceLayout ?? groups?.[WORKSPACE_PANE_OWNER];
         if (instanceLayout) {
@@ -1004,7 +1177,7 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
             } else {
                 const seedId = instanceId ?? newFeatureInstanceId(featureId);
                 if (featureId === 'files') {
-                    get().copyFilesListing(connectionId, undefined, seedId);
+                    pendingFilesCopies.push([undefined, seedId]);
                     layout = singleFeaturePane('files', undefined, seedId);
                 } else {
                     layout = singleFeaturePane(featureId, undefined, seedId);
@@ -1013,26 +1186,51 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
             }
         }
         if (!canSplit(layout)) return 'refused-cap';
-        const target = findNode(layout.root, layout.activePaneId) ?? firstLeaf(layout.root);
+        const visible = visibleLayout(state, connectionId, layout);
+        if (!visible) return 'no-target';
+        const target = instanceId
+            ? collectLeaves(visible.root).find(pane => isFeatureContent(pane.content)
+                && pane.content.featureId === featureId && pane.content.instanceId === instanceId)
+            : findNode(layout.root, visible.activePaneId);
+        if (!target || !isPaneLeaf(target)) return 'no-target';
+        const targetKey = paneContentKey(target.content, target.id);
+        if (state.workspaceDocking?.[connectionId]?.placements[targetKey]
+            && (!state.sessionLoaded || state.isRestoring || state.sessionPersistenceBlocked)) return 'no-target';
         const nextInstanceId = newFeatureInstanceId(featureId);
         let nextContent = featurePaneContent(featureId, nextInstanceId);
         if (featureId === 'files') {
             const fromInstance = isPaneLeaf(target) && target.content.kind === 'feature' && target.content.featureId === 'files'
                 ? target.content.instanceId
                 : undefined;
-            get().copyFilesListing(connectionId, fromInstance, nextInstanceId);
+            pendingFilesCopies.push([fromInstance, nextInstanceId]);
         }
         const result = splitPane(layout, target.id, direction, nextContent);
         if (!result.ok) return result.reason === 'cap' ? 'refused-cap' : 'no-target';
+        const duplicateKey = paneContentKey(nextContent, result.newPaneId);
+        const allocation = dockingForDuplicate(state.workspaceDocking, connectionId, targetKey, duplicateKey);
+        if (!allocation.ok) {
+            discardPlannedSplitIntros(state, connectionId, { [owner]: result.layout });
+            return 'no-target';
+        }
+        const destination = allocation.value[connectionId]?.placements[duplicateKey];
+        if (destination && !registrationForContent(state.workspaceViewRegistry, nextContent)?.allowedLocations.includes(destination)) {
+            discardPlannedSplitIntros(state, connectionId, { [owner]: result.layout });
+            return 'no-target';
+        }
+        const docked = Boolean(destination);
+        const nextGroups = { ...(groups ?? {}), [owner]: docked
+            ? { ...result.layout, activePaneId: layout.activePaneId } : focusPaneInLayout(result.layout, result.newPaneId) };
+        if (!acceptsDockingTopology({ ...state, workspaceDocking: allocation.value }, connectionId, state.terminals[connectionId] ?? [], nextGroups)) return 'refused-cap';
+        for (const [from, to] of pendingFilesCopies) get().copyFilesListing(connectionId, from, to);
         set({
             paneLayouts: {
                 ...state.paneLayouts,
-                [connectionId]: { ...(groups ?? {}), [owner]: focusPaneInLayout(result.layout, result.newPaneId) },
+                [connectionId]: nextGroups,
             },
-            activePaneGroupOwner: {
-                ...state.activePaneGroupOwner,
-                [connectionId]: owner,
-            },
+            ...(docked ? { workspaceDocking: allocation.value,
+                workspaceDockFocus: { ...state.workspaceDockFocus, [connectionId]: duplicateKey } }
+                : { activePaneGroupOwner: { ...state.activePaneGroupOwner, [connectionId]: owner },
+                    workspaceDockFocus: { ...state.workspaceDockFocus, [connectionId]: null } }),
         });
         scheduleSaveSession(() => get().saveSession());
         track('split');
@@ -1042,49 +1240,21 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
 
     unsplitPanes: (connectionId) => {
         const state = get();
+        const dockId = state.workspaceDockFocus?.[connectionId];
+        if (dockId) {
+            get().releasePaneFromSplit(connectionId, { contentId: dockId });
+            return;
+        }
         const activeId = state.activeTerminalIds[connectionId];
         const groups = state.paneLayouts[connectionId];
         const owner = resolveDockOwner(groups, activeId, undefined, state.activePaneGroupOwner[connectionId]);
         const layout = owner ? groups?.[owner] : undefined;
         if (!owner || !layout || !isSplitLayout(layout)) return;
-        const focused = findNode(layout.root, layout.activePaneId);
-        if (focused && isPaneLeaf(focused) && !isTermContent(focused.content)) {
-            get().closePaneInSplit(connectionId, focused.id);
-            return;
+        const visible = visibleLayout(state, connectionId, layout);
+        const focused = visible && findNode(visible.root, visible.activePaneId);
+        if (focused && isPaneLeaf(focused)) {
+            get().releasePaneFromSplit(connectionId, { contentId: paneContentKey(focused.content, focused.id) });
         }
-
-        set(state => {
-            const focusedTermLeaf = findNode(layout.root, layout.activePaneId);
-            if (!focusedTermLeaf || !isPaneLeaf(focusedTermLeaf) || focusedTermLeaf.content.kind !== 'term') {
-                return state;
-            }
-            const focusedTerm = focusedTermLeaf.content.termId;
-            const { next, nextOwner } = detachTermFromGroups(state.paneLayouts[connectionId], focusedTerm);
-
-            const nextTabs = (state.terminals[connectionId] || []).map(t => {
-                if (t.id === focusedTerm || (nextOwner && t.id === nextOwner)) {
-                    return { ...t, tabVisible: true };
-                }
-                return t;
-            });
-
-            const nextLayouts = { ...state.paneLayouts };
-            if (next) {
-                nextLayouts[connectionId] = next;
-            } else {
-                delete nextLayouts[connectionId];
-            }
-            return {
-                terminals: { ...state.terminals, [connectionId]: nextTabs },
-                paneLayouts: nextLayouts,
-                activeTerminalIds: { ...state.activeTerminalIds, [connectionId]: focusedTerm },
-                activePaneGroupOwner: {
-                    ...state.activePaneGroupOwner,
-                    [connectionId]: nextOwner,
-                },
-            };
-        });
-        scheduleSaveSession(() => get().saveSession());
     },
 
     togglePanes: (connectionId) => {
@@ -1102,24 +1272,36 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
         }
     },
 
-    resizePanes: (connectionId, splitId, sizes, persist = false) => {
+    resizePanes: (connectionId, splitId, sizes, persist = false, layoutOwner) => {
+        let accepted = false;
         set(state => {
-            const activeId = state.activeTerminalIds[connectionId];
             const groups = state.paneLayouts[connectionId];
-            const owner = resolveDockOwner(groups, activeId, splitId);
-            const layout = owner ? groups?.[owner] : undefined;
-            if (!owner || !layout) return state;
+            const matches = Object.entries(groups ?? {}).filter(([owner, layout]) =>
+                (layoutOwner === undefined || owner === layoutOwner) && findNode(layout.root, splitId)?.type === 'split');
+            if (matches.length !== 1) return state;
+            const [owner, layout] = matches[0];
+            accepted = true;
             const nextGroups = { ...(groups ?? {}), [owner]: setSplitSizes(layout, splitId, sizes) };
             return {
                 paneLayouts: { ...state.paneLayouts, [connectionId]: nextGroups },
             };
         });
-        if (persist) {
+        if (persist && accepted) {
             scheduleSaveSession(() => get().saveSession());
         }
     },
 
     focusPane: (connectionId, paneId) => {
+        const current = get();
+        const currentOwner = resolveDockOwner(current.paneLayouts[connectionId], current.activeTerminalIds[connectionId], paneId);
+        const currentLayout = currentOwner ? current.paneLayouts[connectionId]?.[currentOwner] : undefined;
+        const target = currentLayout ? findNode(currentLayout.root, paneId) : undefined;
+        if (!target || !isPaneLeaf(target) || isContentHidden(current, connectionId, target.content, target.id)) return;
+        const key = paneContentKey(target.content, target.id);
+        if (current.workspaceDocking?.[connectionId]?.placements[key]) {
+            current.focusWorkspaceContent(connectionId, key);
+            return;
+        }
         set(state => {
             const activeId = state.activeTerminalIds[connectionId];
             const groups = state.paneLayouts[connectionId];
@@ -1127,8 +1309,9 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
             const layout = owner ? groups?.[owner] : undefined;
             if (!owner || !layout) return state;
             const next = focusPaneInLayout(layout, paneId);
-            const termId = layoutActiveTermId(next);
+            const termId = layoutActiveTermId(visibleLayout(state, connectionId, next));
             return {
+                ...(state.workspaceDockFocus?.[connectionId] && { workspaceDockFocus: { ...state.workspaceDockFocus, [connectionId]: null } }),
                 paneLayouts: {
                     ...state.paneLayouts,
                     [connectionId]: { ...(groups ?? {}), [owner]: next },
@@ -1145,16 +1328,29 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
         scheduleSaveSession(() => get().saveSession());
     },
 
-    focusPaneInDirection: (connectionId, direction) => {
+    focusPaneInDirection: (connectionId, direction, targetPaneId) => {
         const state = get();
         const activeId = state.activeTerminalIds[connectionId];
         const groups = state.paneLayouts[connectionId];
-        const owner = resolveDockOwner(groups, activeId, undefined, state.activePaneGroupOwner[connectionId]);
+        const owner = resolveDockOwner(groups, activeId, targetPaneId, state.activePaneGroupOwner[connectionId]);
         const layout = owner ? groups?.[owner] : undefined;
         if (!owner || !layout || !isSplitLayout(layout)) return false;
-        const nextId = neighborPaneId(layout, direction);
-        if (!nextId) return true;
-        get().focusPane(connectionId, nextId);
+        const projected = visibleLayout(state, connectionId, layout);
+        if (!projected) return false;
+        if (targetPaneId !== undefined) {
+            const target = findNode(projected.root, targetPaneId);
+            if (!target || !isPaneLeaf(target)) return false;
+        }
+        const visible = targetPaneId === undefined ? projected : focusPaneInLayout(projected, targetPaneId);
+        const needsFocusRepair = visible.activePaneId !== layout.activePaneId;
+        if (!isSplitLayout(visible)) {
+            if (needsFocusRepair) get().focusPane(connectionId, visible.activePaneId);
+            return needsFocusRepair;
+        }
+        const nextId = neighborPaneId(visible, direction);
+        // Repair determines the origin, not a separate keystroke. Commit once to
+        // its neighbor, or to the repaired origin when the requested edge is empty.
+        if (nextId || needsFocusRepair) get().focusPane(connectionId, nextId ?? visible.activePaneId);
         return true;
     },
 
@@ -1162,38 +1358,139 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
         return get().dockInSplit(connectionId, { kind: 'feature', featureId }, edge);
     },
 
-    dockInSplit: (connectionId, payload, edge, targetPaneId, canvasTermId, targetContent) => {
+    dockInSplit: (connectionId, payload, edge, targetPaneId, canvasTermId, targetContent, launch) => {
         const state = get();
-        const tabs = state.terminals[connectionId] || [];
+        // Planning must not create file-listing state before the complete topology
+        // passes the connection-wide reservation check.
+        const pendingFilesCopies: Array<[string | undefined, string | undefined]> = [];
+        const copyPlannedListings = () => {
+            for (const [from, to] of pendingFilesCopies) get().copyFilesListing(connectionId, from, to);
+        };
+        if (allContentHidden(state, connectionId)) return 'no-target';
+        const existingTabs = state.terminals[connectionId] || [];
+        if (launch && (payload.kind !== 'term' || payload.sourcePaneId || existingTabs.some(tab => tab.id === payload.termId))) return 'no-target';
+        const created = launch && payload.kind === 'term' ? {
+            id: payload.termId,
+            title: launch.title ?? (launch.isSynced ? 'Synced Terminal' : nextShellTitle(existingTabs)),
+            initialPath: launch.initialPath, lastKnownCwd: launch.initialPath,
+            shellOverride: launch.shellOverride, isSynced: launch.isSynced ?? false, tabVisible: false,
+        } : undefined;
+        // The pending tab participates in planning only. commitDockPlan publishes
+        // it after topology, allocation and destination guards have all passed.
+        const tabs = created ? [...existingTabs, created] : existingTabs;
         const groups = state.paneLayouts[connectionId];
-        const paneId = targetPaneId || undefined;
-        const owner = resolveDockOwner(
+        const canvases = workspaceCanvases(tabs, groups);
+        const requested = targetPaneId ?? (state.workspaceDockFocus?.[connectionId]
+            ? { contentId: state.workspaceDockFocus[connectionId]! } : undefined);
+        const isOverlay = typeof requested === 'string' && requested.startsWith('overlay:');
+        const exactTarget = requested && !isOverlay ? findWorkspacePane(canvases, requested) : undefined;
+        if (requested && !isOverlay && !exactTarget) return 'no-target';
+        const requestedPaneId = exactTarget?.leaf.id ?? (typeof requested === 'string' ? requested : undefined);
+        const standaloneTargetId = requestedPaneId && tabs.some(tab => tab.id === requestedPaneId)
+            && !findLayoutOwner(groups, requestedPaneId) ? requestedPaneId : undefined;
+        const owner = exactTarget?.owner ?? standaloneTargetId ?? resolveDockOwner(
             groups,
             canvasTermId ?? state.activeTerminalIds[connectionId],
-            paneId,
+            requestedPaneId,
             state.activePaneGroupOwner[connectionId],
         )
             ?? tabs.find(isTabVisible)?.id
             ?? WORKSPACE_PANE_OWNER;
-        const sourcePaneId = sourcePaneIdForPayload(groups, payload);
+        // An omitted target means the focused pane, including a standalone shell.
+        // Resolve it before deciding whether this request moves or clones content.
+        const implicitTargetLayout = !groups?.[owner] && tabs.some(tab => tab.id === owner)
+            && (!requestedPaneId || standaloneTargetId)
+            ? singlePane(owner, standaloneTargetId) : undefined;
+        const canonicalTargetLayout = groups?.[owner] ?? implicitTargetLayout;
+        const projectedTarget = canonicalTargetLayout ? visibleLayout(state, connectionId, canonicalTargetLayout) : undefined;
+        if (canonicalTargetLayout && !projectedTarget) return 'no-target';
+        const explicitTarget = requestedPaneId && canonicalTargetLayout ? findNode(canonicalTargetLayout.root, requestedPaneId) : undefined;
+        if (requestedPaneId && !requestedPaneId.startsWith('overlay:')
+            && (!explicitTarget || !isPaneLeaf(explicitTarget))) return 'no-target';
+        if (explicitTarget && isPaneLeaf(explicitTarget) && isContentHidden(state, connectionId, explicitTarget.content, explicitTarget.id)) return 'no-target';
+        if (targetContent && isContentHidden(state, connectionId, targetContent, requestedPaneId ?? '')) return 'no-target';
+        if (targetContent && targetContent.kind !== 'term' && !targetContent.instanceId) {
+            const legacyTargets = Object.values(groups ?? {}).flatMap(group => collectLeaves(group.root)).filter(pane =>
+                pane.content.kind === targetContent.kind && !pane.content.instanceId
+                && (isFeatureContent(pane.content) && isFeatureContent(targetContent)
+                    ? pane.content.featureId === targetContent.featureId
+                    : isPluginContent(pane.content) && isPluginContent(targetContent) && pane.content.pluginId === targetContent.pluginId));
+            if (legacyTargets.length > 0 && legacyTargets.every(pane => isContentHidden(state, connectionId, pane.content, pane.id))) return 'no-target';
+        }
+        const paneId = requestedPaneId ?? projectedTarget?.activePaneId;
+        const resolvedSource = workspacePaneForDockPayload(canvases, payload);
+        if (!resolvedSource.ok) return 'no-target';
+        const sourceLocation = resolvedSource.pane;
+        const sourcePaneId = sourceLocation?.leaf.id;
+        const sourceOwner = sourceLocation?.owner;
+        const source = sourceLocation?.leaf;
+        if (source && isPaneLeaf(source) && isContentHidden(state, connectionId, source.content, source.id)) return 'no-target';
+        if (payload.kind === 'term' && isContentHidden(state, connectionId, termPaneContent(payload.termId), payload.termId)) return 'no-target';
+
+        const targetLeaf = explicitTarget?.type === 'pane' ? explicitTarget
+            : projectedTarget && collectLeaves(projectedTarget.root).find(leaf => leaf.id === paneId);
+        const targetKey = targetLeaf ? paneContentKey(targetLeaf.content, targetLeaf.id) : '';
+        const selfTarget = Boolean(source && targetLeaf
+            && paneContentKey(source.content, source.id) === targetKey);
+
+        /** Publish resource topology, allocation and focus together after all guards pass. */
+        const commitDockPlan = (nextGroups: PaneLayoutGroups, nextTabs: TerminalTab[], nextOwner: string,
+            incomingId: string, centerTerminalId = state.activeTerminalIds[connectionId]): DockResult | null => {
+            const allocation = dockingBesideTarget(state.workspaceDocking, connectionId, targetKey, incomingId);
+            const refuse = (reason: DockResult) => { discardPlannedSplitIntros(state, connectionId, nextGroups); return reason; };
+            if (!allocation.ok) return refuse('no-target');
+            const destination = allocation.value[connectionId]?.placements[incomingId];
+            const priorRegion = state.workspaceDocking?.[connectionId]?.placements[incomingId];
+            if ((destination || priorRegion) && (!state.sessionLoaded || state.isRestoring || state.sessionPersistenceBlocked)) return refuse('no-target');
+            const incoming = findWorkspacePane(workspaceCanvases(nextTabs, nextGroups), { contentId: incomingId });
+            if (!incoming) return refuse('no-target');
+            if (destination && !registrationForContent(state.workspaceViewRegistry, incoming.leaf.content)?.allowedLocations.includes(destination)) return refuse('no-target');
+            if (!acceptsDockingTopology({ ...state, workspaceDocking: allocation.value }, connectionId, nextTabs, nextGroups)) return 'refused-cap';
+            if (destination) {
+                const previous = groups?.[nextOwner]?.activePaneId;
+                if (previous && findNode(nextGroups[nextOwner].root, previous)?.type === 'pane') {
+                    nextGroups = { ...nextGroups, [nextOwner]: { ...nextGroups[nextOwner], activePaneId: previous } };
+                }
+            }
+            const selectedOwner = state.activePaneGroupOwner[connectionId];
+            const retainedOwner = selectedOwner && nextGroups[selectedOwner] ? selectedOwner
+                : sourceOwner === selectedOwner && sourceLocation
+                    ? collectLeaves(sourceLocation.layout.root).map(leaf => findWorkspacePane(workspaceCanvases(nextTabs, nextGroups),
+                        { contentId: paneContentKey(leaf.content, leaf.id) })).find(found => found && found.owner !== nextOwner)?.owner ?? null
+                    : null;
+            copyPlannedListings();
+            set({
+                terminals: { ...state.terminals, [connectionId]: nextTabs },
+                paneLayouts: writeConnectionGroups(state.paneLayouts, connectionId, nextGroups),
+                ...(created?.isSynced && { syncedTerminalId: { ...state.syncedTerminalId, [connectionId]: created.id } }),
+                ...((destination || priorRegion) && { workspaceDocking: allocation.value }),
+                workspaceDockFocus: { ...state.workspaceDockFocus, [connectionId]: destination ? incomingId : null },
+                activePaneGroupOwner: { ...state.activePaneGroupOwner, [connectionId]: destination ? retainedOwner : nextOwner },
+                activeTerminalIds: destination ? state.activeTerminalIds
+                    : centerTerminalId ? { ...state.activeTerminalIds, [connectionId]: centerTerminalId }
+                        : state.activeTerminalIds,
+            });
+            scheduleSaveSession(() => get().saveSession());
+            if (created) track('terminal');
+            return null;
+        };
 
         // Dropping onto another pane relocates that exact pane. Dropping back
         // onto itself (an edge of the same pane) still splits on self.
-        if (sourcePaneId && paneId && sourcePaneId !== paneId) {
-            const sourceOwner = resolveDockOwner(groups, state.activeTerminalIds[connectionId], sourcePaneId);
-            const sourceLayout = sourceOwner ? groups?.[sourceOwner] : undefined;
+        if (sourcePaneId && paneId && !selfTarget) {
+            const sourceLayout = sourceLocation?.layout;
             if (sourceOwner && sourceLayout) {
                 const sourceNode = findNode(sourceLayout.root, sourcePaneId);
                 if (!sourceNode || !isPaneLeaf(sourceNode)) return 'no-target';
                 const withoutSource = isSplitLayout(sourceLayout)
                     ? unsplitPane(sourceLayout, sourcePaneId)
                     : null;
-                let targetLayout = sourceOwner === owner ? withoutSource : groups?.[owner];
+                let targetLayout = sourceOwner === owner ? withoutSource : groups?.[owner] ?? implicitTargetLayout;
                 if (!targetLayout && owner === WORKSPACE_PANE_OWNER && targetContent) {
                     if (targetContent.kind === 'feature') {
                         const instanceId = targetContent.instanceId ?? newFeatureInstanceId(targetContent.featureId);
                         if (targetContent.featureId === 'files' && !targetContent.instanceId) {
-                            get().copyFilesListing(connectionId, undefined, instanceId);
+                            pendingFilesCopies.push([undefined, instanceId]);
                         }
                         targetLayout = singleFeaturePane(targetContent.featureId, undefined, instanceId);
                     } else if (targetContent.kind === 'plugin') {
@@ -1207,7 +1504,14 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                     }
                 }
                 if (!targetLayout) return 'no-target';
-                const moved = dockIntoLayout(targetLayout, sourceNode.content, edge, undefined, paneId, sourcePaneId);
+                // Local leaf IDs may collide across canvases. Modern content keeps
+                // its stable instance identity if its container needs a fresh ID.
+                let incomingPaneId = sourcePaneId;
+                if (findNode(targetLayout.root, incomingPaneId)) {
+                    if (sourceNode.content.kind !== 'term' && !sourceNode.content.instanceId) return 'no-target';
+                    incomingPaneId = `pane-${crypto.randomUUID()}`;
+                }
+                const moved = dockIntoLayout(targetLayout, sourceNode.content, edge, undefined, paneId, incomingPaneId);
                 if (!moved.ok) {
                     return moved.reason === 'cap' ? 'refused-cap' : 'no-target';
                 }
@@ -1215,9 +1519,12 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                 if (sourceOwner !== owner) {
                     const remainingTerms = withoutSource ? visibleTermIds(withoutSource) : [];
                     const keepSourceGroup = isKeepableRemainder(withoutSource);
-                    const nextSourceOwner = keepSourceGroup && withoutSource
+                    const candidateOwner = keepSourceGroup && withoutSource
                         ? ownerForLayout(withoutSource, sourceOwner)
                         : null;
+                    const nextSourceOwner = candidateOwner && candidateOwner !== sourceOwner
+                        && (candidateOwner === owner || Object.prototype.hasOwnProperty.call(groups ?? {}, candidateOwner))
+                        ? sourceOwner : candidateOwner;
                     const nextGroups: PaneLayoutGroups = {};
                     for (const [groupOwner, groupLayout] of Object.entries(groups ?? {})) {
                         if (groupOwner === sourceOwner) {
@@ -1238,36 +1545,16 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                         }
                         return tab;
                     });
-                    set({
-                        terminals: { ...state.terminals, [connectionId]: nextTabs },
-                        paneLayouts: writeConnectionGroups(state.paneLayouts, connectionId, nextGroups),
-                        activeTerminalIds: {
-                            ...state.activeTerminalIds,
-                            [connectionId]: layoutActiveTermId(moved.layout),
-                        },
-                        activePaneGroupOwner: {
-                            ...state.activePaneGroupOwner,
-                            [connectionId]: owner,
-                        },
-                    });
-                    scheduleSaveSession(() => get().saveSession());
+                    const refused = commitDockPlan(nextGroups, nextTabs, owner,
+                        paneContentKey(sourceNode.content, moved.paneId), layoutActiveTermId(moved.layout));
+                    if (refused) return refused;
                     return 'moved';
                 }
 
-                set({
-                    paneLayouts: {
-                        ...state.paneLayouts,
-                        [connectionId]: { ...(groups ?? {}), [owner]: moved.layout },
-                    },
-                    activeTerminalIds: sourceNode.content.kind === 'term'
-                        ? { ...state.activeTerminalIds, [connectionId]: sourceNode.content.termId }
-                        : state.activeTerminalIds,
-                    activePaneGroupOwner: {
-                        ...state.activePaneGroupOwner,
-                        [connectionId]: owner,
-                    },
-                });
-                scheduleSaveSession(() => get().saveSession());
+                const refused = commitDockPlan({ ...(groups ?? {}), [owner]: moved.layout }, tabs, owner,
+                    paneContentKey(sourceNode.content, moved.paneId), sourceNode.content.kind === 'term'
+                        ? sourceNode.content.termId : state.activeTerminalIds[connectionId]);
+                if (refused) return refused;
                 return 'moved';
             }
         }
@@ -1275,11 +1562,11 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
         if (payload.kind === 'term') {
             if (!tabs.some((tab) => tab.id === payload.termId)) return 'no-target';
             const selfDock = sameGroupTermDock(groups, owner, payload.termId);
-            let targetLayout = groups?.[owner];
+            let targetLayout = groups?.[owner] ?? implicitTargetLayout;
             if (!targetLayout && targetContent?.kind === 'feature') {
                 const instanceId = targetContent.instanceId ?? newFeatureInstanceId(targetContent.featureId);
                 if (targetContent.featureId === 'files' && !targetContent.instanceId) {
-                    get().copyFilesListing(connectionId, undefined, instanceId);
+                    pendingFilesCopies.push([undefined, instanceId]);
                 }
                 targetLayout = singleFeaturePane(targetContent.featureId, undefined, instanceId);
             } else if (!targetLayout && targetContent?.kind === 'plugin') {
@@ -1313,19 +1600,9 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                     initialPath: sourceTab.lastKnownCwd ?? sourceTab.initialPath,
                     lastKnownCwd: sourceTab.lastKnownCwd,
                 };
-                set({
-                    terminals: { ...state.terminals, [connectionId]: [...tabs, duplicate] },
-                    paneLayouts: {
-                        ...state.paneLayouts,
-                        [connectionId]: { ...(groups ?? {}), [owner]: docked.layout },
-                    },
-                    activeTerminalIds: { ...state.activeTerminalIds, [connectionId]: duplicateId },
-                    activePaneGroupOwner: {
-                        ...state.activePaneGroupOwner,
-                        [connectionId]: owner,
-                    },
-                });
-                scheduleSaveSession(() => get().saveSession());
+                const refused = commitDockPlan({ ...(groups ?? {}), [owner]: docked.layout }, [...tabs, duplicate], owner,
+                    paneContentKey(termPaneContent(duplicateId), docked.paneId), duplicateId);
+                if (refused) return refused;
                 return 'opened';
             }
 
@@ -1358,28 +1635,14 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                 return tab;
             });
 
-            set({
-                terminals: { ...state.terminals, [connectionId]: nextTabs },
-                paneLayouts: writeConnectionGroups(
-                    state.paneLayouts,
-                    connectionId,
-                    Object.keys(groupsNext).length > 0 ? groupsNext : undefined,
-                ),
-                activeTerminalIds: {
-                    ...state.activeTerminalIds,
-                    [connectionId]: payload.termId,
-                },
-                activePaneGroupOwner: {
-                    ...state.activePaneGroupOwner,
-                    [connectionId]: nextOwner,
-                },
-            });
-            scheduleSaveSession(() => get().saveSession());
+            const refused = commitDockPlan(groupsNext, nextTabs, nextOwner,
+                paneContentKey(termPaneContent(payload.termId), docked.paneId), payload.termId);
+            if (refused) return refused;
             return 'moved';
         }
 
         const existingLayout = groups?.[owner];
-        let layout = existingLayout;
+        let layout = existingLayout ?? implicitTargetLayout;
         let seededFromPluginPayload = false;
         if (!layout) {
             // A split command from a shell tab must start with that shell as the
@@ -1390,7 +1653,7 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
             } else if (targetContent?.kind === 'feature') {
                 const baseInstanceId = targetContent.instanceId ?? newFeatureInstanceId(targetContent.featureId);
                 if (targetContent.featureId === 'files' && !targetContent.instanceId) {
-                    get().copyFilesListing(connectionId, undefined, baseInstanceId);
+                    pendingFilesCopies.push([undefined, baseInstanceId]);
                 }
                 layout = singleFeaturePane(targetContent.featureId, undefined, baseInstanceId);
             } else if (targetContent?.kind === 'plugin') {
@@ -1402,7 +1665,7 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                 const baseInstanceId = payload.instanceId ?? newFeatureInstanceId(payload.featureId);
                 if (payload.featureId === 'files') {
                     if (!payload.instanceId) {
-                        get().copyFilesListing(connectionId, undefined, baseInstanceId);
+                        pendingFilesCopies.push([undefined, baseInstanceId]);
                     }
                     layout = singleFeaturePane('files', undefined, baseInstanceId);
                 } else {
@@ -1413,8 +1676,9 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
             }
         }
         if (!layout) return 'no-target';
+        if (!canSplit(layout)) return 'refused-cap';
         const duplicateFeature = payload.kind === 'feature' && (
-            Boolean(sourcePaneId && paneId && sourcePaneId === paneId)
+            selfTarget
             || (!existingLayout
                 && targetContent?.kind === 'feature'
                 && targetContent.featureId === payload.featureId
@@ -1422,12 +1686,15 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
         );
         const duplicatePlugin = payload.kind === 'plugin' && (
             seededFromPluginPayload
-            || Boolean(sourcePaneId && paneId && sourcePaneId === paneId)
+            || selfTarget
             || (!existingLayout
                 && targetContent?.kind === 'plugin'
                 && targetContent.pluginId === payload.pluginId
                 && targetContent.instanceId === payload.instanceId)
         );
+        if (payload.kind === 'plugin' && (duplicatePlugin || (!payload.instanceId && Object.values(groups ?? {}).some(group =>
+            collectLeaves(group.root).some(leaf => isPluginContent(leaf.content) && leaf.content.pluginId === payload.pluginId),
+        ))) && !permitsPluginDuplicate(state, payload)) return 'no-target';
         let content = payload.kind === 'plugin'
             ? pluginPaneContent(payload.pluginId, duplicatePlugin ? undefined : payload.instanceId)
             : featurePaneContent(
@@ -1444,7 +1711,7 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                     ? focused.content.instanceId
                     : undefined;
             if (content.instanceId !== fromInstance) {
-                get().copyFilesListing(connectionId, fromInstance, content.instanceId);
+                pendingFilesCopies.push([fromInstance, content.instanceId]);
             }
         }
         const docked = dockIntoLayout(layout, content, edge, undefined, paneId);
@@ -1454,17 +1721,9 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
         if (paneId?.startsWith('overlay:') && isPaneSplit(docked.layout.root)) {
             dropSplitIntro(docked.layout.root.id);
         }
-        set({
-            paneLayouts: {
-                ...state.paneLayouts,
-                [connectionId]: { ...(groups ?? {}), [owner]: docked.layout },
-            },
-            activePaneGroupOwner: {
-                ...state.activePaneGroupOwner,
-                [connectionId]: owner,
-            },
-        });
-        scheduleSaveSession(() => get().saveSession());
+        const refused = commitDockPlan({ ...(groups ?? {}), [owner]: docked.layout }, tabs, owner,
+            paneContentKey(content, docked.paneId));
+        if (refused) return refused;
         if (docked.created) {
             track('split');
             if (content.kind === 'feature' && content.featureId === 'files') track('split_files');
@@ -1473,6 +1732,7 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
     },
 
     closeFeatureInSplit: (connectionId, featureId) => {
+        const before = connectionContentKeys(get(), connectionId);
         set(state => {
             const activeId = state.activeTerminalIds[connectionId];
             const groups = state.paneLayouts[connectionId];
@@ -1512,10 +1772,12 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                     : state.activeTerminalIds,
             };
         });
+        forgetClosedContent(get, connectionId, before);
         scheduleSaveSession(() => get().saveSession());
     },
 
     closePluginInSplit: (connectionId, pluginId) => {
+        const before = connectionContentKeys(get(), connectionId);
         set(state => {
             const activeId = state.activeTerminalIds[connectionId];
             const groups = state.paneLayouts[connectionId];
@@ -1555,28 +1817,111 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                     : state.activeTerminalIds,
             };
         });
+        forgetClosedContent(get, connectionId, before);
         scheduleSaveSession(() => get().saveSession());
     },
 
-    closePaneInSplit: (connectionId, paneId) => {
+    releasePaneFromSplit: (connectionId, requestedTarget, insertion) => {
         const state = get();
         const groups = state.paneLayouts[connectionId];
-        const owner = resolveDockOwner(groups, state.activeTerminalIds[connectionId], paneId);
-        const layout = owner ? groups?.[owner] : undefined;
-        const node = layout ? findNode(layout.root, paneId) : null;
-        if (!layout || !node || !isPaneLeaf(node)) return false;
+        const target = findWorkspacePane(workspaceCanvases(state.terminals[connectionId] ?? [], groups), requestedTarget);
+        if (!target) return false;
+        const contentId = paneContentKey(target.leaf.content, target.leaf.id);
+        if (state.contentPresentation?.[connectionId]?.items[contentId]?.hidden) return false;
+        let presentationPatch: Partial<AppStore> = {};
+        if (insertion) {
+            if (!state.sessionLoaded || state.isRestoring || state.sessionPersistenceBlocked
+                || !isPresentationScopeId(connectionId) || insertion.source.contentId !== contentId
+                || !parseContentPresentation(state.contentPresentation).ok) return false;
+            const scope = state.contentPresentation[connectionId];
+            if (!scope && Object.keys(state.contentPresentation).length >= MAX_PRESENTATION_SCOPES) return false;
+            const order = planPaneTabInsertion(state.terminals[connectionId] ?? [], groups, scope, insertion);
+            if (!order) return false;
+            presentationPatch = { contentPresentation: { ...state.contentPresentation,
+                [connectionId]: { version: CONTENT_PRESENTATION_VERSION, items: scope?.items ?? {}, order } } };
+        }
+        const allocation = withoutWorkspaceDocking(state.workspaceDocking, connectionId, new Set([contentId]));
+        if (!allocation.ok) return false;
+        const wasDocked = Boolean(state.workspaceDocking?.[connectionId]?.placements?.[contentId]);
+        if (wasDocked && (!state.sessionLoaded || state.isRestoring || state.sessionPersistenceBlocked)) return false;
+        if (wasDocked && !isSplitLayout(target.layout)) {
+            if (!allowsDockingTopology({ workspaceDocking: allocation.value }, connectionId, state.terminals[connectionId] ?? [], groups)) return false;
+            const termId = isTermContent(target.leaf.content) ? target.leaf.content.termId : undefined;
+            const revealShell = termId !== undefined && state.terminals[connectionId]?.some(tab => tab.id === termId && !tab.tabVisible);
+            // A single-pane canvas has no tree to detach. Release its region
+            // allocation and select the same resource without rebuilding hosts.
+            set({
+                ...presentationPatch,
+                workspaceDocking: allocation.value,
+                workspaceDockFocus: { ...state.workspaceDockFocus, [connectionId]: null },
+                activePaneGroupOwner: { ...state.activePaneGroupOwner, [connectionId]: groups?.[target.owner] ? target.owner : null },
+                ...(termId !== undefined && { activeTerminalIds: { ...state.activeTerminalIds, [connectionId]: termId } }),
+                ...(revealShell && { terminals: { ...state.terminals, [connectionId]: state.terminals[connectionId].map(tab =>
+                    tab.id === termId ? { ...tab, tabVisible: true } : tab) } }),
+            });
+            scheduleSaveSession(() => get().saveSession());
+            return true;
+        }
+        const result = releasePaneFromGroups(groups, target.leaf.id, target.owner);
+        if (!result) return false;
+        const visible = new Set(result.visibleTermIds);
+        const terminals = (state.terminals[connectionId] ?? []).map(tab => visible.has(tab.id) ? { ...tab, tabVisible: true } : tab);
+        if (!allowsDockingTopology({ workspaceDocking: allocation.value }, connectionId, terminals, result.groups)) return false;
+        // Ungroup returns this same resource to its own center tab. Placement and
+        // focus change together; no disposal, listing copy or editor-close guard.
+        set({
+            ...presentationPatch,
+            paneLayouts: writeConnectionGroups(state.paneLayouts, connectionId, result.groups),
+            terminals: { ...state.terminals, [connectionId]: terminals },
+            ...(wasDocked && { workspaceDocking: allocation.value }),
+            workspaceDockFocus: { ...state.workspaceDockFocus, [connectionId]: null },
+            activePaneGroupOwner: { ...state.activePaneGroupOwner, [connectionId]: result.releasedOwner },
+            activeTerminalIds: isTermContent(result.released.content)
+                ? { ...state.activeTerminalIds, [connectionId]: result.released.content.termId }
+                : state.activeTerminalIds,
+        });
+        scheduleSaveSession(() => get().saveSession());
+        return true;
+    },
+
+    closePaneInSplit: (connectionId, requestedTarget) => {
+        const state = get();
+        const before = connectionContentKeys(state, connectionId);
+        const groups = state.paneLayouts[connectionId];
+        const target = findWorkspacePane(workspaceCanvases(state.terminals[connectionId] ?? [], groups), requestedTarget);
+        if (!target) return false;
+        const { leaf: node } = target;
         if (isPaneCloseBlocked(paneCloseScope(connectionId, node.content))) {
             get().showToast('warning', 'Close the unsaved editor before closing this pane.');
             return false;
         }
+        const contentId = paneContentKey(node.content, node.id);
+        const releaseDock = isTermContent(node.content) && Boolean(state.workspaceDocking?.[connectionId]?.placements?.[contentId]);
+        let allocationPatch: Partial<AppStore> = {};
+        if (releaseDock) {
+            if (!state.sessionLoaded || state.isRestoring || state.sessionPersistenceBlocked) return false;
+            const allocation = withoutWorkspaceDocking(state.workspaceDocking, connectionId, new Set([contentId]));
+            if (!allocation.ok) return false;
+            allocationPatch = { workspaceDocking: allocation.value,
+                ...(state.workspaceDockFocus[connectionId] === contentId && { workspaceDockFocus: { ...state.workspaceDockFocus, [connectionId]: null } }) };
+        }
+        if (!groups?.[target.owner]) {
+            // The existing pane-close contract releases shells to their tab; it
+            // does not terminate the PTY. A standalone dock must also lose its
+            // allocation, otherwise closing its header would leave it displayed.
+            if (!releaseDock || !isTermContent(node.content)) return false;
+            const termId = node.content.termId;
+            set({ ...allocationPatch, terminals: { ...state.terminals, [connectionId]: (state.terminals[connectionId] ?? [])
+                .map(tab => tab.id === termId ? { ...tab, tabVisible: true } : tab) } });
+            scheduleSaveSession(() => get().saveSession());
+            return true;
+        }
         set(state => {
             const groups = state.paneLayouts[connectionId];
-            const owner = resolveDockOwner(groups, state.activeTerminalIds[connectionId], paneId);
-            if (!owner) return state;
-            const layout = groups?.[owner];
-            if (!layout) return state;
-            const node = findNode(layout.root, paneId);
-            if (!node || !isPaneLeaf(node)) return state;
+            const current = findWorkspacePane(workspaceCanvases(state.terminals[connectionId] ?? [], groups), requestedTarget);
+            if (!current || !groups?.[current.owner]) return state;
+            const { owner, layout, leaf: node } = current;
+            const paneId = node.id;
             const closingTermId = isTermContent(node.content) ? node.content.termId : null;
             if (isPaneLeaf(layout.root)) {
                 const nextGroups = { ...(groups ?? {}) };
@@ -1587,6 +1932,7 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                     ))
                     : state.terminals[connectionId] || [];
                 return {
+                    ...allocationPatch,
                     terminals: { ...state.terminals, [connectionId]: nextTabs },
                     paneLayouts: writeConnectionGroups(
                         state.paneLayouts,
@@ -1614,18 +1960,22 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
             let nextLayoutOwner: string | null = null;
             if (isSplitLayout(dropped)) {
                 const remainingTerms = visibleTermIds(dropped);
-                const nextOwner = ownerForLayout(dropped, owner);
+                const candidateOwner = ownerForLayout(dropped, owner);
+                const nextOwner = Object.prototype.hasOwnProperty.call(nextGroups, candidateOwner) ? owner : candidateOwner;
                 nextGroups[nextOwner] = dropped;
                 nextLayoutOwner = nextOwner;
-                if (remainingTerms.length > 0 && (!nextActiveTermId || !remainingTerms.includes(nextActiveTermId))) {
+                if (state.activePaneGroupOwner[connectionId] === owner && remainingTerms.length > 0
+                    && (!nextActiveTermId || !remainingTerms.includes(nextActiveTermId))) {
                     nextActiveTermId = remainingTerms[0];
                 }
             } else if (dropped && isPaneLeaf(dropped.root) && !isTermContent(dropped.root.content)) {
-                const nextOwner = ownerForLayout(dropped, owner);
+                const candidateOwner = ownerForLayout(dropped, owner);
+                const nextOwner = Object.prototype.hasOwnProperty.call(nextGroups, candidateOwner) ? owner : candidateOwner;
                 nextGroups[nextOwner] = dropped;
                 nextLayoutOwner = nextOwner;
             }
             return {
+                ...allocationPatch,
                 terminals: { ...state.terminals, [connectionId]: nextTabs },
                 paneLayouts: writeConnectionGroups(
                     state.paneLayouts,
@@ -1640,6 +1990,7 @@ export const createTerminalSlice: StateCreator<AppStore, [], [], TerminalSlice> 
                     : state.activePaneGroupOwner,
             };
         });
+        forgetClosedContent(get, connectionId, before);
         scheduleSaveSession(() => get().saveSession());
         return true;
     },

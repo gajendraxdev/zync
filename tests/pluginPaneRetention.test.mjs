@@ -4,18 +4,28 @@ import ts from 'typescript';
 import { runInNewContext } from 'node:vm';
 
 const source = readFileSync('src/components/layout/retainedItems.ts', 'utf8');
-const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext } });
-const { retainLiveItems } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
+const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } });
+const { retainLiveItems, retainedItemsInMountOrder } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
 
 let retained = retainLiveItems(['one', 'two', 'unvisited'], new Set(), 'one');
 assert.deepEqual([...retained], ['one']);
 retained = retainLiveItems(['one', 'two', 'unvisited'], retained, 'two');
 assert.deepEqual([...retained], ['one', 'two'], 'Switching retains the previous pane');
+retained = retainLiveItems(['two', 'unvisited', 'one'], retained, 'two');
+assert.deepEqual([...retained], ['one', 'two'], 'Tab reorder must not reorder mounted iframe ancestors');
+const latestTabs = [{ id: 'two', title: 'Updated title' }, { id: 'unvisited' }, { id: 'one' }];
+assert.deepEqual(retainedItemsInMountOrder(latestTabs, retained), [latestTabs[2], latestTabs[0]], 'Stable host order uses current metadata');
+assert.deepEqual([...retainLiveItems(['new', 'two', 'unvisited', 'one'], retained, 'two')], ['one', 'two'], 'Adding an inactive tab stays lazy');
+assert.deepEqual([...retainLiveItems(['new', 'two', 'unvisited', 'one'], retained, 'new')], ['one', 'two', 'new'], 'Newly visited tabs append regardless of tab-bar position');
+assert.deepEqual([...retainLiveItems(['two', 'one'], retained, 'missing')], ['one', 'two'], 'Unknown active IDs never mount');
 retained = retainLiveItems(['two', 'unvisited'], retained, 'two');
 assert.deepEqual([...retained], ['two'], 'Closing disposes the old pane');
 retained = retainLiveItems(['one', 'two', 'unvisited'], retained, null);
 assert.deepEqual([...retained], ['two'], 'Reopening an inactive item does not resurrect closed state');
 assert.deepEqual([...retainLiveItems([], retained, null)], []);
+const reopened = retainLiveItems(['one', 'two'], retained, 'one');
+assert.deepEqual([...reopened], ['two', 'one'], 'A closed then reactivated tab gets a new final mount slot');
+assert.deepEqual(retainedItemsInMountOrder([{ id: 'one' }], new Set(['closed', 'one'])), [{ id: 'one' }], 'Projection omits missing live items');
 
 const frame = readFileSync('src/components/plugins/PluginPanel.tsx', 'utf8');
 // Execute the actual registration effect so cleanup cannot leave a terminal owner.

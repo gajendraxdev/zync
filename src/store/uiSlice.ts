@@ -1,4 +1,5 @@
 import { StateCreator } from 'zustand';
+import type { GlobalSidebarSection } from '../features/workspace/application/globalNavigation';
 
 export interface ConfirmDialogOpts {
     id: number;
@@ -12,6 +13,12 @@ export interface ConfirmDialogOpts {
 }
 
 export interface UiSlice {
+    globalSidebarSection: GlobalSidebarSection;
+    /** Last non-empty destination, used when reopening a hidden sidebar. */
+    lastGlobalSidebarSection: GlobalSidebarSection;
+    /** Transient action ownership; never persisted. Includes same-section selections. */
+    globalSidebarSelectionRevision: number;
+    setGlobalSidebarSection: (section: GlobalSidebarSection, rememberedSection?: GlobalSidebarSection) => void;
     confirmDialog: ConfirmDialogOpts | null;
     confirmDialogQueue: ConfirmDialogOpts[];
     showConfirmDialog: (opts: Omit<ConfirmDialogOpts, 'id' | 'onConfirm' | 'onCancel'>) => Promise<boolean>;
@@ -27,6 +34,13 @@ export interface UiSlice {
 let nextConfirmDialogId = 0;
 
 export const createUiSlice: StateCreator<UiSlice, [], [], UiSlice> = (set, get) => ({
+    globalSidebarSection: 'hosts',
+    lastGlobalSidebarSection: 'hosts',
+    globalSidebarSelectionRevision: 0,
+    setGlobalSidebarSection: (globalSidebarSection, rememberedSection) => set(state => ({
+        globalSidebarSection, globalSidebarSelectionRevision: state.globalSidebarSelectionRevision + 1,
+        lastGlobalSidebarSection: rememberedSection !== undefined ? rememberedSection : globalSidebarSection ?? state.lastGlobalSidebarSection,
+    })),
     confirmDialog: null,
     confirmDialogQueue: [],
     editorDiagnosticsVisible: false,

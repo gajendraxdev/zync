@@ -1,17 +1,32 @@
-import { useState, useRef, useEffect, useMemo, useCallback, memo, type DragEvent } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback, useId, memo, type DragEvent, type ReactNode } from 'react';
+import { resolveWorkspaceNavigation } from '../../features/workspace/domain/navigation';
+import { isInsideMenu } from '../ui/MenuSubmenu';
 import { useAppStore } from '../../store/useAppStore';
+import { ChromeActionItems } from './ChromeActionItems';
+import { useChromeCustomizationMenu } from './useChromeCustomizationMenu';
+import { COMPACT_TAB_LABEL_CLASSES, COMPACT_TAB_ROW_CLASSES, TabDragPreview } from './TabDragPreview';
+import { describePaneGroup, PaneGroupTabIcon } from './PaneGroupTabChrome';
+import { ContentTabTrigger } from './ContentTabTrigger';
+import { TabAddButton } from './TabAddButton';
 import { useShallow } from 'zustand/react/shallow';
 import { cn } from '../../lib/utils';
-import { pluginTabInventory } from './featureTabInventory';
-import { FolderOpen, Plus, X, PanelRight, Search, Terminal as TerminalIcon } from 'lucide-react';
+import { deriveWorkspaceContentInventory } from '../../features/workspace/domain/contentInventory';
+import { resolveDisplayTitle } from '../../features/workspace/domain/presentation';
+import { projectWorkspaceTabs } from '../../features/workspace/domain/tabPresentation';
+import { parseWorkspaceDocking } from '../../features/workspace/domain/docking';
+import { workspaceSplitTarget } from '../../features/workspace/domain/dockingView';
+import { describeDockedTab } from '../../features/workspace/domain/dockPresentation';
+import { useWorkspaceContextActions } from '../workspace/workspaceActionsContext';
+import { FolderOpen, X, Pin, PanelRight, Search, Terminal as TerminalIcon } from 'lucide-react';
 import { ContextMenu, type ContextMenuItem } from '../ui/ContextMenu';
-import { useWindowDrag } from '../../hooks/useWindowDrag';
+import { WorkspaceStripHandle } from './navigation/WorkspaceStripHandle';
 import type { ShellEntry } from '../../lib/shells/types';
 import { ShellIcon } from '../icons/ShellIcon';
 import { PluginIcon } from '../icons/PluginIcon';
 import { FEATURE_META, type FeatureId, type WorkspaceFeatureTab } from './featureMeta';
 import { formatShortcutLabel } from '../../lib/shortcuts';
 import { SHORTCUT_CATALOG } from '../../features/shortcuts/catalog';
+import { shortcutHint } from '../../features/shortcuts/labels';
 import { defaultSettings } from '../../store/settingsSlice';
 import { Tooltip } from '../ui/Tooltip';
 import {
@@ -26,8 +41,9 @@ import {
     isTermContent,
     layoutForCanvas,
     layoutHasFeature,
-    layoutHasPlugin,
+    paneContentKey,
     paneDockPayload,
+    projectVisiblePaneLayout,
     sameSplitGroup,
     SPLIT_FEATURE_IDS,
     visibleTermIds,
@@ -49,17 +65,18 @@ interface CombinedTabBarProps {
     tabId: string;
     activeView: string;
     activeTerminalId: string | null;
-    openFeatures: string[];
     featureTabs: WorkspaceFeatureTab[];
     activeFeatureTabId: string | null;
     pinnedFeatures: string[];
-    pluginPanels?: { id: string; title: string }[];
+    pluginPanels?: { id: string; title: string; allowMultiple: boolean }[];
+    contentActions?: ReactNode;
     availableShells?: ShellEntry[];
     shellsLoading?: boolean;
     shellsError?: string | null;
     onRefetchShells?: () => void;
     onTabSelect: (view: string, termId?: string) => void;
-    onFeatureClose: (feature: string) => void;
+    onPluginTabSelect: (contentId: string) => void;
+    onPluginTabClose: (contentId: string) => void;
     onFeatureTabSelect: (tabId: string, featureId: FeatureId) => void;
     onFeatureTabClose: (tabId: string, featureId: FeatureId) => void;
     onTerminalClose: (termId: string) => void;
@@ -73,10 +90,11 @@ interface CombinedTabBarProps {
     onSplit?: (direction: SplitDirection) => void;
     onUnsplit?: () => void;
     onSplitSelect?: (owner: string) => void;
-    onSplitClose?: (owner: string, paneId: string) => void;
+    /** Close the canonical group, including hidden members; the app owns close guards. */
+    onPaneGroupClose?: (owner: string) => void;
     onSplitUnsplit?: (owner: string, paneId: string) => void;
     onOpenSplitFeature?: (featureId: SplitFeatureId, edge?: DockEdge) => void;
-    onOpenSplitPlugin?: (pluginId: string, edge?: DockEdge) => void;
+    onOpenSplitPlugin?: (pluginId: string, edge?: DockEdge, contentId?: string) => void;
     onDockTerm?: (termId: string, edge: DockEdge) => void;
     onSplitNewShell?: (edge: DockEdge, shell?: ShellEntry) => void;
     dockPointer?: DockTabPointerHandlers;
@@ -86,7 +104,7 @@ type ContextMenuTarget =
     | { type: 'split'; owner: string; paneId: string }
     | { type: 'terminal'; termId: string }
     | { type: 'feature'; featureId: FeatureId; tabId: string }
-    | { type: 'plugin'; featureId: string };
+    | { type: 'plugin'; panelId: string; contentId: string };
 
 const COMMON_SHELL_PATTERN = /(^|\/)(bash|zsh|fish|sh)$/i;
 const COMMON_SHELL_LABEL_PATTERN = /\b(?:bash|zsh|fish|sh)\b/i;
@@ -132,19 +150,25 @@ function normalizeTerminalTitle(title: string): string {
     return title;
 }
 
+function ContentPinIndicator() {
+    return <span className="inline-flex shrink-0 text-app-accent" title="Pinned content">
+        <Pin size={10} aria-hidden="true" />
+        <span className="sr-only">Pinned content</span>
+    </span>;
+}
+
 function getContextMenuItems(input: {
     target: ContextMenuTarget;
     pinnedFeatures: string[];
     onTerminalClose: (termId: string) => void;
-    onFeatureClose: (feature: string) => void;
+    onPluginTabClose: (contentId: string) => void;
     onFeatureTabClose: (tabId: string, featureId: FeatureId) => void;
     onTogglePin: (feature: string) => void;
     onUnsplit?: () => void;
-    onSplitClose?: (owner: string, paneId: string) => void;
     onSplitUnsplit?: (owner: string, paneId: string) => void;
     canUnsplitTab?: boolean;
     onOpenSplitFeature?: (featureId: SplitFeatureId, edge?: DockEdge) => void;
-    onOpenSplitPlugin?: (pluginId: string, edge?: DockEdge) => void;
+    onOpenSplitPlugin?: (pluginId: string, edge?: DockEdge, contentId?: string) => void;
     onDockTerm?: (termId: string, edge: DockEdge) => void;
     canOpenSplit: boolean;
     isCurrentShellGroup: boolean;
@@ -185,7 +209,7 @@ function getContextMenuItems(input: {
         if (input.onOpenSplitPlugin) {
             items.push(
                 ...splitOpenMenuItems(
-                    (edge) => input.onOpenSplitPlugin!(target.featureId.slice('plugin:'.length), edge),
+                    (edge) => input.onOpenSplitPlugin!(target.panelId, edge, target.contentId),
                     !input.canOpenSplit,
                 ),
                 { separator: true },
@@ -195,7 +219,7 @@ function getContextMenuItems(input: {
             {
                 label: 'Close Tab',
                 variant: 'danger' as const,
-                action: () => input.onFeatureClose(target.featureId),
+                action: () => input.onPluginTabClose(target.contentId),
             },
         );
         return items;
@@ -211,7 +235,7 @@ function getContextMenuItems(input: {
     }
     items.push(
         {
-            label: input.pinnedFeatures.includes(target.featureId) ? 'Unpin Tab' : 'Pin Tab',
+            label: input.pinnedFeatures.includes(target.featureId) ? 'Stop opening with connection' : 'Open with connection',
             action: () => input.onTogglePin(target.featureId),
         },
         {
@@ -229,17 +253,18 @@ export const CombinedTabBar = memo(function CombinedTabBar({
     tabId,
     activeView,
     activeTerminalId,
-    openFeatures,
     featureTabs,
     activeFeatureTabId,
     pinnedFeatures,
     pluginPanels = [],
+    contentActions,
     availableShells = [],
     shellsLoading = false,
     shellsError = null,
     onRefetchShells,
     onTabSelect,
-    onFeatureClose,
+    onPluginTabSelect,
+    onPluginTabClose,
     onFeatureTabSelect,
     onFeatureTabClose,
     onTerminalClose,
@@ -253,7 +278,7 @@ export const CombinedTabBar = memo(function CombinedTabBar({
     onSplit,
     onUnsplit,
     onSplitSelect,
-    onSplitClose,
+    onPaneGroupClose,
     onSplitUnsplit,
     onOpenSplitFeature,
     onOpenSplitPlugin,
@@ -261,7 +286,20 @@ export const CombinedTabBar = memo(function CombinedTabBar({
     onSplitNewShell,
     dockPointer,
 }: CombinedTabBarProps) {
-    const { begin: beginDockPointer, consumeClickIfDragged } = useDockTabPointer(dockPointer);
+    const navigationRaw = useAppStore(state => state.settings.workspaceNavigation);
+    const navigationPosition = resolveWorkspaceNavigation(navigationRaw).workspaceTabsPosition ?? 'default';
+    const vertical = navigationPosition !== 'default';
+    const openMenuId = useId();
+    const workspaceActions = useWorkspaceContextActions();
+    const { begin: beginDockPointer, consumeClickIfDragged } = useDockTabPointer(dockPointer && {
+        ...dockPointer,
+        onTabReorder: (source, target, after) => {
+            const store = useAppStore.getState();
+            const changed = store.reorderContent(connectionId, source, target, after);
+            if (!changed) store.showToast('info', 'Keep pinned tabs together. This tab cannot move to that position now.');
+            return changed;
+        },
+    });
     const fileDragActive = useInternalFileDrag();
     const [fileDropTermId, setFileDropTermId] = useState<string | null>(null);
     const handleTermFileDragOver = useCallback((event: DragEvent<HTMLDivElement>, termId: string) => {
@@ -278,21 +316,37 @@ export const CombinedTabBar = memo(function CombinedTabBar({
     const terminals = useAppStore(useShallow(state =>
         (state.terminals[connectionId] || []).filter(term => term.tabVisible !== false),
     ));
+    const allTerminals = useAppStore(state => state.terminals[connectionId]);
     const paneGroups = useAppStore(state => state.paneLayouts[connectionId]);
+    const presentationScope = useAppStore(state => state.contentPresentation[connectionId]);
+    const dockingRaw = useAppStore(state => state.workspaceDocking);
+    const dockFocus = useAppStore(state => state.workspaceDockFocus[connectionId]);
+    const docking = useMemo(() => parseWorkspaceDocking(dockingRaw), [dockingRaw]);
+    const chromeActions = useAppStore(state => state.settings.chromeActions);
+    const toolbarMenu = useChromeCustomizationMenu('workspaceToolbar');
+    const contentPresentation = presentationScope?.items;
+    const hiddenContent = useMemo(() => new Set(Object.entries(contentPresentation ?? {})
+        .filter(([, item]) => item.hidden).map(([id]) => id)), [contentPresentation]);
+    const dockFor = (ids: readonly string[]) => describeDockedTab(ids.filter(id => !hiddenContent.has(id)),
+        docking.ok ? docking.value[connectionId]?.placements ?? {} : {}, dockFocus);
     const activePaneGroupOwner = useAppStore(state => state.activePaneGroupOwner[connectionId] ?? null);
     const splitBinding = useAppStore(state =>
-        state.settings.keybindings?.splitPanes || defaultSettings.keybindings.splitPanes,
+        state.settings.keybindings?.splitPanes ?? defaultSettings.keybindings.splitPanes,
     );
-    const stackedSplitBinding = SHORTCUT_CATALOG.find(command => command.id === 'splitPanes')
+    const sessionToolsHint = useAppStore(state => shortcutHint('snippetsFeature', state.settings.keybindings ?? {}));
+    const stackedSplitBinding = splitBinding ? (SHORTCUT_CATALOG.find(command => command.id === 'splitPanes')
         ?.extraKeys?.find(chord => chord.endsWith('ArrowDown'))
-        ?? 'Ctrl+Shift+ArrowDown';
+        ?? 'Ctrl+Shift+ArrowDown') : '';
     const canOpenFeature = Boolean(onOpenFeature);
     const splitLayout = layoutForCanvas(paneGroups, activeTerminalId, activePaneGroupOwner);
-    const focusedPane = splitLayout ? findNode(splitLayout.root, splitLayout.activePaneId) : null;
-    // A feature pane must not send Find to the last selected (possibly hidden) shell.
-    const findTerminalId = activeView !== 'terminal' ? null : splitLayout
-        ? (focusedPane && isPaneLeaf(focusedPane) && isTermContent(focusedPane.content) ? focusedPane.content.termId : null)
-        : activeTerminalId;
+    const findTerminalId = useAppStore(state => {
+        const target = workspaceSplitTarget(state, connectionId, {
+            featureId: isSplitFeatureId(activeView) ? activeView : undefined,
+            featureInstanceId: isSplitFeatureId(activeView) ? featureTabs.find(tab => tab.id === activeFeatureTabId)?.instanceId : undefined,
+            pluginPanelId: activeView.startsWith('plugin:') ? activeView.slice('plugin:'.length) : undefined,
+        });
+        return target && isTermContent(target.leaf.content) ? target.leaf.content.termId : null;
+    });
     const splitGroups = Object.entries(paneGroups ?? {})
         .filter((entry): entry is [string, NonNullable<typeof entry[1]>] => isSplitLayout(entry[1]));
     const allPaneLeaves = Object.values(paneGroups ?? {}).flatMap(layout => collectLeaves(layout.root));
@@ -307,9 +361,6 @@ export const CombinedTabBar = memo(function CombinedTabBar({
         groupedLeaves.flatMap((leaf) => (
             isFeatureContent(leaf.content) && leaf.content.instanceId ? [leaf.content.instanceId] : []
         )),
-    );
-    const extraLeafPluginIds = new Set(
-        groupedLeaves.flatMap((leaf) => (isPluginContent(leaf.content) ? [leaf.content.pluginId] : [])),
     );
     const filesInSplit = layoutHasFeature(splitLayout, 'files');
     const canOpenFilesSplit = filesInSplit || canSplit;
@@ -356,12 +407,10 @@ export const CombinedTabBar = memo(function CombinedTabBar({
         return { id: effectiveShellId, label: effectiveShellId };
     }, [connectionId, localDisplayFallbackShellId, remoteFallbackShellId, shellById]);
 
-    // Window drag hook for Linux compatibility
-    const dragRegionRef = useRef<HTMLDivElement>(null);
-    useWindowDrag(dragRegionRef, true);
-
     // Dropdown State
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+    // A placement change invalidates the popup anchor geometry, not the live pane content.
+    useEffect(() => { setIsDropdownOpen(false); }, [navigationPosition]);
     const [dropdownAlign, setDropdownAlign] = useState<'left' | 'right'>('left');
     const dropdownRef = useRef<HTMLDivElement>(null);
     const dropdownButtonRef = useRef<HTMLButtonElement>(null);
@@ -371,7 +420,7 @@ export const CombinedTabBar = memo(function CombinedTabBar({
         const handleClickOutside = (event: MouseEvent) => {
             const inContextMenu = event.target instanceof Element
                 && Boolean(event.target.closest('.context-menu-container, .context-menu-submenu-portal'));
-            if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node) && !inContextMenu) {
+            if (dropdownRef.current && !isInsideMenu(dropdownRef.current, event.target) && !inContextMenu) {
                 setIsDropdownOpen(false);
             }
             // Close context menu if click outside
@@ -393,7 +442,8 @@ export const CombinedTabBar = memo(function CombinedTabBar({
         .map(term => term.id)
         .filter(termId => isSplitLayout(paneGroups?.[termId]));
     const terminalSplitOwnerSet = new Set(terminalSplitOwners);
-    const pluginInventory = pluginTabInventory(openFeatures, pinnedFeatures, activeView);
+    const pluginInventory = deriveWorkspaceContentInventory([], paneGroups)
+        .filter(item => isPluginContent(item.content));
     const featureAnchorOwnerByTabId = new Map<string, string>();
     const featureAnchorTabIdByOwner = new Map<string, string>();
     const pluginAnchorOwnerById = new Map<string, string>();
@@ -426,13 +476,11 @@ export const CombinedTabBar = memo(function CombinedTabBar({
             featureAnchorTabIdByOwner.set(owner, featureAnchor.id);
             continue;
         }
-        const pluginAnchor = pluginInventory
-            .map(featureId => featureId.slice('plugin:'.length))
-            .find(pluginId => !claimedPlugins.has(pluginId) && layoutHasPlugin(layout, pluginId));
+        const pluginAnchor = pluginInventory.find(item => !claimedPlugins.has(item.id) && item.owner === owner);
         if (pluginAnchor) {
-            claimedPlugins.add(pluginAnchor);
-            pluginAnchorOwnerById.set(pluginAnchor, owner);
-            pluginAnchorIdByOwner.set(owner, pluginAnchor);
+            claimedPlugins.add(pluginAnchor.id);
+            pluginAnchorOwnerById.set(pluginAnchor.id, owner);
+            pluginAnchorIdByOwner.set(owner, pluginAnchor.id);
         }
     }
     const visibleFeatureTabs = featureTabs
@@ -456,12 +504,6 @@ export const CombinedTabBar = memo(function CombinedTabBar({
         seenFeatureCounts.set(featureTab.featureId, ordinal);
         standaloneFeatureOrdinals.set(featureTab.id, ordinal);
     }
-    const splitOwnerOrder = [
-        ...terminalSplitOwners,
-        ...splitGroups
-            .map(([owner]) => owner)
-            .filter(owner => !terminalSplitOwnerSet.has(owner)),
-    ];
     const renderedSplitOwners = new Set([
         ...terminalSplitOwners,
         ...featureAnchorTabIdByOwner.keys(),
@@ -469,14 +511,45 @@ export const CombinedTabBar = memo(function CombinedTabBar({
     ]);
 
     const renderSplitTab = (owner: string, layout: (typeof splitGroups)[number][1]) => {
-        const splitIndex = splitOwnerOrder.indexOf(owner);
-        const label = `Split ${splitIndex >= 0 ? splitIndex + 1 : 1}`;
         const isActive = splitLayout === layout
             || activePaneGroupOwner === owner;
-        const activePane = findNode(layout.root, layout.activePaneId);
+        const projected = projectVisiblePaneLayout(layout, hiddenContent);
+        const leaves = collectLeaves(layout.root);
+        const members = leaves.filter(leaf => !hiddenContent.has(paneContentKey(leaf.content, leaf.id))).map(leaf => {
+            const id = paneContentKey(leaf.content, leaf.id);
+            const content = leaf.content;
+            let defaultLabel: string;
+            let icon: ReactNode;
+            if (isTermContent(content)) {
+                const term = allTerminals?.find(item => item.id === content.termId);
+                defaultLabel = normalizeTerminalTitle(term?.title ?? 'Shell');
+                const shell = resolveShell(term?.shellOverride);
+                icon = shell ? <ShellIcon shell={shell} size={13} /> : <TerminalIcon size={13} />;
+            } else if (isFeatureContent(content)) {
+                const meta = FEATURE_META[content.featureId];
+                defaultLabel = meta.label;
+                const Icon = meta.icon;
+                icon = <Icon size={13} />;
+            } else {
+                defaultLabel = pluginPanels.find(panel => panel.id === content.pluginId)?.title ?? 'Plugin';
+                icon = <PluginIcon panelId={content.pluginId} size={13} />;
+            }
+            return { id, label: resolveDisplayTitle(defaultLabel, contentPresentation?.[id]?.displayAlias), icon };
+        });
+        const { label, description, closeDescription } = describePaneGroup(members, leaves.length - members.length);
+        const dock = dockFor(members.map(member => member.id));
+        const interactivePaneId = projected?.activePaneId;
+        const activePane = interactivePaneId ? findNode(layout.root, interactivePaneId) : null;
         const dockPayload = activePane && isPaneLeaf(activePane) ? paneDockPayload(activePane) : null;
-        return (
-            <Tooltip key={`split:${owner}`} content={label} position="bottom">
+        return {
+            id: `split:${owner}`,
+            label,
+            dragIcon: <PaneGroupTabIcon members={members} />,
+            groupDescription: description,
+            contextTarget: interactivePaneId ? { type: 'split', owner, paneId: interactivePaneId } as ContextMenuTarget : undefined,
+            contentIds: leaves.map(leaf => paneContentKey(leaf.content, leaf.id)),
+            render: (pinned: boolean) => (
+            <Tooltip key={`split:${owner}`} content={dock ? `${description} — ${dock.description}` : description} position="bottom">
                 <div
                     onPointerDown={(event) => {
                         if (dockPayload) beginDockPointer(event, dockPayload);
@@ -488,51 +561,52 @@ export const CombinedTabBar = memo(function CombinedTabBar({
                     onContextMenu={(event) => {
                         event.preventDefault();
                         event.stopPropagation();
+                        if (!interactivePaneId) return;
                         setContextMenu({
                             x: event.clientX,
                             y: event.clientY,
-                            target: { type: 'split', owner, paneId: layout.activePaneId },
+                            target: { type: 'split', owner, paneId: interactivePaneId },
                         });
                     }}
-                    data-tauri-drag-region="false"
+                    data-pane-group-tab data-zync-color="contentTab" data-zync-selected={isActive}
                     className={cn(
-                        "flex items-center gap-2 px-3 py-1.5 h-7 text-xs font-medium rounded-md transition-colors duration-100 cursor-grab min-w-[100px] max-w-[200px] group border border-transparent drag-none shrink-0 active:scale-[0.98] active:cursor-grabbing",
+                        COMPACT_TAB_ROW_CLASSES,
+                        "rounded-md transition-colors duration-100 cursor-grab min-w-[100px] max-w-[240px] group border border-transparent drag-none shrink-0 active:scale-[0.98] active:cursor-grabbing",
                         isActive
                             ? "bg-app-surface text-app-text shadow-sm border-app-border/50"
                             : "text-app-muted hover:bg-app-surface/50 hover:text-app-text",
                     )}
                 >
-                    <span className={cn(isActive ? 'text-app-accent' : 'text-app-muted')}>
-                        <SplitPaneIcon direction="horizontal" size={12} />
-                    </span>
-                    <span className="truncate flex-1">{label}</span>
+                    <ContentTabTrigger label={description} selected={isActive} compact dock={dock}>
+                        <PaneGroupTabIcon members={members} />
+                        <span data-tab-label className={COMPACT_TAB_LABEL_CLASSES}>{label}</span>
+                        {pinned && <ContentPinIndicator />}
+                    </ContentTabTrigger>
                     <button
+                        data-pane-group-close
                         type="button"
                         onClick={(event) => {
                             event.stopPropagation();
-                            onSplitClose?.(owner, layout.activePaneId);
+                            onPaneGroupClose?.(owner);
                         }}
                         className={cn(
-                            "p-0.5 rounded hover:bg-app-bg hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100",
+                            "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded hover:bg-app-bg hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
                             isActive && "opacity-100",
                         )}
-                        aria-label={`Close ${label}`}
-                        title="Close split"
+                        aria-label={closeDescription}
+                        title={closeDescription}
                     >
                         <X size={12} />
                     </button>
                 </div>
             </Tooltip>
-        );
+            ),
+        };
     };
-    return (
-        <div ref={dragRegionRef} className="flex items-center w-full bg-app-panel border-b border-app-border px-1 h-9 shrink-0 gap-1 select-none app-drag-region" data-tauri-drag-region>
-
-            {/* Scrollable Tabs Wrapper - flex-initial to size to content, allow shrinking for scroll */}
-            <div className="flex-initial min-w-0 flex overflow-x-auto scrollbar-hide h-full items-center gap-1 pr-1 app-drag-region" data-tauri-drag-region>
-
-                {/* 1. Terminal inventory; a shell-owned split replaces its owner in place. */}
-                {terminals.map(term => {
+    // Preserve the existing default anchors, then project instance preferences
+    // across the complete strip so DOM order matches the visible order.
+    const defaultTabs = [
+                ...terminals.map(term => {
                     const ownedSplit = paneGroups?.[term.id];
                     if (ownedSplit && isSplitLayout(ownedSplit)) {
                         return renderSplitTab(term.id, ownedSplit);
@@ -544,17 +618,21 @@ export const CombinedTabBar = memo(function CombinedTabBar({
                     const isActive = activeView === 'terminal'
                         && !activePaneGroupOwner
                         && (activeTerminalId === term.id || splitOwner === term.id);
-                    const tabLabel = normalizeTerminalTitle(term.title);
+                    const defaultTitle = normalizeTerminalTitle(term.title);
+                    const contentId = paneContentKey({ kind: 'term', termId: term.id }, term.id);
+                    const dock = dockFor([contentId]);
+                    const tabLabel = resolveDisplayTitle(defaultTitle, contentPresentation?.[contentId]?.displayAlias);
                     // Prefer tab-stamped shell only. Do not fall back to live Default Shell settings.
                     const effectiveShellId = term.shellOverride
                         ?? (connectionId === 'local'
                             ? localDisplayFallbackShellId
                             : remoteFallbackShellId);
                     const shell = resolveShell(effectiveShellId);
-                    return (
+                    return { id: contentId, label: tabLabel, dragIcon: shell ? <ShellIcon shell={shell} size={13} /> : <TerminalIcon size={13} />, contentIds: [contentId], contextTarget: { type: 'terminal', termId: term.id } as ContextMenuTarget,
+                        render: (pinned: boolean) => (
                         <Tooltip
                             key={term.id}
-                            content={tabLabel}
+                            content={`${tabLabel === defaultTitle ? defaultTitle : `${tabLabel} — ${defaultTitle}`}${dock ? ` — ${dock.description}` : ''}`}
                             position="bottom"
                         >
                             <div
@@ -574,7 +652,7 @@ export const CombinedTabBar = memo(function CombinedTabBar({
                                     e.stopPropagation();
                                     setContextMenu({ x: e.clientX, y: e.clientY, target: { type: 'terminal', termId: term.id } });
                                 }}
-                                data-tauri-drag-region="false"
+                                data-zync-color="contentTab" data-zync-selected={isActive}
                                 className={cn(
                                     "flex items-center gap-2 px-3 py-1.5 h-7 text-xs font-medium rounded-md transition-colors duration-100 cursor-grab min-w-[100px] max-w-[200px] group border border-transparent drag-none shrink-0 active:scale-[0.98] active:cursor-grabbing",
                                     isActive
@@ -583,16 +661,21 @@ export const CombinedTabBar = memo(function CombinedTabBar({
                                     fileDragActive && fileDropTermId === term.id && "border-app-accent bg-app-accent/15 text-app-text",
                                 )}
                             >
-                                {shell ? (
-                                    <ShellIcon shell={shell} size={12} />
-                                ) : (
-                                    <TerminalIcon size={12} className={cn(isActive ? "text-app-accent" : "text-app-muted")} />
-                                )}
-                                <span className="truncate flex-1">{tabLabel}</span>
+                                <ContentTabTrigger label={`${tabLabel} tab`} selected={isActive} dock={dock}>
+                                    {shell ? (
+                                        <ShellIcon shell={shell} size={12} />
+                                    ) : (
+                                        <TerminalIcon size={12} className={cn(isActive ? "text-app-accent" : "text-app-muted")} />
+                                    )}
+                                    <span className="truncate flex-1">{tabLabel}</span>
+                                    {pinned && <ContentPinIndicator />}
+                                </ContentTabTrigger>
                                 <button
+                                    type="button"
+                                    aria-label={`Close ${tabLabel}`}
                                     onClick={(e) => { e.stopPropagation(); onTerminalClose(term.id); }}
                                     className={cn(
-                                        "p-0.5 rounded hover:bg-app-bg hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100",
+                                        "p-0.5 rounded hover:bg-app-bg hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
                                         isActive && "opacity-100"
                                     )}
                                 >
@@ -600,16 +683,15 @@ export const CombinedTabBar = memo(function CombinedTabBar({
                                 </button>
                             </div>
                         </Tooltip>
-                    );
-                })}
+                    ) };
+                }),
 
-                {/* Restored/legacy groups without a current inventory anchor. */}
-                {splitGroups
+                // Restored/legacy groups without a current inventory anchor.
+                ...splitGroups
                     .filter(([owner]) => !renderedSplitOwners.has(owner))
-                    .map(([owner, layout]) => renderSplitTab(owner, layout))}
+                    .map(([owner, layout]) => renderSplitTab(owner, layout)),
 
-                {/* 2. Feature inventory; a feature-owned split replaces that feature in place. */}
-                {visibleFeatureTabs.map(featureTab => {
+                ...visibleFeatureTabs.map(featureTab => {
                     const anchoredOwner = featureAnchorOwnerByTabId.get(featureTab.id);
                     const anchoredLayout = anchoredOwner ? paneGroups?.[anchoredOwner] : undefined;
                     if (anchoredOwner && anchoredLayout && isSplitLayout(anchoredLayout)) {
@@ -618,10 +700,14 @@ export const CombinedTabBar = memo(function CombinedTabBar({
                     const featureId = featureTab.featureId;
                     const config = FEATURE_META[featureId];
                     const duplicateCount = standaloneFeatureCounts.get(featureId) ?? 0;
-                    const tabLabel = duplicateCount > 1
+                    const defaultTitle = duplicateCount > 1
                         ? `${config.label} ${standaloneFeatureOrdinals.get(featureTab.id) ?? 1}`
                         : config.label;
-                    const isActive = activeView === featureId && activeFeatureTabId === featureTab.id;
+                    const contentId = paneContentKey({ kind: 'feature', featureId, instanceId: featureTab.instanceId }, featureTab.id);
+                    const dock = dockFor([contentId]);
+                    const tabLabel = resolveDisplayTitle(defaultTitle, contentPresentation?.[contentId]?.displayAlias);
+                    const isActive = (activeView === featureId && activeFeatureTabId === featureTab.id)
+                        || (activeView === 'terminal' && Boolean(anchoredOwner) && activePaneGroupOwner === anchoredOwner);
                     const isPinned = pinnedFeatures.includes(featureId) && featureTab.id === `pinned:${featureId}`;
                     const Icon = config.icon;
                     const sourcePane = allPaneLeaves.find(leaf => (
@@ -630,7 +716,9 @@ export const CombinedTabBar = memo(function CombinedTabBar({
                         && leaf.content.instanceId === featureTab.instanceId
                     ));
 
-                    return (
+                    return { id: contentId, label: tabLabel, dragIcon: <Icon size={13} />, contentIds: [contentId], contextTarget: { type: 'feature', featureId, tabId: featureTab.id } as ContextMenuTarget,
+                        render: (pinned: boolean) => (
+                        <Tooltip content={`${tabLabel === defaultTitle ? defaultTitle : `${tabLabel} — ${defaultTitle}`}${dock ? ` — ${dock.description}` : ''}`} position="bottom">
                         <div
                             key={featureTab.id}
                             onPointerDown={(event) => {
@@ -651,7 +739,7 @@ export const CombinedTabBar = memo(function CombinedTabBar({
                                 e.stopPropagation();
                                 setContextMenu({ x: e.clientX, y: e.clientY, target: { type: 'feature', featureId, tabId: featureTab.id } });
                             }}
-                            data-tauri-drag-region="false"
+                            data-zync-color="contentTab" data-zync-selected={isActive}
                             className={cn(
                                 "flex items-center gap-2 px-3 py-1.5 h-7 text-xs font-medium rounded-md transition-colors duration-100 cursor-grab min-w-[90px] group border border-transparent relative drag-none shrink-0 active:scale-[0.98] active:cursor-grabbing",
                                 isActive
@@ -664,20 +752,25 @@ export const CombinedTabBar = memo(function CombinedTabBar({
                                 <div className="absolute top-0.5 right-0.5 w-1 h-1 rounded-full bg-app-accent" />
                             )}
 
-                            <span className={cn(
-                                "inline-flex h-4 w-4 items-center justify-center rounded-sm shrink-0",
-                                isActive ? "text-app-accent" : "text-app-muted"
-                            )}>
-                                <Icon size={11} />
-                            </span>
-                            <span className="truncate flex-1">{tabLabel}</span>
+                            <ContentTabTrigger label={`${tabLabel} tab`} selected={isActive} dock={dock}>
+                                <span className={cn(
+                                    "inline-flex h-4 w-4 items-center justify-center rounded-sm shrink-0",
+                                    isActive ? "text-app-accent" : "text-app-muted"
+                                )}>
+                                    <Icon size={11} />
+                                </span>
+                                <span className="truncate flex-1">{tabLabel}</span>
+                                {pinned && <ContentPinIndicator />}
+                            </ContentTabTrigger>
 
                             {/* Close Button (Hidden if Pinned) */}
                             {!isPinned && (
                                 <button
+                                    type="button"
+                                    aria-label={`Close ${tabLabel}`}
                                     onClick={(e) => { e.stopPropagation(); onFeatureTabClose(featureTab.id, featureId); }}
                                     className={cn(
-                                        "p-0.5 rounded hover:bg-app-bg hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100",
+                                        "p-0.5 rounded hover:bg-app-bg hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
                                         isActive && "opacity-100"
                                     )}
                                 >
@@ -685,39 +778,42 @@ export const CombinedTabBar = memo(function CombinedTabBar({
                                 </button>
                             )}
                         </div>
-                    );
-                })}
+                        </Tooltip>
+                    ) };
+                }),
 
-                {/* 3. Plugin panel inventory */}
-                {pluginInventory.map(featureId => {
-                    const panelId = featureId.replace('plugin:', '');
-                    const anchoredOwner = pluginAnchorOwnerById.get(panelId);
+                ...pluginInventory.map(item => {
+                    if (!isPluginContent(item.content)) return null;
+                    const panelId = item.content.pluginId;
+                    const anchoredOwner = pluginAnchorOwnerById.get(item.id);
                     const anchoredLayout = anchoredOwner ? paneGroups?.[anchoredOwner] : undefined;
                     if (anchoredOwner && anchoredLayout && isSplitLayout(anchoredLayout)) {
                         return renderSplitTab(anchoredOwner, anchoredLayout);
                     }
-                    if (extraLeafPluginIds.has(panelId)) return null;
+                    if (item.owner && isSplitLayout(paneGroups?.[item.owner])) return null;
                     const panel = pluginPanels.find(p => p.id === panelId) ?? { id: panelId, title: 'Plugin' };
-                    const pluginLeaf = allPaneLeaves.find(leaf =>
-                        isPluginContent(leaf.content) && leaf.content.pluginId === panelId,
-                    );
-                    const isActive = activeView === featureId;
-                    return (
+                    const dock = dockFor([item.id]);
+                    const tabLabel = resolveDisplayTitle(panel.title, contentPresentation?.[item.id]?.displayAlias);
+                    const pluginLeaf = allPaneLeaves.find(leaf => leaf.id === item.paneId);
+                    const isActive = (activeView === `plugin:${panelId}` || activeView === 'terminal') && activePaneGroupOwner === item.owner;
+                    return { id: item.id, label: tabLabel, dragIcon: <PluginIcon panelId={panelId} size={13} />, contentIds: [item.id], contextTarget: { type: 'plugin', panelId, contentId: item.id } as ContextMenuTarget,
+                        render: (pinned: boolean) => (
+                        <Tooltip content={`${tabLabel === panel.title ? panel.title : `${tabLabel} — ${panel.title}`}${dock ? ` — ${dock.description}` : ''}`} position="bottom">
                         <div
-                            key={featureId}
+                            key={item.id}
                             onPointerDown={(event) => beginDockPointer(event, pluginLeaf
                                 ? paneDockPayload(pluginLeaf)
                                 : { kind: 'plugin', pluginId: panelId })}
                             onClick={() => {
                                 if (consumeClickIfDragged()) return;
-                                onTabSelect(featureId);
+                                onPluginTabSelect(item.id);
                             }}
                             onContextMenu={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                setContextMenu({ x: e.clientX, y: e.clientY, target: { type: 'plugin', featureId } });
+                                setContextMenu({ x: e.clientX, y: e.clientY, target: { type: 'plugin', panelId, contentId: item.id } });
                             }}
-                            data-tauri-drag-region="false"
+                            data-zync-color="contentTab" data-zync-selected={isActive}
                             className={cn(
                                 "flex items-center gap-2 px-3 py-1.5 h-7 text-xs font-medium rounded-md transition-colors duration-100 cursor-grab min-w-[90px] group border border-transparent relative drag-none shrink-0 active:scale-[0.98] active:cursor-grabbing",
                                 isActive
@@ -725,34 +821,79 @@ export const CombinedTabBar = memo(function CombinedTabBar({
                                     : "text-app-muted hover:bg-app-surface/50 hover:text-app-text"
                             )}
                         >
-                            <PluginIcon panelId={panelId} size={14} className={cn(isActive ? "text-app-accent" : "text-app-muted")} />
-                            <span className="truncate flex-1">{panel.title}</span>
+                            <ContentTabTrigger label={`${tabLabel} tab`} selected={isActive} dock={dock}>
+                                <PluginIcon panelId={panelId} size={14} className={cn(isActive ? "text-app-accent" : "text-app-muted")} />
+                                <span className="truncate flex-1">{tabLabel}</span>
+                                {pinned && <ContentPinIndicator />}
+                            </ContentTabTrigger>
                             <button
-                                onClick={(e) => { e.stopPropagation(); onFeatureClose(featureId); }}
+                                type="button"
+                                aria-label={`Close ${tabLabel}`}
+                                onClick={(e) => { e.stopPropagation(); onPluginTabClose(item.id); }}
                                 className={cn(
-                                    "p-0.5 rounded hover:bg-app-bg hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100",
+                                    "p-0.5 rounded hover:bg-app-bg hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
                                     isActive && "opacity-100"
                                 )}
                             >
                                 <X size={12} />
                             </button>
                         </div>
-                    );
-                })}
-            </div>
+                        </Tooltip>
+                    ) };
+                }),
+    ].filter((tab): tab is NonNullable<typeof tab> => tab !== null);
+    const presentedTabs = projectWorkspaceTabs(defaultTabs, presentationScope);
+    const contextualExtras = (target: ContextMenuTarget | undefined) => target ? getContextMenuItems({
+        target, pinnedFeatures, onTerminalClose, onPluginTabClose, onFeatureTabClose, onTogglePin,
+        onUnsplit, onSplitUnsplit, onOpenSplitFeature, onOpenSplitPlugin, onDockTerm,
+        canUnsplitTab: target.type === 'terminal' && isSplit && findLayoutOwner(paneGroups, activeTerminalId ?? '') === target.termId,
+        canOpenSplit: target.type === 'feature' && isSplitFeatureId(target.featureId) ? canSplit || layoutHasFeature(splitLayout, target.featureId) : canSplit,
+        isCurrentShellGroup: target.type === 'terminal' && activeTerminalId != null && sameSplitGroup(paneGroups, activeTerminalId, target.termId),
+    }) : [];
+    return (
+        // Keep this strip out of native caption hit-testing so empty space can
+        // open pane recovery menus. The top title bar owns window dragging.
+        <div data-workspace-tab-strip data-workspace-scope={connectionId} tabIndex={-1} role="group" aria-label="Workspace tabs"
+            onContextMenu={event => workspaceActions?.open(event, undefined, toolbarMenu.items)}
+            onKeyDown={event => {
+                if (event.target === event.currentTarget && (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))) workspaceActions?.open(event, undefined, toolbarMenu.items);
+            }}
+            data-zync-color="contentTabs" className={cn('flex bg-app-panel border-app-border px-1 shrink-0 gap-1 select-none drag-none',
+                vertical ? 'host-tabs-vertical flex-col items-stretch h-full w-full min-w-0 py-1' : 'items-center w-full border-b h-9')}>
 
-            <div
-                className="relative flex items-center bg-app-surface/30 rounded-lg p-0.5 border border-app-border/30 drag-none shrink-0 ml-1"
-                data-tauri-drag-region="false"
-                ref={dropdownRef}
-            >
-                <Tooltip content="Open a tab" position="bottom">
-                    <button
+            {/* Chrome order is independent of retained content host mount order. */}
+            <WorkspaceStripHandle tabId={tabId} />
+            {/* Header drops include the open-tab button and trailing space, but not workspace actions. */}
+            <div data-tab-insertion-surface className={cn('flex flex-1 min-w-0 min-h-0 gap-1', vertical ? 'flex-col' : 'h-full items-center')}>
+                <div data-tab-drag-strip data-tab-drag-axis={vertical ? 'vertical' : 'horizontal'} className={cn('min-w-0 min-h-0 flex scrollbar-hide gap-1 drag-none',
+                    vertical ? 'flex-1 flex-col items-stretch overflow-y-auto overflow-x-hidden' : 'flex-initial overflow-x-auto h-full items-center pr-1')}>
+                    {presentedTabs.map(({ item, pinned }) => <div key={item.id} role="group"
+                        aria-label={'groupDescription' in item ? item.groupDescription : `${item.label} tab`}
+                        data-workspace-tab-contents={JSON.stringify(item.contentIds)}
+                        data-tab-drag-source data-tab-drag-item data-tab-drag-pinned={pinned}
+                        className={cn('shrink-0 rounded-md focus-visible:outline focus-visible:outline-1 focus-visible:outline-app-accent', vertical && 'w-full')}
+                        onContextMenuCapture={event => workspaceActions?.open(event, item.contentIds, contextualExtras(item.contextTarget))}
+                        onKeyDown={event => {
+                            if (event.target !== event.currentTarget.querySelector('[data-workspace-tab-trigger]')) return;
+                            if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) workspaceActions?.open(event, item.contentIds, contextualExtras(item.contextTarget));
+                            else if (event.key === 'F2' && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && item.contentIds.length === 1) {
+                                event.preventDefault(); event.stopPropagation(); workspaceActions?.rename(item.contentIds[0]);
+                            }
+                        }}>
+                        <div data-tab-drag-visual>{item.render(pinned)}</div>
+                        <div hidden aria-hidden="true"><TabDragPreview icon={item.dragIcon} compact={'groupDescription' in item}>{item.label}</TabDragPreview></div>
+                    </div>)}
+                </div>
+
+                <div
+                    className="relative flex items-center drag-none shrink-0 ml-1"
+                    ref={dropdownRef}
+                >
+                    <TabAddButton
                         ref={dropdownButtonRef}
-                        type="button"
-                        aria-haspopup="dialog"
-                        aria-expanded={isDropdownOpen}
-                        aria-label="Open a tab"
+                        id={openMenuId}
+                        label="Open a tab"
+                        open={isDropdownOpen}
                         onClick={() => {
                             const opening = !isDropdownOpen;
                             if (opening && dropdownButtonRef.current) {
@@ -765,171 +906,170 @@ export const CombinedTabBar = memo(function CombinedTabBar({
                                 requestAnimationFrame(() => onRefetchShells());
                             }
                         }}
-                        className={cn(
-                            'h-6 w-7 flex items-center justify-center rounded transition-colors',
-                            isDropdownOpen
-                                ? 'bg-app-surface text-white'
-                                : 'hover:bg-app-surface hover:text-white text-app-accent',
-                        )}
-                    >
-                        <Plus size={14} strokeWidth={3} />
-                    </button>
-                </Tooltip>
-                {isDropdownOpen && (
-                    <WorkspaceOpenMenu
-                        align={dropdownAlign}
-                        shells={availableShells}
-                        shellsLoading={shellsLoading}
-                        shellsError={shellsError}
-                        onRefetchShells={onRefetchShells}
-                        canOpenFeature={canOpenFeature}
-                        features={(Object.keys(FEATURE_META) as FeatureId[]).map((id) => ({
-                            id,
-                            isOpen: featureTabs.some(tab => tab.featureId === id),
-                            isActive: activeView === id && featureTabs.some(tab => tab.id === activeFeatureTabId && tab.featureId === id),
-                        }))}
-                        plugins={pluginPanels.map(panel => ({
-                            id: panel.id,
-                            title: panel.title,
-                            isOpen: pluginInventory.includes(`plugin:${panel.id}`),
-                        }))}
-                        onNewShell={onNewTerminal}
-                        onOpenFeature={onOpenFeature}
-                        onOpenPlugin={(pluginId) => onTabSelect(`plugin:${pluginId}`)}
-                        splitFeatures={SPLIT_FEATURE_IDS.map((id) => {
-                            const isOpen = layoutHasFeature(splitLayout, id);
-                            return { id, isOpen, canOpen: isOpen || canSplit };
-                        })}
-                        onOpenSplitFeature={onOpenSplitFeature}
-                        onOpenSplitPlugin={onOpenSplitPlugin}
-                        onSplitNewShell={onSplitNewShell}
-                        canSplitPane={canSplit}
-                        onClose={(source) => {
-                            setIsDropdownOpen(false);
-                            if (source === 'keyboard') {
-                                dropdownButtonRef.current?.focus();
-                            }
-                        }}
                     />
-                )}
+                    {isDropdownOpen && (
+                        <WorkspaceOpenMenu
+                            anchor={vertical ? dropdownButtonRef.current : undefined}
+                            align={dropdownAlign}
+                            shells={availableShells}
+                            shellsLoading={shellsLoading}
+                            shellsError={shellsError}
+                            onRefetchShells={onRefetchShells}
+                            canOpenFeature={canOpenFeature}
+                            features={(Object.keys(FEATURE_META) as FeatureId[]).map((id) => ({
+                                id,
+                                isOpen: featureTabs.some(tab => tab.featureId === id),
+                                isActive: activeView === id && featureTabs.some(tab => tab.id === activeFeatureTabId && tab.featureId === id),
+                            }))}
+                            plugins={pluginPanels.map(panel => ({
+                                id: panel.id,
+                                title: panel.title,
+                                isOpen: pluginInventory.some(item => isPluginContent(item.content) && item.content.pluginId === panel.id),
+                            }))}
+                            onNewShell={onNewTerminal}
+                            onOpenFeature={onOpenFeature}
+                            onOpenPlugin={(pluginId) => onTabSelect(`plugin:${pluginId}`)}
+                            splitFeatures={SPLIT_FEATURE_IDS.map((id) => {
+                                const isOpen = layoutHasFeature(splitLayout, id);
+                                return { id, isOpen, canOpen: isOpen || canSplit };
+                            })}
+                            onOpenSplitFeature={onOpenSplitFeature}
+                            onOpenSplitPlugin={onOpenSplitPlugin}
+                            onSplitNewShell={onSplitNewShell}
+                            canSplitPane={canSplit}
+                            onClose={(source) => {
+                                setIsDropdownOpen(false);
+                                if (source === 'keyboard') {
+                                    dropdownButtonRef.current?.focus();
+                                }
+                            }}
+                        />
+                    )}
+                </div>
             </div>
 
+            {contentActions}
             {(findTerminalId || onSplit || onToggleSessionTools) && (
                 <div
-                    className="ml-auto flex items-center shrink-0 gap-1 pr-0.5 drag-none"
-                    data-tauri-drag-region="false"
+                    tabIndex={-1}
+                    onContextMenu={toolbarMenu.onContextMenu}
+                    onKeyDown={toolbarMenu.onKeyDown}
+                    className={cn('flex items-center shrink-0 gap-1 pr-0.5 drag-none', vertical ? 'flex-wrap w-full' : 'ml-auto')}
                 >
-                    {findTerminalId && (
-                        <Tooltip content="Find in terminal" position="bottom">
-                            <button
-                                type="button"
-                                aria-label="Find in terminal"
-                                onClick={() => openTerminalFind(terminalCache.get(findTerminalId)?.term.element ?? null)}
-                                className="h-7 w-7 flex items-center justify-center rounded-md border border-transparent text-app-muted transition-colors hover:text-app-text hover:bg-app-surface hover:border-app-border/40"
-                            >
-                                <Search size={14} aria-hidden="true" />
-                            </button>
-                        </Tooltip>
-                    )}
-                    {onSplit && (
-                        <div className="flex items-center bg-app-surface/30 rounded-lg p-0.5 border border-app-border/30">
-                            <Tooltip
-                                content={`Split side by side (${formatShortcutLabel(splitBinding)})`}
-                                position="bottom"
-                            >
+                    <ChromeActionItems value={chromeActions} area="workspaceToolbar" slots={{
+                        'terminal.find': findTerminalId && (
+                            <Tooltip content="Find in terminal" position="bottom">
                                 <button
                                     type="button"
-                                    onClick={() => onSplit('horizontal')}
-                                    disabled={!canSplit}
-                                    aria-label="Split side by side"
-                                    className={cn(
-                                        'h-6 w-7 flex items-center justify-center rounded transition-colors',
-                                        isSplit
-                                            ? 'text-app-text'
-                                            : 'text-app-muted hover:text-app-text hover:bg-app-surface',
-                                        !canSplit && 'opacity-40 cursor-default hover:bg-transparent',
-                                    )}
+                                    aria-label="Find in terminal"
+                                    onClick={() => openTerminalFind(terminalCache.get(findTerminalId)?.term.element ?? null)}
+                                    className="h-7 w-7 flex items-center justify-center rounded-md border border-transparent text-app-muted transition-colors hover:text-app-text hover:bg-app-surface hover:border-app-border/40"
                                 >
-                                    <SplitPaneIcon direction="horizontal" />
+                                    <Search size={14} aria-hidden="true" />
                                 </button>
                             </Tooltip>
-                            <div className="w-px h-4 bg-app-border/50" />
-                            <Tooltip
-                                content={`Split stacked (${formatShortcutLabel(stackedSplitBinding)})`}
-                                position="bottom"
-                            >
-                                <button
-                                    type="button"
-                                    onClick={() => onSplit('vertical')}
-                                    disabled={!canSplit}
-                                    aria-label="Split stacked"
-                                    className={cn(
-                                        'h-6 w-7 flex items-center justify-center rounded transition-colors',
-                                        isSplit
-                                            ? 'text-app-text'
-                                            : 'text-app-muted hover:text-app-text hover:bg-app-surface',
-                                        !canSplit && 'opacity-40 cursor-default hover:bg-transparent',
-                                    )}
+                        ),
+                        'workspace.splits': onSplit && (
+                            <div className="flex items-center bg-app-surface/30 rounded-lg p-0.5 border border-app-border/30">
+                                <Tooltip
+                                    content={`Split side by side${splitBinding ? ` (${formatShortcutLabel(splitBinding)})` : ''}`}
+                                    position="bottom"
                                 >
-                                    <SplitPaneIcon direction="vertical" />
-                                </button>
-                            </Tooltip>
-                            {onOpenSplitFeature && (
-                                <>
-                                    <div className="w-px h-4 bg-app-border/50" />
-                                    <Tooltip
-                                        content={
-                                            filesInSplit
-                                                ? 'Files in split'
-                                                : canOpenFilesSplit
-                                                    ? 'Open Files in split'
-                                                    : 'Pane limit reached (4)'
-                                        }
-                                        position="bottom"
+                                    <button
+                                        type="button"
+                                        onClick={() => onSplit('horizontal')}
+                                        disabled={!canSplit}
+                                        aria-label="Split side by side"
+                                        className={cn(
+                                            'h-6 w-7 flex items-center justify-center rounded transition-colors',
+                                            isSplit
+                                                ? 'text-app-text'
+                                                : 'text-app-muted hover:text-app-text hover:bg-app-surface',
+                                            !canSplit && 'opacity-40 cursor-default hover:bg-transparent',
+                                        )}
                                     >
-                                        <button
-                                            type="button"
-                                            onClick={() => onOpenSplitFeature('files')}
-                                            disabled={!canOpenFilesSplit}
-                                            aria-label="Open Files in split"
-                                            aria-pressed={filesInSplit}
-                                            className={cn(
-                                                'h-6 w-7 flex items-center justify-center rounded transition-colors',
+                                        <SplitPaneIcon direction="horizontal" />
+                                    </button>
+                                </Tooltip>
+                                <div className="w-px h-4 bg-app-border/50" />
+                                <Tooltip
+                                    content={`Split stacked${stackedSplitBinding ? ` (${formatShortcutLabel(stackedSplitBinding)})` : ''}`}
+                                    position="bottom"
+                                >
+                                    <button
+                                        type="button"
+                                        onClick={() => onSplit('vertical')}
+                                        disabled={!canSplit}
+                                        aria-label="Split stacked"
+                                        className={cn(
+                                            'h-6 w-7 flex items-center justify-center rounded transition-colors',
+                                            isSplit
+                                                ? 'text-app-text'
+                                                : 'text-app-muted hover:text-app-text hover:bg-app-surface',
+                                            !canSplit && 'opacity-40 cursor-default hover:bg-transparent',
+                                        )}
+                                    >
+                                        <SplitPaneIcon direction="vertical" />
+                                    </button>
+                                </Tooltip>
+                                {onOpenSplitFeature && (
+                                    <>
+                                        <div className="w-px h-4 bg-app-border/50" />
+                                        <Tooltip
+                                            content={
                                                 filesInSplit
-                                                    ? 'text-app-text'
-                                                    : 'text-app-muted hover:text-app-text hover:bg-app-surface',
-                                                !canOpenFilesSplit && 'opacity-40 cursor-default hover:bg-transparent',
-                                            )}
+                                                    ? 'Files in split'
+                                                    : canOpenFilesSplit
+                                                        ? 'Open Files in split'
+                                                        : 'Pane limit reached (4)'
+                                            }
+                                            position="bottom"
                                         >
-                                            <FolderOpen size={14} />
-                                        </button>
-                                    </Tooltip>
-                                </>
-                            )}
-                        </div>
-                    )}
-                    {onToggleSessionTools && (
-                        <Tooltip
-                            content={`Session tools (${formatShortcutLabel('Ctrl+Shift+S')})`}
-                            position="bottom"
-                        >
-                            <button
-                                type="button"
-                                id={`session-tools-toggle-${tabId}`}
-                                onClick={onToggleSessionTools}
-                                aria-pressed={sessionToolsOpen}
-                                aria-label="Toggle session tools"
-                                className={cn(
-                                    'h-7 w-7 flex items-center justify-center rounded-md border transition-colors',
-                                    sessionToolsOpen
-                                        ? 'bg-app-accent/20 text-app-text border-app-accent/40'
-                                        : 'text-app-muted border-transparent hover:text-app-text hover:bg-app-surface hover:border-app-border/40',
+                                            <button
+                                                type="button"
+                                                onClick={() => onOpenSplitFeature('files')}
+                                                disabled={!canOpenFilesSplit}
+                                                aria-label="Open Files in split"
+                                                aria-pressed={filesInSplit}
+                                                className={cn(
+                                                    'h-6 w-7 flex items-center justify-center rounded transition-colors',
+                                                    filesInSplit
+                                                        ? 'text-app-text'
+                                                        : 'text-app-muted hover:text-app-text hover:bg-app-surface',
+                                                    !canOpenFilesSplit && 'opacity-40 cursor-default hover:bg-transparent',
+                                                )}
+                                            >
+                                                <FolderOpen size={14} />
+                                            </button>
+                                        </Tooltip>
+                                    </>
                                 )}
+                            </div>
+                        ),
+                        'workspace.sessionTools': onToggleSessionTools && (
+                            <Tooltip
+                                content={sessionToolsHint ? `Session tools (${sessionToolsHint})` : 'Session tools'}
+                                position="bottom"
                             >
-                                <PanelRight size={14} />
-                            </button>
-                        </Tooltip>
-                    )}
+                                <button
+                                    type="button"
+                                    id={`session-tools-toggle-${tabId}`}
+                                    onClick={onToggleSessionTools}
+                                    aria-pressed={sessionToolsOpen}
+                                    aria-label="Toggle session tools"
+                                    className={cn(
+                                        'h-7 w-7 flex items-center justify-center rounded-md border transition-colors',
+                                        sessionToolsOpen
+                                            ? 'bg-app-accent/20 text-app-text border-app-accent/40'
+                                            : 'text-app-muted border-transparent hover:text-app-text hover:bg-app-surface hover:border-app-border/40',
+                                    )}
+                                >
+                                    <PanelRight size={14} />
+                                </button>
+                            </Tooltip>
+                        ),
+                    }} />
+                    {toolbarMenu.menu}
                 </div>
             )}
 
@@ -938,29 +1078,7 @@ export const CombinedTabBar = memo(function CombinedTabBar({
                     x={contextMenu.x}
                     y={contextMenu.y}
                     onClose={() => setContextMenu(null)}
-                    items={getContextMenuItems({
-                        target: contextMenu.target,
-                        pinnedFeatures,
-                        onTerminalClose,
-                        onFeatureClose,
-                        onFeatureTabClose,
-                        onTogglePin,
-                        onUnsplit,
-                        onSplitClose,
-                        onSplitUnsplit,
-                        canUnsplitTab: contextMenu.target.type === 'terminal'
-                            && isSplit
-                            && findLayoutOwner(paneGroups, activeTerminalId ?? '') === contextMenu.target.termId,
-                        onOpenSplitFeature,
-                        onOpenSplitPlugin,
-                        onDockTerm,
-                        canOpenSplit: contextMenu.target.type === 'feature' && isSplitFeatureId(contextMenu.target.featureId)
-                            ? canSplit || layoutHasFeature(splitLayout, contextMenu.target.featureId)
-                            : canSplit,
-                        isCurrentShellGroup: contextMenu.target.type === 'terminal'
-                            && activeTerminalId != null
-                            && sameSplitGroup(paneGroups, activeTerminalId, contextMenu.target.termId),
-                    })}
+                    items={contextualExtras(contextMenu.target)}
                 />
             )}
         </div>

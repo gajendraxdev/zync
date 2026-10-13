@@ -15,18 +15,20 @@ const route = (event, policy = 'shell', focus = 'xterm', overrides = {}, excepti
   event, focus, policy, SHORTCUT_CATALOG, overrides, id => { actions.push(id); return true; }, exceptions,
 );
 
-const defaults = { terminalFocusPolicy: 'shell', terminalShortcutExceptions: ['commandPaletteMode', 'snippetsFeature'] };
+const secondaryIds = SHORTCUT_CATALOG.filter(row => row.actionId && row.terminalReservation).map(row => row.id);
+const defaults = { terminalFocusPolicy: 'shell', terminalShortcutExceptions: ['commandPaletteMode', 'snippetsFeature', ...secondaryIds], secondaryShortcutsVersion: 1 };
 assert.deepEqual(normalizeKeyboardSettings(undefined), defaults);
 assert.deepEqual(normalizeKeyboardSettings({ terminalFocusPolicy: 'bad' }), defaults);
 assert.deepEqual(normalizeKeyboardSettings({ terminalFocusPolicy: 'app' }), { ...defaults, terminalFocusPolicy: 'app' });
-assert.deepEqual(normalizeKeyboardSettings({ terminalShortcutExceptions: [] }).terminalShortcutExceptions, []);
+assert.deepEqual(normalizeKeyboardSettings({ terminalShortcutExceptions: [] }).terminalShortcutExceptions, secondaryIds, 'legacy profiles automatically receive only secondary reservations');
 assert.deepEqual(normalizeKeyboardSettings({ terminalShortcutExceptions: 'all' }), defaults);
-assert.deepEqual(normalizeKeyboardSettings({ terminalShortcutExceptions: ['snippetsFeature', 'snippetsFeature', 'toggleSidebar', null] }).terminalShortcutExceptions, ['snippetsFeature']);
+assert.deepEqual(normalizeKeyboardSettings({ terminalShortcutExceptions: ['snippetsFeature', 'snippetsFeature', 'termCopy', 'fmCopy', 'unknown', null] }).terminalShortcutExceptions, ['snippetsFeature', ...secondaryIds]);
 assert.deepEqual(normalizeKeyboardSettings(JSON.parse(JSON.stringify({ ...defaults, terminalShortcutExceptions: [] }))).terminalShortcutExceptions, [], 'disabled exceptions survive reload');
 assert.deepEqual(normalizeKeyboardSettings(JSON.parse(JSON.stringify({ ...defaults, terminalShortcutExceptions: ['filesFeature'] }))).terminalShortcutExceptions, ['filesFeature'], 'custom choices survive reload');
 assert.notEqual(normalizeKeyboardSettings(undefined).terminalShortcutExceptions, normalizeKeyboardSettings(undefined).terminalShortcutExceptions, 'default lists are not shared mutable state');
 for (const id of TERMINAL_SHORTCUT_EXCEPTION_IDS) {
-  assert.ok(SHORTCUT_CATALOG.some(command => command.id === id && command.when === 'always'), 'every exception maps to a real globally scoped command');
+  assert.ok(SHORTCUT_CATALOG.some(command => command.id === id && command.terminalReservation
+    && ['always', 'app', 'xterm'].includes(command.when)), 'every exception maps to an eligible named app command');
 }
 for (const event of [key('b'), key('p'), key('i'), key('t'), key('w'), key('f'), key(','), key('1'),
   key('Tab'), key('ArrowRight', { shiftKey: true }), key('ArrowLeft', { altKey: true }),
@@ -48,7 +50,14 @@ assert.equal(route(key('s', { shiftKey: true }), 'app', 'xterm', {}, []), true, 
 assert.equal(route(key('s', { shiftKey: true }), 'shell', 'app', {}, []), true, 'exception choices do not disable app-chrome shortcuts');
 assert.equal(route(key('f', { shiftKey: true })), false, 'no blanket Ctrl+Shift interception');
 assert.equal(route(key('f', { shiftKey: true }), 'shell', 'xterm', {}, ['filesFeature']), true);
-assert.equal(route(key('b'), 'shell', 'xterm', {}, ['toggleSidebar']), false, 'unapproved IDs cannot reserve terminal controls');
+assert.equal(route(key('b'), 'shell', 'xterm', {}, ['toggleSidebar']), true, 'sidebar can be explicitly reserved');
+assert.equal(route(key('c'), 'shell', 'xterm', {}, ['termCopy', 'terminalInterrupt']), false, 'invented IDs cannot reserve Ctrl+C');
+assert.equal(route(key('1', { altKey: true }), 'shell', 'xterm', {}, ['navigationHosts']), true, 'app-scoped navigation supports hybrid ownership');
+assert.equal(route(key('1', { altKey: true }), 'shell', 'field', {}, ['navigationHosts']), false, 'a reservation does not broaden editable-field scope');
+assert.equal(route(key('1', { altKey: true }), 'shell', 'xterm', {}, []), false, 'unreserved navigation passes through');
+assert.equal(route(key('q'), 'shell', 'xterm', { navigationHosts: 'Mod+Q' }, ['navigationHosts']), true, 'reservations use customized keys');
+assert.equal(route(key('ArrowDown', { shiftKey: true }), 'shell', 'xterm', { splitPanes: '' }, ['splitPanes']), false, 'removing a command disables its fixed aliases');
+assert.equal(route(key('p', { shiftKey: true }), 'shell', 'xterm', { commandPaletteMode: '' }), false, 'a removed reserved shortcut does not fall back to default');
 assert.equal(route(key('c', { shiftKey: true }), 'shell', 'xterm', {}, []), true, 'clipboard remains available with app exceptions disabled');
 assert.equal(route(key('v', { shiftKey: true }), 'shell', 'xterm', {}, []), true);
 actions.length = 0;
@@ -92,3 +101,28 @@ assert.equal(route(key('p', { ctrlKey: false, metaKey: true, shiftKey: true })),
 assert.equal(route(key('p', { shiftKey: true })), false, 'physical Ctrl+Shift+P remains terminal input on macOS');
 assert.equal(route(key('s', { shiftKey: true })), true, 'existing explicit Ctrl+Shift+S stays physical Ctrl');
 console.log('Shortcut ownership, overrides, repeats, IME/AltGraph and PTY boundary tests passed.');
+
+navigator.platform = 'Win32';
+const alternativeOnly = ['toggleSidebarAlternative'];
+actions.length = 0;
+assert.equal(route(key('b'), 'shell', 'xterm', {}, alternativeOnly), false, 'reserving the alternative preserves shell Ctrl+B');
+assert.equal(route(key('b', { shiftKey: true }), 'shell', 'xterm', {}, alternativeOnly), true);
+assert.deepEqual(actions, ['toggleSidebarAlternative']);
+assert.equal(route(key('b', { shiftKey: true }), 'shell', 'xterm', {}, ['toggleSidebar']), false, 'primary reservation does not reserve its alternative');
+assert.equal(route(key('b', { shiftKey: true }), 'shell', 'xterm', { toggleSidebarAlternative: '' }, alternativeOnly), false);
+assert.equal(route(key('q', { shiftKey: true }), 'shell', 'xterm', { toggleSidebarAlternative: 'Mod+Shift+Q' }, alternativeOnly), true);
+assert.equal(route(key('b', { shiftKey: true }), 'shell', 'xterm', { toggleSidebar: '' }, alternativeOnly), true, 'removing the primary does not remove an independent alternative');
+
+// Automatic adoption is idempotent and does not make secondary keys terminal-only.
+const upgraded = normalizeKeyboardSettings({ terminalFocusPolicy: 'shell', terminalShortcutExceptions: [] });
+assert.deepEqual(normalizeKeyboardSettings(upgraded), upgraded);
+for (const platform of ['Win32', 'MacIntel']) {
+  navigator.platform = platform;
+  const modifiers = { ctrlKey: platform === 'Win32', metaKey: platform === 'MacIntel' };
+  for (const policy of ['shell', 'app']) {
+    assert.equal(route(key('p', modifiers), policy, 'app', {}, upgraded.terminalShortcutExceptions), true);
+    assert.equal(route(key(' ', { ...modifiers, shiftKey: true }), policy, 'app', {}, upgraded.terminalShortcutExceptions), true);
+    assert.equal(route(key(' ', { ...modifiers, shiftKey: true }), policy, 'xterm', {}, upgraded.terminalShortcutExceptions), true);
+    assert.equal(route(key('p', modifiers), policy, 'xterm', {}, upgraded.terminalShortcutExceptions), policy === 'app');
+  }
+}

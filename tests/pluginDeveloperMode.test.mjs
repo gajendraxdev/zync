@@ -7,7 +7,7 @@ const review = fs.readFileSync('src-tauri/src/plugins/install/review.rs', 'utf8'
 const broker = fs.readFileSync('src-tauri/src/plugins/broker.rs', 'utf8');
 const commands = fs.readFileSync('src-tauri/src/commands.rs', 'utf8');
 const developerTab = fs.readFileSync('src/components/settings/tabs/plugins/PluginsDeveloperTab.tsx', 'utf8');
-const settingsHook = fs.readFileSync('src/components/settings/hooks/useSettingsPlugins.ts', 'utf8');
+const settingsHook = fs.readFileSync('src/features/plugins/presentation/usePluginManagement.ts', 'utf8');
 
 assert.match(scanner, /struct PluginState[\s\S]*developer_mode: bool/);
 assert.match(scanner, /user_plugin_enabled_by_policy\([\s\S]*manifest_version < 2[\s\S]*developer_mode/);

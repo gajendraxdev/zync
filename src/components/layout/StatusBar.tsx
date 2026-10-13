@@ -1,8 +1,12 @@
 import { CircleAlert, Monitor, PanelLeft, Sparkles, Wifi, WifiOff } from 'lucide-react';
 import { LOCAL_TERMINAL_CONNECTION_ID } from '../../features/connections/application/tabService';
+import { sidebarPresentation } from '../../features/workspace/application/sidebarPresentation';
+import { runShortcutCommand } from '../../features/shortcuts/actions';
 import { useEditorStatus } from '../../features/editor/editorStatus';
 import { formatShortcutLabel } from '../../lib/shortcuts';
 import { useAppStore } from '../../store/useAppStore';
+import { ChromeActionItems } from './ChromeActionItems';
+import { useChromeCustomizationMenu } from './useChromeCustomizationMenu';
 import { cn } from '../../lib/utils';
 import { Tooltip } from '../ui/Tooltip';
 import { StatusBarTransferIndicator } from '../file-manager/StatusBarTransferIndicator';
@@ -20,17 +24,18 @@ const statusToggleBtnClass =
 
 function EditorStatusText() {
   const editorStatus = useEditorStatus();
-  return <span className="text-app-muted font-mono text-[11px] tracking-wide">{editorStatus}</span>;
+  return <span data-zync-color-label className="text-app-muted font-mono text-[11px] tracking-wide">{editorStatus}</span>;
 }
 
 export function StatusBar() {
   const activeConnectionId = useAppStore(state => state.activeConnectionId);
+  const chromeActions = useAppStore(state => state.settings.chromeActions);
+  const statusMenu = useChromeCustomizationMenu('statusBar');
   const connections = useAppStore(state => state.connections);
   const activeConnection = connections.find((c) => c.id === activeConnectionId);
   const isLocalWorkspace = activeConnectionId === LOCAL_TERMINAL_CONNECTION_ID;
-  const sidebarCollapsed = useAppStore(state => state.settings.sidebarCollapsed);
+  const sidebarCollapsed = useAppStore(state => sidebarPresentation(state.settings.workspaceNavigation, state.globalSidebarSection, state.settings.sidebarCollapsed).collapsed);
   const keybindings = useAppStore(state => state.settings.keybindings);
-  const updateSettings = useAppStore(state => state.updateSettings);
   const toggleAiSidebar = useAppStore(state => state.toggleAiSidebar);
   const isAiSidebarOpen = useAppStore(state => state.isAiSidebarOpen);
   const editorDiagnosticsCount = useAppStore(state => state.editorDiagnosticsCount);
@@ -38,15 +43,13 @@ export function StatusBar() {
   const editorDiagnosticsVisible = useAppStore(state => state.editorDiagnosticsVisible);
   const setEditorDiagnosticsVisible = useAppStore(state => state.setEditorDiagnosticsVisible);
   const isMac = (window.electronUtils?.platform || 'linux') === 'darwin';
-  const sidebarShortcut = formatShortcutLabel(keybindings?.toggleSidebar || 'Mod+B', isMac);
-  const aiShortcut = formatShortcutLabel(keybindings?.aiCommandBar || 'Mod+I', isMac);
+  const sidebarShortcut = formatShortcutLabel(keybindings?.toggleSidebar ?? 'Mod+B', isMac);
+  const aiShortcut = formatShortcutLabel(keybindings?.aiCommandBar ?? 'Mod+I', isMac);
+  const sidebarHint = sidebarShortcut ? ` (${sidebarShortcut})` : '';
+  const aiHint = aiShortcut ? ` (${aiShortcut})` : '';
 
   const toggleSidebar = () => {
-    window.dispatchEvent(new CustomEvent('zync:layout-transition-start'));
-    void updateSettings({ sidebarCollapsed: !sidebarCollapsed });
-    window.setTimeout(() => {
-      window.dispatchEvent(new CustomEvent('zync:layout-transition-end'));
-    }, 320);
+    runShortcutCommand('toggleSidebar', new KeyboardEvent('keydown'));
   };
 
   const isLiveConnected = activeConnection?.status === 'connected';
@@ -62,11 +65,12 @@ export function StatusBar() {
   });
 
   return (
-    <div className="h-9 bg-app-panel border-t border-app-border flex items-center px-2.5 text-[11px] select-none text-app-text/80 justify-between shrink-0 gap-2">
+    <div data-zync-color="statusBar" tabIndex={-1} onContextMenu={statusMenu.onContextMenu} onKeyDown={statusMenu.onKeyDown}
+      className="h-9 bg-app-panel border-t border-app-border flex items-center px-2.5 text-[11px] select-none text-app-text/80 justify-between shrink-0 gap-2">
       {/* Bottom-left: sidebar toggle + connection status */}
       <div className="flex min-w-0 items-center gap-2 overflow-hidden">
         <Tooltip
-          content={`${sidebarCollapsed ? 'Show Sidebar' : 'Hide Sidebar'} (${sidebarShortcut})`}
+          content={`${sidebarCollapsed ? 'Show Sidebar' : 'Hide Sidebar'}${sidebarHint}`}
           position="top"
         >
           <button
@@ -76,7 +80,7 @@ export function StatusBar() {
               statusToggleBtnClass,
               !sidebarCollapsed && 'text-app-accent bg-app-accent/10 border-app-accent/20',
             )}
-            aria-label={`${sidebarCollapsed ? 'Show Sidebar' : 'Hide Sidebar'} (${sidebarShortcut})`}
+            aria-label={`${sidebarCollapsed ? 'Show Sidebar' : 'Hide Sidebar'}${sidebarHint}`}
           >
             <PanelLeft size={14} />
           </button>
@@ -110,7 +114,7 @@ export function StatusBar() {
                 className="min-w-0 max-w-full justify-start overflow-hidden"
               >
                 <span className="inline-flex min-w-0 max-w-full overflow-hidden">
-                  <span className="min-w-0 truncate font-medium hover:text-white transition-colors">
+                  <span data-zync-color-label className="min-w-0 truncate font-medium hover:text-white transition-colors">
                     {activeConnection.name}
                   </span>
                 </span>
@@ -124,7 +128,7 @@ export function StatusBar() {
             >
               <div className="flex min-w-0 max-w-full items-center gap-1.5 overflow-hidden">
                 <Wifi size={12} className="text-app-warning shrink-0 animate-pulse" />
-                <span className="min-w-0 truncate text-app-muted">{activeConnection.name}</span>
+                <span data-zync-color-label className="min-w-0 truncate text-app-muted">{activeConnection.name}</span>
               </div>
             </Tooltip>
           ) : activeConnection ? (
@@ -135,18 +139,18 @@ export function StatusBar() {
             >
               <div className="flex min-w-0 max-w-full items-center gap-1.5 overflow-hidden">
                 <WifiOff size={12} className="text-app-muted shrink-0" />
-                <span className="min-w-0 truncate text-app-muted">{activeConnection.name}</span>
+                <span data-zync-color-label className="min-w-0 truncate text-app-muted">{activeConnection.name}</span>
               </div>
             </Tooltip>
           ) : isLocalWorkspace ? (
             <div className="flex shrink-0 items-center gap-1.5">
               <Monitor size={12} className="text-app-muted shrink-0" />
-              <span className="whitespace-nowrap text-app-muted">Local</span>
+              <span data-zync-color-label className="whitespace-nowrap text-app-muted">Local</span>
             </div>
           ) : (
             <div className="flex shrink-0 items-center gap-1.5">
               <WifiOff size={12} className="text-app-muted shrink-0" />
-              <span className="whitespace-nowrap text-app-muted">No Connection</span>
+              <span data-zync-color-label className="whitespace-nowrap text-app-muted">No Connection</span>
             </div>
           )}
         </div>
@@ -156,48 +160,53 @@ export function StatusBar() {
 
       {/* Bottom-right: status bits + AI toggle */}
       <div className="flex items-center gap-3 shrink-0">
-        <EditorStatusText />
-        {editorDiagnosticsCount > 0 && (
-          <button
-            type="button"
-            onClick={() => setEditorDiagnosticsVisible(!editorDiagnosticsVisible)}
-            className="inline-flex items-center gap-1 rounded-sm px-1 py-0.5 hover:bg-app-surface/60"
-            title={`${editorDiagnosticsVisible ? 'Hide' : 'Show'} diagnostics (${editorDiagnosticsCount})`}
-          >
-            <CircleAlert
-              size={13}
-              className={cn(
-                editorDiagnosticsSeverity === 'error' ? 'text-app-danger' : 'text-app-warning',
-                editorDiagnosticsVisible && 'opacity-100',
-                !editorDiagnosticsVisible && 'opacity-85',
-              )}
-            />
-            <span className="font-mono text-[11px] text-app-muted">{editorDiagnosticsCount}</span>
-          </button>
-        )}
+        <ChromeActionItems value={chromeActions} area="statusBar" slots={{
+          'status.editor': <EditorStatusText />,
+          'status.diagnostics': editorDiagnosticsCount > 0 && (
+            <Tooltip content={`${editorDiagnosticsVisible ? 'Hide' : 'Show'} diagnostics (${editorDiagnosticsCount})`} position="top">
+            <button
+              type="button"
+              onClick={() => setEditorDiagnosticsVisible(!editorDiagnosticsVisible)}
+              className="inline-flex items-center gap-1 rounded-sm px-1 py-0.5 hover:bg-app-surface/60"
+              aria-label={`${editorDiagnosticsVisible ? 'Hide' : 'Show'} diagnostics (${editorDiagnosticsCount})`}
+            >
+              <CircleAlert
+                size={13}
+                className={cn(
+                  editorDiagnosticsSeverity === 'error' ? 'text-app-danger' : 'text-app-warning',
+                  editorDiagnosticsVisible && 'opacity-100',
+                  !editorDiagnosticsVisible && 'opacity-85',
+                )}
+              />
+              <span className="font-mono text-[11px] text-app-muted">{editorDiagnosticsCount}</span>
+            </button>
+            </Tooltip>
+          ),
+          'status.transfers': <StatusBarTransferIndicator />,
+          'status.updates': <StatusBarUpdateIndicator />,
+          'status.message': <StatusMessage />,
+          'status.inbox': <StatusBarInboxIndicator />,
+          'status.notifications': showInStatusRight && <NotificationBell tooltipPosition="top" size="status" />,
+          'status.ai': <>
+            <div className="h-4 w-px shrink-0 bg-app-border/50" aria-hidden />
 
-        <StatusBarTransferIndicator />
-        <StatusBarUpdateIndicator />
-        <StatusMessage />
-        <StatusBarInboxIndicator />
-        {showInStatusRight && <NotificationBell tooltipPosition="top" size="status" />}
-
-        <div className="h-4 w-px shrink-0 bg-app-border/50" aria-hidden />
-
-        <Tooltip content={`AI Assistant (${aiShortcut})`} position="top">
-          <button
-            type="button"
-            onClick={toggleAiSidebar}
-            className={cn(
-              statusToggleBtnClass,
-              isAiSidebarOpen && 'text-app-accent bg-app-accent/10 border-app-accent/20',
-            )}
-            aria-label={`Toggle AI Sidebar (${aiShortcut})`}
-          >
-            <Sparkles size={14} />
-          </button>
-        </Tooltip>
+            <Tooltip content={`AI Assistant${aiHint}`} position="top">
+              <button
+                type="button"
+                onClick={toggleAiSidebar}
+                className={cn(
+                  statusToggleBtnClass,
+                  isAiSidebarOpen && 'text-app-accent bg-app-accent/10 border-app-accent/20',
+                )}
+                aria-label={`Toggle AI Sidebar${aiHint}`}
+              >
+                <Sparkles size={14} />
+              </button>
+            </Tooltip>
+          </>,
+        }} />
       </div>
+      {statusMenu.menu}
     </div>
   );
 }

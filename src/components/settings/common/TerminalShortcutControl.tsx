@@ -1,54 +1,31 @@
-import { useId, useSyncExternalStore } from 'react';
+import { useId } from 'react';
 import { Keyboard } from 'lucide-react';
 import { TerminalShortcutMenu } from './TerminalShortcutMenu';
-import { normalizeKeyboardSettings, normalizeTerminalFocusPolicy, TERMINAL_SHORTCUT_EXCEPTION_IDS, type KeyboardSettings } from '../../../features/shortcuts/policy';
+import { normalizeTerminalFocusPolicy } from '../../../features/shortcuts/policy';
 import { SHORTCUT_CATALOG } from '../../../features/shortcuts/catalog';
-import { formatShortcutLabel } from '../../../lib/shortcuts';
+import { activeShortcutBindingLabel, resolveShortcutBindings } from '../../../features/shortcuts/bindings';
+import { useKeyboardShortcutSettings } from './useKeyboardShortcutSettings';
 import { useAppStore } from '../../../store/useAppStore';
 import { Select } from '../../ui/Select';
 
-// All mounted controls share the in-flight write, not a second preference.
-let saving = false;
-const listeners = new Set<() => void>();
-const subscribe = (listener: () => void) => {
-    listeners.add(listener);
-    return () => { listeners.delete(listener); };
-};
-const getSaving = () => saving;
-function setSaving(value: boolean): void {
-    saving = value;
-    listeners.forEach(listener => listener());
-}
-
 /** One global preference and save boundary for menu, quick settings, and Settings. */
-export function TerminalShortcutControl({ compact = false, showExceptions = false, menu = false }: { compact?: boolean; showExceptions?: boolean; menu?: boolean }) {
+export function TerminalShortcutControl({ compact = false, showExceptions = false, menu = false, showHelp = true, onManage }: { compact?: boolean; showExceptions?: boolean; menu?: boolean; showHelp?: boolean; onManage?: () => void }) {
     const controlId = useId();
     const descriptionId = useId();
-    const rawKeyboard = useAppStore(state => state.settings.keyboard);
-    const keyboard = normalizeKeyboardSettings(rawKeyboard);
+    const { keyboard, pending, save, reserve } = useKeyboardShortcutSettings();
+    const overrides = useAppStore(state => state.settings.keybindings) ?? {};
     const enabled = keyboard.terminalFocusPolicy === 'app';
-    const pending = useSyncExternalStore(subscribe, getSaving, getSaving);
-    const save = async (updates: Partial<KeyboardSettings>) => {
-        if (saving) return;
-        setSaving(true);
-        try {
-            await useAppStore.getState().updateKeyboardSettings(updates);
-        } catch {
-            useAppStore.getState().showToast('error', 'Could not save terminal shortcut preference. Please try again.');
-        } finally {
-            setSaving(false);
-        }
-    };
-    const choices = SHORTCUT_CATALOG.filter(command => TERMINAL_SHORTCUT_EXCEPTION_IDS.some(id => id === command.id));
-    const reserved = choices.filter(command => keyboard.terminalShortcutExceptions.includes(command.id));
+    const choices = SHORTCUT_CATALOG.filter(command => command.terminalReservation);
+    const reserved = choices.filter(command => keyboard.terminalShortcutExceptions.includes(command.id)
+        && resolveShortcutBindings(command, overrides, SHORTCUT_CATALOG).active.length > 0);
     const reservation = reserved.length
-        ? `Kept for Zync: ${reserved.map(command => `${formatShortcutLabel(command.defaultKeys)} (${command.label})`).join(', ')}.`
+        ? `Kept for Zync: ${reserved.map(command => `${activeShortcutBindingLabel(command, overrides, SHORTCUT_CATALOG)} (${command.label})`).join(', ')}.`
         : 'No app shortcuts are reserved.';
     const description = enabled
         ? 'Zync shortcuts take priority in the focused terminal.'
         : 'Terminal keys take priority. Selected Zync shortcuts and terminal copy/paste remain available.';
     if (menu) {
-        return <TerminalShortcutMenu value={keyboard.terminalFocusPolicy} pending={pending}
+        return <TerminalShortcutMenu value={keyboard.terminalFocusPolicy} pending={pending} onManage={onManage}
             onChange={value => { void save({ terminalFocusPolicy: value }); }} />;
     }
     return (
@@ -75,28 +52,28 @@ export function TerminalShortcutControl({ compact = false, showExceptions = fals
             />
             <p id={descriptionId} className={compact ? 'sr-only' : 'text-xs text-app-muted'}>{description}</p>
             {pending && <p role="status" className="text-xs text-app-muted">Saving…</p>}
-            {!compact && (
+            {!compact && showHelp && (
                 showExceptions ? (
                     <details className="pt-1">
                         <summary className="cursor-pointer text-xs font-medium text-app-text">Customize terminal-first shortcuts</summary>
                         <fieldset disabled={pending || enabled} className="mt-2 space-y-2 disabled:opacity-60">
                             <legend className="sr-only">Zync shortcut exceptions</legend>
                             <p className="text-xs text-app-muted">Keep the checked shortcuts for Zync. Uncheck all to pass app shortcuts to the terminal; terminal copy/paste remain available. Choose Terminal first to edit.</p>
-                            {choices.map(command => (
-                                <label key={command.id} className="flex flex-wrap items-center gap-2 text-xs text-app-text">
-                                    <input
-                                        type="checkbox"
-                                        checked={keyboard.terminalShortcutExceptions.includes(command.id)}
-                                        onChange={event => {
-                                            const current = normalizeKeyboardSettings(useAppStore.getState().settings.keyboard).terminalShortcutExceptions;
-                                            void save({ terminalShortcutExceptions: event.target.checked
-                                                ? [...current, command.id] : current.filter(id => id !== command.id) });
-                                        }}
-                                    />
-                                    <span>{command.label}</span>
-                                    <span className="ml-auto break-words text-app-muted">{[command.defaultKeys, ...(command.extraKeys ?? [])].map(chord => formatShortcutLabel(chord)).join(' / ')}</span>
-                                </label>
-                            ))}
+                            {choices.map(command => {
+                                const active = resolveShortcutBindings(command, overrides, SHORTCUT_CATALOG).active.length > 0;
+                                return (
+                                    <label key={command.id} className="flex flex-wrap items-center gap-2 text-xs text-app-text">
+                                        <input
+                                            type="checkbox"
+                                            checked={active && keyboard.terminalShortcutExceptions.includes(command.id)}
+                                            disabled={!active}
+                                            onChange={event => { void reserve(command.id, event.target.checked); }}
+                                        />
+                                        <span>{command.label}</span>
+                                        <span className="ml-auto break-words text-app-muted">{activeShortcutBindingLabel(command, overrides, SHORTCUT_CATALOG)}</span>
+                                    </label>
+                                );
+                            })}
                         </fieldset>
                     </details>
                 ) : <p className="text-[10px] text-app-muted">Choose exceptions in Settings → Shortcuts.</p>

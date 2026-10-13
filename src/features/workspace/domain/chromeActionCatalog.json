@@ -1,0 +1,13 @@
+{
+  "terminal.find": { "area": "workspaceToolbar", "position": 0, "label": "Find in terminal", "optional": true },
+  "workspace.splits": { "area": "workspaceToolbar", "position": 1, "label": "Split controls", "optional": true },
+  "workspace.sessionTools": { "area": "workspaceToolbar", "position": 2, "label": "Session tools", "optional": true },
+  "status.editor": { "area": "statusBar", "position": 0, "label": "Editor position", "optional": true },
+  "status.diagnostics": { "area": "statusBar", "position": 1, "label": "Editor diagnostics", "optional": false },
+  "status.transfers": { "area": "statusBar", "position": 2, "label": "File transfers", "optional": false },
+  "status.updates": { "area": "statusBar", "position": 3, "label": "App updates", "optional": false },
+  "status.message": { "area": "statusBar", "position": 4, "label": "Action messages", "optional": false },
+  "status.inbox": { "area": "statusBar", "position": 5, "label": "Replies inbox", "optional": false },
+  "status.notifications": { "area": "statusBar", "position": 6, "label": "Notifications", "optional": false },
+  "status.ai": { "area": "statusBar", "position": 7, "label": "AI assistant", "optional": true }
+}

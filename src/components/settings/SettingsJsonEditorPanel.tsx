@@ -3,6 +3,9 @@ import { invoke } from '@tauri-apps/api/core';
 import { FileEditorHost } from '../FileEditorHost';
 import { CODEMIRROR_EDITOR_ID } from '../editor/providers';
 import { useAppStore } from '../../store/useAppStore';
+import { Button } from '../ui/Button';
+import { PanelHeader } from '../ui/PanelHeader';
+import { Toolbar } from '../ui/Toolbar';
 
 interface SettingsFilePayload {
     path: string;
@@ -180,31 +183,37 @@ export function SettingsJsonEditorPanel({ onClose }: SettingsJsonEditorPanelProp
 
     return (
         <div className="h-full flex flex-col animate-in fade-in duration-300 bg-app-bg">
-            <div className="flex h-9 items-center justify-between border-b border-app-border px-3">
-                <div className="min-w-0 truncate text-sm font-semibold text-app-text">
-                    settings.json
-                </div>
-                <div className="flex items-center gap-2">
-                    <span className="rounded border border-app-border bg-app-surface/40 px-2 py-0.5 text-[10px] font-medium text-app-muted">
-                        {modKey}+S
-                    </span>
-                    <span className="rounded border border-app-border bg-app-surface/40 px-2 py-0.5 text-[10px] font-medium text-app-muted">
-                        {modKey}+F
-                    </span>
-                    <button
-                        onClick={loadSettingsJson}
-                        className="px-2 py-1 rounded-md text-[11px] border border-app-border hover:bg-app-surface"
-                    >
-                        Reload
-                    </button>
-                    <button
-                        onClick={restoreLastKnownGoodSettings}
-                        className="px-2 py-1 rounded-md text-[11px] border border-app-border hover:bg-app-surface"
-                    >
-                        Restore
-                    </button>
-                </div>
-            </div>
+            <PanelHeader
+                title="settings.json"
+                titleClassName="font-semibold"
+                className="min-h-9 px-3 py-1"
+                actions={(
+                    <Toolbar label="Settings JSON actions">
+                        <span className="rounded border border-app-border bg-app-surface/40 px-2 py-0.5 text-[10px] font-medium text-app-muted">
+                            {modKey}+S
+                        </span>
+                        <span className="rounded border border-app-border bg-app-surface/40 px-2 py-0.5 text-[10px] font-medium text-app-muted">
+                            {modKey}+F
+                        </span>
+                        <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            onClick={loadSettingsJson}
+                        >
+                            Reload
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            onClick={restoreLastKnownGoodSettings}
+                        >
+                            Restore
+                        </Button>
+                    </Toolbar>
+                )}
+            />
             {(hasExternalChange || settingsJsonError) && (
                 <div className="border-b border-app-border px-3 py-1.5 text-[11px] text-app-muted space-y-1">
                     {hasExternalChange && (

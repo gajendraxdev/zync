@@ -23,10 +23,21 @@ assert.match(store, /closePaneInSplit:[\s\S]*?isPaneCloseBlocked\(paneCloseScope
   'closing one split pane must check only that pane for unsaved content');
 assert.match(layout, /if \(!store\.closePaneInSplit\(tab\.connectionId, pane\.id\)\) return;/,
   'feature tabs must remain open when pane close is blocked');
-assert.match(layout, /if \(!store\.closePaneGroup\(tab\.connectionId, owner\)\) return;[\s\S]*?setFeatureTabs\(remainingFeatureTabs\)/,
-  'group tabs must not be removed before the guarded close succeeds');
-assert.match(tabs, /if \(!closePaneInSplit\(connectionId, focused\.id\)\) return;/,
-  'undocking must stop when a dirty editor blocks pane removal');
+assert.match(layout, /const featureTabs = useMemo\(\(\) => featureTabsFromPaneGroups\(paneGroups\), \[paneGroups\]\)/,
+  'feature tabs must derive from canonical groups so a blocked close cannot remove the tab independently');
+const groupClose = layout.match(/const handlePaneGroupClose = useCallback\([\s\S]*?\n    \}, \[/)?.[0];
+assert.ok(groupClose, 'group close callback must exist');
+const groupGuard = groupClose.indexOf('if (!store.closePaneGroup(tab.connectionId, owner)) return;');
+assert.ok(groupGuard >= 0, 'a refused group close must return immediately');
+for (const effect of ['const groupsAfterClose =', 'toggleConnectionFeature(', 'setActiveFeatureTabId(', 'setTabView(', 'handlePluginTabSelect(']) {
+  assert.ok(groupClose.indexOf(effect) > groupGuard, `${effect} must run only after the guarded close succeeds`);
+}
+const undock = tabs.match(/const handleUnsplit = \([\s\S]*?\n    \};/)?.[0];
+assert.ok(undock, 'undocking must have an explicit release handler');
+assert.match(undock, /if \(!releasePaneFromSplit\(connectionId, \{ contentId: paneContentKey\(focused\.content, focused\.id\) \}\)\) return;/,
+  'undocking moves the existing content through the non-destructive release path');
+assert.doesNotMatch(undock, /closePaneInSplit|closePaneGroup/,
+  'undocking must not close a dirty editor or invoke close guards');
 assert.match(connections, /closeTab:[\s\S]*?isPaneLayoutCloseBlocked\(connectionId, layout\)/,
   'closing a connection tab must respect its unsaved pane editors');
 

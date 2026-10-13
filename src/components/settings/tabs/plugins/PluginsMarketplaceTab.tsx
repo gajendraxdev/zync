@@ -1,6 +1,6 @@
 import { RefreshCw } from 'lucide-react';
 import { Marketplace } from '../../Marketplace';
-import type { RegistryPlugin } from '../../../../features/plugins/types';
+import type { InstalledPlugin, RegistryPlugin } from '../../../../features/plugins/types';
 
 interface PluginsMarketplaceTabProps {
     isLoadingRegistry: boolean;
@@ -9,9 +9,10 @@ interface PluginsMarketplaceTabProps {
     betaPluginIds: ReadonlySet<string>;
     onSetPluginBeta: (pluginId: string, enabled: boolean) => Promise<void>;
     onInspectPlugin: (plugin: RegistryPlugin) => Promise<void>;
+    onUninstallPlugin: (plugin: InstalledPlugin) => Promise<void>;
 }
 
-export function PluginsMarketplaceTab({ isLoadingRegistry, registry, selectedRegistry, betaPluginIds, onSetPluginBeta, onInspectPlugin }: PluginsMarketplaceTabProps) {
+export function PluginsMarketplaceTab({ isLoadingRegistry, registry, selectedRegistry, betaPluginIds, onSetPluginBeta, onInspectPlugin, onUninstallPlugin }: PluginsMarketplaceTabProps) {
     if (isLoadingRegistry) {
         return (
             <div
@@ -28,7 +29,7 @@ export function PluginsMarketplaceTab({ isLoadingRegistry, registry, selectedReg
 
     return (
         <div className="h-full">
-            <Marketplace registry={registry} selectedRegistry={selectedRegistry} betaPluginIds={betaPluginIds} onSetPluginBeta={onSetPluginBeta} onInspectPlugin={onInspectPlugin} />
+            <Marketplace registry={registry} selectedRegistry={selectedRegistry} betaPluginIds={betaPluginIds} onSetPluginBeta={onSetPluginBeta} onInspectPlugin={onInspectPlugin} onUninstallPlugin={onUninstallPlugin} />
         </div>
     );
 }

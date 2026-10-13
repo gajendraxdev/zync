@@ -13,7 +13,8 @@ import { terminalOcclusion, TERMINAL_HEADER_HEIGHT } from '../../features/plugin
 import { useAppStore } from '../../store/useAppStore';
 import { buildXtermOptions } from '../../lib/terminal/xtermOptions';
 import { getTerminalDocument } from '../../lib/terminal/terminalDocument';
-import { resolveXtermTheme } from '../terminal/terminalTheme';
+import { applyXtermTheme, resolveXtermTheme } from '../terminal/terminalTheme';
+import { TERMINAL_ELEMENT_COLORS_CHANGED } from '../../features/appearance/presentation/elementColorStyle';
 import { registerTerminalInteraction } from '../../lib/terminal/terminalInteraction';
 import { routeTerminalKey } from '../../lib/terminal/terminalKeyRouting';
 /** Stable host sibling: only the plugin's rectangle is shared, never xterm/PTY. */
@@ -45,7 +46,7 @@ export function PluginTerminalLayer({ iframe, runtime, pane, plugin, pluginName,
     const promptGate = useRef(new TerminalPromptGate());
     const opening = useRef(false);
     const blocked = useAppStore(s => Boolean(s.confirmDialog || s.isSettingsOpen || s.isAddConnectionModalOpen));
-    const settings = useAppStore(s => s.settings);
+    const terminalSettings = useAppStore(s => s.settings.terminal);
     const allocation = rect && allocateTerminalSurface(rect, viewport);
     const occlusion = allocation ? terminalOcclusion(allocation.clip, overlays) : { hidden: false };
     const active = visible && !document.hidden && !blocked && !suppressed && Boolean(rect) && !occlusion.hidden;
@@ -175,7 +176,7 @@ export function PluginTerminalLayer({ iframe, runtime, pane, plugin, pluginName,
         const update = () => {
             if (!terminal.current)
                 return;
-            const options = buildXtermOptions({ settings: settings.terminal, theme: resolveXtermTheme(host.current, undefined, { enabled: false, opacity: 1 }) });
+            const options = buildXtermOptions({ settings: terminalSettings, theme: resolveXtermTheme(host.current, undefined, { enabled: false, opacity: 1 }) });
             Object.assign(terminal.current.options, options, { allowProposedApi: false, scrollback: 2000 });
             if (activeRef.current) {
                 fit.current?.fit();
@@ -187,7 +188,15 @@ export function PluginTerminalLayer({ iframe, runtime, pane, plugin, pluginName,
         observer.observe(document.body, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
         update();
         return () => observer.disconnect();
-    }, [settings]);
+    }, [terminalSettings]);
+    useEffect(() => {
+        // Color-only updates must not fit, resize, replace or reconnect the live terminal.
+        const repaint = () => {
+            if (terminal.current) applyXtermTheme(terminal.current, host.current, undefined, { enabled: false, opacity: 1 });
+        };
+        window.addEventListener(TERMINAL_ELEMENT_COLORS_CHANGED, repaint);
+        return () => window.removeEventListener(TERMINAL_ELEMENT_COLORS_CHANGED, repaint);
+    }, []);
     const open = async () => {
         if (!document.hasFocus() || !activeRef.current || opening.current || busy || closed || !offer)
             return;

@@ -12,6 +12,11 @@ mod pty;
 mod pty_output_flush;
 mod pty_term_env;
 mod session;
+mod navigation_settings;
+mod element_color_settings;
+mod theme_settings;
+mod chrome_action_settings;
+mod preference_settings;
 mod shell_icons;
 mod snippets;
 mod ssh;
@@ -236,6 +241,11 @@ pub fn run() {
             commands::get_system_info,
             commands::settings_get,
             commands::settings_set,
+            commands::settings_theme_set,
+            commands::settings_element_colors_save,
+            commands::settings_theme_import,
+            commands::settings_navigation_save,
+            commands::settings_chrome_actions_save,
             commands::settings_get_path,
             commands::settings_read_raw,
             commands::settings_write_raw,

@@ -30,7 +30,8 @@ import {
     submitAgentGoal,
     submitAskQuery,
 } from './sidebarSubmit';
-import { useAiSidebarResize } from './useAiSidebarResize';
+import { AI_SIDEBAR_WIDTH_LIMITS, useAiSidebarWidth } from './useAiSidebarWidth';
+import { SidebarChrome, SidebarContent } from '../layout/sidebar/SidebarChrome';
 import { useVaultStore } from '../../vault/useVaultStore';
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -164,16 +165,7 @@ export function AiSidebar({ connectionId, activeTermId: activeTermIdProp, onRunC
     const agentRunning = activeRunId !== null;
 
     // ── Resize ───────────────────────────────────────────────────────────
-    const {
-        width,
-        isAnimating,
-        transition,
-        sidebarOuterRef,
-        sidebarInnerRef,
-        resizeHandlers,
-        handleAnimationStart,
-        handleAnimationComplete,
-    } = useAiSidebarResize();
+    const { width, saveWidth } = useAiSidebarWidth();
     // Provider / Model
     const activeProviderValue = (aiSettings?.provider ?? 'ollama') as ProviderValue;
     const {
@@ -411,33 +403,12 @@ export function AiSidebar({ connectionId, activeTermId: activeTermIdProp, onRunC
 
     // ── Render ───────────────────────────────────────────────────────────
     return (
-        <AnimatePresence>
+        <SidebarChrome position="right" collapsed={!isOpen} savedWidth={width} onResize={saveWidth}
+            widthLimits={AI_SIDEBAR_WIDTH_LIMITS} resizeLabel="Resize AI panel" landmarkLabel="AI Assistant" order={2} className="bg-app-bg">
+            {/* Inner panel */}
             {isOpen && (
-                <motion.aside
-                    key="ai-sidebar"
-                    ref={sidebarOuterRef as React.RefObject<HTMLElement>}
-                    initial={{ width: 0 }}
-                    animate={{ width }}
-                    exit={{ width: 0 }}
-                    transition={transition}
-                    onAnimationStart={handleAnimationStart}
-                    onAnimationComplete={handleAnimationComplete}
-                    className={cn('relative flex shrink-0', isAnimating && 'overflow-hidden')}
-                    style={{ minWidth: 0 }}
-                >
-                    {/* Drag handle */}
-                    <div
-                        className="absolute top-0 bottom-0 left-0 w-1 cursor-col-resize z-[60] hover:bg-app-accent/60 transition-colors"
-                        {...resizeHandlers}
-                        style={{ touchAction: 'none' }}
-                        aria-label="Resize AI panel"
-                    />
-
-                        {/* Inner panel */}
-                        <div
-                            ref={sidebarInnerRef}
-                            className="flex flex-col shrink-0 border-l border-app-border/40 bg-app-bg h-full"
-                            style={{ width }}
+                        <SidebarContent
+                            className="flex flex-col shrink-0 bg-app-bg h-full"
                         >
                             {/* ── Header (clean & minimalist) ── */}
                             <div className="shrink-0 flex items-center justify-between gap-2 px-4 py-3 bg-app-bg z-10 w-full relative">
@@ -612,9 +583,8 @@ export function AiSidebar({ connectionId, activeTermId: activeTermIdProp, onRunC
                                 />
                             </div>
                         </div>
-                    </div>
-                </motion.aside>
+                    </SidebarContent>
             )}
-        </AnimatePresence>
+        </SidebarChrome>
     );
 }

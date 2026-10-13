@@ -1,5 +1,7 @@
 import { useRef, useState } from 'react';
 import { Button } from '../../ui/Button';
+import { Input } from '../../ui/Input';
+import { Textarea } from '../../ui/Textarea';
 import { Select } from '../../ui/Select';
 import { Section } from '../common/Section';
 import {
@@ -146,76 +148,60 @@ export function FeedbackTab() {
           {feedbackInboxEnabled && (
             <div className="space-y-2 text-xs text-app-muted">
               <InboxReplyNotice />
-              <button
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
                 onClick={() =>
                   window.dispatchEvent(new Event(INBOX_OPEN_EVENT))
                 }
                 className="text-app-accent"
               >
                 Open replies inbox
-              </button>
+              </Button>
             </div>
           )}
 
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-app-muted">
-              Category
-            </label>
-            <Select
-              value={category}
-              onChange={(value) => setCategory(value as FeedbackCategory)}
-              options={FEEDBACK_CATEGORY_OPTIONS}
-              showSearch={false}
-            />
-          </div>
+          <Select
+            label="Category"
+            value={category}
+            onChange={(value) => setCategory(value as FeedbackCategory)}
+            options={FEEDBACK_CATEGORY_OPTIONS}
+            showSearch={false}
+          />
 
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-app-muted">
-              Message
-            </label>
-            <textarea
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              rows={5}
-              maxLength={4000}
-              placeholder="What’s on your mind?"
-              className="w-full resize-y rounded-md border border-app-border bg-app-bg px-3 py-2 text-sm text-app-text outline-none focus:border-app-accent/50"
-            />
-          </div>
+          <Textarea
+            label="Message"
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            rows={5}
+            maxLength={4000}
+            placeholder="What’s on your mind?"
+          />
 
           {category === 'bug' && (
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-app-muted">
-                Steps to reproduce (optional)
-              </label>
-              <textarea
-                value={reproSteps}
-                onChange={(e) => setReproSteps(e.target.value)}
-                rows={3}
-                maxLength={2000}
-                placeholder="1. …  2. …  3. …"
-                className="w-full resize-y rounded-md border border-app-border bg-app-bg px-3 py-2 text-sm text-app-text outline-none focus:border-app-accent/50"
-              />
-            </div>
+            <Textarea
+              label="Steps to reproduce (optional)"
+              value={reproSteps}
+              onChange={(e) => setReproSteps(e.target.value)}
+              rows={3}
+              maxLength={2000}
+              placeholder="1. …  2. …  3. …"
+            />
           )}
 
           <div className="space-y-2">
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-app-muted">
-                Email
-              </label>
-              <input
-                type="email"
-                value={contactEmail}
-                onChange={(e) => {
-                  const next = e.target.value;
-                  setContactEmail(next);
-                  if (!next.trim()) setAllowContact(false);
-                }}
-                placeholder="you@example.com"
-                className="h-9 w-full rounded-md border border-app-border bg-app-bg px-3 text-sm text-app-text outline-none focus:border-app-accent/50"
-              />
-            </div>
+            <Input
+              label="Email"
+              type="email"
+              value={contactEmail}
+              onChange={(e) => {
+                const next = e.target.value;
+                setContactEmail(next);
+                if (!next.trim()) setAllowContact(false);
+              }}
+              placeholder="you@example.com"
+            />
             <label
               className={`flex items-center gap-2 text-xs ${
                 contactEmail.trim() ? 'text-app-muted' : 'text-app-muted/45'
@@ -233,16 +219,19 @@ export function FeedbackTab() {
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               onClick={() => {
                 void openGitHubIssue();
               }}
-              className="text-left text-xs text-app-muted transition-colors hover:text-app-text"
+              className="h-auto min-h-[var(--zync-control-height-sm)] justify-start whitespace-normal text-left"
             >
               Want it public? Open a GitHub issue
-            </button>
+            </Button>
             <Button
+              type="button"
               size="sm"
               isLoading={submitting}
               onClick={() => {
