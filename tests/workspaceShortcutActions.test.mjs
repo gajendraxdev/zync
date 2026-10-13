@@ -419,7 +419,7 @@ test('primary and alternative sidebar shortcuts toggle Hosts with the rail and r
     assert.equal(subject.get().settings.sidebarCollapsed, false);
     subject.run('toggleSidebar');
     assert.equal(subject.get().settings.sidebarCollapsed, true);
-    subject.set({ settings: { sidebarCollapsed: false, workspaceNavigation: preferences } });
+    subject.set({ settings: { sidebarCollapsed: false, workspaceNavigation: { ...preferences, visible: false } } });
     subject.get().setGlobalSidebarSection('vaults');
     subject.run('toggleSidebarAlternative');
     assert.equal(subject.get().settings.sidebarCollapsed, true);

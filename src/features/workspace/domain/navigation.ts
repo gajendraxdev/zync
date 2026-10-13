@@ -20,9 +20,16 @@ export interface WorkspaceNavigation {
     readonly workspaceTabsPosition?: WorkspaceTabsPosition;
 }
 
+/** Missing preferences show the activity bar; saved visibility remains authoritative. */
 export const DEFAULT_WORKSPACE_NAVIGATION: WorkspaceNavigation = Object.freeze({
-    version: 3, visible: false, position: 'left', showLabels: false,
+    version: 3, visible: true, position: 'left', showLabels: false,
     order: NAVIGATION_IDS, hidden: Object.freeze([]), workspaceTabsPosition: 'default',
+});
+
+// Unsupported settings may contain a hidden preference we cannot interpret.
+// Preserve the existing hidden recovery view without rewriting that envelope.
+const READ_ONLY_WORKSPACE_NAVIGATION: WorkspaceNavigation = Object.freeze({
+    ...DEFAULT_WORKSPACE_NAVIGATION, visible: false,
 });
 
 export function isNavigationId(value: unknown): value is NavigationId {
@@ -118,8 +125,8 @@ export function changeWorkspaceNavigation(current: WorkspaceNavigation, action: 
     return JSON.stringify(valid) === JSON.stringify(current) ? current : valid;
 }
 
-/** Preserve raw settings at the persistence boundary; display a safe disabled fallback only. */
+/** Missing settings inherit defaults; unsupported raw settings retain a hidden read-only fallback. */
 export function resolveWorkspaceNavigation(value: unknown): WorkspaceNavigation {
     const parsed = parseWorkspaceNavigation(value);
-    return parsed ? migrateWorkspaceNavigation(parsed) : DEFAULT_WORKSPACE_NAVIGATION;
+    return parsed ? migrateWorkspaceNavigation(parsed) : READ_ONLY_WORKSPACE_NAVIGATION;
 }

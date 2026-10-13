@@ -97,8 +97,11 @@ function Gallery() {
             input.value = 'retained text';
             const parent = frame.parentElement;
             const initialLoads = loads.current;
+            check(preview.current!.querySelector('nav[aria-label="Global navigation"]'), 'Global activity bar is visible by default');
+            await change({ type: 'visible', value: false });
+            check(!preview.current!.querySelector('nav[aria-label="Global navigation"]'), 'Saved hide choice removes the activity bar');
             await change({ type: 'visible', value: true });
-            check(preview.current!.querySelector('nav[aria-label="Global navigation"]'), 'Global activity bar is opt-in');
+            check(preview.current!.querySelector('nav[aria-label="Global navigation"]'), 'Activity bar can be shown again');
             check(!preview.current!.querySelector('[data-navigation-item="workspace"]'), 'Undocked workspace has no duplicate navigation icon');
             for (const position of ['left', 'right'] as const) {
                 await change({ type: 'position', value: position });
