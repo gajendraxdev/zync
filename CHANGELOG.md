@@ -4,19 +4,13 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
-### Changed
+## [2.35.1] - 2026-10-14
 
-- **Activity-bar default:** Show global side navigation when no navigation preference
-  has been saved. Preserve existing visible/hidden choices, including older supported
-  settings; keep unsupported preferences read-only with a hidden fallback. Reset
-  navigation restores the visible default. Host workspace tab-strip sidebar placement
-  remains opt-in, and no load-time preference rewrite is introduced. ([905f8eb])
-
-## [2.35.0] - 2026-10-12
+This release combines the unpublished 2.35.0 draft with the activity-bar default change.
 
 ### Added
 
-- **Global navigation:** Enable the optional left/right activity bar for Hosts,
+- **Global navigation:** Use the configurable left/right activity bar for Hosts,
   Host workspace, Public URLs, global Port Forwarding, Snippets, Command Palette,
   Vaults and plugin management. Reorder items with shared pointer dragging or
   contextual/keyboard actions and hide/reveal entries. Icon-only navigation uses
@@ -382,6 +376,12 @@ All notable changes to Zync are documented in this file. The format is based on 
   ([1cac232], [75a2b87])
 
 ### Changed
+
+- **Activity-bar default:** Show global side navigation when no navigation preference
+  has been saved. Preserve existing visible/hidden choices, including older supported
+  settings; keep unsupported preferences read-only with a hidden fallback. Reset
+  navigation restores the visible default. Host workspace tab-strip sidebar placement
+  remains opt-in, and no load-time preference rewrite is introduced. ([905f8eb])
 
 - **Consistent tab add buttons:** Main and pane strips share one themed add-button
   component, with matching size, icon weight, hover/menu states and Zync tooltips.
@@ -2399,8 +2399,8 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [840afc2]: https://github.com/zync-sh/zync/commit/840afc2
 [193f568]: https://github.com/zync-sh/zync/commit/193f568
 [4e3c5ff]: https://github.com/zync-sh/zync/commit/4e3c5ff
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.35.0...HEAD
-[2.35.0]: https://github.com/zync-sh/zync/compare/v2.34.1...v2.35.0
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.35.1...HEAD
+[2.35.1]: https://github.com/zync-sh/zync/compare/v2.34.1...v2.35.1
 [2.34.1]: https://github.com/zync-sh/zync/compare/v2.34.0...v2.34.1
 [2.34.0]: https://github.com/zync-sh/zync/compare/v2.33.12...v2.34.0
 [2.33.12]: https://github.com/zync-sh/zync/compare/v2.33.11...v2.33.12
