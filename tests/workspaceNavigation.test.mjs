@@ -253,16 +253,18 @@ function preferencesPort(initial, save = async () => {}) {
     return { port, writes, value: () => value, reload: next => { generation++; value = next; }, loading: next => { loading = next; } };
 }
 
-test('global navigation defaults are opt-in, strict, bounded and protect utility access', () => {
+test('global navigation defaults are visible, strict, bounded and protect utility access', () => {
     assert.equal(domain.parseWorkspaceNavigation(undefined), domain.DEFAULT_WORKSPACE_NAVIGATION);
-    assert.equal(defaults().visible, false);
+    assert.equal(domain.resolveWorkspaceNavigation(undefined), domain.DEFAULT_WORKSPACE_NAVIGATION);
+    assert.equal(defaults().visible, true);
+    assert.equal(defaults().workspaceTabsPosition, 'default', 'host strip sidebar placement remains opt-in');
     for (const bad of [null, [], {}, { ...defaults(), version: 99 }, { ...defaults(), extra: true },
         { ...defaults(), visible: 1 }, { ...defaults(), position: 'top' }, { ...defaults(), position: 'bottom' },
         { ...defaults(), order: ['hosts'] }, { ...defaults(), hidden: ['hosts', 'hosts'] },
         { ...defaults(), hidden: ['settings'] }, { ...defaults(), hidden: ['profile'] },
         { ...defaults(), workspaceTabsPosition: 'bottom' }, { ...defaults(), workspaceTabsPosition: undefined }]) {
         assert.equal(domain.parseWorkspaceNavigation(bad), null);
-        assert.equal(domain.resolveWorkspaceNavigation(bad), domain.DEFAULT_WORKSPACE_NAVIGATION);
+        assert.deepEqual(plain(domain.resolveWorkspaceNavigation(bad)), { ...defaults(), visible: false }, 'unsupported settings retain the hidden read-only fallback');
     }
     const parsed = domain.parseWorkspaceNavigation(defaults());
     parsed.order.reverse(); assert.notDeepEqual(plain(parsed), defaults());
@@ -273,7 +275,7 @@ test('workspace strip placement rejects non-string JSON values without changing 
         const raw = { ...defaults(), workspaceTabsPosition: value };
         const before = structuredClone(raw);
         assert.equal(domain.parseWorkspaceNavigation(raw), null);
-        assert.equal(domain.resolveWorkspaceNavigation(raw), domain.DEFAULT_WORKSPACE_NAVIGATION);
+        assert.deepEqual(plain(domain.resolveWorkspaceNavigation(raw)), { ...defaults(), visible: false });
         assert.deepEqual(raw, before);
     }
 });
@@ -300,12 +302,24 @@ test('legacy v1/v2 data projects global-only chrome without a load-time write or
     }
 });
 
+test('saved visible and hidden choices survive resolution across every supported version', () => {
+    for (const version of [1, 2, 3]) for (const visible of [false, true]) {
+        const raw = { ...(version === 3 ? defaults() : legacy(version)), visible };
+        const before = structuredClone(raw);
+        const resolved = domain.resolveWorkspaceNavigation(raw);
+        assert.equal(resolved.visible, visible);
+        assert.equal(resolved.workspaceTabsPosition, 'default');
+        assert.deepEqual(raw, before, 'resolving defaults never rewrites saved choices');
+    }
+});
+
 test('global order, visibility and host-tab placement are independent bounded choices', () => {
     let current = domain.changeWorkspaceNavigation(defaults(), { type: 'move', id: 'snippets', targetId: 'hosts' });
     assert.equal(current.order[0], 'snippets');
     current = domain.changeWorkspaceNavigation(current, { type: 'hidden', id: 'snippets', value: true });
     current = domain.changeWorkspaceNavigation(current, { type: 'workspace-tabs', value: 'right' });
     current = domain.changeWorkspaceNavigation(current, { type: 'reset' });
+    assert.equal(current.visible, true, 'Reset restores the visible activity-bar default');
     assert.equal(current.workspaceTabsPosition, 'right');
     assert.deepEqual(Array.from(current.hidden), []);
     for (const utility of ['settings', 'profile']) {
@@ -333,12 +347,12 @@ test('serialized confirmed saves publish only after acknowledgement and compose 
     const gate = deferred();
     const state = preferencesPort(undefined, async () => { await gate.promise; });
     const update = createNavigationUpdater(state.port);
-    const first = update({ type: 'visible', value: true });
+    const first = update({ type: 'visible', value: false });
     const second = update({ type: 'move', id: 'snippets', targetId: 'hosts' });
     await Promise.resolve();
     assert.equal(state.value(), undefined); assert.equal(state.writes.length, 1);
     gate.resolve(); await Promise.all([first, second]);
-    assert.equal(state.value().visible, true); assert.equal(state.value().order[0], 'snippets');
+    assert.equal(state.value().visible, false); assert.equal(state.value().order[0], 'snippets');
     assert.deepEqual(state.writes[0].expected, { exists: false });
     await update({ type: 'move', id: 'snippets', targetId: 'snippets' });
     assert.equal(state.writes.length, 2);
@@ -347,7 +361,7 @@ test('serialized confirmed saves publish only after acknowledgement and compose 
 test('reload supersedes acknowledged writes, including absent-key ABA reloads', async () => {
     for (const fresh of [undefined, { version: 99, opaque: true }]) {
         const gate = deferred(); const state = preferencesPort(undefined, () => gate.promise);
-        const saving = createNavigationUpdater(state.port)({ type: 'visible', value: true });
+        const saving = createNavigationUpdater(state.port)({ type: 'visible', value: false });
         await Promise.resolve(); state.reload(fresh); gate.resolve();
         await assert.rejects(saving, /settings changed/); assert.equal(state.value(), fresh);
     }
@@ -356,10 +370,10 @@ test('reload supersedes acknowledged writes, including absent-key ABA reloads', 
 test('failed acknowledgement retries through native comparison even for an apparent reset no-op', async () => {
     let fail = true; const state = preferencesPort(undefined, async () => { if (fail) throw Error('lost reply'); });
     const update = createNavigationUpdater(state.port);
-    await assert.rejects(update({ type: 'visible', value: true }), /lost reply/);
+    await assert.rejects(update({ type: 'visible', value: false }), /lost reply/);
     assert.equal(state.value(), undefined);
     fail = false; await update({ type: 'reset' });
-    assert.equal(state.writes.length, 2); assert.equal(state.value().visible, false);
+    assert.equal(state.writes.length, 2); assert.equal(state.value().visible, true);
 });
 
 test('unsupported and loading preferences refuse mutation without writing', async () => {
@@ -377,7 +391,8 @@ test('unsupported and loading preferences refuse mutation without writing', asyn
 
 test('navigation renders global destinations rather than active-host feature shortcuts', () => {
     const props = { hasWorkspace: false, keybindings: {}, onCommand() {}, onCustomize() {}, onGlobal() {} };
-    assert.equal(renderNavigation({ ...props, preferences: defaults() }), '');
+    assert.match(renderNavigation({ ...props, preferences: defaults() }), /aria-label="Global navigation"/, 'missing preferences render the default bar');
+    assert.equal(renderNavigation({ ...props, preferences: { ...defaults(), visible: false } }), '', 'an explicit hidden choice still removes the bar');
     const html = renderNavigation({ ...props, preferences: { ...defaults(), visible: true, showLabels: true } });
     assert.match(html, /aria-label="Global navigation"/);
     for (const label of ['Hosts', 'Public URLs', 'Port Forwarding', 'Snippets', 'Vaults', 'Plugins']) assert.ok(html.includes('aria-label="' + label + '"'));

@@ -53,7 +53,7 @@ export function NavigationSection({ value, onChange, entries = GLOBAL_NAVIGATION
     return <Section title="Navigation">
         <div ref={root} aria-busy={saving} className="space-y-3">
             {!parsed && <p role="alert" className="text-sm text-control-danger">Navigation settings use an unsupported format. They are preserved; review settings.json before editing them.</p>}
-            <Toggle label="Activity bar" description="Global Hosts, Public URLs, Port Forwarding, Snippets, Vaults and Plugins navigation. Hidden by default."
+            <Toggle label="Activity bar" description="Global Hosts, Public URLs, Port Forwarding, Snippets, Vaults and Plugins navigation. Shown by default; your saved visibility choice is preserved."
                 checked={preferences.visible} disabled={!parsed} onChange={visible => { void apply({ type: 'visible', value: visible }); }} />
             <Select portal label="Navigation position" value={preferences.position} disabled={!parsed}
                 options={POSITIONS.map(position => ({ value: position, label: position[0].toUpperCase() + position.slice(1) }))}

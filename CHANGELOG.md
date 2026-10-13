@@ -4,6 +4,14 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Changed
+
+- **Activity-bar default:** Show global side navigation when no navigation preference
+  has been saved. Preserve existing visible/hidden choices, including older supported
+  settings; keep unsupported preferences read-only with a hidden fallback. Reset
+  navigation restores the visible default. Host workspace tab-strip sidebar placement
+  remains opt-in, and no load-time preference rewrite is introduced.
+
 ## [2.35.0] - 2026-10-12
 
 ### Added

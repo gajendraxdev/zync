@@ -95,6 +95,25 @@ test('loading an older custom profile preserves bindings and unrelated overrides
     assert.equal(writes.length, 0, 'upgrading a non-empty settings profile performs no load-time save');
 });
 
+test('settings reload defaults to visible navigation without rewriting saved hidden or unsupported choices', async () => {
+    const defaults = JSON.parse(JSON.stringify(resolveWorkspaceNavigation(undefined)));
+    for (const navigation of [undefined, { ...defaults, visible: false }, { ...defaults, visible: true }, { version: 99, visible: false }]) {
+        const disk = { theme: 'dark', ...(navigation !== undefined && { workspaceNavigation: navigation }) };
+        const before = JSON.stringify(disk);
+        const writes = [];
+        const store = realStore(async () => structuredClone(disk), async patch => writes.push(patch));
+        for (let reload = 0; reload < 2; reload++) {
+            await store.get().loadSettings();
+            const raw = store.get().settings.workspaceNavigation;
+            assert.deepEqual(raw === undefined ? undefined : JSON.parse(JSON.stringify(raw)), navigation);
+            assert.equal(resolveWorkspaceNavigation(raw).visible, navigation === undefined || navigation.visible === true);
+            assert.equal(resolveWorkspaceNavigation(raw).workspaceTabsPosition, 'default');
+        }
+        assert.equal(JSON.stringify(disk), before);
+        assert.equal(writes.length, 0, 'the display default does not trigger a settings migration');
+    }
+});
+
 test('chrome settings deep links are transient and clear on regular opening, consumption and close', () => {
     const store = realStore(() => assert.fail('opening settings must not write preferences'));
     const initial = store.get().settings;
@@ -371,7 +390,7 @@ test('real navigation adapter confirms only its field and invalidates stale relo
     const delayed = deferred();
     const other = realStore(command => command === 'settings_get' ? Promise.resolve({ workspaceNavigation: { version: 99 } }) : delayed.promise);
     other.set({ isLoadingSettings: false });
-    const pending = other.get().updateWorkspaceNavigation({ type: 'visible', value: true });
+    const pending = other.get().updateWorkspaceNavigation({ type: 'visible', value: false });
     await Promise.resolve(); await other.get().loadSettings(); delayed.resolve();
     await assert.rejects(pending, /settings changed/);
     assert.equal(other.get().settings.workspaceNavigation.version, 99);
