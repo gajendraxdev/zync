@@ -1,0 +1,334 @@
+{
+  "name": "Material Icon Theme (curated Zync bundle)",
+  "version": "5.18.0",
+  "source": "https://github.com/material-extensions/vscode-material-icon-theme",
+  "license": "MIT",
+  "notice": "LICENSE.txt",
+  "assets": [
+    {
+      "path": "c.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/c.svg",
+      "integrity": "sha256-StulQlHoWFHzvMePEL+wVfF7JKrYpT0O+9AAhd0gK64="
+    },
+    {
+      "path": "certificate.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/certificate.svg",
+      "integrity": "sha256-UZh8qCLfsWz7nu9N7Be/UcdDqU82moYMGPQZtP6xL2s="
+    },
+    {
+      "path": "console.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/console.svg",
+      "integrity": "sha256-NpvU18i5j3OkZ7fHlswY5H71LurgvRG/yzuLZ+ahkb4="
+    },
+    {
+      "path": "cpp.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/cpp.svg",
+      "integrity": "sha256-M2NGr7o6+2ILPttfCOCivPFMuFpJURPe/7O7zIe4rqs="
+    },
+    {
+      "path": "css.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/css.svg",
+      "integrity": "sha256-xNYMGQSNLvJSL93wVWJlJAf8WE6DjFYIdl9qWRBQs54="
+    },
+    {
+      "path": "dart.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/dart.svg",
+      "integrity": "sha256-lJWColp7EMe/hkyTK0pxefo831RBI9NZJ+P8mdDRFH4="
+    },
+    {
+      "path": "database.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/database.svg",
+      "integrity": "sha256-4GeSlN7+qQeT9BB9Z4P+eyWXjUPFcDWubCHlwa6Nc2c="
+    },
+    {
+      "path": "docker.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/docker.svg",
+      "integrity": "sha256-IuHyNHHSfWzR6nws1Y4RYB6XEtgHM7x2LW3rlSTugfg="
+    },
+    {
+      "path": "document.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/document.svg",
+      "integrity": "sha256-ZPXaVt5ZHV9CnSx/X1czOIs85wR2JjG6C0h6CEdflFI="
+    },
+    {
+      "path": "editorconfig.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/editorconfig.svg",
+      "integrity": "sha256-cklmX2EnYZASOq5mby19Lom560RgwNxeePmxus7N+GU="
+    },
+    {
+      "path": "eslint.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/eslint.svg",
+      "integrity": "sha256-rrOlU+IPCHpg5KTwnrvln5koqMWCk85MgLngDy7OHbc="
+    },
+    {
+      "path": "file.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/file.svg",
+      "integrity": "sha256-5IJeur5tbdXAFaeDqcPtV57XQu53HTzsSuxVK7+wG1w="
+    },
+    {
+      "path": "folder-archive.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/folder-archive.svg",
+      "integrity": "sha256-ApV9G+O2/aSM/r48gogL+K9Rj8xe5YbMdFIMiyZENV8="
+    },
+    {
+      "path": "folder-components.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/folder-components.svg",
+      "integrity": "sha256-JsHx87xal5Ux+ZB9E42eyn1Yf6/GtmcZJHZpqdA44iA="
+    },
+    {
+      "path": "folder-config.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/folder-config.svg",
+      "integrity": "sha256-oNmZcqowcIsuVkHERUnxs7ayjIdpwoKfao2GqdLsJzM="
+    },
+    {
+      "path": "folder-dist.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/folder-dist.svg",
+      "integrity": "sha256-qqmz8lz3h4/IbipRrq4ZQBJUPJYQjv2bD0TUzJZ6XGY="
+    },
+    {
+      "path": "folder-docs.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/folder-docs.svg",
+      "integrity": "sha256-p2lEBDl44HALcjNgmygjo+Eq8dVWMY3rWM/vmPAzt/Q="
+    },
+    {
+      "path": "folder-git.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/folder-git.svg",
+      "integrity": "sha256-KfO3kxb0cAU1Y2bECG12O9BEE5DCVQRSJBXs/xJSvLk="
+    },
+    {
+      "path": "folder-images.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/folder-images.svg",
+      "integrity": "sha256-DKWsADVVGbzCSkrVQ6VM4PaZzw0ekjzs61XLP6ZduiA="
+    },
+    {
+      "path": "folder-log.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/folder-log.svg",
+      "integrity": "sha256-3KxJETVT+aOV84vDk+AkUd7ldChNyl483x1AFr/dfbE="
+    },
+    {
+      "path": "folder-node.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/folder-node.svg",
+      "integrity": "sha256-asb3KsFm0FCmxYp8VlBRc1LDz1vk45bjeIj2kWwXiVQ="
+    },
+    {
+      "path": "folder-public.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/folder-public.svg",
+      "integrity": "sha256-7uYfKQlnctfysje+5wvusAhKN8sZjgpUTyvXIx92T4k="
+    },
+    {
+      "path": "folder-resource.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/folder-resource.svg",
+      "integrity": "sha256-TAQzEtxHKU2wqg/w32A7PMqv0LMKSYT9661MfvusuK8="
+    },
+    {
+      "path": "folder-scripts.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/folder-scripts.svg",
+      "integrity": "sha256-WRcsF/fnXMBCDpYhCXhhmc9Tw6tkEZilKNhuaTuLRuM="
+    },
+    {
+      "path": "folder-server.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/folder-server.svg",
+      "integrity": "sha256-Pr91cXfcXi1dtdtC4TkegOtEoWdjOcF6eE7BEwz20Qc="
+    },
+    {
+      "path": "folder-src.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/folder-src.svg",
+      "integrity": "sha256-OuWrNZAw+Y7u88uMyKN40j9BYmVYCFB9G4Gy+PYBPRM="
+    },
+    {
+      "path": "folder-test.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/folder-test.svg",
+      "integrity": "sha256-+R2jYcnLGnbbajE62pTNFuNz5jMzZlw9pVkh3icCRFI="
+    },
+    {
+      "path": "folder.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/folder.svg",
+      "integrity": "sha256-Kv5klJBxn4bEciYOqqHJIDISslj4Z0KM5herd4eF++E="
+    },
+    {
+      "path": "git.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/git.svg",
+      "integrity": "sha256-sMrufJy05gJTbi9aOEdA58i8WrlNmL/d5Snx65eTghM="
+    },
+    {
+      "path": "go.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/go.svg",
+      "integrity": "sha256-6zt0/K0SQELEY1BZYe6T3TNRZSdaK4SCgIP7jctQZMk="
+    },
+    {
+      "path": "graphql.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/graphql.svg",
+      "integrity": "sha256-cxqyUoGC+jUdnZvqUSwJOS7z3LIGhO2QpizSoT357t4="
+    },
+    {
+      "path": "html.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/html.svg",
+      "integrity": "sha256-57Q94MA78XGY0mN3wXjO7KMw99NFq/yeY3Xj0eBFg4M="
+    },
+    {
+      "path": "image.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/image.svg",
+      "integrity": "sha256-g44ZU6Oi6/XGoGtmKJK6F+HGBcQ3mnfGFzdjnlH7Two="
+    },
+    {
+      "path": "java.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/java.svg",
+      "integrity": "sha256-dVxbbz/g+x5h52waEOuW9l9Z+sG1paGBlFGCY5k1hU4="
+    },
+    {
+      "path": "javascript.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/javascript.svg",
+      "integrity": "sha256-AvL2mTUgAGVbmU4aM8e0UC7vijLDLL6YdFWFfaDzrpE="
+    },
+    {
+      "path": "jsconfig.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/jsconfig.svg",
+      "integrity": "sha256-CFIoLc+l+XWDiS5e85eUNYDvLy+J8FcN8M0r+HdyryA="
+    },
+    {
+      "path": "json.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/json.svg",
+      "integrity": "sha256-ZJrU9NAc7HiJWQF3ELsMYygaZF24zvOJxQAI+9BZ2gM="
+    },
+    {
+      "path": "key.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/key.svg",
+      "integrity": "sha256-tVcHxFm5mqiEJCCPQJ8plsGynvyuxjjDYvhQDK5tL7U="
+    },
+    {
+      "path": "kotlin.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/kotlin.svg",
+      "integrity": "sha256-WmayOujETR1Iaj0s2Af6gDmAWHkw13IOLppXa3qNN+M="
+    },
+    {
+      "path": "log.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/log.svg",
+      "integrity": "sha256-cVAcXyOluFuAgPLGGbK4SAfuUgP6SOntdAz1rO8GARY="
+    },
+    {
+      "path": "makefile.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/makefile.svg",
+      "integrity": "sha256-ptgmB1erxJKKSIRVJyqbSGuKoxfNfBmBUK0aiF2dp0g="
+    },
+    {
+      "path": "markdown.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/markdown.svg",
+      "integrity": "sha256-QvlYZzUO0fNJqymz8lRAX4SuZebUKXLXSwFEICft380="
+    },
+    {
+      "path": "nodejs.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/nodejs.svg",
+      "integrity": "sha256-Nlr1x7cNEcLabXCiEkCke6lBYCUwxG2AjTeukTvnQC4="
+    },
+    {
+      "path": "npm.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/npm.svg",
+      "integrity": "sha256-Wf8IHSFvApNkWI03+B1g5zW6iNr2kMMsFjmpwG1vz5g="
+    },
+    {
+      "path": "pdf.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/pdf.svg",
+      "integrity": "sha256-wUxmo5FLiU2kB3im3NAPDaoTRCZSGq3b2MzqhrpPX/w="
+    },
+    {
+      "path": "pnpm.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/pnpm.svg",
+      "integrity": "sha256-o9jldg8IDQ8QpLkuEVkYrKo+wts3eeMRVLH9GZm04Z8="
+    },
+    {
+      "path": "powershell.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/powershell.svg",
+      "integrity": "sha256-uK0iZNjx/oLn4KKvBizoWkkIP32ajFGhbnfeKnrsFY8="
+    },
+    {
+      "path": "prettier.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/prettier.svg",
+      "integrity": "sha256-um9gSLerpAzC4uxZw/SkI3dxmilow+nWcp/2hZjJh7A="
+    },
+    {
+      "path": "prisma.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/prisma.svg",
+      "integrity": "sha256-xeQSRnMhNzS11MH6cAKTTb2iIr+y42jgr0CmIkB13j8="
+    },
+    {
+      "path": "python.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/python.svg",
+      "integrity": "sha256-JkTaZPoaY4R32rKV1ABZdURI2XRj4VNLjS8HpOVO9Ug="
+    },
+    {
+      "path": "react.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/react.svg",
+      "integrity": "sha256-an+y6LXhaMDQ9gUUcTjwu0N+6mYYAIuCtwjOQuVrr64="
+    },
+    {
+      "path": "ruby.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/ruby.svg",
+      "integrity": "sha256-p/BihHZIK58721hrRV60jYX36SJE+QwcgIKedNCTu7Y="
+    },
+    {
+      "path": "rust.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/rust.svg",
+      "integrity": "sha256-pYwkZB6CwbpHx0eB2gOeKo43IgLPqq7/OVWROKEbzDk="
+    },
+    {
+      "path": "settings.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/settings.svg",
+      "integrity": "sha256-j7yvbBMqju8LI8pZeuNew2KjVRDz45YZUKD1slJ7dek="
+    },
+    {
+      "path": "svelte.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/svelte.svg",
+      "integrity": "sha256-UFEHNpj3V00GU2Mln+X7692GFsaCmfoPNsPMBp6J1Zo="
+    },
+    {
+      "path": "svg.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/svg.svg",
+      "integrity": "sha256-Egzv/KqXZYrmZcqrfwy9Su2aqdBpRH97kIVIx1WTTsA="
+    },
+    {
+      "path": "swift.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/swift.svg",
+      "integrity": "sha256-9i8rkAOdUxWHcLaNFDnqiaFG4g2ul7lTLFQHMaThKX8="
+    },
+    {
+      "path": "toml.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/toml.svg",
+      "integrity": "sha256-6utVukXxSlBNjxYiguyPh8kwQmIgyogDW/NA3IsecAg="
+    },
+    {
+      "path": "tsconfig.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/tsconfig.svg",
+      "integrity": "sha256-p70qlmV4qezYkWuVDQIgHhkEjsJn4vKHobP0Yp9XZNY="
+    },
+    {
+      "path": "typescript.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/typescript.svg",
+      "integrity": "sha256-w6ogLvQeZJLureJVPlTep5HcFjm13tq3yCmJer8y2hY="
+    },
+    {
+      "path": "vue.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/vue.svg",
+      "integrity": "sha256-A5gU/mso/3G7/1SkdxMrFg/cXCCFU8XRVICbg0BpwP8="
+    },
+    {
+      "path": "xml.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/xml.svg",
+      "integrity": "sha256-Ub/rk4wkdywN/rEqs+a6tEb76gQQ2t8ewYEG1g1SkUo="
+    },
+    {
+      "path": "yaml.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/yaml.svg",
+      "integrity": "sha256-OmN6ilKozXP8cFzNwpoU4OA+br5/JL3A28GIDEqbsWs="
+    },
+    {
+      "path": "yarn.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/yarn.svg",
+      "integrity": "sha256-qd7Wf1f6oXY6RxKqjt7eFi+DuwY/SoJ06kFbftfP004="
+    },
+    {
+      "path": "zip.svg",
+      "source": "https://unpkg.com/material-icon-theme@5.18.0/icons/zip.svg",
+      "integrity": "sha256-2teaRfdWVC03q9QiUC7PvqFXILkuocnYDvBDmra5RIo="
+    }
+  ]
+}
