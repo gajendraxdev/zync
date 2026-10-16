@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { Check } from 'lucide-react';
 import { cn } from '../../lib/utils.js';
@@ -43,6 +43,8 @@ interface ContextMenuProps {
   onClose: () => void;
   /** Opt in for keyboard-opened contextual chrome; caller owns return focus. */
   autoFocus?: boolean;
+  /** Keep trigger clicks inside the dismissal boundary; the caller owns toggling. */
+  triggerRef?: RefObject<HTMLElement | null>;
   className?: string;
   ariaLabel?: string;
 }
@@ -128,7 +130,7 @@ function eventInsideSubmenu(target: EventTarget | null): boolean {
   ));
 }
 
-export function ContextMenu({ x, y, items, onClose, autoFocus = false, className, ariaLabel }: ContextMenuProps) {
+export function ContextMenu({ x, y, items, onClose, autoFocus = false, triggerRef, className, ariaLabel }: ContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
   const [pos, setPos] = useState<MenuPosition>({ top: 0, left: 0 });
@@ -140,6 +142,7 @@ export function ContextMenu({ x, y, items, onClose, autoFocus = false, className
     const isInsideAnyMenuLayer = (target: EventTarget | null) => isInsideMenu(ref.current, target);
 
     const handleClickOutside = (e: MouseEvent) => {
+      if (e.target instanceof Node && triggerRef?.current?.contains(e.target)) return;
       if (!isInsideAnyMenuLayer(e.target)) {
         onClose();
       }
@@ -166,7 +169,7 @@ export function ContextMenu({ x, y, items, onClose, autoFocus = false, className
       document.removeEventListener('scroll', handleScroll, true);
       document.removeEventListener('keydown', handleKeyDown, true);
     };
-  }, [onClose]);
+  }, [onClose, triggerRef]);
 
   // Measure while invisible, compute position, then reveal — all before paint
   useLayoutEffect(() => {
@@ -209,7 +212,7 @@ function MenuItem({ item, onClose }: { item: ContextMenuItem; onClose: () => voi
       : item.variant === 'danger' ? 'text-app-danger hover:bg-app-danger/10' : 'text-app-text hover:bg-app-surface',
   );
   if (item.children?.length) {
-    return <MenuSubmenu label={item.label} icon={item.icon} disabled={item.disabled} triggerClassName={itemClass}>
+    return <MenuSubmenu role="menuitem" label={item.label} icon={item.icon} disabled={item.disabled} triggerClassName={itemClass}>
       {renderMenuItems(item.children, onClose)}
     </MenuSubmenu>;
   }
