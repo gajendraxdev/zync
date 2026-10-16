@@ -1,3 +1,4 @@
+pub(crate) mod icon_theme;
 mod validation;
 
 use anyhow::{anyhow, Context, Result};
@@ -14,7 +15,29 @@ pub(crate) fn is_known_permission_id(permission_id: &str) -> bool {
 
 const LEGACY_MANIFEST_VERSION: u32 = 1;
 const CURRENT_MANIFEST_VERSION: u32 = 2;
-pub const PLUGIN_API_VERSION: &str = "2.1.0";
+pub const PLUGIN_API_VERSION: &str = "2.2.0";
+
+/// Normalize the comparator syntax shared by host compatibility and feature-version gates.
+fn parse_engine_range(range: &str) -> Result<semver::VersionReq> {
+    let parts = range
+        .split(|character: char| character == ',' || character.is_whitespace())
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    let mut comparisons = Vec::new();
+    let mut index = 0;
+    while index < parts.len() {
+        if matches!(parts[index], ">" | ">=" | "<" | "<=" | "=" | "~" | "^")
+            && index + 1 < parts.len()
+        {
+            comparisons.push(format!("{}{}", parts[index], parts[index + 1]));
+            index += 2;
+        } else {
+            comparisons.push(parts[index].to_string());
+            index += 1;
+        }
+    }
+    semver::VersionReq::parse(&comparisons.join(", ")).context("Invalid engine version range")
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct EditorManifest {
@@ -100,6 +123,8 @@ pub struct PluginContributions {
 #[serde(rename_all = "camelCase")]
 pub struct ManifestExtensions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_theme: Option<icon_theme::IconTheme>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub manifest_version: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -178,25 +203,7 @@ impl Manifest {
             ),
         ] {
             let range = range.ok_or_else(|| anyhow!("Manifest v2 requires {label}"))?;
-            let parts = range
-                .split(|character: char| character == ',' || character.is_whitespace())
-                .filter(|part| !part.is_empty())
-                .collect::<Vec<_>>();
-            let mut comparisons = Vec::new();
-            let mut index = 0;
-            while index < parts.len() {
-                if matches!(parts[index], ">" | ">=" | "<" | "<=" | "=" | "~" | "^")
-                    && index + 1 < parts.len()
-                {
-                    comparisons.push(format!("{}{}", parts[index], parts[index + 1]));
-                    index += 2;
-                } else {
-                    comparisons.push(parts[index].to_string());
-                    index += 1;
-                }
-            }
-            let normalized = comparisons.join(", ");
-            let requirement = semver::VersionReq::parse(&normalized)
+            let requirement = parse_engine_range(range)
                 .with_context(|| format!("Invalid {label} version range: {range}"))?;
             if !requirement.matches(installed) {
                 return Err(anyhow!(
@@ -244,6 +251,29 @@ impl Manifest {
             "manifest.editor.entry",
         )?;
 
+        if let Some(theme) = &self.extensions.icon_theme {
+            theme.validate()?;
+            if self.manifest_type.as_deref() != Some("icon-theme")
+                || self.main.is_some()
+                || self.extensions.runtime.is_some()
+                || self.style.is_some()
+                || self.editor.is_some()
+                || self.icons_path.is_some()
+                || self.extensions.contributes.as_ref().is_some_and(|c| {
+                    !c.commands.is_empty()
+                        || !c.pane_kinds.is_empty()
+                        || !c.dashboard_cards.is_empty()
+                })
+                || self
+                    .extensions
+                    .permissions
+                    .as_ref()
+                    .is_some_and(|p| !p.required.is_empty() || !p.optional.is_empty())
+            {
+                return Err(anyhow!("iconTheme requires a data-only icon-theme plugin without executable entries, iconsPath, contributions or permissions"));
+            }
+        }
+
         if manifest_version == LEGACY_MANIFEST_VERSION {
             return Ok(());
         }
@@ -272,6 +302,16 @@ impl Manifest {
             .ok_or_else(|| anyhow!("Manifest v2 requires engines"))?;
         validate_required_text(engines.zync.as_deref(), "engines.zync", 80)?;
         validate_required_text(engines.plugin_api.as_deref(), "engines.pluginApi", 80)?;
+        if self.extensions.icon_theme.is_some() {
+            let range = parse_engine_range(engines.plugin_api.as_deref().unwrap())?;
+            // Requirements are intersections, not unions. A range accepting API 2.2
+            // must not span the older 2.1 line, including any of its patch releases.
+            if range.matches(&semver::Version::new(2, 1, u64::MAX)) {
+                return Err(anyhow!(
+                    "iconTheme requires engines.pluginApi with a minimum of 2.2.0"
+                ));
+            }
+        }
 
         validate_optional_text(self.extensions.description.as_deref(), "description", 500)?;
         validate_optional_text(self.extensions.license.as_deref(), "license", 80)?;
@@ -287,6 +327,26 @@ impl Manifest {
             validate_contribution_permissions(contributions, self.extensions.permissions.as_ref())?;
         }
         validate_permissions(self.extensions.permissions.as_ref())
+    }
+
+    /// Validate external-package identity and declarative resources at every package boundary.
+    pub(crate) fn validate_package_assets(&self, root: &std::path::Path) -> Result<()> {
+        if self.extensions.icon_theme.is_some()
+            && self.manifest_version() != CURRENT_MANIFEST_VERSION
+        {
+            return Err(anyhow!(
+                "External declarative icon packs require Manifest v2"
+            ));
+        }
+        if super::builtins::is_builtin_icon_theme(&self.id) {
+            return Err(anyhow!(
+                "Built-in icon identities cannot be replaced by external packages"
+            ));
+        }
+        if let Some(theme) = &self.extensions.icon_theme {
+            theme.validate_assets(root)?;
+        }
+        Ok(())
     }
 }
 

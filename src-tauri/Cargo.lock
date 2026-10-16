@@ -8556,6 +8556,7 @@ dependencies = [
  "log",
  "percent-encoding",
  "portable-pty",
+ "quick-xml",
  "rand_core 0.6.4",
  "redb",
  "regex",
