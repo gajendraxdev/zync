@@ -1,23 +1,23 @@
 import { Folder, Info, X } from 'lucide-react';
-import { DynamicIcon } from '../ui/DynamicIcon';
+import { FileEntryIcon } from './FileEntryIcon';
 import { cn, formatBytes } from '../../lib/utils';
-import { formatFileListDate } from './fileGridLayout';
+import { isMatch } from '../../lib/keyboard';
+import { formatFileListDate, formatFileListType } from './fileGridLayout';
+import { IconButton } from '../ui/IconButton';
+import { Tooltip } from '../ui/Tooltip';
+import type { ReactNode } from 'react';
 import type { FileEntry } from './types';
 
 interface PropertiesPanelProps {
   files: FileEntry[];
   onClose: () => void;
   dateTimeFormat?: 'simple' | 'detailed';
+  showHeader?: boolean;
 }
 
 function fileKindLabel(file: FileEntry): string {
   if (file.type === 'd') return 'Folder';
-  if (file.type === 'l') return 'Link';
-  const name = file.name;
-  if (name.startsWith('.') && name.indexOf('.', 1) === -1) return 'File';
-  const ext = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1) : '';
-  if (!ext || ext === name) return 'File';
-  return `${ext.toUpperCase()} file`;
+  return formatFileListType(file);
 }
 
 function unixModeString(octal: string): string {
@@ -42,87 +42,102 @@ function unixModeString(octal: string): string {
 
 function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div className="flex items-start gap-2 px-3 py-1.5">
-      <dt className="w-[4.75rem] shrink-0 text-[10px] font-medium uppercase tracking-wider text-app-muted/70">
+    <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-start gap-3 py-1 text-xs">
+      <dt className="text-app-muted">
         {label}
       </dt>
-      <dd className={cn('min-w-0 flex-1 break-all text-[12px] font-medium text-app-text select-text', mono && 'font-mono tracking-wide')}>
+      <dd className={cn('min-w-0 [overflow-wrap:anywhere] text-app-text select-text', mono && 'font-mono')}>
         {value}
       </dd>
     </div>
   );
 }
 
-export function PropertiesPanel({ files, onClose, dateTimeFormat = 'simple' }: PropertiesPanelProps) {
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return <section className="border-t border-app-border/30 py-3">
+    <h3 className="mb-1 text-xs font-medium text-app-text">{title}</h3>
+    <dl>{children}</dl>
+  </section>;
+}
+
+export function PropertiesPanel({ files, onClose, dateTimeFormat = 'simple', showHeader = true }: PropertiesPanelProps) {
   const single = files.length === 1 ? files[0] : null;
   const folderCount = files.filter((file) => file.type === 'd').length;
   const otherCount = files.length - folderCount;
   const totalSize = files.reduce((sum, file) => sum + (file.type === 'd' ? 0 : file.size), 0);
 
   return (
-    <aside className="flex h-full w-full min-w-0 flex-col">
-      <header className="flex shrink-0 items-center justify-between gap-1 border-b border-app-border/30 px-2 py-1.5">
-        <h2 className="truncate px-1 text-[11px] font-medium text-app-text">
+    <aside aria-label="File properties" className={cn('flex h-full w-full min-w-0 flex-col bg-app-panel/70', !showHeader && 'max-h-[70vh]')}
+      onKeyDown={event => {
+        // Inline details own dismissal, including Escape already used to hide a button's tooltip.
+        // The shared dialog remains the sole dismissal owner for modal details.
+        if (!showHeader || event.nativeEvent.isComposing || !isMatch(event.nativeEvent, 'Escape')) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+      }}>
+      {showHeader && <header className="flex shrink-0 items-center justify-between gap-1 border-b border-app-border/30 px-3 py-1.5">
+        <h2 className="truncate text-sm font-medium text-app-text">
           {files.length > 1 ? `${files.length} items` : 'Properties'}
         </h2>
-        <button
-          type="button"
-          aria-label="Close properties"
-          className="shrink-0 rounded-md p-1 text-app-muted transition-all hover:bg-app-surface/50 hover:text-app-text"
-          onClick={onClose}
-        >
-          <X size={12} />
-        </button>
-      </header>
+        <Tooltip content="Close properties" position="bottom">
+          <IconButton label="Close properties" icon={<X size={14} />} onClick={onClose} data-file-inspector-close="" />
+        </Tooltip>
+      </header>}
 
       {files.length === 0 ? (
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-4 py-10 text-center opacity-60">
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-4 py-10 text-center">
           <Info size={20} className="mb-2 text-app-muted" />
-          <span className="text-[10px] font-medium text-app-muted">Select a file or folder</span>
+          <span className="text-sm text-app-muted">Select a file or folder</span>
         </div>
       ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto p-2">
-          <div className="mb-1 flex flex-col items-center px-1 py-3 text-center">
-            <div className="mb-2 flex h-10 w-10 items-center justify-center">
-              {single && single.type !== 'd' ? (
-                <DynamicIcon type={single.name} size={32} />
-              ) : (
-                <Folder size={32} fill="currentColor" className="text-app-accent" strokeWidth={0.5} />
-              )}
+        <div className="min-h-0 flex-1 overflow-y-auto px-4">
+          <div className="flex items-center gap-3 py-4">
+            <div aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center">
+              {single ? <FileEntryIcon file={single} size={32} />
+                : <Folder size={32} fill="currentColor" className="text-app-accent" strokeWidth={0.5} />}
             </div>
-            <div className="w-full break-all text-[12px] font-medium text-app-text select-text">
-              {single ? single.name : `${files.length} items`}
-            </div>
-            <div className="mt-0.5 text-[10px] uppercase tracking-wider text-app-muted/70">
-              {single
-                ? fileKindLabel(single)
-                : [folderCount ? `${folderCount} folder${folderCount === 1 ? '' : 's'}` : null, otherCount ? `${otherCount} file${otherCount === 1 ? '' : 's'}` : null]
-                    .filter(Boolean)
-                    .join(' · ')}
+            <div className="min-w-0 flex-1">
+              <h3 className="[overflow-wrap:anywhere] text-sm font-medium text-app-text select-text">
+                {single ? single.name : `${files.length} items`}
+              </h3>
+              <div className="mt-1 text-xs text-app-muted">
+                {single
+                  ? fileKindLabel(single)
+                  : [folderCount ? `${folderCount} folder${folderCount === 1 ? '' : 's'}` : null, otherCount ? `${otherCount} file${otherCount === 1 ? '' : 's'}` : null]
+                      .filter(Boolean)
+                      .join(' · ')}
+              </div>
             </div>
           </div>
 
-          <dl>
             {single ? (
               <>
-                <Row label="Location" value={single.path || '—'} />
-                <Row label="Size" value={single.type === 'd' ? '—' : formatBytes(single.size)} />
-                <Row label="Type" value={fileKindLabel(single)} />
-                <Row label="Owner" value={(single.owner || '').trim() || '—'} />
-                <Row label="Group" value={(single.group || '').trim() || '—'} />
-                <Row label="Modified" value={formatFileListDate(single.lastModified, Date.now(), dateTimeFormat) || '—'} />
-                <Row label="Mode" value={unixModeString(single.permissions || '')} mono />
-                <Row label="Octal" value={single.permissions?.trim() || '—'} mono />
+                <Section title="Location">
+                  <dt className="sr-only">Path</dt>
+                  <dd className="py-1.5 text-xs text-app-text select-text [overflow-wrap:anywhere]">{single.path || '—'}</dd>
+                </Section>
+                <Section title="Information">
+                  <Row label="Size" value={single.type === 'd' ? '—' : formatBytes(single.size)} />
+                  <Row label="Type" value={fileKindLabel(single)} />
+                  <Row label="Modified" value={formatFileListDate(single.lastModified, Date.now(), dateTimeFormat) || '—'} />
+                </Section>
+                <Section title="Permissions">
+                  <Row label="Owner" value={(single.owner || '').trim() || '—'} />
+                  <Row label="Group" value={(single.group || '').trim() || '—'} />
+                  <Row label="Mode" value={unixModeString(single.permissions || '')} mono />
+                  <Row label="Octal" value={single.permissions?.trim() || '—'} mono />
+                </Section>
+                <p className="pb-4 text-xs leading-relaxed text-app-muted">Reported metadata only. Effective access may also depend on ACLs and server policy.</p>
               </>
             ) : (
-              <>
+              <Section title="Selection">
                 <Row label="Items" value={String(files.length)} />
                 <Row label="Size" value={formatBytes(totalSize)} />
                 <Row label="Folders" value={String(folderCount)} />
                 <Row label="Files" value={String(otherCount)} />
-              </>
+              </Section>
             )}
-          </dl>
         </div>
       )}
     </aside>

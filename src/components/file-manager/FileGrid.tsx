@@ -1,20 +1,24 @@
-import {
-  Folder,
-} from 'lucide-react';
-import { DynamicIcon } from '../ui/DynamicIcon';
+import { Folder } from 'lucide-react';
+import { FileEntryIcon } from './FileEntryIcon';
 import type React from 'react';
 import { cn, formatBytes } from '../../lib/utils';
 import { Tooltip } from '../ui/Tooltip';
+import { Button } from '../ui/Button';
 import { FileHoverTip, useFileHoverTip } from './FileHoverTip';
 import type { FileEntry } from './types';
 import { useAppStore } from '../../store/useAppStore';
-import { useMemo, useState, useEffect, useLayoutEffect, useCallback, useRef, memo, type CSSProperties } from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
+import { useMemo, useState, useEffect, useLayoutEffect, useCallback, useRef, useId, memo, type CSSProperties, type RefObject } from 'react';
+import { FileSelectionMark, isFileSelectionMark } from './FileSelectionMark';
 import { setCurrentDragSource } from '../../lib/dragDrop';
 import { motion, AnimatePresence } from 'framer-motion';
 import { forwardRef } from 'react';
 import { buildDragData, startInternalDrag, validateAndBuildMoves } from './dragDropUtils';
-import { getScrollbarSize, Grid, List, useGridRef, useListRef } from 'react-window';
+import { List, useListRef, type ListImperativeAPI } from 'react-window';
+import { fileListColumns, fileListTracks, fileOptionId, type FileDetailColumn } from './fileListPresentation';
+import { FileName } from './FileName';
+import { FileListHeading } from './FileListHeading';
+import { useFileGridViewport } from './useFileGridViewport';
+import { useFileListLayout } from './useFileListLayout';
 import { FILE_GRID_VIRTUALIZE_AFTER, FILE_GRID_ZOOM, FILE_LIST_ZOOM, clampFileGridZoom, clampFileListZoom } from './fileChrome';
 import {
   MARQUEE_DRAG_THRESHOLD_PX,
@@ -27,48 +31,23 @@ import {
   type MarqueeRect,
 } from './fileMarquee';
 import {
-  computeFileGridMetrics,
-  fileGridScrollTarget,
+  fileGridColumnPitch,
   fileIconGridTemplateColumns,
+  fileGridScrollTarget,
   formatFileIdentity,
   formatFileListDate,
   formatFileListType,
-  fileListSortTooltip,
-  FILE_LIST_COLUMN_ALIGN,
-  FILE_LIST_COLUMN_IDS,
-  FILE_LIST_COLUMN_LABELS,
-  FILE_LIST_COLUMNS,
   type FileSortColumn,
   type FileSortDirection,
 } from './fileGridLayout';
 
-// Extended Icon Selector with Colors
-const FileIcon = memo(function FileIcon({ file, size }: { file: FileEntry; size: number }) {
-  if (file.type === 'd') {
-    // Theme-based: Solid Accent Folder
-    return (
-      <div className="relative flex items-center justify-center">
-        <Folder
-          size={size}
-          fill="currentColor"
-          className="text-app-accent drop-shadow-sm"
-          strokeWidth={0.5}
-        />
-      </div>
-    );
-  }
-
-  // Use the new DynamicIcon engine for files
-  return (
-    <DynamicIcon
-        type={file.name}
-        size={size}
-    />
-  );
-});
+const FileIcon = FileEntryIcon;
 
 // Memoized File Item Component
 const FileGridItem = memo(forwardRef<HTMLDivElement, {
+  optionId: string;
+  optionIndex: number;
+  optionCount: number;
   file: FileEntry;
   viewMode: 'grid' | 'list';
   compactMode: boolean;
@@ -86,6 +65,9 @@ const FileGridItem = memo(forwardRef<HTMLDivElement, {
   onHoverShow?: (file: FileEntry, el: HTMLElement) => void;
   onHoverHide?: () => void;
 }>(({
+  optionId,
+  optionIndex,
+  optionCount,
   file,
   viewMode,
   compactMode,
@@ -108,7 +90,14 @@ const FileGridItem = memo(forwardRef<HTMLDivElement, {
   return (
     <div
       ref={ref}
-      id={`file-item-${file.name}`}
+      id={optionId}
+      data-file-name={file.name}
+      role="option"
+      aria-label={`${file.name}, ${formatFileListType(file)}`}
+      aria-selected={isSelected}
+      aria-posinset={optionIndex + 1}
+      aria-setsize={optionCount}
+      data-focused={isFocused || undefined}
       draggable={connectionId !== undefined}
       onDragStart={(e: any) => {
         if (!connectionId || !currentPath) return;
@@ -159,13 +148,13 @@ const FileGridItem = memo(forwardRef<HTMLDivElement, {
       }}
       onClick={(e) => {
         e.stopPropagation();
-        const toggle = e.ctrlKey || e.metaKey;
+        const toggle = e.ctrlKey || e.metaKey || isFileSelectionMark(e.target);
         onSelect(file.name, toggle, e.shiftKey);
         if (clickPolicy === 'single' && !toggle && !e.shiftKey) onNavigate(file.name);
       }}
       onDoubleClick={(e) => {
         e.stopPropagation();
-        if (clickPolicy === 'double') onNavigate(file.name);
+        if (clickPolicy === 'double' && !isFileSelectionMark(e.target)) onNavigate(file.name);
       }}
       onContextMenu={(e) => {
         e.stopPropagation();
@@ -175,22 +164,19 @@ const FileGridItem = memo(forwardRef<HTMLDivElement, {
       onPointerEnter={(e) => onHoverShow?.(file, e.currentTarget)}
       onPointerLeave={() => onHoverHide?.()}
       className={cn(
-        'group relative cursor-pointer select-none',
+        'files-option group relative cursor-pointer select-none',
         viewMode === 'grid'
           ? cn(
             'flex flex-col items-center w-full min-w-0 rounded-xl',
             'px-1 py-1 gap-0.5',
-            isSelected
-              ? 'bg-app-accent/20'
-              : 'bg-transparent hover:bg-app-surface/55',
           )
           : cn(
-            'flex items-center rounded-lg border border-transparent hover:bg-app-surface/50',
+            'flex items-center rounded-lg border border-transparent',
             compactMode ? 'p-1.5' : 'p-2',
           ),
-        isFocused && !isSelected && (viewMode === 'grid' ? 'bg-app-surface/70' : 'ring-1 ring-app-accent/35'),
       )}
     >
+      <FileSelectionMark selected={isSelected} className="absolute start-0.5 top-0.5 z-10" />
       <div className={cn(
         'flex items-center justify-center shrink-0',
         viewMode === 'grid' ? 'w-full' : 'w-10 mr-4',
@@ -206,7 +192,7 @@ const FileGridItem = memo(forwardRef<HTMLDivElement, {
             viewMode === 'grid'
               ? cn(
                 (iconSize ?? 0) >= 168 ? 'line-clamp-3' : 'line-clamp-2',
-                'break-words [overflow-wrap:anywhere] leading-[1.25] text-[12px]',
+                'break-words [overflow-wrap:anywhere] leading-snug text-sm',
               )
               : 'truncate text-sm leading-snug',
             isSelected ? 'text-app-text' : 'text-app-text/85',
@@ -221,6 +207,10 @@ const FileGridItem = memo(forwardRef<HTMLDivElement, {
 
 // Memoized File List Item Component — plain div (windowed rows must not replay motion enter).
 const FileListItem = memo(forwardRef<HTMLDivElement, {
+  optionId: string;
+  optionIndex: number;
+  optionCount: number;
+  columns: readonly FileSortColumn[];
   file: FileEntry;
   isSelected: boolean;
   isFocused: boolean;
@@ -235,6 +225,10 @@ const FileListItem = memo(forwardRef<HTMLDivElement, {
   iconSize?: number;
   dateTimeFormat?: 'simple' | 'detailed';
 }>(({
+  optionId,
+  optionIndex,
+  optionCount,
+  columns,
   file,
   isSelected,
   isFocused,
@@ -252,12 +246,22 @@ const FileListItem = memo(forwardRef<HTMLDivElement, {
   const isFolder = file.type === 'd';
   const kindLabel = formatFileListType(file);
   const identityLabel = formatFileIdentity(file.owner || '', file.group || '');
+  const metadata: Record<Exclude<FileSortColumn, 'name'>, string> = {
+    modified: formatFileListDate(file.lastModified, Date.now(), dateTimeFormat) || '—',
+    size: isFolder ? '—' : formatBytes(file.size), type: kindLabel, owner: identityLabel || '—',
+  };
 
   return (
     <div
       ref={ref}
-      role="row"
-      id={`file-item-${file.name}`}
+      role="option"
+      id={optionId}
+      data-file-name={file.name}
+      aria-label={`${file.name}, ${kindLabel}`}
+      aria-selected={isSelected}
+      aria-posinset={optionIndex + 1}
+      aria-setsize={optionCount}
+      data-focused={isFocused || undefined}
       draggable={connectionId !== undefined}
       onDragStart={(e: any) => {
         if (!connectionId || !currentPath) return;
@@ -306,13 +310,13 @@ const FileListItem = memo(forwardRef<HTMLDivElement, {
       }}
       onClick={(e) => {
         e.stopPropagation();
-        const toggle = e.ctrlKey || e.metaKey;
+        const toggle = e.ctrlKey || e.metaKey || isFileSelectionMark(e.target);
         onSelect(file.name, toggle, e.shiftKey);
         if (clickPolicy === 'single' && !toggle && !e.shiftKey) onNavigate(file.name);
       }}
       onDoubleClick={(e) => {
         e.stopPropagation();
-        if (clickPolicy === 'double') onNavigate(file.name);
+        if (clickPolicy === 'double' && !isFileSelectionMark(e.target)) onNavigate(file.name);
       }}
       onContextMenu={(e) => {
         e.stopPropagation();
@@ -320,48 +324,28 @@ const FileListItem = memo(forwardRef<HTMLDivElement, {
         onContextMenu(e, file);
       }}
       className={cn(
-        'h-full w-full min-w-0 cursor-pointer outline-none',
+        'files-option files-list-option h-full w-full min-w-0 cursor-pointer outline-none',
         'grid items-center overflow-hidden',
-        'hover:bg-app-surface/40',
-        isSelected && 'bg-app-accent/10 ring-1 ring-inset ring-app-text/30 rounded-sm',
-        isFocused && !isSelected && 'bg-app-surface/55',
-        isFocused && isSelected && 'bg-app-accent/14',
+        'files-list-columns rounded-md',
       )}
-      style={{ gridTemplateColumns: FILE_LIST_COLUMNS }}
     >
-      <div className="py-1.5 px-3 min-w-0 overflow-hidden">
+      <div className="py-1 px-2 min-w-0 overflow-hidden">
         <div className="flex items-center gap-2 min-w-0">
+          <FileSelectionMark selected={isSelected} />
           <span className="shrink-0">
             <FileIcon file={file} size={iconSize} />
           </span>
           <Tooltip content={file.name} position="top" className="min-w-0 w-full justify-start">
-            <span className={cn('block min-w-0 truncate text-[13px]', isSelected ? 'text-app-text font-medium' : 'text-app-text')}>
-              {file.name}
-            </span>
+            <FileName name={file.name} />
           </Tooltip>
         </div>
       </div>
-      <div className="py-1.5 px-3 min-w-0 overflow-hidden text-[12px] text-app-muted tabular-nums truncate">
-        {formatFileListDate(file.lastModified, Date.now(), dateTimeFormat) || '—'}
-      </div>
-      <Tooltip content={kindLabel} position="top" className="min-w-0 w-full justify-start py-1.5 px-3">
-        <span className="block min-w-0 truncate text-[12px] text-app-muted">
-          {kindLabel}
+      {columns.filter(column => column !== 'name').map(column => <Tooltip key={column} content={metadata[column]}
+        position="top" className={cn(`files-list-column-${column}`, 'min-w-0 py-1 px-2', column === 'size' && 'justify-end')}>
+        <span className={cn('block min-w-0 truncate text-xs text-app-muted', column === 'owner' ? 'font-mono' : 'tabular-nums', column === 'size' && 'text-right')}>
+          {metadata[column]}
         </span>
-      </Tooltip>
-      <div className="py-1.5 px-3 min-w-0 overflow-hidden text-[12px] text-app-muted tabular-nums truncate text-right">
-        {isFolder ? '' : formatBytes(file.size)}
-      </div>
-      <Tooltip
-        content={identityLabel || '—'}
-        position="top"
-        className="min-w-0 w-full justify-start py-1.5 px-3"
-        disabled={!identityLabel}
-      >
-        <span className="block min-w-0 truncate font-mono text-[12px] text-app-muted">
-          {identityLabel || '—'}
-        </span>
-      </Tooltip>
+      </Tooltip>)}
     </div>
   );
 }));
@@ -370,6 +354,13 @@ FileGridItem.displayName = 'FileGridItem';
 FileListItem.displayName = 'FileListItem';
 
 interface FileGridProps {
+  focusRef: RefObject<HTMLDivElement | null>;
+  /** Incremented for explicit keyboard navigation, even when focus stays on the same file. */
+  focusRevealRequest?: number;
+  onFocusItem: (name: string) => void;
+  label: string;
+  detailColumns: readonly FileDetailColumn[];
+  onKeyboardContextMenu: (position: { x: number; y: number }, file?: FileEntry) => void;
   files: FileEntry[];
   selectedFiles: string[];
   onSelect: (name: string, multi: boolean) => void;
@@ -390,9 +381,13 @@ interface FileGridProps {
   listZoom?: number;
   clickPolicy?: 'single' | 'double';
   dateTimeFormat?: 'simple' | 'detailed';
+  /** The owner distinguishes filtered/failed listings from a truly empty folder. */
+  emptyState?: { title: string; description: string; onReset?: () => void };
 }
 
 type FileListRowExtra = {
+  scopeId: string;
+  columns: readonly FileSortColumn[];
   files: FileEntry[];
   selectedSet: Set<string>;
   focusedFile?: string | null;
@@ -411,7 +406,8 @@ type FileListRowExtra = {
 function FileListRow({
   index,
   style,
-  ariaAttributes,
+  scopeId,
+  columns,
   files,
   selectedSet,
   focusedFile,
@@ -433,8 +429,9 @@ function FileListRow({
   const file = files[index];
   if (!file) return null;
   return (
-    <div style={style} {...ariaAttributes} className="min-w-0 overflow-hidden">
+    <div style={style} role="presentation" className="min-w-0 overflow-hidden py-px">
       <FileListItem
+        optionId={fileOptionId(scopeId, index)} optionIndex={index} optionCount={files.length} columns={columns}
         file={file}
         isSelected={selectedSet.has(file.name)}
         isFocused={focusedFile === file.name}
@@ -453,8 +450,10 @@ function FileListRow({
   );
 }
 
-type FileGridCellExtra = FileListRowExtra & {
+type FileGridRowExtra = FileListRowExtra & {
   columnCount: number;
+  gap: number;
+  minTrack: number;
   compactMode: boolean;
   iconSize: number;
   clickPolicy: 'single' | 'double';
@@ -462,13 +461,15 @@ type FileGridCellExtra = FileListRowExtra & {
   onHoverHide: () => void;
 };
 
-function FileGridCell({
-  columnIndex,
-  rowIndex,
+/** Virtualize visual rows, not semantics: every file remains an option in one listbox. */
+function FileGridRow({
+  index: rowIndex,
   style,
-  ariaAttributes,
+  scopeId,
   files,
   columnCount,
+  gap,
+  minTrack,
   compactMode,
   selectedSet,
   focusedFile,
@@ -484,41 +485,49 @@ function FileGridCell({
   onHoverShow,
   onHoverHide,
 }: {
-  columnIndex: number;
-  rowIndex: number;
+  index: number;
   style: CSSProperties;
-  ariaAttributes: { 'aria-colindex': number; role: 'gridcell' };
-} & FileGridCellExtra) {
-  const index = rowIndex * columnCount + columnIndex;
-  const file = files[index];
-  if (!file) {
-    return <div style={style} />;
-  }
+  ariaAttributes: { 'aria-posinset': number; 'aria-setsize': number; role: 'listitem' };
+} & FileGridRowExtra) {
   return (
-    <div style={{ ...style, contain: 'layout paint' }} {...ariaAttributes} className="min-w-0 flex items-start justify-center p-1">
-      <FileGridItem
-        file={file}
-        viewMode="grid"
-        compactMode={compactMode}
-        isSelected={selectedSet.has(file.name)}
-        isFocused={focusedFile === file.name}
-        connectionId={connectionId}
-        currentPath={currentPath}
-        getSelectedFiles={getSelectedFiles}
-        onSelect={onSelect}
-        onNavigate={onNavigate}
-        onContextMenu={onContextMenu}
-        onMove={onMove}
-        iconSize={iconSize}
-        clickPolicy={clickPolicy}
-        onHoverShow={onHoverShow}
-        onHoverHide={onHoverHide}
-      />
+    <div style={{ ...style, display: 'grid', gridTemplateColumns: fileIconGridTemplateColumns(minTrack, columnCount), columnGap: gap, paddingBottom: gap, contain: 'layout' }} role="presentation">
+      {Array.from({ length: columnCount }, (_, columnIndex) => {
+        const index = rowIndex * columnCount + columnIndex;
+        const file = files[index];
+        if (!file) return null;
+        return <div key={file.path || file.name} role="presentation" className="min-w-0 flex items-start justify-center p-1">
+          <FileGridItem
+            optionId={fileOptionId(scopeId, index)} optionIndex={index} optionCount={files.length}
+            file={file}
+            viewMode="grid"
+            compactMode={compactMode}
+            isSelected={selectedSet.has(file.name)}
+            isFocused={focusedFile === file.name}
+            connectionId={connectionId}
+            currentPath={currentPath}
+            getSelectedFiles={getSelectedFiles}
+            onSelect={onSelect}
+            onNavigate={onNavigate}
+            onContextMenu={onContextMenu}
+            onMove={onMove}
+            iconSize={iconSize}
+            clickPolicy={clickPolicy}
+            onHoverShow={onHoverShow}
+            onHoverHide={onHoverHide}
+          />
+        </div>;
+      })}
     </div>
   );
 }
 
 export const FileGrid = memo(function FileGrid({
+  focusRef,
+  focusRevealRequest = 0,
+  onFocusItem,
+  label,
+  detailColumns,
+  onKeyboardContextMenu,
   files,
   selectedFiles,
   onSelect,
@@ -539,6 +548,7 @@ export const FileGrid = memo(function FileGrid({
   listZoom,
   clickPolicy = 'double',
   dateTimeFormat = 'simple',
+  emptyState,
 }: FileGridProps) {
   const compactMode = useAppStore(state => state.settings.compactMode);
   const gridZoomLevel = gridZoom === undefined ? (compactMode ? 0 : 2) : clampFileGridZoom(gridZoom);
@@ -547,13 +557,18 @@ export const FileGrid = memo(function FileGrid({
   const listIcon = FILE_LIST_ZOOM[listZoomLevel].icon;
   const listRowHeight = FILE_LIST_ZOOM[listZoomLevel].rowHeight;
   const listRef = useListRef(null);
-  const gridRef = useGridRef(null);
-  const gridColumnCountRef = useRef(1);
+  const gridRef = useListRef(null);
+  const scopeId = useId();
+  const columns = useMemo(() => fileListColumns(detailColumns), [detailColumns]);
+  const [activeOption, setActiveOption] = useState<string | null>(null);
+  const focusedIndex = focusedFile ? files.findIndex(file => file.name === focusedFile) : -1;
+  const expectedActiveOption = focusedIndex >= 0 ? fileOptionId(scopeId, focusedIndex) : null;
+  const syncActiveOption = useCallback(() => {
+    const node = expectedActiveOption ? document.getElementById(expectedActiveOption) : null;
+    const next = node && focusRef.current?.contains(node) ? expectedActiveOption : null;
+    setActiveOption(previous => previous === next ? previous : next);
+  }, [expectedActiveOption, focusRef]);
   const lastReportedColumnCountRef = useRef<number | null>(null);
-  const [gridViewportWidth, setGridViewportWidth] = useState(0);
-  const pendingWidthRef = useRef<number | null>(null);
-  const resizeRafRef = useRef<number | null>(null);
-  const reportIdleRef = useRef<number | null>(null);
   const cssGridRef = useRef<HTMLDivElement>(null);
   const selectedFilesRef = useRef(selectedFiles);
   const getSelectedFiles = useCallback(() => selectedFilesRef.current, []);
@@ -563,16 +578,33 @@ export const FileGrid = memo(function FileGrid({
   const selectedSet = useMemo(() => new Set(selectedFiles), [selectedFiles]);
   const useVirtualIconGrid = files.length > FILE_GRID_VIRTUALIZE_AFTER;
   const listingRef = useRef<HTMLDivElement>(null);
+  const listLayout = useFileListLayout(listingRef);
+  const zoomTrack = FILE_GRID_ZOOM[gridZoomLevel];
+  const gridRowHeight = zoomTrack.rowHeight + zoomTrack.gap;
+  const { columnCount: gridColumnCount, ready: gridReady, captureAnchor, viewport: gridViewport, setViewport } = useFileGridViewport({
+    enabled: viewMode === 'grid', files, path: currentPath,
+    zoom: gridZoomLevel, rowPitch: gridRowHeight,
+  });
+  const setVirtualGridRef = useCallback((instance: ListImperativeAPI | null) => {
+    gridRef.current = instance;
+    setViewport(instance?.element ?? null);
+  }, [gridRef, setViewport]);
+  const setCssGridRef = useCallback((element: HTMLDivElement | null) => {
+    cssGridRef.current = element;
+    setViewport(element);
+  }, [setViewport]);
+  const gridRowCount = Math.max(1, Math.ceil(files.length / gridColumnCount));
   const marqueeOriginRef = useRef<{ x: number; y: number; additive: boolean; snapshot: string[] } | null>(null);
   const marqueeSkipClearRef = useRef(false);
   const [marqueeRect, setMarqueeRect] = useState<MarqueeRect | null>(null);
   const handleItemSelect = useCallback((name: string, multi: boolean, range?: boolean) => {
+    focusRef.current?.focus({ preventScroll: true });
     if (range && focusedFile && onSelectMany) {
       onSelectMany(namesBetween(files, focusedFile, name), name);
       return;
     }
     onSelect(name, multi);
-  }, [files, focusedFile, onSelect, onSelectMany]);
+  }, [files, focusedFile, onSelect, onSelectMany, focusRef]);
   const { tip: hoverTip, show: showHoverTip, hide: hideHoverTip } = useFileHoverTip(undefined, dateTimeFormat);
   useEffect(() => {
     hideHoverTip();
@@ -586,21 +618,11 @@ export const FileGrid = memo(function FileGrid({
   }, [hideHoverTip, viewMode, files.length, listRef, gridRef]);
 
   const reportColumnCount = useCallback((count: number) => {
-    gridColumnCountRef.current = count;
-    if (lastReportedColumnCountRef.current === count) {
-      if (reportIdleRef.current != null) {
-        window.clearTimeout(reportIdleRef.current);
-        reportIdleRef.current = null;
-      }
-      return;
-    }
-    if (reportIdleRef.current != null) window.clearTimeout(reportIdleRef.current);
-    reportIdleRef.current = window.setTimeout(() => {
-      reportIdleRef.current = null;
-      if (lastReportedColumnCountRef.current === count) return;
-      lastReportedColumnCountRef.current = count;
-      onGridColumnCount?.(count);
-    }, 120);
+    // Publish only a changed visual-row count, never every resize pixel. Keyboard
+    // movement must use the committed geometry rather than a delayed old count.
+    if (lastReportedColumnCountRef.current === count) return;
+    lastReportedColumnCountRef.current = count;
+    onGridColumnCount?.(count);
   }, [onGridColumnCount]);
 
   const scrollFocusedListRow = useCallback(() => {
@@ -616,18 +638,7 @@ export const FileGrid = memo(function FileGrid({
     const rowCount = Math.max(1, Math.ceil(files.length / columnCount));
     const target = fileGridScrollTarget(index, columnCount, rowCount);
     if (!target) return;
-    if (target.columnIndex >= columnCount || target.rowIndex >= rowCount) return;
-    try {
-      gridRef.current?.scrollToCell({
-        rowIndex: target.rowIndex,
-        columnIndex: target.columnIndex,
-        rowAlign: 'smart',
-        columnAlign: 'smart',
-        behavior: 'auto',
-      });
-    } catch {
-      // react-window throws if this column count is not committed on the Grid yet.
-    }
+    gridRef.current?.scrollToRow({ index: target.rowIndex, align: 'smart', behavior: 'auto' });
   }, [viewMode, focusedFile, files, gridRef]);
 
   useLayoutEffect(() => {
@@ -647,6 +658,8 @@ export const FileGrid = memo(function FileGrid({
 
   const listRowProps = useMemo(
     () => ({
+      scopeId,
+      columns,
       files,
       selectedSet,
       focusedFile,
@@ -662,6 +675,8 @@ export const FileGrid = memo(function FileGrid({
       dateTimeFormat,
     }),
     [
+      scopeId,
+      columns,
       files,
       selectedSet,
       focusedFile,
@@ -678,29 +693,14 @@ export const FileGrid = memo(function FileGrid({
     ],
   );
 
-  const zoomTrack = FILE_GRID_ZOOM[gridZoomLevel];
-  const gridMetrics = useMemo(
-    () => computeFileGridMetrics(gridViewportWidth, compactMode, gridZoomLevel),
-    [gridViewportWidth, compactMode, gridZoomLevel],
-  );
-  const gridColumnCount = gridMetrics.columnCount;
-  const gridColumnWidth = Math.max(
-    1,
-    gridViewportWidth > 0
-      ? gridViewportWidth / Math.max(1, gridColumnCount)
-      : gridMetrics.columnWidth,
-  );
-  const gridRowCount = Math.max(1, Math.ceil(files.length / gridColumnCount));
-  const gridRowHeight = zoomTrack.rowHeight;
   const cssGridStyle = useMemo<CSSProperties>(() => ({
     display: 'grid',
-    gridTemplateColumns: fileIconGridTemplateColumns(zoomTrack.minTrack),
+    gridTemplateColumns: fileIconGridTemplateColumns(zoomTrack.minTrack, gridColumnCount),
     gridAutoRows: `${zoomTrack.rowHeight}px`,
     gap: zoomTrack.gap,
-    justifyContent: 'stretch',
+    justifyContent: 'start',
     alignContent: 'start',
-    ['--file-grid-row' as string]: `${zoomTrack.rowHeight}px`,
-  }), [zoomTrack.minTrack, zoomTrack.rowHeight, zoomTrack.gap]);
+  }), [gridColumnCount, zoomTrack.rowHeight, zoomTrack.gap, zoomTrack.minTrack]);
 
   const collectMarqueeNames = useCallback((rect: MarqueeRect) => {
     if (viewMode === 'list') {
@@ -724,7 +724,7 @@ export const FileGrid = memo(function FileGrid({
       return gridNamesInMarquee(
         files,
         gridColumnCount,
-        gridColumnWidth,
+        fileGridColumnPitch(gridEl.clientWidth, zoomTrack.minTrack, zoomTrack.gap),
         gridRowHeight,
         box.left,
         box.top,
@@ -734,46 +734,7 @@ export const FileGrid = memo(function FileGrid({
     }
     const root = cssGridRef.current ?? listingRef.current;
     return root ? namesInDomMarquee(root, rect) : [];
-  }, [files, gridColumnCount, gridColumnWidth, gridRef, gridRowHeight, listRef, listRowHeight, useVirtualIconGrid, viewMode]);
-
-  const scheduleWidth = useCallback((width: number) => {
-    pendingWidthRef.current = width;
-    if (resizeRafRef.current != null) return;
-    resizeRafRef.current = window.requestAnimationFrame(() => {
-      resizeRafRef.current = null;
-      const nextWidth = pendingWidthRef.current;
-      if (nextWidth == null) return;
-      setGridViewportWidth((prev) => (prev === nextWidth ? prev : nextWidth));
-    });
-  }, []);
-
-  useEffect(() => () => {
-    if (resizeRafRef.current != null) window.cancelAnimationFrame(resizeRafRef.current);
-    if (reportIdleRef.current != null) window.clearTimeout(reportIdleRef.current);
-  }, []);
-
-  useEffect(() => {
-    if (viewMode !== 'grid' || useVirtualIconGrid) return;
-    const el = cssGridRef.current;
-    if (!el) return;
-    const apply = () => {
-      reportColumnCount(computeFileGridMetrics(el.clientWidth, compactMode, gridZoomLevel).columnCount);
-    };
-    apply();
-    let raf = 0;
-    const observer = new ResizeObserver(() => {
-      if (raf !== 0) return;
-      raf = window.requestAnimationFrame(() => {
-        raf = 0;
-        apply();
-      });
-    });
-    observer.observe(el);
-    return () => {
-      observer.disconnect();
-      if (raf !== 0) window.cancelAnimationFrame(raf);
-    };
-  }, [viewMode, useVirtualIconGrid, compactMode, gridZoomLevel, reportColumnCount, files.length]);
+  }, [files, gridColumnCount, gridRef, gridRowHeight, listRef, listRowHeight, useVirtualIconGrid, viewMode, zoomTrack.gap, zoomTrack.minTrack]);
 
   useEffect(() => {
     if (viewMode !== 'grid' || useVirtualIconGrid) return;
@@ -785,52 +746,69 @@ export const FileGrid = memo(function FileGrid({
   }, [viewMode, useVirtualIconGrid, hideHoverTip, files.length]);
 
   useEffect(() => {
-    if (!useVirtualIconGrid) return;
+    if (viewMode !== 'grid' || !gridReady) return;
     reportColumnCount(gridColumnCount);
-  }, [useVirtualIconGrid, gridColumnCount, reportColumnCount]);
+  }, [viewMode, gridReady, gridColumnCount, reportColumnCount]);
 
+  const pendingFocusReveal = useRef(false);
+  // Geometry changes preserve the reading anchor. Only navigation/view intent
+  // requests focus reveal, which waits for the chosen renderer to actually mount.
+  useLayoutEffect(() => { pendingFocusReveal.current = true; },
+    [focusedFile, focusedIndex, currentPath, viewMode, focusRevealRequest]);
   useLayoutEffect(() => {
-    if (!focusedFile) return;
+    if (!pendingFocusReveal.current) return;
+    if (!focusedFile || focusedIndex < 0) { pendingFocusReveal.current = false; return; }
     if (viewMode === 'list') {
+      if (!listRef.current?.element) return;
       scrollFocusedListRow();
+      pendingFocusReveal.current = false;
       return;
     }
+    if (!gridReady || !gridViewport?.isConnected) return;
     if (!useVirtualIconGrid) {
-      const node = cssGridRef.current?.querySelector(`[id="file-item-${CSS.escape(focusedFile)}"]`);
-      if (node instanceof HTMLElement) node.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-      return;
+      const node = expectedActiveOption ? document.getElementById(expectedActiveOption) : null;
+      if (!(node instanceof HTMLElement) || !gridViewport.contains(node)) return;
+      node.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    } else {
+      if (gridRef.current?.element !== gridViewport) return;
+      scrollFocusedGridCell(gridColumnCount);
     }
-    scrollFocusedGridCell(gridColumnCount);
-  }, [
-    focusedFile,
-    viewMode,
-    currentPath,
-    useVirtualIconGrid,
-    files.length,
-    gridColumnCount,
-    scrollFocusedListRow,
-    scrollFocusedGridCell,
-  ]);
+    captureAnchor();
+    pendingFocusReveal.current = false;
+  });
+
+  useLayoutEffect(syncActiveOption, [syncActiveOption, viewMode, files, useVirtualIconGrid, gridColumnCount, gridReady]);
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: <explanation>
     <div
       ref={listingRef}
+      data-file-list-layout={listLayout}
+      data-file-marquee-active={marqueeRect !== null || undefined}
       className={cn(
-        'flex-1 min-h-0 min-w-0 overflow-hidden p-4 relative flex flex-col',
+        'files-listing flex-1 min-h-0 min-w-0 overflow-hidden relative flex flex-col',
+        viewMode === 'list' && 'files-listing-list',
         marqueeRect && 'select-none',
       )}
+      style={{ '--files-list-columns': fileListTracks(columns), '--files-type-track': columns.includes('type') ? '6.5rem' : ' ',
+        '--files-type-width': columns.includes('type') ? '6.5rem' : '0rem',
+        '--files-list-icon-width': `${listIcon}px` } as CSSProperties}
       onClick={() => {
         if (marqueeSkipClearRef.current) {
           marqueeSkipClearRef.current = false;
           return;
         }
         onSelect('', false);
+        focusRef.current?.focus({ preventScroll: true });
       }}
       onPointerDown={(e) => {
         if (e.button !== 0 || !onSelectMany) return;
         const target = e.target as HTMLElement | null;
-        if (target?.closest('[id^="file-item-"]') || target?.closest('button')) return;
+        if (target?.closest('[data-file-name]') || target?.closest('button')) return;
+        // This background gesture belongs to file selection, not the browser's text range.
+        e.preventDefault();
+        e.currentTarget.ownerDocument.getSelection()?.removeAllRanges();
+        focusRef.current?.focus({ preventScroll: true });
         marqueeOriginRef.current = {
           x: e.clientX,
           y: e.clientY,
@@ -846,6 +824,7 @@ export const FileGrid = memo(function FileGrid({
         const dx = e.clientX - origin.x;
         const dy = e.clientY - origin.y;
         if (!marqueeRect && Math.hypot(dx, dy) < MARQUEE_DRAG_THRESHOLD_PX) return;
+        e.preventDefault();
         const rect = normalizeClientRect(origin.x, origin.y, e.clientX, e.clientY);
         setMarqueeRect(rect);
         hideHoverTip();
@@ -862,6 +841,10 @@ export const FileGrid = memo(function FileGrid({
         marqueeOriginRef.current = null;
         setMarqueeRect(null);
         if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+      }}
+      onLostPointerCapture={() => {
+        marqueeOriginRef.current = null;
+        setMarqueeRect(null);
       }}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -914,121 +897,98 @@ export const FileGrid = memo(function FileGrid({
         )}
       </AnimatePresence>
 
-      <div className={cn(
+      {viewMode === 'list' && files.length > 0 && <FileListHeading columns={columns} sortColumn={sortColumn} sortDirection={sortDirection} onSort={onSort} />}
+      <div ref={focusRef} role={files.length > 0 ? 'listbox' : 'region'} aria-label={label} aria-multiselectable={files.length > 0 ? true : undefined}
+        aria-busy={isLoading} aria-activedescendant={activeOption === expectedActiveOption ? activeOption ?? undefined : undefined}
+        tabIndex={0} className={cn(
+        'files-selection outline-none',
         "flex-1 min-h-0 w-full",
         isLoading && "pointer-events-none cursor-wait"
-      )}>
+      )} onFocus={event => {
+        if (event.target === event.currentTarget && focusedIndex < 0 && files[0]) onFocusItem(files[0].name);
+      }} onKeyDown={event => {
+        if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const item = focusedIndex >= 0 ? files[focusedIndex] : undefined;
+        const node = expectedActiveOption ? document.getElementById(expectedActiveOption) : null;
+        const box = (node ?? event.currentTarget).getBoundingClientRect();
+        onKeyboardContextMenu({ x: box.left + 12, y: box.top + Math.min(box.height, 36) }, item);
+      }}>
         {files.length === 0 ? (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="flex-1 flex flex-col items-center justify-center text-app-muted opacity-50 select-none pb-20 h-full"
+            className="flex flex-col items-center justify-center gap-2 px-6 text-center text-app-muted select-none h-full"
             onContextMenu={(e) => onContextMenu(e)}
           >
-            <Folder size={64} className="mb-4 stroke-1" />
-            <p className="text-lg font-medium opacity-80">Empty directory</p>
-            {(() => {
-              // Only show upload prompt if user is actually dragging external files
-              // OR if nothing is being dragged (default state)
-              return <p className="text-sm opacity-50">Drag files here to upload</p>;
-            })()}
+            <Folder size={36} aria-hidden="true" className="mb-2 stroke-1" />
+            <p className="text-sm font-medium text-app-text">{isLoading ? 'Loading folder…' : emptyState?.title ?? 'This folder is empty'}</p>
+            {!isLoading && <p className="max-w-xs text-xs leading-relaxed">{emptyState?.description ?? 'Create a file or folder with New, or choose Upload to add files.'}</p>}
+            {!isLoading && emptyState?.onReset && <Button type="button" size="sm" variant="secondary" onClick={event => {
+              event.stopPropagation();
+              emptyState.onReset?.();
+              focusRef.current?.focus({ preventScroll: true });
+            }}>Clear filter</Button>}
           </motion.div>
         ) : viewMode === 'list' ? (
-        <div className="flex flex-col h-full min-h-0">
-          <div
-            className="shrink-0 grid items-center w-full min-w-0 overflow-hidden text-[11px] font-medium text-app-muted/80 bg-app-panel/95 backdrop-blur-sm z-10 border-b border-app-border/30"
-            style={{ gridTemplateColumns: FILE_LIST_COLUMNS, paddingRight: getScrollbarSize() }}
-          >
-            {FILE_LIST_COLUMN_IDS.map((column) => (
-              <Tooltip
-                key={column}
-                content={fileListSortTooltip(column, sortColumn, sortDirection)}
-                position="bottom"
-                className={cn(
-                  'min-w-0 w-full',
-                  FILE_LIST_COLUMN_ALIGN[column] === 'right' ? 'justify-end' : 'justify-start',
-                )}
-              >
-                <button
-                  type="button"
-                  aria-sort={
-                    sortColumn === column
-                      ? (sortDirection === 'asc' ? 'ascending' : 'descending')
-                      : 'none'
-                  }
-                  className={cn(
-                    'min-w-0 w-full overflow-hidden py-2 cursor-pointer hover:text-app-text hover:bg-app-surface/25 transition-colors group',
-                    'px-3',
-                    FILE_LIST_COLUMN_ALIGN[column] === 'right' ? 'text-right' : 'text-left',
-                    sortColumn === column && 'text-app-text',
-                  )}
-                  onClick={() => onSort(column)}
-                >
-                  <span
-                    className={cn(
-                      'flex items-center gap-1 min-w-0',
-                      FILE_LIST_COLUMN_ALIGN[column] === 'right' && 'justify-end',
-                    )}
-                  >
-                    <span className="truncate">{FILE_LIST_COLUMN_LABELS[column]}</span>
-                    {sortColumn === column && (sortDirection === 'asc' ? <ArrowUp size={12} className="shrink-0 text-app-accent" /> : <ArrowDown size={12} className="shrink-0 text-app-accent" />)}
-                    {sortColumn !== column && <ArrowUpDown size={12} className="shrink-0 opacity-0 group-hover:opacity-50" />}
-                  </span>
-                </button>
-              </Tooltip>
-            ))}
-          </div>
-          <div className="flex-1 min-h-0 min-w-0">
-            <List
+        <div className="h-full min-h-0 min-w-0">
+            <List key="files-list" tabIndex={-1}
+              role="presentation"
               listRef={listRef}
               rowCount={files.length}
               rowHeight={listRowHeight}
               rowComponent={FileListRow}
               rowProps={listRowProps}
               overscanCount={4}
+              onRowsRendered={syncActiveOption}
+              onResize={(size, previous) => {
+                // A newly mounted list needs its first measurement before revealing focus.
+                if (previous.height === 0 && size.height > 0) scrollFocusedListRow();
+              }}
               style={{ height: '100%', width: '100%' }}
             />
-          </div>
         </div>
       ) : (
         <div className="h-full w-full min-h-0 min-w-0">
           {useVirtualIconGrid ? (
-          <Grid
-            gridRef={gridRef}
-            cellComponent={FileGridCell}
-            cellProps={{
+          <List key="files-grid" tabIndex={-1}
+            role="presentation"
+            listRef={setVirtualGridRef}
+            rowComponent={FileGridRow}
+            rowProps={{
               ...listRowProps,
               columnCount: gridColumnCount,
+              gap: zoomTrack.gap,
+              minTrack: zoomTrack.minTrack,
               compactMode,
               iconSize: gridIcon,
               clickPolicy,
               onHoverShow: showHoverTip,
               onHoverHide: hideHoverTip,
             }}
-            columnCount={gridColumnCount}
-            columnWidth={gridColumnWidth}
             rowCount={gridRowCount}
             rowHeight={gridRowHeight}
             overscanCount={2}
-            style={{ height: '100%', width: '100%', overflowX: 'hidden' }}
-            onResize={({ width }) => {
-              scheduleWidth(width);
-            }}
+            onRowsRendered={syncActiveOption}
+            style={{ height: '100%', width: '100%', overflowX: 'hidden', overflowAnchor: 'none', scrollbarGutter: 'stable' }}
           />
           ) : (
           <div
-            ref={cssGridRef}
-            role="list"
-            className="h-full w-full min-h-0 min-w-0 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable] [contain:layout_paint]"
+            ref={setCssGridRef}
+            tabIndex={-1}
+            role="presentation"
+            className="h-full w-full min-h-0 min-w-0 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable] [overflow-anchor:none] [contain:layout_paint]"
             style={cssGridStyle}
           >
-            {files.map((file) => (
+            {files.map((file, index) => (
               <div
                 key={file.path || file.name}
-                role="listitem"
-                className="min-w-0 w-full flex items-start justify-center p-1 [content-visibility:auto] [contain:layout_paint] [contain-intrinsic-size:auto_var(--file-grid-row)]"
+                role="presentation"
+                className="min-w-0 w-full flex items-start justify-center p-1 [contain:layout]"
               >
                 <FileGridItem
+                  optionId={fileOptionId(scopeId, index)} optionIndex={index} optionCount={files.length}
                   file={file}
                   viewMode="grid"
                   compactMode={compactMode}
