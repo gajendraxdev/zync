@@ -4,6 +4,67 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Changed
+
+- **Files interface:** Use compact navigation and folder-summary rows, separate New
+  and Upload menus, one View menu, and direct List/Grid controls. Keep selection
+  feedback in place and distinguish empty, hidden-only, filtered and failed
+  listings with Clear filter or Retry. Preserve existing file operations, editor
+  ownership, virtualized listings and saved preferences. ([6f0bf22], [90d9ea5])
+
+- **Responsive Files layout:** Align list headings, rows, grid and actions to
+  shared gutters. Give filenames more room while keeping Size and Modified
+  compact; optional Type/Owner columns remain sortable when hidden. Preserve
+  short extensions and icon zoom preferences, use readable list/Places artwork,
+  and place Pins before Recent. Show wide Places by default only when no explicit
+  visibility preference exists. ([a356400], [6f0bf22])
+
+- **Folder navigation:** Keep breadcrumbs visible while filtering, fold parent
+  folders into a keyboard-accessible menu, and offer on-demand sibling choices.
+  Add debounced folder suggestions during path editing, click/Tab completion,
+  arrow selection and Enter navigation, with bounded results, retry and stale-reply
+  protection. Preserve literal folder-name spaces, manual entry, history and
+  cancellation without changing native path identity. ([1bcfd30], [28ae8ee])
+
+- **Files selection and focus:** Share checkbox-style selection across list and
+  grid, with modifier-free toggles that never navigate. Use the theme accent and
+  contrasting ticks, retaining forced-colors support and distinct keyboard focus.
+  Total loaded regular-file sizes without implying recursive folder sizes.
+  Keep same-host panes isolated and rubber-band selection separate from browser
+  text selection, while preserving native Properties text copy. Automatic Files
+  activation stays visually quiet without losing keyboard shortcuts.
+  ([6ab62e4], [a356400], [6f0bf22])
+
+- **Sidebars and Properties:** Share native width-transition coordination across
+  main/tools sidebars and nested Files drawers. Keep drawer contents stable and
+  scrolling independent, wrap fixed grid tracks directly without per-file
+  animations, and preserve the viewed file during reflow. Retain direct pointer
+  resizing, reduced motion and pane-local ownership. Use inline Properties when
+  space permits and shared dialogs otherwise; dismiss transient dialogs when
+  Files becomes inactive without stealing focus or losing inline inspector state.
+  ([5bed17b], [6f0bf22])
+
+- **Shared popups:** Keep menu trigger clicks within their dismissal boundary,
+  expose submenu semantics in context menus, and prevent noninteractive tooltip
+  wrappers from blocking controls. Allow inactive owners to suppress modal focus
+  restoration; existing callers retain the default behavior. ([c44431b])
+
+### Added
+
+- **Bundled Material icons:** Add an optional offline Material Icon Theme choice
+  with 65 unchanged, attributed MIT-licensed assets and programming-language and
+  special-folder mappings. Reuse one renderer for Files, Places and Properties
+  without replacing existing defaults or saved icon selections.
+  ([de93c92], [a8e470a])
+
+- **Declarative icon packs:** Register built-in choices through the existing plugin
+  lifecycle and derive enabled picker choices from that registry. Add versioned
+  community mappings, bounded static-SVG validation and plugin API 2.2 compatibility
+  gates through normal review, activation and rollback paths. Preserve legacy
+  packs and saved selections on fallback. Bound unused renderer cache entries and
+  ignore late results from released requests. Packaged-host release testing and
+  SDK publication remain separate steps. ([7c7c5db], [a8e470a])
+
 ## [2.35.1] - 2026-10-14
 
 This release combines the unpublished 2.35.0 draft with the activity-bar default change.
@@ -2673,3 +2734,14 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [2e9c615]: https://github.com/zync-sh/zync/commit/2e9c6154e8849dc4454ae948e4f29a49d34eb28b
 [acd9f33]: https://github.com/zync-sh/zync/commit/acd9f33dcc20ff92e175e6b0d8e9dac1f2496c4c
 [905f8eb]: https://github.com/zync-sh/zync/commit/905f8eb304391ffdb135c207167a767512d62b11
+[6ab62e4]: https://github.com/zync-sh/zync/commit/6ab62e4ffa18cd89c4fb74bb02c5d48cd2a2959a
+[c44431b]: https://github.com/zync-sh/zync/commit/c44431bd4c9f237c4fb2dffd8c699cbffe47a296
+[5bed17b]: https://github.com/zync-sh/zync/commit/5bed17b6e73a58a2b763dcd83a6ff5a446789f35
+[7c7c5db]: https://github.com/zync-sh/zync/commit/7c7c5db11256178b299e5853dcbfe9ffd26bd8f8
+[de93c92]: https://github.com/zync-sh/zync/commit/de93c92483f3cb0eba668573ead87223966b1239
+[a8e470a]: https://github.com/zync-sh/zync/commit/a8e470a1504ab22ad3c95ad82ec2fd5001d8c5bf
+[28ae8ee]: https://github.com/zync-sh/zync/commit/28ae8eeb09101a5e8b0be590a1e9c18865df0090
+[a356400]: https://github.com/zync-sh/zync/commit/a356400de65ea09118dee96cfcdc2391b6756d1b
+[1bcfd30]: https://github.com/zync-sh/zync/commit/1bcfd30eda8bd76dd5caece0cbf5f1f6ba34a87c
+[6f0bf22]: https://github.com/zync-sh/zync/commit/6f0bf22e41a54186b27f70a931dc367e9a55cd7a
+[90d9ea5]: https://github.com/zync-sh/zync/commit/90d9ea5cdc9da1ef8dec5b7e5070ae9b0d99c4e4
