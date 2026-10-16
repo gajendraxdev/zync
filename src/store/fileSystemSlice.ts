@@ -127,7 +127,8 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
     loadFiles: async (connectionId, path, skipHistory = false, silent = false, instanceId) => {
         const state = get();
         const key = filesStoreKey(connectionId, instanceId);
-        let targetPath = (path !== undefined ? path : state.currentPath[key] || '').trim();
+        // Native paths are identities, not form prose: valid folder-name spaces must survive reads/history.
+        let targetPath = path !== undefined ? path : state.currentPath[key] || '';
         if (!targetPath) return;
         const recentGen = recentPathsGeneration.get(connectionId) || 0;
         const loadGen = (filesLoadGeneration.get(key) || 0) + 1;
