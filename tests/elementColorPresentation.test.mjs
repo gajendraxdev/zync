@@ -8,7 +8,7 @@ import { createElementColorStyle, ELEMENT_COLORS_CHANGED, TERMINAL_ELEMENT_COLOR
 
 const colors = load('features/appearance/domain/elementColors.ts');
 const { buildElementColorRules: rules, terminalElementColorSignature: signature, ELEMENT_COLOR_BINDINGS: bindings } = load('features/appearance/presentation/elementColorBindings.ts');
-const { opaqueCssColor, colorContrast } = load('features/appearance/domain/colorContrast.ts');
+const { opaqueCssColor, colorContrast, contrastingForeground } = load('features/appearance/domain/colorContrast.ts');
 const value = overrides => ({ version: 1, overrides });
 
 test('all supported colors bind only finite host selectors/color properties; default and unknown data emit nothing', () => {
@@ -61,6 +61,19 @@ test('contrast handles opaque sRGB endpoints/symmetry and refuses unknown/transl
     for (const input of ['rgba(255,0,0,0.4)', 'transparent', 'rgb(300,0,0)', 'rgb(255,,0,0)', 'rgb(255,0 0)', 'var(--color)', 'oklch(0.4 0.2 130)', 'url(secret)']) {
         assert.equal(opaqueCssColor(input), null); assert.equal(colorContrast(input, '#ffffff'), null);
     }
+});
+
+test('accent foreground picks the more contrasting endpoint without guessing unsupported colors', () => {
+    assert.equal(contrastingForeground('#ffffff'), '#000000');
+    assert.equal(contrastingForeground('#000000'), '#ffffff');
+    assert.equal(contrastingForeground('#f59c77'), '#000000');
+    assert.equal(contrastingForeground('rgb(30, 64, 175)'), '#ffffff');
+    for (const background of ['#777777', '#797bce', '#ffff00', '#ff0000', '#0000ff']) {
+        const foreground = contrastingForeground(background);
+        assert.ok(colorContrast(foreground, background) >= 4.5);
+        assert.ok(colorContrast(foreground, background) >= colorContrast(foreground === '#000000' ? '#ffffff' : '#000000', background));
+    }
+    for (const unsupported of ['', 'transparent', 'rgba(1,2,3,0.5)', 'var(--accent)']) assert.equal(contrastingForeground(unsupported), null);
 });
 
 test('palette references depend on theme tokens, never mounted/hidden host contents or layout reads', () => {
