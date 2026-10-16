@@ -1,4 +1,4 @@
-/** Nautilus window breakpoint (`max-width: 682sp`). */
+/** Places switches to a dialog when the measured Files pane cannot fit a useful sidebar. */
 export const FILE_CHROME_NARROW_MAX = 682;
 
 /** Recent folders kept per connection and shown in Places. */
@@ -14,11 +14,12 @@ export function clampFileRecentLimit(value: number | undefined): number {
   return n;
 }
 
-/** Places column width (`w-48`). */
-export const FILE_PLACES_WIDTH_PX = 192;
+/** Readable inline Places width; narrow panes use the shared dialog. */
+export const FILE_PLACES_WIDTH_PX = 184;
 
-/** Properties overlay width (`w-64`, same as Snippets). */
-export const FILE_PROPERTIES_WIDTH_PX = 256;
+/** Inline inspector width; reserve a useful listing beside it before choosing this mode. */
+export const FILE_PROPERTIES_WIDTH_PX = 320;
+export const FILE_INSPECTOR_LISTING_MIN_WIDTH_PX = 400;
 
 /** Icon view uses CSS auto-fill below this; react-window for larger folders. */
 export const FILE_GRID_VIRTUALIZE_AFTER = 96;
@@ -32,10 +33,13 @@ export const FILE_GRID_ZOOM = [
 ] as const;
 
 export const FILE_LIST_ZOOM = [
-  { icon: 16, rowHeight: 40 },
-  { icon: 32, rowHeight: 52 },
-  { icon: 64, rowHeight: 80 },
+  { icon: 20, rowHeight: 38 },
+  { icon: 32, rowHeight: 44 },
+  { icon: 64, rowHeight: 74 },
 ] as const;
+
+/** Sidebar artwork stays subordinate to file entries, without becoming tiny at normal density. */
+export const FILE_PLACE_ICON_PX = 18;
 
 export type FileClickPolicy = 'single' | 'double';
 

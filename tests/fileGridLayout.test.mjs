@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
-import {
+import { loadSource } from './helpers/loadSource.mjs';
+
+const chrome = loadSource('components/file-manager/fileChrome.ts');
+const presentation = loadSource('components/file-manager/fileListPresentation.ts');
+const {
   computeFileGridMetrics,
+  fileGridColumnPitch,
   fileGridScrollTarget,
   fileHoverHint,
   fileIconGridTemplateColumns,
@@ -12,7 +17,10 @@ import {
   FILE_LIST_COLUMNS,
   FILE_LIST_SORT_INITIAL,
   sortFileEntries,
-} from '../.tmp-agent-tests/src/components/file-manager/fileGridLayout.js';
+} = loadSource('components/file-manager/fileGridLayout.ts', {
+  './fileChrome.js': chrome,
+  './fileListPresentation': presentation,
+});
 
 function runTest(name, fn) {
   try {
@@ -34,7 +42,7 @@ runTest('sortFileEntries puts directories first then name', () => {
     'name',
     'asc',
   );
-  assert.deepEqual(sorted.map((f) => f.name), ['a', 'b.txt', 'c.txt']);
+  assert.deepEqual(Array.from(sorted, (f) => f.name), ['a', 'b.txt', 'c.txt']);
 });
 
 runTest('sortFileEntries reverses non-dir comparison on desc', () => {
@@ -43,7 +51,7 @@ runTest('sortFileEntries reverses non-dir comparison on desc', () => {
     'size',
     'desc',
   );
-  assert.deepEqual(sorted.map((f) => f.name), ['b.txt', 'a.txt']);
+  assert.deepEqual(Array.from(sorted, (f) => f.name), ['b.txt', 'a.txt']);
 });
 
 runTest('computeFileGridMetrics compact column count', () => {
@@ -55,11 +63,18 @@ runTest('computeFileGridMetrics compact column count', () => {
   assert.ok(m.minTrack * m.columnCount <= 332);
 });
 
-runTest('fileIconGridTemplateColumns lets leftover space grow tiles', () => {
+runTest('fileIconGridTemplateColumns keeps tile widths stable and fits a narrow single track', () => {
   assert.equal(
     fileIconGridTemplateColumns(108),
-    'repeat(auto-fill, minmax(min(100%, 108px), 1fr))',
+    'repeat(auto-fill, min(100%, 108px))',
   );
+});
+
+runTest('grid columns retain minimum tracks and share marquee geometry during resizing', () => {
+  assert.equal(fileIconGridTemplateColumns(108, 9), 'repeat(9, min(100%, 108px))');
+  assert.equal(fileGridColumnPitch(900, 108, 8), 116);
+  assert.equal(fileGridColumnPitch(1200, 108, 8), 116);
+  assert.equal(fileGridColumnPitch(60, 108, 8), 68);
 });
 
 runTest('computeFileGridMetrics zoom minTrack is independent of viewport', () => {
@@ -73,15 +88,15 @@ runTest('computeFileGridMetrics zoom minTrack is independent of viewport', () =>
 
 runTest('fileGridScrollTarget rejects a cell past the live grid', () => {
   assert.equal(fileGridScrollTarget(23, 8, 2), null);
-  assert.deepEqual(fileGridScrollTarget(23, 8, 4), { rowIndex: 2, columnIndex: 7 });
+  assert.deepEqual({ ...fileGridScrollTarget(23, 8, 4) }, { rowIndex: 2, columnIndex: 7 });
   assert.equal(fileGridScrollTarget(-1, 8, 4), null);
   assert.equal(fileGridScrollTarget(0, 8, 0), null);
 });
 
 runTest('FILE_LIST_COLUMNS includes name flex track and size column', () => {
-  assert.equal(FILE_LIST_COLUMNS.includes('minmax(12rem, 20rem)'), true);
-  assert.equal(FILE_LIST_COLUMNS.includes('5.5rem'), true);
-  assert.equal(FILE_LIST_COLUMNS.endsWith('minmax(0, 1fr)'), true);
+  assert.equal(FILE_LIST_COLUMNS.includes('min(var(--files-name-limit, 25rem), calc(100% - 14rem))'), true);
+  assert.equal(FILE_LIST_COLUMNS.includes('5rem'), true);
+  assert.equal(FILE_LIST_COLUMNS.endsWith('9rem'), true, 'default has only Name, Size and Modified');
 });
 
 runTest('formatFileListDate uses time today and short date otherwise', () => {
@@ -128,7 +143,7 @@ runTest('sortFileEntries compares combined owner:group', () => {
     'owner',
     'asc',
   );
-  assert.deepEqual(byOwner.map((f) => f.name), ['a.txt', 'b.txt']);
+  assert.deepEqual(Array.from(byOwner, (f) => f.name), ['a.txt', 'b.txt']);
 });
 
 runTest('fileHoverHint lists name and folder', () => {
