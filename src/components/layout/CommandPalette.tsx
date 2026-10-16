@@ -24,6 +24,7 @@ import { GoogleMarkIcon } from "../icons/providerIcons";
 import { useConnectionDisplayLabels } from "../../features/connections/presentation/useConnectionDisplayLabels";
 import { openBuiltinThemePicker } from '../../features/plugins/presentation/themePicker';
 import { WorkspaceCommandItems } from './WorkspaceCommandItems';
+import { iconThemeOptions } from '../../lib/icons/iconTheme';
 
 interface QuickPickItem {
     id: string;
@@ -286,13 +287,7 @@ export function CommandPalette() {
                                         value="Preferences: Icon Theme"
                                         onSelect={() => {
                                             cancelActiveQuickPick();
-                                            const themes = [
-                                                { label: 'VSCode Icons (Default)', id: 'vscode-icons' },
-                                                { label: 'Lucide Minimalist', id: 'lucide' },
-                                                ...plugins
-                                                    .filter(p => p.manifest.type === 'icon-theme')
-                                                    .map(p => ({ label: p.manifest.name, id: p.manifest.id }))
-                                            ];
+                                            const themes = iconThemeOptions(plugins);
 
                                             const nextOptions = { 
                                                 placeHolder: 'Select Icon Theme', 

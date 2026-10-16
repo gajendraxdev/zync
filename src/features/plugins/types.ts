@@ -1,4 +1,5 @@
 import permissionCatalogJson from '../../../plugin-api/permissions.json' with { type: 'json' };
+import type { IconThemeDefinition } from '../../lib/icons/iconTheme';
 
 export type PluginPermissionRisk =
     | 'declarative'
@@ -88,6 +89,7 @@ export interface PluginManifest {
     type?: string;
     iconsPath?: string;
     icons_path?: string;
+    iconTheme?: IconThemeDefinition;
     editor?: EditorProviderManifest;
 }
 

@@ -36,6 +36,7 @@ import { PluginsMarketplaceTab } from './tabs/plugins/PluginsMarketplaceTab';
 import { PluginPermissionReview, PluginsDeveloperTab, type LocalInstallAction } from './tabs/plugins/PluginsDeveloperTab';
 import { useVaultStore } from '../../vault/useVaultStore';
 import type { ChromeActionArea } from '../../features/workspace/domain/chromeActions';
+import { iconThemeOptions } from '../../lib/icons/iconTheme';
 
 
 interface SettingsModalProps {
@@ -43,7 +44,6 @@ interface SettingsModalProps {
     onClose: () => void;
 }
 
-const BUILTIN_ICON_THEME_COUNT = 2; // VSCode Icons + Lucide
 const FOCUSABLE_SELECTOR = [
     'a[href]',
     'button:not([disabled])',
@@ -441,7 +441,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             onSaveOptionalPermissions={handleSetOptionalPluginPermissions}
             onClearPluginData={handleClearPluginData}
             onRollbackPlugin={handleRollbackPlugin}
-            iconThemeCount={BUILTIN_ICON_THEME_COUNT + plugins.filter((plugin) => plugin.manifest.type === 'icon-theme').length}
+            iconThemeCount={iconThemeOptions(plugins).length}
             iconRenderer={IconResolver}
         />
     );

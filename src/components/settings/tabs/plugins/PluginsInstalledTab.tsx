@@ -8,6 +8,7 @@ import type { IconResolverProps } from '../../common/IconResolver';
 import { getPluginCategory, getPluginCategoryLabel } from '../../../editor/providers';
 import { PluginDetailsDialog } from './PluginDetailsDialog';
 import { openBuiltinThemePicker } from '../../../../features/plugins/presentation/themePicker';
+import { iconThemeOptions } from '../../../../lib/icons/iconTheme';
 
 interface PluginsInstalledTabProps {
     plugins: InstalledPlugin[];
@@ -132,13 +133,7 @@ export function PluginsInstalledTab({
                     </div>
                     <button
                         onClick={() => {
-                            const themes = [
-                                { label: 'VSCode Icons (Default)', id: 'vscode-icons' },
-                                { label: 'Lucide Minimalist', id: 'lucide' },
-                                ...plugins
-                                    .filter(p => p.manifest.type === 'icon-theme' && p.enabled !== false)
-                                    .map(p => ({ label: p.manifest.name, id: p.manifest.id }))
-                            ];
+                            const themes = iconThemeOptions(plugins);
 
                             window.dispatchEvent(new CustomEvent('zync:quick-pick', {
                                 detail: {
