@@ -63,8 +63,15 @@ All notable changes to Zync are documented in this file. The format is based on 
   publishing the result, keeping an existing destination unchanged during copying.
   Bound concurrent transfers and attempt temporary-file cleanup after confirmed
   cancellation. Retain recovery details when the outcome is uncertain. These
-  staging guarantees do not yet cover whole-folder replacement, moves or archives.
+  staging guarantees do not cover moves or archives.
   ([bfb9231], [822c8c9], [d4469ff])
+
+- **Staged folder copies:** Extend the same transfer service to copy complete
+  folders into temporary siblings before replacing an existing folder. Keep the
+  original available during copying, check nested contents before publication,
+  and clean owned temporary trees after confirmed cancellation. Reuse existing
+  progress, recovery and history controls; folder replacement is not merging.
+  ([241b0d4], [5bdc13e])
 
 - **Transfer recovery:** Restore active transfers after a UI reload and unresolved
   recovery details after an app restart, without automatically resuming interrupted
@@ -2771,3 +2778,5 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [d32d8bc]: https://github.com/zync-sh/zync/commit/d32d8bcc546035dd79e2744603c0f6f359d83df0
 [1842b93]: https://github.com/zync-sh/zync/commit/1842b93ffaf5d1054b20a597d660222c5e2ea918
 [d4469ff]: https://github.com/zync-sh/zync/commit/d4469ff66b5dee6e15f1e15e4a238271aea9cdf0
+[241b0d4]: https://github.com/zync-sh/zync/commit/241b0d48e9b61ed71b7b6eaad10e3811512ad3c1
+[5bdc13e]: https://github.com/zync-sh/zync/commit/5bdc13e5553d675d497a48fbd0c59340bbc9e113
