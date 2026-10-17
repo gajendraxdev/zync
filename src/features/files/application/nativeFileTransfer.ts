@@ -18,6 +18,30 @@ export interface NativeFileTransferReceipt {
     stageCleaned?: boolean;
     warning: string | null;
     error: string | null;
+    combine?: NativeFolderCombineProgress;
+}
+
+export interface NativeFolderCombineProgress {
+    sourceRoot: string;
+    destinationRoot: string;
+    completedItems: number;
+    totalItems: number;
+    completedBytes: number;
+    totalBytes: number;
+    currentDone: boolean;
+    finished: boolean;
+}
+
+function validCombine(value: unknown): value is NativeFolderCombineProgress {
+    if (!value || typeof value !== 'object') return false;
+    const job = value as Record<string, unknown>;
+    return ['sourceRoot', 'destinationRoot'].every(key => typeof job[key] === 'string'
+        && (job[key] as string).length > 0 && (job[key] as string).length <= 4096 && !(job[key] as string).includes('\0'))
+        && ['completedItems', 'totalItems', 'completedBytes', 'totalBytes'].every(key => typeof job[key] === 'number'
+            && Number.isSafeInteger(job[key]) && (job[key] as number) >= 0)
+        && Number(job.completedItems) <= Number(job.totalItems) && Number(job.totalItems) <= 100_000
+        && Number(job.completedBytes) <= Number(job.totalBytes)
+        && typeof job.currentDone === 'boolean' && typeof job.finished === 'boolean';
 }
 
 const phases = new Set<NativeFileTransferReceipt['phase']>([
@@ -29,6 +53,7 @@ export function nativeFileTransferReceipt(value: unknown): NativeFileTransferRec
     if (!value || typeof value !== 'object') throw new Error('Invalid native file-transfer receipt');
     const item = value as Record<string, unknown>;
     if (item.version !== 1 || !phases.has(item.phase as NativeFileTransferReceipt['phase'])
+        || item.combine !== undefined && !validCombine(item.combine)
         || ['id', 'sourceConnectionId', 'sourcePath', 'destinationConnectionId', 'destinationPath', 'stagePath', 'backupPath']
             .some(key => typeof item[key] !== 'string' || !(item[key] as string).length || (item[key] as string).length > 4096)
         || ['createdAt', 'transferred', 'total'].some(key => typeof item[key] !== 'number' || !Number.isFinite(item[key]) || (item[key] as number) < 0)
@@ -43,13 +68,27 @@ export function nativeFileTransferReceipt(value: unknown): NativeFileTransferRec
 }
 
 export function isNativeTransferActive(receipt: NativeFileTransferReceipt): boolean {
-    return ['prepared', 'writing', 'ready', 'backingUp', 'publishing', 'published'].includes(receipt.phase);
+    return ['prepared', 'writing', 'ready', 'backingUp', 'publishing', 'published'].includes(receipt.phase)
+        || receipt.phase === 'completed' && receipt.combine?.finished === false;
 }
 
 /** Match native journal resolution; absent cleanup evidence never means safe. */
 export function isNativeTransferResolved(receipt: NativeFileTransferReceipt): boolean {
-    return receipt.warning === null && (receipt.phase === 'completed'
-        || receipt.phase === 'cancelled' && receipt.stageCleaned === true && receipt.destinationUnchanged);
+    return receipt.combine?.finished !== false && receipt.warning === null && (receipt.phase === 'completed'
+        || receipt.phase === 'cancelled' && (receipt.combine?.currentDone === true
+            || receipt.stageCleaned === true && receipt.destinationUnchanged));
+}
+
+/** Physical receipt paths remain recovery authority; root paths and aggregate
+ * bytes describe the user's job without double-counting its completed cursor. */
+export function nativeTransferDisplay(receipt: NativeFileTransferReceipt) {
+    const job = receipt.combine;
+    return {
+        sourcePath: job?.sourceRoot ?? receipt.sourcePath,
+        destinationPath: job?.destinationRoot ?? receipt.destinationPath,
+        transferred: job ? job.completedBytes + (job.currentDone ? 0 : receipt.transferred) : receipt.transferred,
+        total: job?.totalBytes ?? receipt.total,
+    };
 }
 
 export interface NativeTransferInspection {

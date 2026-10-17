@@ -281,7 +281,7 @@ export function TransferPanel({ onClose, indicatorRef }: TransferPanelProps) {
                       <div className="text-[10px] text-app-muted break-words">
                         {transfer.status === 'completed'
                           ? transfer.recoveryWarning ? 'Transfer complete; cleanup needs attention'
-                            : transfer.recoveryBackupPath ? 'Transfer complete; cleanup pending' : 'Transfer complete'
+                            : transfer.recoveryBackupPath ? 'Transfer complete; cleanup pending' : transfer.combine ? 'Folders combined' : 'Transfer complete'
                           : transfer.status === 'cancelled'
                             ? transfer.nativeRecovery ? 'Copy cancelled' : 'Cancelled'
                             : fileTransferFailureMessage(transfer.error)}
@@ -292,11 +292,14 @@ export function TransferPanel({ onClose, indicatorRef }: TransferPanelProps) {
                           {transfer.stageCleaned && <p>No temporary copy remains.</p>}
                           {recovery.warning && <p className="text-app-warning break-words">{recovery.warning}</p>}
                           <p className="break-all select-text">Destination: {transfer.destinationPath}</p>
+                          {transfer.recoveryDestinationPath && transfer.recoveryDestinationPath !== transfer.destinationPath
+                            && <p className="break-all select-text">Current item: {transfer.recoveryDestinationPath}</p>}
                           {transfer.recoveryStagePath && <p className="break-all select-text">Temporary copy: {transfer.recoveryStagePath}</p>}
                           {transfer.recoveryBackupPath && (
                             <p className="break-all select-text">{transfer.nativeRecovery ? 'Possible original backup' : 'Original recovery backup'}: {transfer.recoveryBackupPath}</p>
                           )}
                           {transfer.nativeRecovery && (transfer.recoveryStagePath || transfer.recoveryBackupPath || transfer.recoveryWarning)
+                            && (!transfer.combine?.currentDone || transfer.recoveryStagePath || transfer.recoveryBackupPath)
                             && <TransferRecoveryDetails transfer={transfer} onRequestCleanup={(transfer, onConfirm) => {
                               if (confirmDelete) setCleanupConfirmation({ transfer, onConfirm });
                               else onConfirm();

@@ -34,7 +34,7 @@ Object.defineProperty(globalThis, 'window', { configurable: true, value: {
 } });
 
 // The real slice captures its native bridge during module initialization.
-const { acknowledgeMovedClipboard, createFileSystemSlice, filesStoreKey } = await import('../src/store/fileSystemSlice');
+const { acknowledgeMovedClipboard, createFileSystemSlice, filesStoreKey, splitFileName } = await import('../src/store/fileSystemSlice');
 let serial = 0;
 
 function fixture() {
@@ -78,6 +78,11 @@ function deferred() {
 }
 
 try {
+    await run('Keep Both shares filename rules while preserving dotted folder names', async () => {
+        sameValues(splitFileName('project.v2', true), { base: 'project.v2', ext: '' }, 'A directory has no file extension');
+        sameValues(splitFileName('report.txt'), { base: 'report', ext: '.txt' }, 'Keep normal file extensions');
+        sameValues(splitFileName('.env'), { base: '.env', ext: '' }, 'Keep dotfiles intact');
+    });
     await run('a connection refresh reads the base and every split instance at its own path', async () => {
         const { store, connectionId } = fixture();
         const left = filesStoreKey(connectionId, 'left');

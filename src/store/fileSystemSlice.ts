@@ -21,8 +21,9 @@ export function filesStoreKey(connectionId: string, instanceId?: string | null):
     return id ? `${connectionId}::${id}` : connectionId;
 }
 
-/** Splits the last filename extension without treating dotfiles such as `.env` as extensions. */
-export function splitFileName(name: string): { base: string; ext: string } {
+/** Split a leaf extension without splitting dotfiles or directory names. */
+export function splitFileName(name: string, isDirectory = false): { base: string; ext: string } {
+    if (isDirectory) return { base: name, ext: '' };
     // If it starts with a dot and has no other dots, it's a hidden file like .env
     if (name.startsWith('.') && name.indexOf('.', 1) === -1) {
         return { base: name, ext: '' };

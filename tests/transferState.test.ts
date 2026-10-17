@@ -50,6 +50,12 @@ Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: m
 setUsageEnabled(true);
 
 try {
+    run('cancelled combines explain partial completion instead of claiming an unchanged folder', () => {
+        const copy = transferRecoveryCopy({ status: 'cancelled', nativeRecovery: true, destinationUnchanged: true,
+            combine: { sourceRoot: '/source', destinationRoot: '/target', completedItems: 1, totalItems: 3,
+                completedBytes: 10, totalBytes: 30, currentDone: false, finished: true } });
+        equal(copy.detail, '1 of 3 items combined. Completed items remain; destination-only items are kept.', 'Do not confuse a clean current file with a whole-folder rollback');
+    });
     run('unchanged native cancellation removes only the redundant warning', () => {
         const transfer = { status: 'cancelled' as const, nativeRecovery: true, destinationUnchanged: true,
             recoveryWarning: 'Destination left unchanged. A separate staging file may remain; inspect it before cleanup.' };

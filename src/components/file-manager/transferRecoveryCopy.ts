@@ -5,10 +5,11 @@ const UNCHANGED_STAGING_WARNING = 'Destination left unchanged. A separate stagin
 
 /** Present recorded outcomes without turning an unknown replacement into a safety claim. */
 export function transferRecoveryCopy(transfer: Pick<Transfer,
-    'status' | 'nativeRecovery' | 'destinationUnchanged' | 'recoveryWarning'>) {
+    'status' | 'nativeRecovery' | 'destinationUnchanged' | 'recoveryWarning' | 'combine'>) {
     const warning = transfer.nativeRecovery && transfer.destinationUnchanged
         && transfer.recoveryWarning === UNCHANGED_STAGING_WARNING ? undefined : transfer.recoveryWarning;
     const detail = transfer.status === 'completed' ? undefined
+        : transfer.combine ? `${transfer.combine.completedItems} of ${transfer.combine.totalItems} items combined. Completed items remain; destination-only items are kept.`
         : transfer.destinationUnchanged ? 'Destination left unchanged.'
             : transfer.nativeRecovery ? warning ? undefined : 'Replacement outcome is uncertain. Inspect the files before retrying.'
                 : 'Check the destination; incomplete output may remain.';

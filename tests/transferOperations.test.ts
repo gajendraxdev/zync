@@ -5,7 +5,7 @@ import { executeFileTransfer, tryStagedFileTransfer, fileTransferFailureMessage,
 import { replaceFileWithBackup, replacementPreconditionError } from '../src/features/files/application/replaceFileWithBackup';
 import { acquireFileDestination } from '../src/features/files/application/fileDestinationReservations';
 import { createTransferEventProjection, createFileTransferExecution, getTransferEventProjection, dismissTransferReceipt } from '../src/features/files/application/transferEventProjection';
-import { nativeTransferInspection, type NativeFileTransferReceipt } from '../src/features/files/application/nativeFileTransfer';
+import { nativeTransferInspection, nativeFileTransferReceipt, nativeTransferDisplay, isNativeTransferActive, isNativeTransferResolved, type NativeFileTransferReceipt } from '../src/features/files/application/nativeFileTransfer';
 import { runFileTransferBatch, fileTransferBatchFailure } from '../src/features/files/application/runFileTransferBatch';
 
 function equal(actual: unknown, expected: unknown, message: string): void {
@@ -85,6 +85,83 @@ function nativeReceipt(overrides: Partial<NativeFileTransferReceipt> = {}): Nati
         stagePath: '/destination/.zync-transfer-test.part', backupPath: '/destination/.zync-transfer-test.backup', backupExpected: true,
         phase: 'completed', createdAt: 1, transferred: 10, total: 10, destinationUnchanged: false, warning: null, error: null, ...overrides };
 }
+
+await run('combine uses the existing command, validates root identity and never falls back', async () => {
+    const job = { sourceRoot: request.sourcePath, destinationRoot: request.destinationPath,
+        completedItems: 2, totalItems: 2, completedBytes: 20, totalBytes: 20, currentDone: true, finished: true };
+    const receipt = nativeReceipt({ sourcePath: `${request.sourcePath}/item`, destinationPath: `${request.destinationPath}/item`, combine: job });
+    const calls: Array<{ command: string; args: Record<string, unknown> }> = [];
+    const fixture = execution(async (command, args) => { calls.push({ command, args }); return receipt; }, true);
+    await executeFileTransfer({ ...request, overwrite: true, folderMode: 'combine' }, fixture.ports);
+    equal(calls.length, 1, 'One native coordinator, not renderer recursion');
+    equal(calls[0].command, 'fs_transfer_file', 'Reuse the current command');
+    equal(calls[0].args.folderMode, 'combine', 'Explicitly distinguish combine from replacement');
+    equal(fixture.outcomes.join(), 'completed:transfer', 'Only the terminal job completes');
+    for (const operation of [executeFileTransfer, tryStagedFileTransfer]) {
+        const commands: string[] = [];
+        const unsupported = execution(async command => { commands.push(command); return null; }, true);
+        let refused = false;
+        try { await operation({ ...request, overwrite: true, folderMode: 'combine' }, unsupported.ports); }
+        catch (error) { refused = String(error).includes('no legacy copy'); }
+        equal(refused, true, 'Both copy and conflict callers reject an unhandled combine rather than returning false');
+        equal(commands.join(), 'fs_transfer_file', 'An unhandled combine never dispatches another mutation');
+        equal(unsupported.outcomes.length, 1, 'Report the failure once');
+        equal(unsupported.outcomes[0].startsWith('failed:'), true, 'Do not report a failed combine as completed');
+        acquireFileDestination(request.destinationConnectionId, request.destinationPath).release();
+    }
+    const mismatched = execution(async () => ({ ...receipt, combine: { ...job, destinationRoot: '/other' } }), true);
+    let refused = false;
+    try { await executeFileTransfer({ ...request, folderMode: 'combine' }, mismatched.ports); }
+    catch (error) { refused = String(error).includes('does not match'); }
+    equal(refused, true, 'Bind the result to the requested root');
+});
+
+await run('pre-start folder limits never select an untracked legacy copy', async () => {
+    for (const detail of ['Folder entry limit exceeded', 'Folder nesting limit exceeded',
+        'Folder path budget exceeded', 'Folder size exceeds transfer limits']) {
+        for (const operation of [executeFileTransfer, tryStagedFileTransfer]) {
+            const error = `TRANSFER_NOT_STARTED:${detail}`;
+            const commands: string[] = [];
+            const fixture = execution(async command => { commands.push(command); throw error; }, true);
+            await rejected(operation({ ...request, overwrite: false }, fixture.ports), error);
+            equal(commands.join(), 'fs_transfer_file', 'An absent-target copy still respects staged tree limits');
+            equal(fixture.outcomes.join(), `failed:transfer:${error}`, 'Keep the original pre-start refusal');
+            acquireFileDestination(request.destinationConnectionId, request.destinationPath).release();
+        }
+    }
+});
+
+await run('combine cursor projects aggregate bytes once and cannot complete or expire a running job', async () => {
+    const job = { sourceRoot: request.sourcePath, destinationRoot: request.destinationPath,
+        completedItems: 1, totalItems: 3, completedBytes: 10, totalBytes: 30, currentDone: true, finished: false };
+    const receipt = nativeReceipt({ sourcePath: `${request.sourcePath}/a`, destinationPath: `${request.destinationPath}/a`, combine: job });
+    equal(nativeFileTransferReceipt(receipt), receipt, 'Accept the versioned optional cursor');
+    equal(isNativeTransferActive(receipt), true, 'A finished unit is not a finished combine');
+    equal(isNativeTransferResolved(receipt), false, 'Do not expire the gap between units');
+    equal(nativeTransferDisplay(receipt).transferred, 10, 'Do not count the completed cursor twice');
+    const store = createStore<TransferSlice>()(createTransferSlice);
+    store.getState().receiveNativeTransfer(receipt);
+    let transfer = store.getState().transfers[0];
+    equal(transfer.status, 'transferring', 'Keep the aggregate active');
+    equal(transfer.sourcePath, request.sourcePath, 'Display the folder root');
+    equal(transfer.progress.total, 30, 'Display the whole planned job');
+    equal(transfer.recoveryStagePath, undefined, 'Do not offer inspection for a clean completed cursor');
+    const cancelled = nativeReceipt({ ...receipt, phase: 'cancelled', stageCleaned: true, destinationUnchanged: true,
+        transferred: 5, combine: { ...job, currentDone: false, finished: true }, error: 'Cancelled' });
+    store.getState().receiveNativeTransfer(cancelled);
+    transfer = store.getState().transfers[0];
+    equal(transfer.progress.transferred, 15, 'Add only the in-flight unit bytes to acknowledged progress');
+    equal(transfer.status, 'cancelled', 'Project cancellation once');
+    equal(isNativeTransferResolved(cancelled), true, 'A clean cancelled combine is not unresolved recovery');
+    store.getState().receiveNativeTransfer(receipt);
+    equal(store.getState().transfers[0].status, 'cancelled', 'A stale cursor cannot revive the job');
+    for (const malformed of [{ ...job, completedItems: 4 }, { ...job, totalBytes: -1 },
+        { ...job, finished: 'yes' }, { ...job, sourceRoot: '' }]) {
+        let rejected = false;
+        try { nativeFileTransferReceipt({ ...receipt, combine: malformed }); } catch { rejected = true; }
+        equal(rejected, true, 'Reject malformed aggregate authority');
+    }
+});
 
 await run('recovery cleanup eligibility is explicit and malformed permissions fail closed', async () => {
     const entries = { destination: null, stage: { kind: 'File', size: 12 }, backup: null };
@@ -201,6 +278,32 @@ await run('bounded batches continue after failures and report cancellations quie
     const unknown = await runFileTransferBatch([0], async () => { throw undefined; });
     equal(unknown.failed, 1, 'An empty thrown value still counts as failure');
     equal(fileTransferBatchFailure(unknown), 'Transfer failed. Check Transfers for details.', 'Do not silently swallow an unstructured failure');
+});
+
+await run('metadata batches remain independent of active transfer batches', async () => {
+    const gate = deferred();
+    let active = 0;
+    const transfers = runFileTransferBatch([0, 1], async () => {
+        active++;
+        try { await gate.promise; } finally { active--; }
+    });
+    try {
+        equal(active, 2, 'Keep both transfer workers occupied');
+        const reads: number[] = [];
+        let completed = false;
+        const metadata = runFileTransferBatch([0, 1, 2], async item => { reads.push(item); })
+            .then(result => { completed = true; return result; });
+        // Drain microtasks only: a shared limiter would still be blocked by gate.
+        for (let turn = 0; turn < 10 && !completed; turn++) await Promise.resolve();
+        equal(completed, true, 'Per-call workers let optional metadata finish while transfers are blocked');
+        equal(reads.join(), '0,1,2', 'Read every conflict exactly once');
+        equal(active, 2, 'Metadata completion does not depend on finishing a transfer');
+        equal((await metadata).failed, 0, 'Metadata workers retain normal batch reporting');
+    } finally {
+        gate.resolve();
+        await transfers;
+    }
+    equal(active, 0, 'Release all blocked fixture work');
 });
 
 await run('bounded success history cannot be recreated by a late active snapshot', async () => {

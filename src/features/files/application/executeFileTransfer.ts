@@ -8,6 +8,7 @@ export interface FileTransferRequest {
     destinationConnectionId: string;
     destinationPath: string;
     overwrite?: boolean;
+    folderMode?: 'replace' | 'combine';
 }
 
 export interface FileTransferExecution {
@@ -72,6 +73,7 @@ async function runFileTransfer(request: FileTransferRequest, execution: FileTran
             if (receipt.phase !== 'completed') throw new Error(error);
             return true;
         }
+        if (request.folderMode === 'combine') throw new Error('Combine folders requires native folder staging; no legacy copy was started');
         if (stagedOnly) return false;
         const options = { transferId, waitForCompletion: true };
         if (sourceConnectionId === destinationConnectionId && sourceConnectionId !== 'local') {
@@ -103,12 +105,15 @@ async function invokeStagedFileTransfer(request: FileTransferRequest, invoke: Fi
         transferId: request.transferId, sourceConnectionId: request.sourceConnectionId, sourcePath: request.sourcePath,
         destinationConnectionId: request.destinationConnectionId, destinationPath: request.destinationPath,
         overwrite: request.overwrite ?? false,
+        ...(request.folderMode ? { folderMode: request.folderMode } : {}),
     });
     if (result === null) return null;
     const receipt = nativeFileTransferReceipt(result);
     if (receipt.id !== request.transferId || receipt.destinationConnectionId !== request.destinationConnectionId
-        || receipt.destinationPath !== request.destinationPath || receipt.sourceConnectionId !== request.sourceConnectionId
-        || receipt.sourcePath !== request.sourcePath) throw new Error('Native transfer receipt does not match the requested operation');
+        || (receipt.combine?.destinationRoot ?? receipt.destinationPath) !== request.destinationPath || receipt.sourceConnectionId !== request.sourceConnectionId
+        || (receipt.combine?.sourceRoot ?? receipt.sourcePath) !== request.sourcePath
+        || request.folderMode === 'combine' && !receipt.combine
+        || request.folderMode !== 'combine' && receipt.combine) throw new Error('Native transfer receipt does not match the requested operation');
     if (isNativeTransferActive(receipt)) throw new Error('Native file transfer did not return a terminal outcome');
     return receipt;
 }

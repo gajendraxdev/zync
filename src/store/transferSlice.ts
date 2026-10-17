@@ -1,6 +1,6 @@
 import type { StateCreator } from 'zustand';
 import { track } from '../features/usage';
-import { isNativeTransferActive, isNativeTransferResolved, type NativeFileTransferReceipt } from '../features/files/application/nativeFileTransfer';
+import { isNativeTransferActive, isNativeTransferResolved, nativeTransferDisplay, type NativeFileTransferReceipt, type NativeFolderCombineProgress } from '../features/files/application/nativeFileTransfer';
 
 export type TransferStatus = 'pending' | 'transferring' | 'cancelling' | 'completed' | 'failed' | 'cancelled';
 
@@ -33,6 +33,8 @@ export interface Transfer {
     nativeRecovery?: boolean;
     destinationUnchanged?: boolean;
     stageCleaned?: boolean;
+    combine?: NativeFolderCombineProgress;
+    recoveryDestinationPath?: string;
     startTime: number;
     lastUpdated: number;
     speed: number; // bytes per second
@@ -109,16 +111,20 @@ export const createTransferSlice: StateCreator<TransferSlice> = (set) => {
                 if (previous?.nativeRecovery && !isActiveTransferStatus(previous.status) && previous.status !== status) return state;
                 if (previous?.stageCleaned && !receipt.stageCleaned) return state;
                 completed = Boolean(previous && isActiveTransferStatus(previous.status) && status === 'completed');
-                const transferred = active ? Math.max(previous?.progress.transferred ?? 0, receipt.transferred) : receipt.transferred;
-                const total = active ? Math.max(previous?.progress.total ?? 0, receipt.total) : receipt.total;
+                const display = nativeTransferDisplay(receipt);
+                const transferred = active ? Math.max(previous?.progress.transferred ?? 0, display.transferred) : display.transferred;
+                const total = active ? Math.max(previous?.progress.total ?? 0, display.total) : display.total;
+                const cleanCombineCursor = receipt.combine?.currentDone && !receipt.warning;
                 const transfer: Transfer = {
-                    ...previous, id: receipt.id, sourceConnectionId: receipt.sourceConnectionId, sourcePath: receipt.sourcePath,
-                    destinationConnectionId: receipt.destinationConnectionId, destinationPath: receipt.destinationPath,
+                    ...previous, id: receipt.id, sourceConnectionId: receipt.sourceConnectionId, sourcePath: display.sourcePath,
+                    destinationConnectionId: receipt.destinationConnectionId, destinationPath: display.destinationPath,
                     status, progress: { transferred, total,
                         percentage: status === 'completed' ? 100 : total > 0 ? Math.min(100, transferred / total * 100) : 0 },
                     error: receipt.error ?? undefined, recoveryWarning: receipt.warning ?? undefined,
-                    recoveryStagePath: receipt.stageCleaned || status === 'completed' && !receipt.warning ? undefined : receipt.stagePath,
-                    recoveryBackupPath: receipt.backupExpected && !receipt.destinationUnchanged && (status !== 'completed' || receipt.warning) ? receipt.backupPath : undefined,
+                    recoveryStagePath: receipt.combine?.currentDone || receipt.stageCleaned || status === 'completed' && !receipt.warning ? undefined : receipt.stagePath,
+                    recoveryBackupPath: !cleanCombineCursor && receipt.backupExpected && !receipt.destinationUnchanged && (status !== 'completed' || receipt.warning) ? receipt.backupPath : undefined,
+                    combine: receipt.combine ? { ...receipt.combine } : undefined,
+                    recoveryDestinationPath: receipt.combine ? receipt.destinationPath : undefined,
                     destinationUnchanged: receipt.destinationUnchanged, stageCleaned: receipt.stageCleaned ?? false, nativeRecovery: true,
                     startTime: previous?.startTime ?? receipt.createdAt, lastUpdated: Date.now(), speed: previous?.speed ?? 0,
                     speedBaseline: previous?.speedBaseline ?? 0,
