@@ -280,6 +280,7 @@ fn request(overwrite: bool) -> Request {
         destination_path: "/target".into(),
         destination_identity: "fixture".into(),
         overwrite,
+        folder_mode: FolderCopyMode::Replace,
         stage_copy: None,
     }
 }

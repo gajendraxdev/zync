@@ -30,23 +30,33 @@ impl Fingerprint {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-struct Entry {
-    relative: String,
-    snapshot: Snapshot,
+pub(super) struct Entry {
+    pub relative: String,
+    pub snapshot: Snapshot,
     link: Option<String>,
 }
 
 pub(super) struct Inventory {
-    entries: Vec<Entry>,
+    pub entries: Vec<Entry>,
     pub fingerprint: Fingerprint,
 }
 
 /// Join validated relative components through the destination's platform policy.
-fn at(endpoint: &dyn FileEndpoint, root: &str, relative: &str) -> Result<String, String> {
+pub(super) fn at(
+    endpoint: &dyn FileEndpoint,
+    root: &str,
+    relative: &str,
+) -> Result<String, String> {
     relative
         .split('/')
         .filter(|part| !part.is_empty())
         .try_fold(root.to_owned(), |path, leaf| endpoint.child(&path, leaf))
+}
+
+/// Preserve the endpoint's full-path collision policy without retaining a long
+/// absolute root once per name. A digest collision can only reject a copy.
+pub(super) fn collision_digest(endpoint: &dyn FileEndpoint, parent: &str, leaf: &str) -> [u8; 32] {
+    Sha256::digest(endpoint.collision_key(parent, leaf).as_bytes()).into()
 }
 
 impl Inventory {
@@ -59,7 +69,7 @@ impl Inventory {
         let mut names = std::collections::HashSet::new();
         for entry in &self.entries {
             let path = at(endpoint, root, &entry.relative)?;
-            if !names.insert(endpoint.collision_key(&path, "")) {
+            if !names.insert(collision_digest(endpoint, &path, "")) {
                 return Err("Folder names collide on the destination filesystem".into());
             }
         }

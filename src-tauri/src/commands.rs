@@ -4676,7 +4676,7 @@ pub async fn fs_copy_batch(
     let mut legacy_links = Vec::new();
     for operation in operations {
         let result = fs_transfer_file(state.app_handle.clone(), connection_id.clone(), operation.from.clone(),
-            connection_id.clone(), operation.to.clone(), uuid::Uuid::new_v4().to_string(), Some(false), state.clone()).await
+            connection_id.clone(), operation.to.clone(), uuid::Uuid::new_v4().to_string(), Some(false), None, state.clone()).await
             .map_err(|error| match error.strip_prefix("TRANSFER_NOT_STARTED:") {
                 // Earlier files in this batch may have succeeded. Never attach
                 // a whole-batch unchanged-destination claim to one file's failure.
@@ -4896,6 +4896,18 @@ pub async fn fs_exists(
             Err(e) => Err(e),
         }
     }
+}
+
+/// No-follow metadata for conflict choices. Reuse read-only session preparation;
+/// the eventual transfer still repeats native path/type checks before mutation.
+#[tauri::command]
+pub async fn fs_entry_kind(
+    connection_id: String,
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<Option<crate::file_transfers::endpoint::EntryKind>, String> {
+    let (_, _, metadata) = prepare_file_transfer_endpoint(&state, &connection_id, &path, "entry").await?;
+    Ok(metadata.map(|entry| entry.kind))
 }
 
 #[tauri::command]
@@ -5776,6 +5788,7 @@ pub async fn fs_transfer_file(
     destination_path: String,
     transfer_id: String,
     overwrite: Option<bool>,
+    folder_mode: Option<crate::file_transfers::FolderCopyMode>,
     state: State<'_, AppState>,
 ) -> Result<Option<crate::file_transfers::Receipt>, String> {
     use crate::file_transfers::{endpoint::EntryKind, Request};
@@ -5788,7 +5801,12 @@ pub async fn fs_transfer_file(
         let Some(metadata) = metadata else { return Err("Source no longer exists".into()); };
         // Only top-level links retain the explicit legacy policy. Nested links
         // are preserved as links by staged folder copies, never followed.
-        if metadata.kind == EntryKind::Symlink { return Ok(None); }
+        if metadata.kind == EntryKind::Symlink {
+            if folder_mode == Some(crate::file_transfers::FolderCopyMode::Combine) {
+                return Err("Combine folders does not follow a symbolic-link root".into());
+            }
+            return Ok(None);
+        }
         if !matches!(metadata.kind, EntryKind::File | EntryKind::Directory) {
             return Err("Special files require a separate copy policy".into());
         }
@@ -5820,7 +5838,8 @@ pub async fn fs_transfer_file(
     let Some((source, destination, source_identity, destination_identity, stage_copy)) = prepared else { return Ok(None); };
     let service = state.file_transfers.clone();
     let request = Request { id: transfer_id.clone(), source_connection_id, source_path, source_identity,
-        destination_connection_id, destination_path, destination_identity, overwrite: overwrite.unwrap_or(false), stage_copy };
+        destination_connection_id, destination_path, destination_identity, overwrite: overwrite.unwrap_or(false),
+        folder_mode: folder_mode.unwrap_or_default(), stage_copy };
     crate::transfers::run_owned_transfer(state.transfers.clone(), transfer_id.clone(), move |token| async move {
         let progress_app = app.clone(); let progress_id = transfer_id.clone();
         let receipt = service.execute(request, source, destination, token, move |transferred, total| {

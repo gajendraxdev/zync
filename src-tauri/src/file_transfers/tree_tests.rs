@@ -8,6 +8,7 @@ use std::{path::Path, sync::atomic::Ordering};
 
 #[derive(Default, Clone)]
 struct Faults {
+    backup: bool,
     write: bool,
     close: bool,
     publish: bool,
@@ -19,6 +20,12 @@ struct Faults {
     cancel: Option<Arc<AtomicBool>>,
     cleanup_attempts: Option<Arc<std::sync::atomic::AtomicUsize>>,
     stage_verification_count: Option<Arc<std::sync::atomic::AtomicUsize>>,
+    published: Option<Arc<std::sync::atomic::AtomicUsize>>,
+    cancel_after_publish: Option<Arc<AtomicBool>>,
+    write_after_publish: bool,
+    cancel_write_after_publish: bool,
+    untouched: Option<PathBuf>,
+    parent_link_after_publish: bool,
 }
 
 struct Destination {
@@ -46,13 +53,28 @@ impl StageWriter for Writer {
             )
             .unwrap();
         }
-        if self.faults.write {
+        if self.faults.write
+            || self.faults.write_after_publish
+                && self
+                    .faults
+                    .published
+                    .as_ref()
+                    .is_some_and(|count| count.load(Ordering::Relaxed) > 0)
+        {
             self.inner.write(&bytes[..bytes.len().min(3)]).await?;
             return Err("No space left on device".into());
         }
         self.inner.write(bytes).await?;
         if let Some(token) = &self.faults.cancel {
-            token.store(true, Ordering::Relaxed);
+            if !self.faults.cancel_write_after_publish
+                || self
+                    .faults
+                    .published
+                    .as_ref()
+                    .is_some_and(|count| count.load(Ordering::Relaxed) > 0)
+            {
+                token.store(true, Ordering::Relaxed);
+            }
         }
         Ok(())
     }
@@ -79,6 +101,24 @@ impl StageWriter for Writer {
 #[async_trait]
 impl FileEndpoint for Destination {
     async fn stat(&self, path: &str) -> Result<Option<Snapshot>, String> {
+        if let Some(untouched) = &self.faults.untouched {
+            assert!(
+                !Path::new(path).starts_with(untouched),
+                "Do not inspect unrelated destination subtrees"
+            );
+        }
+        if self.faults.parent_link_after_publish
+            && Path::new(path) == self.original.join("nested")
+            && self
+                .faults
+                .published
+                .as_ref()
+                .is_some_and(|count| count.load(Ordering::Relaxed) > 0)
+        {
+            let mut metadata = Endpoint::Local.stat(path).await?.unwrap();
+            metadata.kind = EntryKind::Symlink;
+            return Ok(Some(metadata));
+        }
         Endpoint::Local.stat(path).await
     }
     async fn canonicalize(&self, path: &str) -> Result<String, String> {
@@ -102,6 +142,12 @@ impl FileEndpoint for Destination {
             return Err("Publication transport lost".into());
         }
         Endpoint::Local.publish(from, to, overwrite).await?;
+        if let Some(count) = &self.faults.published {
+            count.fetch_add(1, Ordering::Relaxed);
+        }
+        if let Some(token) = &self.faults.cancel_after_publish {
+            token.store(true, Ordering::Relaxed);
+        }
         if self.faults.lost_ack {
             Err("Publication acknowledgement lost".into())
         } else {
@@ -122,6 +168,12 @@ impl FileEndpoint for Destination {
         }
     }
     async fn children(&self, path: &str) -> Result<Vec<(String, Option<Snapshot>)>, String> {
+        if let Some(untouched) = &self.faults.untouched {
+            assert!(
+                !Path::new(path).starts_with(untouched),
+                "Do not walk unrelated destination subtrees"
+            );
+        }
         if Path::new(path)
             .file_name()
             .is_some_and(|name| name.to_string_lossy().ends_with(".part"))
@@ -169,7 +221,7 @@ impl FileEndpoint for Destination {
         Endpoint::Local.create_link(path, target, directory).await
     }
     fn requires_backup(&self) -> bool {
-        false
+        self.faults.backup
     }
     fn sibling(&self, target: &str, name: &str) -> Result<String, String> {
         Endpoint::Local.sibling(target, name)
@@ -206,6 +258,7 @@ fn request(root: &Path, overwrite: bool) -> Request {
         destination_identity: "local".into(),
         destination_path: root.join("target").to_str().unwrap().into(),
         overwrite,
+        folder_mode: FolderCopyMode::Replace,
         stage_copy: None,
     }
 }
@@ -224,6 +277,451 @@ async fn run(root: &Path, faults: Faults, token: Arc<AtomicBool>) -> Receipt {
         )
         .await
         .unwrap()
+}
+
+async fn combine(root: &Path, faults: Faults, token: Arc<AtomicBool>) -> (Receipt, Arc<Service>) {
+    let service = Arc::new(Service::new(root.join("history")));
+    let mut copy = request(root, true);
+    copy.folder_mode = FolderCopyMode::Combine;
+    let receipt = service
+        .execute(
+            copy,
+            Arc::new(Endpoint::Local),
+            Arc::new(Destination {
+                original: root.join("target"),
+                faults,
+            }),
+            token,
+            |_, _| {},
+        )
+        .await
+        .unwrap();
+    (receipt, service)
+}
+
+#[tokio::test]
+async fn combine_preserves_root_and_nested_extras_without_recopying_them() {
+    let directory = fixture();
+    let root = directory.path();
+    std::fs::create_dir_all(root.join("target/nested")).unwrap();
+    std::fs::write(root.join("target/nested/extra"), b"keep nested extra").unwrap();
+    std::fs::write(root.join("target/nested/content.txt"), b"replace only this").unwrap();
+    std::fs::create_dir(root.join("source/a")).unwrap();
+    std::fs::write(root.join("source/a/child"), b"new child").unwrap();
+    std::fs::write(root.join("source/a.txt"), b"interleaved sibling").unwrap();
+    let (receipt, service) =
+        combine(root, Faults::default(), Arc::new(AtomicBool::new(false))).await;
+    assert_eq!(receipt.phase, Phase::Completed, "{receipt:?}");
+    assert_eq!(
+        std::fs::read(root.join("target/old-only.txt")).unwrap(),
+        b"original"
+    );
+    assert_eq!(
+        std::fs::read(root.join("target/nested/extra")).unwrap(),
+        b"keep nested extra"
+    );
+    assert_eq!(
+        std::fs::read(root.join("target/nested/content.txt")).unwrap(),
+        b"new content"
+    );
+    assert_eq!(
+        std::fs::read(root.join("target/a/child")).unwrap(),
+        b"new child"
+    );
+    assert!(root.join("target/nested/empty").is_dir());
+    let job = receipt.combine.as_ref().unwrap();
+    assert!(job.finished && job.current_done);
+    assert_eq!(job.completed_items, job.total_items);
+    assert_eq!(job.completed_bytes, job.total_bytes);
+    assert_eq!(
+        service.history().await.unwrap().len(),
+        1,
+        "One aggregate cursor, not a record per file"
+    );
+    assert!(receipt.for_restore(false).is_none());
+}
+
+#[tokio::test]
+async fn combine_never_walks_destination_only_subtrees() {
+    let directory = fixture();
+    let root = directory.path();
+    let untouched = root.join("target/untouched");
+    std::fs::create_dir_all(untouched.join("deep")).unwrap();
+    std::fs::write(
+        untouched.join("deep/keep"),
+        b"not part of the incoming copy",
+    )
+    .unwrap();
+    let (receipt, _) = combine(
+        root,
+        Faults {
+            untouched: Some(untouched.clone()),
+            ..Faults::default()
+        },
+        Arc::new(AtomicBool::new(false)),
+    )
+    .await;
+    assert_eq!(receipt.phase, Phase::Completed, "{receipt:?}");
+    assert_eq!(
+        std::fs::read(untouched.join("deep/keep")).unwrap(),
+        b"not part of the incoming copy"
+    );
+}
+
+#[tokio::test]
+async fn combine_keeps_concurrent_changes_to_destination_only_files() {
+    let directory = fixture();
+    let root = directory.path();
+    let (receipt, _) = combine(
+        root,
+        Faults {
+            changed_child: true,
+            ..Faults::default()
+        },
+        Arc::new(AtomicBool::new(false)),
+    )
+    .await;
+    assert_eq!(receipt.phase, Phase::Completed, "{receipt:?}");
+    assert_eq!(
+        std::fs::read(root.join("target/old-only.txt")).unwrap(),
+        b"changed nested original content"
+    );
+}
+
+#[tokio::test]
+async fn combine_detects_changes_to_an_unattempted_source_without_rescanning_completed_items() {
+    let directory = fixture();
+    let root = directory.path();
+    std::fs::write(root.join("source/a-first"), b"first").unwrap();
+    let (receipt, _) = combine(
+        root,
+        Faults {
+            changed_source: true,
+            ..Faults::default()
+        },
+        Arc::new(AtomicBool::new(false)),
+    )
+    .await;
+    assert_eq!(receipt.phase, Phase::Failed, "{receipt:?}");
+    assert!(
+        receipt
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("Source size changed after combine preflight"),
+        "{receipt:?}"
+    );
+    assert_eq!(receipt.combine.as_ref().unwrap().completed_items, 1);
+    assert_eq!(
+        std::fs::read(root.join("target/a-first")).unwrap(),
+        b"first"
+    );
+    assert!(!root.join("target/nested").exists());
+}
+
+#[tokio::test]
+async fn combine_late_cancellation_after_the_last_publication_is_not_an_undo_request() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    std::fs::create_dir(root.join("source")).unwrap();
+    std::fs::write(root.join("source/only"), b"complete").unwrap();
+    std::fs::create_dir(root.join("target")).unwrap();
+    std::fs::write(root.join("target/old-only.txt"), b"keep").unwrap();
+    let token = Arc::new(AtomicBool::new(false));
+    let (receipt, _) = combine(
+        root,
+        Faults {
+            cancel_after_publish: Some(token.clone()),
+            ..Faults::default()
+        },
+        token,
+    )
+    .await;
+    assert_eq!(receipt.phase, Phase::Completed, "{receipt:?}");
+    assert_eq!(receipt.combine.as_ref().unwrap().completed_items, 1);
+    assert_eq!(
+        std::fs::read(root.join("target/old-only.txt")).unwrap(),
+        b"keep"
+    );
+}
+
+#[tokio::test]
+async fn combine_stops_after_backup_cleanup_failure_and_keeps_recovery_evidence() {
+    let directory = fixture();
+    let root = directory.path();
+    std::fs::write(root.join("source/a-first"), b"new first").unwrap();
+    std::fs::write(root.join("target/a-first"), b"original first").unwrap();
+    let (receipt, service) = combine(
+        root,
+        Faults {
+            backup: true,
+            cleanup: true,
+            ..Faults::default()
+        },
+        Arc::new(AtomicBool::new(false)),
+    )
+    .await;
+    assert_eq!(receipt.phase, Phase::Failed, "{receipt:?}");
+    assert_eq!(receipt.combine.as_ref().unwrap().completed_items, 1);
+    assert_eq!(
+        std::fs::read(&receipt.backup_path).unwrap(),
+        b"original first"
+    );
+    assert!(receipt
+        .warning
+        .as_deref()
+        .unwrap()
+        .contains("cleanup failed"));
+    assert!(!root.join("target/nested").exists());
+    assert!(service.history().await.unwrap()[0]
+        .clone()
+        .for_restore(false)
+        .is_some());
+}
+
+#[tokio::test]
+async fn combine_stops_when_an_existing_parent_becomes_a_link() {
+    let directory = fixture();
+    let root = directory.path();
+    std::fs::write(root.join("source/a-first"), b"first").unwrap();
+    std::fs::create_dir(root.join("target/nested")).unwrap();
+    let (receipt, _) = combine(
+        root,
+        Faults {
+            parent_link_after_publish: true,
+            published: Some(Arc::new(std::sync::atomic::AtomicUsize::new(0))),
+            ..Faults::default()
+        },
+        Arc::new(AtomicBool::new(false)),
+    )
+    .await;
+    assert_eq!(receipt.phase, Phase::Failed, "{receipt:?}");
+    assert!(receipt.error.as_deref().unwrap().contains("became a link"));
+    assert_eq!(receipt.combine.unwrap().completed_items, 1);
+    assert!(!root.join("target/nested/content.txt").exists());
+}
+
+#[tokio::test]
+async fn combine_mid_file_cancel_cleans_only_current_staging_and_keeps_previous_items() {
+    let directory = fixture();
+    let root = directory.path();
+    std::fs::write(root.join("source/a-first"), b"first").unwrap();
+    std::fs::create_dir(root.join("target/nested")).unwrap();
+    std::fs::write(
+        root.join("target/nested/content.txt"),
+        b"keep current original",
+    )
+    .unwrap();
+    let token = Arc::new(AtomicBool::new(false));
+    let (receipt, service) = combine(
+        root,
+        Faults {
+            cancel: Some(token.clone()),
+            cancel_write_after_publish: true,
+            published: Some(Arc::new(std::sync::atomic::AtomicUsize::new(0))),
+            ..Faults::default()
+        },
+        token,
+    )
+    .await;
+    assert_eq!(receipt.phase, Phase::Cancelled, "{receipt:?}");
+    assert!(receipt.stage_cleaned);
+    assert!(!Path::new(&receipt.stage_path).exists());
+    assert_eq!(receipt.combine.as_ref().unwrap().completed_items, 1);
+    assert_eq!(
+        std::fs::read(root.join("target/a-first")).unwrap(),
+        b"first"
+    );
+    assert_eq!(
+        std::fs::read(root.join("target/nested/content.txt")).unwrap(),
+        b"keep current original"
+    );
+    assert!(service.history().await.unwrap()[0]
+        .clone()
+        .for_restore(false)
+        .is_none());
+}
+
+#[tokio::test]
+async fn interrupted_combine_cursor_retains_history_but_does_not_become_a_completed_job() {
+    let directory = fixture();
+    let root = directory.path();
+    let (mut receipt, service) =
+        combine(root, Faults::default(), Arc::new(AtomicBool::new(false))).await;
+    receipt.combine.as_mut().unwrap().finished = false;
+    service.journal.save(&receipt).await.unwrap();
+    assert_eq!(
+        receipt.clone().for_restore(true).unwrap().phase,
+        Phase::Writing
+    );
+    let restored = receipt.for_restore(false).unwrap();
+    assert_eq!(restored.phase, Phase::NeedsReview);
+    assert!(restored.warning.unwrap().contains("Completed items remain"));
+    service.dismiss(restored.id.clone()).await.unwrap();
+    assert!(service.history().await.unwrap()[0]
+        .clone()
+        .for_restore(false)
+        .is_none());
+}
+
+#[tokio::test]
+async fn combine_preflights_all_type_conflicts_before_publishing_any_unit() {
+    let directory = fixture();
+    let root = directory.path();
+    std::fs::write(root.join("source/a-first"), b"must not publish").unwrap();
+    std::fs::write(
+        root.join("target/nested"),
+        b"file cannot become a merged folder",
+    )
+    .unwrap();
+    let mut copy = request(root, true);
+    copy.folder_mode = FolderCopyMode::Combine;
+    let service = Service::new(root.join("history"));
+    let error = service
+        .execute(
+            copy,
+            Arc::new(Endpoint::Local),
+            Arc::new(Endpoint::Local),
+            Arc::new(AtomicBool::new(false)),
+            |_, _| {},
+        )
+        .await
+        .unwrap_err();
+    assert!(error.contains("incompatible entry types"), "{error}");
+    assert!(!root.join("target/a-first").exists());
+    assert!(service.history().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn combine_cancellation_keeps_completed_items_and_does_not_restore_clean_history() {
+    let directory = fixture();
+    let root = directory.path();
+    std::fs::write(root.join("source/a-first"), b"committed before cancel").unwrap();
+    let token = Arc::new(AtomicBool::new(false));
+    let (receipt, service) = combine(
+        root,
+        Faults {
+            cancel_after_publish: Some(token.clone()),
+            ..Faults::default()
+        },
+        token,
+    )
+    .await;
+    assert_eq!(receipt.phase, Phase::Cancelled, "{receipt:?}");
+    let job = receipt.combine.as_ref().unwrap();
+    assert_eq!(job.completed_items, 1);
+    assert!(job.current_done && job.finished);
+    assert_eq!(
+        std::fs::read(root.join("target/a-first")).unwrap(),
+        b"committed before cancel"
+    );
+    assert!(!root.join("target/nested").exists());
+    assert_eq!(
+        std::fs::read(root.join("target/old-only.txt")).unwrap(),
+        b"original"
+    );
+    assert!(service.history().await.unwrap()[0]
+        .clone()
+        .for_restore(false)
+        .is_none());
+}
+
+#[tokio::test]
+async fn combine_storage_failure_retains_previous_publications_and_current_recovery() {
+    let directory = fixture();
+    let root = directory.path();
+    std::fs::write(root.join("source/a-first"), b"complete first").unwrap();
+    std::fs::create_dir(root.join("target/nested")).unwrap();
+    std::fs::write(
+        root.join("target/nested/content.txt"),
+        b"original matching file",
+    )
+    .unwrap();
+    let (receipt, service) = combine(
+        root,
+        Faults {
+            write_after_publish: true,
+            published: Some(Arc::new(std::sync::atomic::AtomicUsize::new(0))),
+            ..Faults::default()
+        },
+        Arc::new(AtomicBool::new(false)),
+    )
+    .await;
+    assert_eq!(receipt.phase, Phase::Failed, "{receipt:?}");
+    assert_eq!(receipt.combine.as_ref().unwrap().completed_items, 1);
+    assert!(receipt.error.as_deref().unwrap().contains("No space"));
+    assert_eq!(
+        std::fs::read(root.join("target/a-first")).unwrap(),
+        b"complete first"
+    );
+    assert_eq!(
+        std::fs::read(root.join("target/nested/content.txt")).unwrap(),
+        b"original matching file"
+    );
+    assert!(Path::new(&receipt.stage_path).exists());
+    assert_eq!(service.history().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn combine_unknown_publication_stops_without_replaying_or_touching_later_items() {
+    let directory = fixture();
+    let root = directory.path();
+    std::fs::write(root.join("source/a-first"), b"publish acknowledgement lost").unwrap();
+    let (receipt, _) = combine(
+        root,
+        Faults {
+            lost_ack: true,
+            ..Faults::default()
+        },
+        Arc::new(AtomicBool::new(false)),
+    )
+    .await;
+    assert_eq!(receipt.phase, Phase::NeedsReview, "{receipt:?}");
+    assert_eq!(receipt.combine.as_ref().unwrap().completed_items, 0);
+    assert!(root.join("target/a-first").exists());
+    assert!(!root.join("target/nested").exists());
+    assert_eq!(
+        std::fs::read(root.join("target/old-only.txt")).unwrap(),
+        b"original"
+    );
+}
+
+#[tokio::test]
+async fn combine_four_admitted_jobs_never_nest_admission_or_lose_root_ownership() {
+    let fixtures: Vec<_> = (0..4).map(|_| fixture()).collect();
+    let history = tempfile::tempdir().unwrap();
+    let service = Service::new(history.path().to_owned());
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        let work = fixtures.iter().map(|directory| {
+            let mut copy = request(directory.path(), true);
+            copy.folder_mode = FolderCopyMode::Combine;
+            service.execute(
+                copy,
+                Arc::new(Endpoint::Local),
+                Arc::new(Endpoint::Local),
+                Arc::new(AtomicBool::new(false)),
+                |_, _| {},
+            )
+        });
+        for result in futures_util::future::join_all(work).await {
+            assert_eq!(result.unwrap().phase, Phase::Completed);
+        }
+    })
+    .await
+    .expect("Admitted combine jobs must not deadlock on nested admission");
+    let scope = service.reserve_destination("local:/root".into()).unwrap();
+    assert!(service
+        .check_borrowed_destination(&scope, "local:/root/child")
+        .is_ok());
+    assert!(service
+        .check_borrowed_destination(&scope, "local:/other")
+        .is_err());
+    assert!(service
+        .reserve_destination("local:/root/child".into())
+        .is_err());
+    assert!(Service::new(history.path().join("foreign"))
+        .check_borrowed_destination(&scope, "local:/root/child")
+        .is_err());
 }
 
 #[tokio::test]
@@ -716,6 +1214,42 @@ async fn folder_overlap_and_ancestor_leases_fail_before_mutation() {
     assert!(service
         .reserve_destination("host:/folder-other".into())
         .is_ok());
+}
+
+#[test]
+fn posix_root_parent_keys_keep_child_ownership_without_rewriting_persisted_keys() {
+    let directory = tempfile::tempdir().unwrap();
+    let service = Service::new(directory.path().to_owned());
+    let persisted = "remote-hash://folder";
+    let root = service.reserve_destination(persisted.to_owned()).unwrap();
+    assert_eq!(
+        root.key, persisted,
+        "Comparison normalization is not a persisted-key migration"
+    );
+    assert!(service
+        .check_borrowed_destination(&root, "remote-hash:/folder/child")
+        .is_ok());
+    assert!(service
+        .reserve_destination("remote-hash:/folder/child".into())
+        .is_err());
+    assert!(service
+        .reserve_destination("remote-hash:/folder-other".into())
+        .is_ok());
+    assert!(!destination_keys_overlap(
+        "remote-hash:/parent\\literal",
+        "remote-hash:/parent/literal"
+    ));
+    if cfg!(windows) {
+        assert_eq!(
+            normalized_destination_key("local://server/share"),
+            "local://server/share"
+        );
+    } else {
+        assert!(destination_keys_overlap(
+            "local://folder",
+            "local:/folder/child"
+        ));
+    }
 }
 
 #[tokio::test]

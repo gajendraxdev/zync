@@ -1,6 +1,7 @@
 //! Native file/folder staging, publication and read-only restart recovery.
 //! Moves deliberately retain their separate existing policy.
 
+mod combine;
 pub mod endpoint;
 mod journal;
 mod recovery;
@@ -82,6 +83,9 @@ pub struct Receipt {
     pub original_tree: Option<tree::Fingerprint>,
     #[serde(default)]
     pub staged_tree: Option<tree::Fingerprint>,
+    /// One current publication unit, not a durable per-file manifest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub combine: Option<combine::Progress>,
 }
 
 impl Receipt {
@@ -91,33 +95,44 @@ impl Receipt {
         if !active && (self.dismissed || self.is_resolved()) {
             return None;
         }
+        let unfinished_combine = self.combine.as_ref().is_some_and(|job| !job.finished);
+        if active && unfinished_combine && self.phase == Phase::Completed {
+            self.phase = Phase::Writing;
+        }
         if !active
-            && matches!(
-                self.phase,
-                Phase::Prepared
-                    | Phase::Writing
-                    | Phase::Ready
-                    | Phase::BackingUp
-                    | Phase::Publishing
-                    | Phase::Published
-            )
+            && (unfinished_combine
+                || matches!(
+                    self.phase,
+                    Phase::Prepared
+                        | Phase::Writing
+                        | Phase::Ready
+                        | Phase::BackingUp
+                        | Phase::Publishing
+                        | Phase::Published
+                ))
         {
             self.phase = Phase::NeedsReview;
-            self.warning = Some("Interrupted transfer. Inspect the destination and recovery paths before retrying; nothing was automatically resumed or deleted.".into());
+            self.warning = Some(if unfinished_combine {
+                "Interrupted folder combine. Completed items remain; nothing was automatically resumed or deleted. Inspect any current recovery paths before retrying."
+            } else {
+                "Interrupted transfer. Inspect the destination and recovery paths before retrying; nothing was automatically resumed or deleted."
+            }.into());
         }
         Some(self)
     }
 
     fn is_resolved(&self) -> bool {
-        self.warning.is_none()
+        !self.combine.as_ref().is_some_and(|job| !job.finished)
+            && self.warning.is_none()
             && (self.phase == Phase::Completed
                 || self.phase == Phase::Cancelled
-                    && self.stage_cleaned
-                    && self.destination_unchanged)
+                    && (self.combine.as_ref().is_some_and(|job| job.current_done)
+                        || self.stage_cleaned && self.destination_unchanged))
     }
 
     fn validate(&self) -> Result<(), String> {
         if self.version != 1
+            || self.combine.as_ref().is_some_and(|job| !job.valid())
             || self
                 .original_tree
                 .as_ref()
@@ -153,7 +168,16 @@ pub struct Request {
     pub destination_path: String,
     pub destination_identity: String,
     pub overwrite: bool,
+    pub folder_mode: FolderCopyMode,
     pub stage_copy: Option<Arc<dyn StageCopy>>,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FolderCopyMode {
+    #[default]
+    Replace,
+    Combine,
 }
 
 /// Optional same-server acceleration. false means execution definitely did not
@@ -308,79 +332,40 @@ impl Service {
         };
         drop(waiting);
         crate::transfers::check_cancelled(&token)?;
-        let source_stat = source
-            .stat(&request.source_path)
-            .await?
-            .ok_or("Source no longer exists")?;
-        if !matches!(source_stat.kind, EntryKind::File | EntryKind::Directory) {
-            return Err(
-                "Staged transfers require a regular file or folder, not a link or special entry"
-                    .into(),
-            );
+        if request.folder_mode == FolderCopyMode::Combine {
+            self.combine_folders(request, source, destination, token, progress)
+                .await
+        } else {
+            self.execute_copy(request, source, destination, token, progress, None)
+                .await
         }
-        let parent_probe = destination.sibling(&request.destination_path, ".")?;
-        let parent = destination.canonicalize(&parent_probe).await?;
-        let leaf = destination.filename(&request.destination_path)?;
-        let key = format!(
-            "{}:{}",
-            request.destination_identity,
-            destination.reservation_key(&parent, &leaf)
-        );
-        let original = destination.stat(&request.destination_path).await?;
-        if request.source_identity == request.destination_identity {
-            let source_path = source.canonicalize(&request.source_path).await?;
-            let source_key = format!(
-                "{}:{}",
-                request.source_identity,
-                source
-                    .reservation_key(&source_path, "")
-                    .trim_end_matches('/')
-            );
-            // An existing leaf may itself be an alias (for example, a short
-            // Windows name). Keep persisted reservations stable, but compare
-            // its resolved location as well as the requested parent/leaf.
-            let canonical_destination_key = if original.is_some() {
-                let path = destination.canonicalize(&request.destination_path).await?;
-                Some(format!(
-                    "{}:{}",
-                    request.destination_identity,
-                    destination.reservation_key(&path, "").trim_end_matches('/')
-                ))
-            } else {
-                None
-            };
-            if destination_keys_overlap(&source_key, &key)
-                || canonical_destination_key
-                    .as_ref()
-                    .is_some_and(|resolved| destination_keys_overlap(&source_key, resolved))
-            {
-                return Err(
-                    "Source and destination paths overlap; the original was left unchanged".into(),
-                );
+    }
+
+    /// Shared publication path. A combine unit borrows its parent's already
+    /// admitted root lease; it never reacquires capacity or nests transfer jobs.
+    async fn execute_copy(
+        &self,
+        request: Request,
+        source: Arc<dyn FileEndpoint>,
+        destination: Arc<dyn FileEndpoint>,
+        token: Arc<AtomicBool>,
+        progress: impl Fn(u64, u64) + Send + Sync,
+        context: Option<combine::UnitContext<'_>>,
+    ) -> Result<Receipt, String> {
+        let (source_stat, parent, key, original) = self
+            .prepare_paths(&request, source.as_ref(), destination.as_ref())
+            .await?;
+        let _lease = if let Some(context) = &context {
+            self.check_borrowed_destination(context.scope, &key)?;
+            if original != context.original {
+                return Err("Destination changed after combine preflight; the current item was left unchanged".into());
             }
-        }
-        let _lease = self.reserve_destination(key.clone())?;
-        for old in self.journal.list().await? {
-            if old.id == request.id {
-                return Err("Transfer ID already exists in recovery history".into());
-            }
-            if destination_keys_overlap(&old.destination_key, &key)
-                && matches!(
-                    old.phase,
-                    Phase::BackingUp | Phase::Publishing | Phase::Published | Phase::NeedsReview
-                )
-            {
-                return Err("An interrupted publication owns this destination; inspect its recovery record before retrying".into());
-            }
-        }
-        if original
-            .as_ref()
-            .is_some_and(|entry| entry.kind != source_stat.kind)
-        {
-            return Err(
-                "Source and destination entry types differ; destination was left unchanged".into(),
-            );
-        }
+            None
+        } else {
+            Some(self.reserve_destination(key.clone())?)
+        };
+        self.check_journal_destination(&request.id, &key, context.is_some())
+            .await?;
         if original.is_some() && !request.overwrite {
             return Err("Destination already exists; choose an explicit collision action".into());
         }
@@ -404,45 +389,26 @@ impl Service {
         } else {
             None
         };
-        let artifact_id = uuid::Uuid::new_v4();
-        let mut receipt = Receipt {
-            dismissed: false,
-            version: 1,
-            id: request.id,
-            source_connection_id: request.source_connection_id,
-            source_path: request.source_path,
-            destination_connection_id: request.destination_connection_id,
-            destination_path: request.destination_path.clone(),
-            destination_identity: request.destination_identity,
-            destination_key: key,
-            stage_path: destination.sibling(
-                &request.destination_path,
-                &format!(".zync-transfer-{artifact_id}.part"),
-            )?,
-            backup_path: destination.sibling(
-                &request.destination_path,
-                &format!(".zync-transfer-{artifact_id}.backup"),
-            )?,
-            backup_expected: original.is_some()
-                && (destination.requires_backup() || source_tree.is_some()),
-            phase: Phase::Prepared,
-            created_at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64,
-            transferred: 0,
-            total: source_tree
+        let mut receipt = Self::prepare_receipt(
+            &request,
+            destination.as_ref(),
+            key,
+            original,
+            original_tree,
+            source_tree
                 .as_ref()
                 .map_or(source_stat.size, |tree| tree.fingerprint.bytes),
-            error: None,
-            warning: None,
-            destination_unchanged: true,
-            stage_cleaned: false,
-            original,
-            staged: None,
-            original_tree,
-            staged_tree: None,
-        };
+            source_tree.is_some(),
+        )?;
+        if context
+            .as_ref()
+            .is_some_and(|context| context.bytes != receipt.total)
+        {
+            return Err(
+                "Source size changed after combine preflight; current item unchanged".into(),
+            );
+        }
+        receipt.combine = context.as_ref().map(|context| context.progress.clone());
         let artifact_key = |path: &str| -> Result<String, String> {
             Ok(format!(
                 "{}:{}",
@@ -450,8 +416,17 @@ impl Service {
                 destination.reservation_key(&parent, &destination.filename(path)?)
             ))
         };
-        let _stage_lease = self.reserve_destination(artifact_key(&receipt.stage_path)?)?;
-        let _backup_lease = self.reserve_destination(artifact_key(&receipt.backup_path)?)?;
+        let reserve_artifact = |path: &str| -> Result<Option<DestinationLease>, String> {
+            let key = artifact_key(path)?;
+            if let Some(context) = &context {
+                self.check_borrowed_destination(context.scope, &key)?;
+                Ok(None)
+            } else {
+                self.reserve_destination(key).map(Some)
+            }
+        };
+        let _stage_lease = reserve_artifact(&receipt.stage_path)?;
+        let _backup_lease = reserve_artifact(&receipt.backup_path)?;
         receipt.validate()?;
         // Intent is durable before the first destination mutation. No progress-tick writes.
         self.journal.save(&receipt).await?;
@@ -506,6 +481,168 @@ impl Service {
             receipt.warning = Some(format!("Recovery receipt could not be saved: {error}. Inspect the recorded paths before retrying."));
         }
         Ok(receipt)
+    }
+
+    /// Read-only path/type/alias validation is shared by a whole copy and a
+    /// combine root. Persisted reservation keys retain their existing policy.
+    async fn prepare_paths(
+        &self,
+        request: &Request,
+        source: &dyn FileEndpoint,
+        destination: &dyn FileEndpoint,
+    ) -> Result<(Snapshot, String, String, Option<Snapshot>), String> {
+        let source_stat = source
+            .stat(&request.source_path)
+            .await?
+            .ok_or("Source no longer exists")?;
+        if !matches!(source_stat.kind, EntryKind::File | EntryKind::Directory) {
+            return Err(
+                "Staged transfers require a regular file or folder, not a link or special entry"
+                    .into(),
+            );
+        }
+        let parent_probe = destination.sibling(&request.destination_path, ".")?;
+        let parent = destination.canonicalize(&parent_probe).await?;
+        let leaf = destination.filename(&request.destination_path)?;
+        let key = format!(
+            "{}:{}",
+            request.destination_identity,
+            destination.reservation_key(&parent, &leaf)
+        );
+        let original = destination.stat(&request.destination_path).await?;
+        if request.source_identity == request.destination_identity {
+            let source_path = source.canonicalize(&request.source_path).await?;
+            let source_key = format!(
+                "{}:{}",
+                request.source_identity,
+                source
+                    .reservation_key(&source_path, "")
+                    .trim_end_matches('/')
+            );
+            // An existing leaf may itself be an alias (for example, a short
+            // Windows name). Keep persisted reservations stable, but compare
+            // its resolved location as well as the requested parent/leaf.
+            let canonical_destination_key = if original.is_some() {
+                let path = destination.canonicalize(&request.destination_path).await?;
+                Some(format!(
+                    "{}:{}",
+                    request.destination_identity,
+                    destination.reservation_key(&path, "").trim_end_matches('/')
+                ))
+            } else {
+                None
+            };
+            if destination_keys_overlap(&source_key, &key)
+                || canonical_destination_key
+                    .as_ref()
+                    .is_some_and(|resolved| destination_keys_overlap(&source_key, resolved))
+            {
+                return Err(
+                    "Source and destination paths overlap; the original was left unchanged".into(),
+                );
+            }
+        }
+        if original
+            .as_ref()
+            .is_some_and(|entry| entry.kind != source_stat.kind)
+        {
+            return Err(
+                "Source and destination entry types differ; destination was left unchanged".into(),
+            );
+        }
+        Ok((source_stat, parent, key, original))
+    }
+
+    async fn check_journal_destination(
+        &self,
+        id: &str,
+        key: &str,
+        borrowed: bool,
+    ) -> Result<(), String> {
+        for old in self.journal.list().await? {
+            if old.id == id {
+                if borrowed {
+                    continue;
+                }
+                return Err("Transfer ID already exists in recovery history".into());
+            }
+            if destination_keys_overlap(&old.destination_key, key)
+                && matches!(
+                    old.phase,
+                    Phase::BackingUp | Phase::Publishing | Phase::Published | Phase::NeedsReview
+                )
+            {
+                return Err("An interrupted publication owns this destination; inspect its recovery record before retrying".into());
+            }
+        }
+        Ok(())
+    }
+
+    fn check_borrowed_destination(
+        &self,
+        scope: &DestinationLease,
+        key: &str,
+    ) -> Result<(), String> {
+        let root = normalized_destination_key(&scope.key);
+        let child = normalized_destination_key(key);
+        let root = root.trim_end_matches('/');
+        if !Arc::ptr_eq(&self.destinations, &scope.destinations)
+            || !(child == root
+                || child
+                    .strip_prefix(root)
+                    .is_some_and(|tail| tail.starts_with('/')))
+        {
+            return Err("Combine destination escaped its reserved folder".into());
+        }
+        Ok(())
+    }
+
+    fn prepare_receipt(
+        request: &Request,
+        destination: &dyn FileEndpoint,
+        key: String,
+        original: Option<Snapshot>,
+        original_tree: Option<tree::Fingerprint>,
+        total: u64,
+        folder: bool,
+    ) -> Result<Receipt, String> {
+        let artifact_id = uuid::Uuid::new_v4();
+        Ok(Receipt {
+            dismissed: false,
+            version: 1,
+            id: request.id.clone(),
+            source_connection_id: request.source_connection_id.clone(),
+            source_path: request.source_path.clone(),
+            destination_connection_id: request.destination_connection_id.clone(),
+            destination_path: request.destination_path.clone(),
+            destination_identity: request.destination_identity.clone(),
+            destination_key: key,
+            stage_path: destination.sibling(
+                &request.destination_path,
+                &format!(".zync-transfer-{artifact_id}.part"),
+            )?,
+            backup_path: destination.sibling(
+                &request.destination_path,
+                &format!(".zync-transfer-{artifact_id}.backup"),
+            )?,
+            backup_expected: original.is_some() && (destination.requires_backup() || folder),
+            phase: Phase::Prepared,
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
+            transferred: 0,
+            total,
+            error: None,
+            warning: None,
+            destination_unchanged: true,
+            stage_cleaned: false,
+            original,
+            staged: None,
+            original_tree,
+            staged_tree: None,
+            combine: None,
+        })
     }
 
     async fn advance(&self, receipt: &mut Receipt, phase: Phase) -> Result<(), String> {
@@ -697,6 +834,11 @@ impl Service {
                 }
                 _ => receipt.warning = Some("Published successfully, but original backup could not be verified; it was retained".into()),
             }
+        }
+        if let Some(job) = &mut receipt.combine {
+            job.completed_items += 1;
+            job.completed_bytes += receipt.total;
+            job.current_done = true;
         }
         self.advance(receipt, Phase::Completed).await?;
         progress(receipt.transferred, receipt.total);
@@ -914,12 +1056,17 @@ fn destination_keys_overlap(left: &str, right: &str) -> bool {
             .is_some_and(|tail| tail.starts_with('/'))
 }
 
-/// Preserve ownership of pre-folder Windows receipts, whose canonical parent
-/// used backslashes. Remote POSIX backslashes remain literal filename bytes.
+/// Comparison only: preserve persisted keys while reconciling old Windows
+/// separators and the doubled slash produced by joining a POSIX root parent.
+/// Remote POSIX backslashes and Windows local UNC prefixes remain literal.
 fn normalized_destination_key(key: &str) -> std::borrow::Cow<'_, str> {
     if cfg!(windows) && key.starts_with("local:") {
-        key.replace('\\', "/").into()
-    } else {
-        key.into()
+        return key.replace('\\', "/").into();
     }
+    if let Some((identity, path)) = key.split_once(":/") {
+        if path.starts_with('/') {
+            return format!("{identity}:/{}", path.trim_start_matches('/')).into();
+        }
+    }
+    key.into()
 }

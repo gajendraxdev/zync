@@ -215,6 +215,7 @@ pub fn run() {
             commands::fs_copy_batch,
             commands::fs_rename_batch,
             commands::fs_exists,
+            commands::fs_entry_kind,
             tunnels::commands::tunnel_get_all,
             tunnels::commands::tunnel_start_local,
             tunnels::commands::tunnel_start_remote,
