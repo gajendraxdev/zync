@@ -20,6 +20,7 @@ interface PendingWrite {
 }
 
 const SIMULATED_COMMANDS = new Set(['fs_entry_kind', 'fs_exists', 'fs_rename', 'fs_delete', 'fs_copy_batch', 'sftp_put', 'sftp:cancelTransfer', 'fs_transfer_file', 'fs_transfer_inspect', 'fs_transfer_cleanup', 'fs_transfer_history', 'fs_transfer_dismiss']);
+const LOCAL_DELETE_COMMANDS = new Set(['fs_delete_batch', 'fs_list', 'fs_list_volumes']);
 
 /** Opt-in, in-memory native boundary. This module never calls a real filesystem or network API. */
 export function createTransferSafetyFixture(host: string, rootPath: string) {
@@ -36,6 +37,8 @@ export function createTransferSafetyFixture(host: string, rootPath: string) {
     let writeSerial = 0;
     let nativeFiles = false;
     let preparationFails = false;
+    let localEntries: FileEntry[] | undefined;
+    const localDirectory = 'C:/zync-delete-fixture';
     const receipts: NativeFileTransferReceipt[] = [];
     let capturedReceipts: NativeFileTransferReceipt[] = [];
     const dismissed = new Set<string>();
@@ -66,10 +69,28 @@ export function createTransferSafetyFixture(host: string, rootPath: string) {
         });
     }
 
+    function handles(command: string): boolean {
+        return SIMULATED_COMMANDS.has(command) || localEntries !== undefined && LOCAL_DELETE_COMMANDS.has(command);
+    }
+
     async function invoke(command: string, args: Record<string, unknown>): Promise<unknown> {
-        if (!SIMULATED_COMMANDS.has(command)) throw new Error(`Mutation unavailable in transfer simulation: ${command}`);
+        if (!handles(command)) throw new Error(`Mutation unavailable in transfer simulation: ${command}`);
         if (calls.length >= 64) throw new Error('Unexpected unbounded simulated native calls');
         calls.push({ command, args: { ...args } });
+        if (localEntries && LOCAL_DELETE_COMMANDS.has(command)) {
+            if (args.connectionId !== 'local') throw new Error('Local delete simulation only permits its own endpoint');
+            if (command === 'fs_list_volumes') return [];
+            if (command === 'fs_list') {
+                if (args.path !== localDirectory) throw new Error('Unexpected local directory');
+                return localEntries;
+            }
+            const removed = localEntries.find(file => file.name === 'remove.txt');
+            if (!removed || !Array.isArray(args.paths) || args.paths.length !== 1 || args.paths[0] !== removed.path) {
+                throw new Error('Delete must use the exact native-listed Windows path');
+            }
+            localEntries = localEntries.filter(file => file !== removed);
+            return;
+        }
         if (command === 'fs_entry_kind') {
             const path = text(args, 'path');
             const selected = app().getState().clipboard?.files.find(file => file.path === path);
@@ -192,10 +213,20 @@ export function createTransferSafetyFixture(host: string, rootPath: string) {
     }
 
     return {
-        handles: (command: string) => SIMULATED_COMMANDS.has(command),
+        handles,
         invoke,
         attach,
         control: {
+            prepareLocalDelete: () => {
+                const entries: FileEntry[] = ['remove.txt', 'keep.txt'].map(name => ({ name, path: `C:\\zync-delete-fixture\\${name}`,
+                    type: '-', size: 1, lastModified: 1, permissions: '644', owner: '', group: '' }));
+                localEntries = entries;
+                app().setState(state => ({ activeConnectionId: 'local',
+                    files: { ...state.files, local: entries },
+                    currentPath: { ...state.currentPath, local: localDirectory },
+                    settings: { ...state.settings, fileManager: { ...state.settings.fileManager, confirmDelete: false } },
+                }));
+            },
             nativeFiles: () => { nativeFiles = true; },
             prepareCopyTarget: () => {
                 files.set(key(secondHost, `${secondPath}/docs`), 'original:docs');

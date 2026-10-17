@@ -634,4 +634,26 @@ export async function runFilesTransferSafetyChecks({ page, check }) {
     await page.evaluate(() => window.filesTransferSafety.replayReceipts());
     check('late unresolved history cannot resurrect verified recovery cleanup', (await snapshot()).transfers.length === 0);
     await closeReceipts();
+
+    // Exercise the real delete handler with Windows-native entry paths and a
+    // slash-form location bar. This boundary never touches a real local file.
+    {
+        const url = new URL(fixtureUrl);
+        url.searchParams.set('transferSafety', '1');
+        await page.goto(url.href, { waitUntil: 'domcontentloaded' });
+        await page.getByRole('listbox').waitFor();
+        await page.evaluate(() => window.filesTransferSafety.prepareLocalDelete());
+        const removed = page.locator('[data-file-name="remove.txt"]');
+        await removed.waitFor();
+        await removed.click({ button: 'right' });
+        await page.getByRole('menuitem', { name: 'Delete', exact: true }).click();
+        await removed.waitFor({ state: 'hidden' });
+        await page.waitForFunction(() => window.filesTransferSafety.snapshot().lastAction?.message === 'Deleted 1 item(s)');
+        const state = await snapshot();
+        const deletion = state.calls.find(call => call.command === 'fs_delete_batch');
+        check('local delete uses the exact Windows entry path, not a reconstructed slash-form path',
+            deletion?.args.connectionId === 'local' && deletion.args.paths[0] === 'C:\\zync-delete-fixture\\remove.txt');
+        check('local delete removes its row without a manual refresh and leaves other entries visible',
+            await removed.count() === 0 && await page.locator('[data-file-name="keep.txt"]').isVisible());
+    }
 }
