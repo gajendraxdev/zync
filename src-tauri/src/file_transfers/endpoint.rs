@@ -1,0 +1,399 @@
+//! Ordinary-account local/SFTP adapters. Path checks are preconditions, not a
+//! confinement boundary against another process replacing directory entries.
+
+use async_trait::async_trait;
+use russh_sftp::{
+    client::SftpSession,
+    protocol::{FileAttributes, OpenFlags, StatusCode},
+};
+use serde::{Deserialize, Serialize};
+use std::{path::Path, sync::Arc};
+use tokio::io::{AsyncRead, AsyncWriteExt};
+
+pub type Reader = Box<dyn AsyncRead + Unpin + Send>;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Snapshot {
+    pub kind: EntryKind,
+    pub size: u64,
+    pub modified: Option<u128>,
+    pub mode: Option<u32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EntryKind {
+    File,
+    Directory,
+    Symlink,
+    Other,
+}
+
+#[async_trait]
+pub trait StageWriter: Send {
+    async fn write(&mut self, bytes: &[u8]) -> Result<(), String>;
+    /// Close acknowledgement is mandatory; it is not a remote fsync guarantee.
+    async fn finish(&mut self) -> Result<(), String>;
+}
+
+#[async_trait]
+pub trait FileEndpoint: Send + Sync {
+    async fn stat(&self, path: &str) -> Result<Option<Snapshot>, String>;
+    async fn canonicalize(&self, path: &str) -> Result<String, String>;
+    async fn reader(&self, path: &str) -> Result<Reader, String>;
+    async fn create_stage(&self, path: &str) -> Result<Box<dyn StageWriter>, String>;
+    async fn set_mode(&self, path: &str, mode: Option<u32>) -> Result<(), String>;
+    /// Fail before publication intent if the destination cannot support no-clobber publication.
+    async fn prepare_publish(&self, _target: &str, _overwrite: bool) -> Result<(), String> {
+        Ok(())
+    }
+    /// Called only after rechecking the target. Local replacement uses platform
+    /// primitives; SFTP replacement is explicitly a non-atomic two-rename fallback.
+    async fn publish(&self, stage: &str, target: &str, overwrite: bool) -> Result<(), String>;
+    async fn rename_absent(&self, from: &str, to: &str) -> Result<(), String>;
+    async fn remove(&self, path: &str) -> Result<(), String>;
+    fn requires_backup(&self) -> bool;
+    fn sibling(&self, target: &str, name: &str) -> Result<String, String>;
+    fn filename(&self, target: &str) -> Result<String, String>;
+    fn reservation_key(&self, parent: &str, leaf: &str) -> String {
+        format!("{parent}/{leaf}")
+    }
+}
+
+pub enum Endpoint {
+    Local,
+    Remote(Arc<SftpSession>),
+}
+
+enum Writer {
+    Local(tokio::fs::File),
+    Remote(russh_sftp::client::fs::File),
+}
+
+#[async_trait]
+impl StageWriter for Writer {
+    async fn write(&mut self, bytes: &[u8]) -> Result<(), String> {
+        match self {
+            Self::Local(file) => file.write_all(bytes).await,
+            Self::Remote(file) => file.write_all(bytes).await,
+        }
+        .map_err(|e| format!("Destination write failed (space, quota or connection): {e}"))
+    }
+
+    async fn finish(&mut self) -> Result<(), String> {
+        match self {
+            Self::Local(file) => {
+                file.flush().await.map_err(|e| e.to_string())?;
+                file.sync_all()
+                    .await
+                    .map_err(|e| format!("Destination flush failed: {e}"))?;
+                file.shutdown().await
+            }
+            Self::Remote(file) => file.shutdown().await,
+        }
+        .map_err(|e| format!("Destination close was not confirmed: {e}"))
+    }
+}
+
+#[async_trait]
+impl FileEndpoint for Endpoint {
+    async fn stat(&self, path: &str) -> Result<Option<Snapshot>, String> {
+        match self {
+            Self::Local => match tokio::fs::symlink_metadata(path).await {
+                Ok(metadata) => {
+                    #[cfg(unix)]
+                    let mode = {
+                        use std::os::unix::fs::PermissionsExt;
+                        Some(metadata.permissions().mode())
+                    };
+                    #[cfg(not(unix))]
+                    let mode = None;
+                    Ok(Some(Snapshot {
+                        kind: if metadata.file_type().is_symlink() {
+                            EntryKind::Symlink
+                        } else if metadata.is_file() {
+                            EntryKind::File
+                        } else if metadata.is_dir() {
+                            EntryKind::Directory
+                        } else {
+                            EntryKind::Other
+                        },
+                        size: metadata.len(),
+                        modified: metadata
+                            .modified()
+                            .ok()
+                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map(|t| t.as_nanos()),
+                        mode,
+                    }))
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(e) => Err(format!("Could not inspect {path}: {e}")),
+            },
+            Self::Remote(sftp) => match sftp.symlink_metadata(path).await {
+                Ok(metadata) => Ok(Some(Snapshot {
+                    kind: if metadata.file_type().is_symlink() {
+                        EntryKind::Symlink
+                    } else if metadata.file_type().is_file() {
+                        EntryKind::File
+                    } else if metadata.file_type().is_dir() {
+                        EntryKind::Directory
+                    } else {
+                        EntryKind::Other
+                    },
+                    size: metadata.size.unwrap_or(0),
+                    modified: metadata.mtime.map(u128::from),
+                    mode: metadata.permissions,
+                })),
+                Err(russh_sftp::client::error::Error::Status(status))
+                    if status.status_code == StatusCode::NoSuchFile =>
+                {
+                    Ok(None)
+                }
+                Err(e) => Err(format!("Could not inspect {path}: {e}")),
+            },
+        }
+    }
+
+    async fn canonicalize(&self, path: &str) -> Result<String, String> {
+        match self {
+            Self::Local => tokio::fs::canonicalize(path)
+                .await
+                .map(|p| p.to_string_lossy().into_owned())
+                .map_err(|e| e.to_string()),
+            Self::Remote(sftp) => sftp.canonicalize(path).await.map_err(|e| e.to_string()),
+        }
+    }
+
+    async fn reader(&self, path: &str) -> Result<Reader, String> {
+        match self {
+            Self::Local => Ok(Box::new(
+                tokio::fs::File::open(path)
+                    .await
+                    .map_err(|e| e.to_string())?,
+            )),
+            Self::Remote(sftp) => Ok(Box::new(sftp.open(path).await.map_err(|e| e.to_string())?)),
+        }
+    }
+
+    async fn create_stage(&self, path: &str) -> Result<Box<dyn StageWriter>, String> {
+        match self {
+            Self::Local => {
+                let mut options = tokio::fs::OpenOptions::new();
+                options.write(true).create_new(true);
+                #[cfg(unix)]
+                options.mode(0o600);
+                Ok(Box::new(Writer::Local(options.open(path).await.map_err(
+                    |e| format!("Could not create staging file: {e}"),
+                )?)))
+            }
+            Self::Remote(sftp) => {
+                let mut attributes = FileAttributes::empty();
+                attributes.permissions = Some(0o600);
+                Ok(Box::new(Writer::Remote(
+                    sftp.open_with_flags_and_attributes(
+                        path,
+                        OpenFlags::WRITE | OpenFlags::CREATE | OpenFlags::EXCLUDE,
+                        attributes,
+                    )
+                    .await
+                    .map_err(|e| format!("Could not exclusively create staging file: {e}"))?,
+                )))
+            }
+        }
+    }
+
+    async fn set_mode(&self, path: &str, mode: Option<u32>) -> Result<(), String> {
+        // Do not copy setuid/setgid bits onto newly created content.
+        let Some(mode) = mode.map(|value| value & 0o777) else {
+            return Ok(());
+        };
+        match self {
+            Self::Local => {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+                        .await
+                        .map_err(|e| e.to_string())?;
+                }
+                Ok(())
+            }
+            Self::Remote(sftp) => {
+                let mut attributes = FileAttributes::empty();
+                attributes.permissions = Some(mode);
+                sftp.set_metadata(path, attributes)
+                    .await
+                    .map_err(|e| e.to_string())
+            }
+        }
+    }
+
+    async fn prepare_publish(&self, target: &str, overwrite: bool) -> Result<(), String> {
+        #[cfg(not(windows))]
+        if matches!(self, Self::Local) && !overwrite {
+            let target = target.to_owned();
+            return tokio::task::spawn_blocking(move || prepare_local_publication(&target))
+                .await
+                .map_err(|error| error.to_string())?;
+        }
+        let _ = (target, overwrite);
+        Ok(())
+    }
+
+    async fn publish(&self, stage: &str, target: &str, overwrite: bool) -> Result<(), String> {
+        match self {
+            Self::Remote(sftp) => sftp
+                .rename(stage, target)
+                .await
+                .map_err(|e| format!("Publish acknowledgement uncertain: {e}")),
+            Self::Local => {
+                let stage = stage.to_owned();
+                let target = target.to_owned();
+                tokio::task::spawn_blocking(move || publish_local(&stage, &target, overwrite))
+                    .await
+                    .map_err(|e| e.to_string())?
+            }
+        }
+    }
+
+    async fn rename_absent(&self, from: &str, to: &str) -> Result<(), String> {
+        if self.stat(to).await?.is_some() {
+            return Err("Recovery backup path already exists".into());
+        }
+        self.publish(from, to, false).await
+    }
+
+    async fn remove(&self, path: &str) -> Result<(), String> {
+        match self {
+            Self::Local => tokio::fs::remove_file(path)
+                .await
+                .map_err(|e| e.to_string()),
+            Self::Remote(sftp) => sftp.remove_file(path).await.map_err(|e| e.to_string()),
+        }
+    }
+
+    fn requires_backup(&self) -> bool {
+        matches!(self, Self::Remote(_))
+    }
+
+    fn sibling(&self, target: &str, name: &str) -> Result<String, String> {
+        match self {
+            Self::Local => Path::new(target)
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .map(|parent| parent.join(name).to_string_lossy().into_owned())
+                .ok_or_else(|| "A destination parent directory is required".into()),
+            Self::Remote(_) => target
+                .rsplit_once('/')
+                .filter(|(_, leaf)| !leaf.is_empty())
+                .map(|(parent, _)| format!("{parent}/{name}"))
+                .ok_or_else(|| "An absolute remote destination path is required".into()),
+        }
+    }
+
+    fn filename(&self, target: &str) -> Result<String, String> {
+        match self {
+            Self::Local => Path::new(target)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .map(str::to_owned),
+            Self::Remote(_) => target.rsplit_once('/').map(|(_, leaf)| leaf.to_owned()),
+        }
+        .filter(|leaf| !leaf.is_empty() && leaf != "." && leaf != "..")
+        .ok_or_else(|| "A destination filename is required".into())
+    }
+
+    fn reservation_key(&self, parent: &str, leaf: &str) -> String {
+        let key = format!("{parent}/{leaf}");
+        // Conservatively serialize case aliases on Windows, including volumes
+        // that opt into case-sensitive directories. Remote POSIX names stay exact.
+        if cfg!(windows) && matches!(self, Self::Local) {
+            key.to_lowercase()
+        } else {
+            key
+        }
+    }
+}
+
+#[cfg(windows)]
+fn publish_local(stage: &str, target: &str, overwrite: bool) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, ReplaceFileW};
+    let wide = |s: &str| {
+        std::ffi::OsStr::new(s)
+            .encode_wide()
+            .chain(Some(0))
+            .collect::<Vec<_>>()
+    };
+    let stage = wide(stage);
+    let target = wide(target);
+    let success = unsafe {
+        if overwrite {
+            ReplaceFileW(
+                target.as_ptr(),
+                stage.as_ptr(),
+                std::ptr::null(),
+                0,
+                std::ptr::null(),
+                std::ptr::null(),
+            )
+        } else {
+            MoveFileExW(stage.as_ptr(), target.as_ptr(), 0)
+        }
+    };
+    if success == 0 {
+        Err(format!(
+            "Publish was not confirmed; inspect recovery state: {}",
+            std::io::Error::last_os_error()
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+fn publish_local(stage: &str, target: &str, overwrite: bool) -> Result<(), String> {
+    if overwrite {
+        std::fs::rename(stage, target).map_err(|e| e.to_string())
+    } else {
+        // Reuse tempfile's Linux/macOS exclusive rename and hard-link fallback,
+        // as session recovery already does. Never auto-delete the real stage on error.
+        let mut path = tempfile::TempPath::from_path(stage);
+        path.disable_cleanup(true);
+        path.persist_noclobber(target)
+            .map_err(|error| error.error.to_string())?;
+        match std::fs::remove_file(stage) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(format!(
+                "Published, but staging cleanup is unconfirmed: {error}"
+            )),
+        }
+    }
+}
+
+#[cfg(any(not(windows), test))]
+pub(super) fn prepare_local_publication(target: &str) -> Result<(), String> {
+    let parent = Path::new(target)
+        .parent()
+        .ok_or("Destination parent is required")?;
+    let source = tempfile::Builder::new()
+        .prefix(".zync-publish-probe-")
+        .tempfile_in(parent)
+        .map(|file| file.into_temp_path())
+        .map_err(|error| error.to_string())?;
+    let destination = source.with_extension("published-probe");
+    // Do not own/drop an absent destination: a no-clobber failure must never
+    // delete another process's file if it won this random probe name.
+    publish_local(
+        source.to_str().ok_or("Invalid probe path")?,
+        destination.to_str().ok_or("Invalid probe path")?,
+        false,
+    )
+    .map_err(|error| {
+        format!("Destination does not support safe no-overwrite publication: {error}")
+    })?;
+    std::fs::remove_file(&destination)
+        .map_err(|error| format!("Could not clean publication probe: {error}"))
+}

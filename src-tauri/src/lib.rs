@@ -20,11 +20,14 @@ mod preference_settings;
 mod shell_icons;
 mod snippets;
 mod ssh;
+mod sftp_read;
 mod ssh_config;
 mod ssh_key_passphrase_cache;
 mod ssh_parser;
 mod sync;
 mod tunnels;
+mod transfers;
+mod file_transfers;
 pub use tunnels::{remote_forward_map_key, tunnel_runtime_id, TunnelManager};
 mod share;
 mod types;
@@ -251,6 +254,12 @@ pub fn run() {
             commands::settings_write_raw,
             commands::settings_restore_last_known_good,
             commands::sftp_put,
+            commands::fs_transfer_file,
+            commands::fs_transfer_history,
+            commands::fs_transfer_inspect,
+            commands::fs_transfer_cleanup,
+            commands::fs_transfer_dismiss,
+            commands::fs_transfer_resolve,
             commands::sftp_get,
             commands::sftp_copy_to_server,
             commands::sftp_cancel_transfer,
