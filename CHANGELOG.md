@@ -4,6 +4,12 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Fixed
+
+- **File deletion:** Update local Windows listings immediately after deletion and
+  refresh other open panes without interrupting folder navigation. Prevent failed
+  deletions from restoring stale folder contents. ([d8d6586], [69a16cb])
+
 ### Changed
 
 - **File operations and feedback:** Close accepted collision dialogs without
@@ -2790,3 +2796,5 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [aee7155]: https://github.com/zync-sh/zync/commit/aee7155d4e386c38a848e6617e7f3d31a2be92bd
 [2e7e674]: https://github.com/zync-sh/zync/commit/2e7e674e811b7e68741d4697f0aeaae1d33df811
 [11d005e]: https://github.com/zync-sh/zync/commit/11d005e04529bf9d1b7f972bdf8a17f4930f20b0
+[d8d6586]: https://github.com/zync-sh/zync/commit/d8d6586bfa0790730bf8ea84c52acfe6c18adcaf
+[69a16cb]: https://github.com/zync-sh/zync/commit/69a16cbaf7401b57a0990760d3c21263e7844397
