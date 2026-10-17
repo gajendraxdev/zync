@@ -6,6 +6,14 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Changed
 
+- **File operations and feedback:** Close accepted collision dialogs without
+  blocking browsing, continue Keep Both batches after individual failures, and
+  preserve dotfile names and dotted parent paths. Keep partial cut selections
+  accurate and refresh open destination panes at their current paths. Consolidate
+  batch errors and remove routine start, success and cancellation toasts; automatic
+  focus restoration stays quiet while keyboard navigation remains visible.
+  ([822c8c9], [1842b93], [d4469ff])
+
 - **Files interface:** Use compact navigation and folder-summary rows, separate New
   and Upload menus, one View menu, and direct List/Grid controls. Keep selection
   feedback in place and distinguish empty, hidden-only, filtered and failed
@@ -50,6 +58,19 @@ All notable changes to Zync are documented in this file. The format is based on 
   restoration; existing callers retain the default behavior. ([c44431b])
 
 ### Added
+
+- **Safer regular-file copies:** Copy into a separate temporary file before
+  publishing the result, keeping an existing destination unchanged during copying.
+  Bound concurrent transfers and attempt temporary-file cleanup after confirmed
+  cancellation. Retain recovery details when the outcome is uncertain. These
+  staging guarantees do not yet cover whole-folder replacement, moves or archives.
+  ([bfb9231], [822c8c9], [d4469ff])
+
+- **Transfer recovery:** Restore active transfers after a UI reload and unresolved
+  recovery details after an app restart, without automatically resuming interrupted
+  copies. Offer read-only inspection and guarded temporary-copy cleanup. Every
+  finished entry retains the existing × clear action; cleared history stays hidden
+  without deleting recovery files. ([bfb9231], [822c8c9], [d32d8bc], [d4469ff])
 
 - **Bundled Material icons:** Add an optional offline Material Icon Theme choice
   with 65 unchanged, attributed MIT-licensed assets and programming-language and
@@ -2745,3 +2766,8 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [1bcfd30]: https://github.com/zync-sh/zync/commit/1bcfd30eda8bd76dd5caece0cbf5f1f6ba34a87c
 [6f0bf22]: https://github.com/zync-sh/zync/commit/6f0bf22e41a54186b27f70a931dc367e9a55cd7a
 [90d9ea5]: https://github.com/zync-sh/zync/commit/90d9ea5cdc9da1ef8dec5b7e5070ae9b0d99c4e4
+[bfb9231]: https://github.com/zync-sh/zync/commit/bfb9231d4ec73f1810b1abd277dc7f641e9696be
+[822c8c9]: https://github.com/zync-sh/zync/commit/822c8c99943d4834a6ee6db66458ce636ba40cc8
+[d32d8bc]: https://github.com/zync-sh/zync/commit/d32d8bcc546035dd79e2744603c0f6f359d83df0
+[1842b93]: https://github.com/zync-sh/zync/commit/1842b93ffaf5d1054b20a597d660222c5e2ea918
+[d4469ff]: https://github.com/zync-sh/zync/commit/d4469ff66b5dee6e15f1e15e4a238271aea9cdf0
