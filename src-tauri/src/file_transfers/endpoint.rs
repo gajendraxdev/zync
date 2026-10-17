@@ -52,11 +52,55 @@ pub trait FileEndpoint: Send + Sync {
     async fn publish(&self, stage: &str, target: &str, overwrite: bool) -> Result<(), String>;
     async fn rename_absent(&self, from: &str, to: &str) -> Result<(), String>;
     async fn remove(&self, path: &str) -> Result<(), String>;
+    /// Directory operations default to unsupported for file-only adapters.
+    async fn children(&self, _path: &str) -> Result<Vec<(String, Option<Snapshot>)>, String> {
+        Err("This endpoint does not support folder transfers".into())
+    }
+    async fn create_directory(&self, _path: &str) -> Result<(), String> {
+        Err("This endpoint does not support folder transfers".into())
+    }
+    async fn remove_directory(&self, _path: &str) -> Result<(), String> {
+        Err("This endpoint does not support folder cleanup".into())
+    }
+    async fn read_link(&self, _path: &str) -> Result<String, String> {
+        Err("This endpoint does not support symbolic links".into())
+    }
+    async fn link_is_directory(&self, _path: &str) -> bool {
+        false
+    }
+    async fn create_link(
+        &self,
+        _path: &str,
+        _target: &str,
+        _directory: bool,
+    ) -> Result<(), String> {
+        Err("This endpoint does not support symbolic links".into())
+    }
+    async fn prepare_directory_publish(&self, _target: &str) -> Result<(), String> {
+        Ok(())
+    }
+    /// Validate one leaf without interpreting remote POSIX names as local paths.
+    fn child(&self, parent: &str, leaf: &str) -> Result<String, String> {
+        if leaf.is_empty()
+            || leaf == "."
+            || leaf == ".."
+            || leaf.contains('/')
+            || leaf.contains('\0')
+        {
+            return Err("Invalid folder entry name".into());
+        }
+        Ok(format!("{}/{leaf}", parent.trim_end_matches('/')))
+    }
     fn requires_backup(&self) -> bool;
     fn sibling(&self, target: &str, name: &str) -> Result<String, String>;
     fn filename(&self, target: &str) -> Result<String, String>;
     fn reservation_key(&self, parent: &str, leaf: &str) -> String {
         format!("{parent}/{leaf}")
+    }
+    /// Preflight name equivalence only; never persist this as destination identity.
+    /// Endpoints without a separate collision policy retain their reservation key.
+    fn collision_key(&self, parent: &str, leaf: &str) -> String {
+        self.reservation_key(parent, leaf)
     }
 }
 
@@ -131,20 +175,7 @@ impl FileEndpoint for Endpoint {
                 Err(e) => Err(format!("Could not inspect {path}: {e}")),
             },
             Self::Remote(sftp) => match sftp.symlink_metadata(path).await {
-                Ok(metadata) => Ok(Some(Snapshot {
-                    kind: if metadata.file_type().is_symlink() {
-                        EntryKind::Symlink
-                    } else if metadata.file_type().is_file() {
-                        EntryKind::File
-                    } else if metadata.file_type().is_dir() {
-                        EntryKind::Directory
-                    } else {
-                        EntryKind::Other
-                    },
-                    size: metadata.size.unwrap_or(0),
-                    modified: metadata.mtime.map(u128::from),
-                    mode: metadata.permissions,
-                })),
+                Ok(metadata) => Ok(Some(remote_snapshot(&metadata))),
                 Err(russh_sftp::client::error::Error::Status(status))
                     if status.status_code == StatusCode::NoSuchFile =>
                 {
@@ -266,10 +297,238 @@ impl FileEndpoint for Endpoint {
 
     async fn remove(&self, path: &str) -> Result<(), String> {
         match self {
-            Self::Local => tokio::fs::remove_file(path)
-                .await
-                .map_err(|e| e.to_string()),
+            Self::Local => {
+                #[cfg(windows)]
+                {
+                    use std::os::windows::fs::FileTypeExt;
+                    if tokio::fs::symlink_metadata(path)
+                        .await
+                        .map_err(|e| e.to_string())?
+                        .file_type()
+                        .is_symlink_dir()
+                    {
+                        // Unlink the directory link itself; never its target.
+                        return tokio::fs::remove_dir(path).await.map_err(|e| e.to_string());
+                    }
+                }
+                tokio::fs::remove_file(path)
+                    .await
+                    .map_err(|e| e.to_string())
+            }
             Self::Remote(sftp) => sftp.remove_file(path).await.map_err(|e| e.to_string()),
+        }
+    }
+
+    async fn children(&self, path: &str) -> Result<Vec<(String, Option<Snapshot>)>, String> {
+        let mut names = Vec::new();
+        match self {
+            Self::Local => {
+                let mut directory = tokio::fs::read_dir(path).await.map_err(|e| e.to_string())?;
+                while let Some(entry) = directory.next_entry().await.map_err(|e| e.to_string())? {
+                    names.push((
+                        entry
+                            .file_name()
+                            .into_string()
+                            .map_err(|_| "Folder contains a non-UTF-8 name")?,
+                        None,
+                    ));
+                    if names.len() > super::tree::MAX_ENTRIES {
+                        return Err("Folder entry limit exceeded".into());
+                    }
+                }
+            }
+            Self::Remote(sftp) => {
+                // russh-sftp materializes one directory response. Do not retain
+                // unbounded directory lists across the tree or open parallel walks.
+                for entry in sftp.read_dir(path).await.map_err(|e| e.to_string())? {
+                    let name = entry.file_name();
+                    if name == "." || name == ".." {
+                        continue;
+                    }
+                    let metadata = entry.metadata();
+                    // Reuse complete READDIR attributes instead of an extra
+                    // network LSTAT for every entry on every verification walk.
+                    let snapshot = if metadata.permissions.is_some()
+                        && metadata.mtime.is_some()
+                        && metadata.size.is_some()
+                    {
+                        Some(remote_snapshot(&metadata))
+                    } else {
+                        None
+                    };
+                    names.push((name, snapshot));
+                    if names.len() > super::tree::MAX_ENTRIES {
+                        return Err("Folder entry limit exceeded".into());
+                    }
+                }
+            }
+        }
+        names.sort_by(|a, b| a.0.cmp(&b.0));
+        if names.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+            return Err("Duplicate folder entry name".into());
+        }
+        Ok(names)
+    }
+
+    async fn create_directory(&self, path: &str) -> Result<(), String> {
+        match self {
+            Self::Local => {
+                #[allow(unused_mut)]
+                let mut builder = tokio::fs::DirBuilder::new();
+                #[cfg(unix)]
+                builder.mode(0o700);
+                builder.create(path).await.map_err(|e| e.to_string())
+            }
+            Self::Remote(sftp) => {
+                sftp.create_dir(path).await.map_err(|e| e.to_string())?;
+                self.set_mode(path, Some(0o700)).await
+            }
+        }
+    }
+
+    async fn remove_directory(&self, path: &str) -> Result<(), String> {
+        match self {
+            Self::Local => tokio::fs::remove_dir(path).await.map_err(|e| e.to_string()),
+            Self::Remote(sftp) => sftp.remove_dir(path).await.map_err(|e| e.to_string()),
+        }
+    }
+
+    async fn read_link(&self, path: &str) -> Result<String, String> {
+        match self {
+            Self::Local => tokio::fs::read_link(path)
+                .await
+                .map_err(|e| e.to_string())?
+                .into_os_string()
+                .into_string()
+                .map_err(|_| "Non-UTF-8 symbolic link target".into()),
+            Self::Remote(sftp) => sftp.read_link(path).await.map_err(|e| e.to_string()),
+        }
+    }
+
+    async fn link_is_directory(&self, path: &str) -> bool {
+        match self {
+            Self::Local => {
+                #[cfg(windows)]
+                {
+                    use std::os::windows::fs::FileTypeExt;
+                    // Preserve Windows directory-link type even if dangling.
+                    tokio::fs::symlink_metadata(path)
+                        .await
+                        .is_ok_and(|entry| entry.file_type().is_symlink_dir())
+                }
+                #[cfg(not(windows))]
+                {
+                    tokio::fs::metadata(path)
+                        .await
+                        .is_ok_and(|entry| entry.is_dir())
+                }
+            }
+            Self::Remote(sftp) => sftp
+                .metadata(path)
+                .await
+                .is_ok_and(|entry| entry.file_type().is_dir()),
+        }
+    }
+
+    async fn create_link(&self, path: &str, target: &str, directory: bool) -> Result<(), String> {
+        let _ = directory;
+        match self {
+            // russh-sftp 2.1.1 writes these arguments in wire order. OpenSSH
+            // expects the target first, then the new link path (as in the
+            // library's client example), despite the API parameter names.
+            // Never retry this mutation with swapped arguments on failure.
+            Self::Remote(sftp) => sftp.symlink(target, path).await.map_err(|e| e.to_string()),
+            Self::Local => {
+                #[cfg(unix)]
+                {
+                    tokio::fs::symlink(target, path)
+                        .await
+                        .map_err(|e| e.to_string())
+                }
+                #[cfg(windows)]
+                {
+                    if directory { tokio::fs::symlink_dir(target, path).await } else { tokio::fs::symlink_file(target, path).await }
+                    .map_err(|e| format!("Could not preserve symbolic link (Windows may require Developer Mode or symlink permission): {e}"))
+                }
+                #[cfg(not(any(unix, windows)))]
+                {
+                    let _ = (path, target);
+                    Err("Symbolic links are unsupported on this platform".into())
+                }
+            }
+        }
+    }
+
+    async fn prepare_directory_publish(&self, target: &str) -> Result<(), String> {
+        if matches!(self, Self::Local) {
+            let target = target.to_owned();
+            tokio::task::spawn_blocking(move || prepare_local_directory_publication(&target))
+                .await
+                .map_err(|e| e.to_string())??;
+        }
+        Ok(())
+    }
+
+    fn child(&self, parent: &str, leaf: &str) -> Result<String, String> {
+        if leaf.is_empty()
+            || leaf == "."
+            || leaf == ".."
+            || leaf.contains('/')
+            || leaf.contains('\0')
+        {
+            return Err("Invalid folder entry name".into());
+        }
+        match self {
+            Self::Local => {
+                // Windows names must not become drive paths, alternate streams,
+                // device aliases or separator traversal when importing from SSH.
+                #[cfg(windows)]
+                if leaf.contains(['\\', ':', '*', '?', '"', '<', '>', '|'])
+                    || leaf.chars().any(|character| character < ' ')
+                    || leaf.ends_with(['.', ' '])
+                    || matches!(
+                        leaf.split('.')
+                            .next()
+                            .unwrap_or("")
+                            .to_ascii_uppercase()
+                            .as_str(),
+                        "CON"
+                            | "PRN"
+                            | "AUX"
+                            | "NUL"
+                            | "COM1"
+                            | "COM2"
+                            | "COM3"
+                            | "COM4"
+                            | "COM5"
+                            | "COM6"
+                            | "COM7"
+                            | "COM8"
+                            | "COM9"
+                            | "COM¹"
+                            | "COM²"
+                            | "COM³"
+                            | "LPT1"
+                            | "LPT2"
+                            | "LPT3"
+                            | "LPT4"
+                            | "LPT5"
+                            | "LPT6"
+                            | "LPT7"
+                            | "LPT8"
+                            | "LPT9"
+                            | "LPT¹"
+                            | "LPT²"
+                            | "LPT³"
+                    )
+                {
+                    return Err(format!(
+                        "Folder entry cannot be represented safely on Windows: {leaf}"
+                    ));
+                }
+                Ok(Path::new(parent).join(leaf).to_string_lossy().into_owned())
+            }
+            Self::Remote(_) => Ok(format!("{}/{leaf}", parent.trim_end_matches('/'))),
         }
     }
 
@@ -309,11 +568,63 @@ impl FileEndpoint for Endpoint {
         // Conservatively serialize case aliases on Windows, including volumes
         // that opt into case-sensitive directories. Remote POSIX names stay exact.
         if cfg!(windows) && matches!(self, Self::Local) {
+            key.replace('\\', "/").to_lowercase()
+        } else {
+            key
+        }
+    }
+
+    fn collision_key(&self, parent: &str, leaf: &str) -> String {
+        let key = self.reservation_key(parent, leaf);
+        // Conservatively reject case aliases even on case-sensitive macOS
+        // volumes, without changing journal keys or remote POSIX path bytes.
+        if cfg!(target_os = "macos") && matches!(self, Self::Local) {
             key.to_lowercase()
         } else {
             key
         }
     }
+}
+
+fn remote_snapshot(metadata: &FileAttributes) -> Snapshot {
+    Snapshot {
+        kind: if metadata.file_type().is_symlink() {
+            EntryKind::Symlink
+        } else if metadata.file_type().is_file() {
+            EntryKind::File
+        } else if metadata.file_type().is_dir() {
+            EntryKind::Directory
+        } else {
+            EntryKind::Other
+        },
+        size: metadata.size.unwrap_or(0),
+        modified: metadata.mtime.map(u128::from),
+        mode: metadata.permissions,
+    }
+}
+
+/// Probe directory-specific no-clobber rename before moving an original tree.
+/// File hard-link fallback is not sufficient evidence for directory publication.
+fn prepare_local_directory_publication(target: &str) -> Result<(), String> {
+    let parent = Path::new(target)
+        .parent()
+        .ok_or("Destination parent is required")?;
+    let mut source = tempfile::Builder::new()
+        .prefix(".zync-publish-probe-")
+        .tempdir_in(parent)
+        .map_err(|e| e.to_string())?;
+    let destination = source.path().with_extension("published-probe");
+    publish_local(
+        source.path().to_str().ok_or("Invalid probe path")?,
+        destination.to_str().ok_or("Invalid probe path")?,
+        false,
+    )
+    .map_err(|e| format!("Destination does not support safe folder publication: {e}"))?;
+    // The renamed source is no longer ours at its old path. In particular, do
+    // not let TempDir's recursive destructor act on a subsequently reused name.
+    source.disable_cleanup(true);
+    std::fs::remove_dir(&destination)
+        .map_err(|e| format!("Could not clean directory publication probe: {e}"))
 }
 
 #[cfg(windows)]

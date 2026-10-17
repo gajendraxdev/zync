@@ -4671,9 +4671,9 @@ pub async fn fs_copy_batch(
     if operations.is_empty() {
         return Ok(());
     }
-    // Regular-file copies use the same native owner as cross-endpoint transfers.
-    // Directory merge/server-side recursion remains a separate existing policy.
-    let mut directories = Vec::new();
+    // Files and whole-folder copies share the native staging owner. Only
+    // top-level links retain their legacy policy; folders never bypass staging.
+    let mut legacy_links = Vec::new();
     for operation in operations {
         let result = fs_transfer_file(state.app_handle.clone(), connection_id.clone(), operation.from.clone(),
             connection_id.clone(), operation.to.clone(), uuid::Uuid::new_v4().to_string(), Some(false), state.clone()).await
@@ -4684,12 +4684,12 @@ pub async fn fs_copy_batch(
                 None => error,
             })?;
         match result {
-            None => directories.push(operation),
+            None => legacy_links.push(operation),
             Some(receipt) if receipt.phase == crate::file_transfers::Phase::Completed => {}
             Some(receipt) => return Err(receipt.error.or(receipt.warning).unwrap_or_else(|| "File transfer requires recovery inspection".into())),
         }
     }
-    let operations = directories;
+    let operations = legacy_links;
     if operations.is_empty() { return Ok(()); }
     if connection_id == "local" {
         for op in operations {
@@ -5778,7 +5778,7 @@ pub async fn fs_transfer_file(
     overwrite: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<Option<crate::file_transfers::Receipt>, String> {
-    use crate::file_transfers::{endpoint::{EntryKind, FileEndpoint}, Request};
+    use crate::file_transfers::{endpoint::EntryKind, Request};
     // This entire preparation block is read-only. Its tagged errors must not be
     // presented as a partially written destination or a saved recovery record.
     let prepared = async {
@@ -5786,18 +5786,15 @@ pub async fn fs_transfer_file(
             &state, &source_connection_id, &source_path, "source",
         ).await?;
         let Some(metadata) = metadata else { return Err("Source no longer exists".into()); };
-        // Only a known non-regular source may use the existing directory/link policy.
-        if matches!(metadata.kind, EntryKind::Directory | EntryKind::Symlink) { return Ok(None); }
-        if metadata.kind != EntryKind::File {
+        // Only top-level links retain the explicit legacy policy. Nested links
+        // are preserved as links by staged folder copies, never followed.
+        if metadata.kind == EntryKind::Symlink { return Ok(None); }
+        if !matches!(metadata.kind, EntryKind::File | EntryKind::Directory) {
             return Err("Special files require a separate copy policy".into());
         }
         let (destination, destination_identity, _) = prepare_file_transfer_endpoint(
             &state, &destination_connection_id, &destination_path, "destination",
         ).await?;
-        if source_identity == destination_identity && source.canonicalize(&source_path).await?
-            == destination.canonicalize(&destination_path).await.unwrap_or_default() {
-            return Err("Source and destination are the same file".into());
-        }
         let stage_copy: Option<Arc<dyn crate::file_transfers::StageCopy>> =
             if source_connection_id == destination_connection_id && source_connection_id != "local" {
                 let connections = state.connections.lock().await;
@@ -5818,11 +5815,11 @@ pub async fn fs_transfer_file(
                     .and_then(|connection| connection.session.clone())
                     .map(|session| Arc::new(SshStageCopy { session }) as Arc<dyn crate::file_transfers::StageCopy>)
             } else { None };
-        Ok(Some((source, destination, destination_identity, stage_copy)))
+        Ok(Some((source, destination, source_identity, destination_identity, stage_copy)))
     }.await.map_err(transfer_not_started_error)?;
-    let Some((source, destination, destination_identity, stage_copy)) = prepared else { return Ok(None); };
+    let Some((source, destination, source_identity, destination_identity, stage_copy)) = prepared else { return Ok(None); };
     let service = state.file_transfers.clone();
-    let request = Request { id: transfer_id.clone(), source_connection_id, source_path,
+    let request = Request { id: transfer_id.clone(), source_connection_id, source_path, source_identity,
         destination_connection_id, destination_path, destination_identity, overwrite: overwrite.unwrap_or(false), stage_copy };
     crate::transfers::run_owned_transfer(state.transfers.clone(), transfer_id.clone(), move |token| async move {
         let progress_app = app.clone(); let progress_id = transfer_id.clone();

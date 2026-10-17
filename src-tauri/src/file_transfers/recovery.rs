@@ -69,7 +69,11 @@ impl Service {
             .await?;
         // The durable snapshot already records this exact path and metadata.
         // Do not introduce a new phase that would conceal an interrupted delete.
-        let removed = endpoint.remove(&receipt.stage_path).await;
+        let removed = if let Some(expected) = &receipt.staged_tree {
+            super::tree::remove_verified_tree(endpoint, &receipt.stage_path, expected).await
+        } else {
+            endpoint.remove(&receipt.stage_path).await
+        };
         if endpoint.stat(&receipt.stage_path).await?.is_some() {
             return Err(removed
                 .err()
@@ -103,7 +107,9 @@ impl Service {
         // `staged` is captured only after acknowledged writer/exec completion and
         // CLOSE, including live cancellation cleanup. Old records without it fail
         // closed; reconnecting or observing an unchanged size is not that evidence.
-        let expected = receipt.staged.as_ref().filter(|snapshot| snapshot.kind == EntryKind::File && snapshot.size == receipt.transferred)
+        let expected = receipt.staged.as_ref().filter(|snapshot|
+            snapshot.kind == EntryKind::File && snapshot.size == receipt.transferred
+                || snapshot.kind == EntryKind::Directory && receipt.staged_tree.is_some())
             .ok_or("Writer completion was not recorded. The interrupted temporary copy is retained for manual review; no automatic cleanup is scheduled.")?;
         if backup.is_some() {
             return Err("A backup remains; review recovery files manually.".into());
@@ -116,7 +122,6 @@ impl Service {
                 "The temporary copy changed or is absent; inspect recovery files again.".into(),
             );
         }
-
         let leaf = endpoint.filename(&receipt.stage_path)?;
         let artifact = leaf
             .strip_prefix(".zync-transfer-")
@@ -141,8 +146,27 @@ impl Service {
             receipt.destination_identity,
             endpoint.reservation_key(&parent, &endpoint.filename(&receipt.destination_path)?)
         );
-        if key != receipt.destination_key {
+        if super::normalized_destination_key(&key)
+            != super::normalized_destination_key(&receipt.destination_key)
+        {
             return Err("Destination parent changed; cleanup was refused.".into());
+        }
+        // Validate path/endpoint ownership before walking either recorded tree.
+        for (path, expected) in [
+            (&receipt.stage_path, &receipt.staged_tree),
+            (&receipt.destination_path, &receipt.original_tree),
+        ] {
+            if let Some(expected) = expected {
+                let current = super::tree::Inventory::capture(
+                    endpoint,
+                    path,
+                    &std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                )
+                .await?;
+                if current.fingerprint != *expected {
+                    return Err("Folder contents changed; cleanup was refused".into());
+                }
+            }
         }
         Ok(())
     }

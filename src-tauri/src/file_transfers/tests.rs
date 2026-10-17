@@ -18,6 +18,8 @@ struct Faults {
     stat_after_close: bool,
     publish_preflight: bool,
     cleanup_journal: Option<Arc<Journal>>,
+    colliding_names: bool,
+    canonical_target: Option<String>,
 }
 
 #[derive(Clone)]
@@ -115,6 +117,11 @@ impl FileEndpoint for FakeEndpoint {
         }))
     }
     async fn canonicalize(&self, path: &str) -> Result<String, String> {
+        if path == "/target" {
+            if let Some(alias) = &self.faults.lock().unwrap().canonical_target {
+                return Ok(alias.clone());
+            }
+        }
         Ok(path.into())
     }
     async fn reader(&self, path: &str) -> Result<Reader, String> {
@@ -198,6 +205,69 @@ impl FileEndpoint for FakeEndpoint {
     fn filename(&self, target: &str) -> Result<String, String> {
         Ok(target.rsplit('/').next().unwrap().into())
     }
+    fn collision_key(&self, parent: &str, leaf: &str) -> String {
+        if self.faults.lock().unwrap().colliding_names {
+            "same-preflight-name".into()
+        } else {
+            self.reservation_key(parent, leaf)
+        }
+    }
+}
+
+#[tokio::test]
+async fn tree_preflight_uses_collision_policy_without_changing_reservation_identity() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(directory.path().join("child"), b"content").unwrap();
+    let plan = tree::Inventory::capture(
+        &Endpoint::Local,
+        directory.path().to_str().unwrap(),
+        &Arc::new(AtomicBool::new(false)),
+    )
+    .await
+    .unwrap();
+    let endpoint = FakeEndpoint::new(false);
+    let key = endpoint.reservation_key("/Target", "ReadMe");
+    plan.validate_destination(&endpoint, "/Target").unwrap();
+    endpoint.faults.lock().unwrap().colliding_names = true;
+    assert!(plan
+        .validate_destination(&endpoint, "/Target")
+        .unwrap_err()
+        .contains("names collide"));
+    assert_eq!(endpoint.reservation_key("/Target", "ReadMe"), key);
+    assert_ne!(
+        endpoint.reservation_key("/Target", ""),
+        endpoint.reservation_key("/Target/child", "")
+    );
+    assert!(
+        endpoint.artifacts().is_empty(),
+        "Collision preflight must not mutate the destination"
+    );
+}
+
+#[tokio::test]
+async fn existing_destination_aliases_cannot_bypass_source_overlap_preflight() {
+    for alias in ["/source", "/"] {
+        let directory = tempfile::tempdir().unwrap();
+        let service = Service::new(directory.path().into());
+        let endpoint = FakeEndpoint::new(false);
+        endpoint.faults.lock().unwrap().canonical_target = Some(alias.into());
+        let result = service
+            .execute(
+                request(true),
+                Arc::new(endpoint.clone()),
+                Arc::new(endpoint.clone()),
+                Arc::new(AtomicBool::new(false)),
+                |_, _| {},
+            )
+            .await;
+        assert!(
+            result.is_err(),
+            "An existing destination alias must be checked before mutation: {result:?}"
+        );
+        assert!(endpoint.artifacts().is_empty());
+        assert_eq!(endpoint.bytes("/target").unwrap(), b"original");
+        assert!(service.history().await.unwrap().is_empty());
+    }
 }
 
 fn request(overwrite: bool) -> Request {
@@ -205,6 +275,7 @@ fn request(overwrite: bool) -> Request {
         id: uuid::Uuid::new_v4().to_string(),
         source_connection_id: "source".into(),
         source_path: "/source".into(),
+        source_identity: "fixture".into(),
         destination_connection_id: "destination".into(),
         destination_path: "/target".into(),
         destination_identity: "fixture".into(),
@@ -1208,4 +1279,27 @@ async fn queued_cancellation_wakes_without_waiting_for_a_large_active_transfer()
     assert!(service.waiting.lock().unwrap().is_empty());
     assert_eq!(service.capacity.available_permits(), MAX_ADMITTED);
     drop(permits);
+}
+#[test]
+fn progress_clock_spans_small_file_updates_and_rate_limits_accelerated_bursts() {
+    let start = std::time::Instant::now();
+    let mut last = start;
+    for (milliseconds, expected) in [
+        (10, false),
+        (60, false),
+        (100, true),
+        (100, false),
+        (110, false),
+        (199, false),
+        (200, true),
+    ] {
+        assert_eq!(
+            super::progress_due(
+                &mut last,
+                start + std::time::Duration::from_millis(milliseconds)
+            ),
+            expected,
+            "update at {milliseconds}ms"
+        );
+    }
 }

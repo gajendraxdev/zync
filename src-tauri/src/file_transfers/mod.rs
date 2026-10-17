@@ -1,12 +1,15 @@
-//! Native regular-file staging, publication and read-only restart recovery.
-//! Directories and moves deliberately retain their separate existing policies.
+//! Native file/folder staging, publication and read-only restart recovery.
+//! Moves deliberately retain their separate existing policy.
 
 pub mod endpoint;
 mod journal;
 mod recovery;
+mod tree;
 pub use recovery::Inspection;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tree_tests;
 
 use endpoint::{EntryKind, FileEndpoint, Snapshot};
 use journal::Journal;
@@ -73,6 +76,12 @@ pub struct Receipt {
     /// Captured only after writer/exec completion and CLOSE. Recovery must also
     /// verify phase, destination ownership and current metadata before removal.
     pub staged: Option<Snapshot>,
+    /// Directory fingerprints are metadata change detectors, not content hashes.
+    /// Absent in older regular-file receipts; never infer tree cleanup authority.
+    #[serde(default)]
+    pub original_tree: Option<tree::Fingerprint>,
+    #[serde(default)]
+    pub staged_tree: Option<tree::Fingerprint>,
 }
 
 impl Receipt {
@@ -109,6 +118,11 @@ impl Receipt {
 
     fn validate(&self) -> Result<(), String> {
         if self.version != 1
+            || self
+                .original_tree
+                .as_ref()
+                .is_some_and(|tree| !tree.valid())
+            || self.staged_tree.as_ref().is_some_and(|tree| !tree.valid())
             || self.stage_cleaned && (self.phase != Phase::Cancelled || !self.destination_unchanged)
             || uuid::Uuid::parse_str(&self.id).is_err()
             || [
@@ -134,6 +148,7 @@ pub struct Request {
     pub id: String,
     pub source_connection_id: String,
     pub source_path: String,
+    pub source_identity: String,
     pub destination_connection_id: String,
     pub destination_path: String,
     pub destination_identity: String,
@@ -187,9 +202,13 @@ impl Service {
             .destinations
             .lock()
             .map_err(|_| "Transfer admission unavailable")?;
-        if !destinations.insert(key.clone()) {
+        if destinations
+            .iter()
+            .any(|owned| destination_keys_overlap(owned, &key))
+        {
             return Err("Another native file operation owns this destination".into());
         }
+        destinations.insert(key.clone());
         Ok(DestinationLease {
             key,
             destinations: self.destinations.clone(),
@@ -292,9 +311,12 @@ impl Service {
         let source_stat = source
             .stat(&request.source_path)
             .await?
-            .ok_or("Source file no longer exists")?;
-        if source_stat.kind != EntryKind::File {
-            return Err("Staged transfers require a regular file, not a link or directory".into());
+            .ok_or("Source no longer exists")?;
+        if !matches!(source_stat.kind, EntryKind::File | EntryKind::Directory) {
+            return Err(
+                "Staged transfers require a regular file or folder, not a link or special entry"
+                    .into(),
+            );
         }
         let parent_probe = destination.sibling(&request.destination_path, ".")?;
         let parent = destination.canonicalize(&parent_probe).await?;
@@ -304,12 +326,45 @@ impl Service {
             request.destination_identity,
             destination.reservation_key(&parent, &leaf)
         );
+        let original = destination.stat(&request.destination_path).await?;
+        if request.source_identity == request.destination_identity {
+            let source_path = source.canonicalize(&request.source_path).await?;
+            let source_key = format!(
+                "{}:{}",
+                request.source_identity,
+                source
+                    .reservation_key(&source_path, "")
+                    .trim_end_matches('/')
+            );
+            // An existing leaf may itself be an alias (for example, a short
+            // Windows name). Keep persisted reservations stable, but compare
+            // its resolved location as well as the requested parent/leaf.
+            let canonical_destination_key = if original.is_some() {
+                let path = destination.canonicalize(&request.destination_path).await?;
+                Some(format!(
+                    "{}:{}",
+                    request.destination_identity,
+                    destination.reservation_key(&path, "").trim_end_matches('/')
+                ))
+            } else {
+                None
+            };
+            if destination_keys_overlap(&source_key, &key)
+                || canonical_destination_key
+                    .as_ref()
+                    .is_some_and(|resolved| destination_keys_overlap(&source_key, resolved))
+            {
+                return Err(
+                    "Source and destination paths overlap; the original was left unchanged".into(),
+                );
+            }
+        }
         let _lease = self.reserve_destination(key.clone())?;
         for old in self.journal.list().await? {
             if old.id == request.id {
                 return Err("Transfer ID already exists in recovery history".into());
             }
-            if old.destination_key == key
+            if destination_keys_overlap(&old.destination_key, &key)
                 && matches!(
                     old.phase,
                     Phase::BackingUp | Phase::Publishing | Phase::Published | Phase::NeedsReview
@@ -318,16 +373,37 @@ impl Service {
                 return Err("An interrupted publication owns this destination; inspect its recovery record before retrying".into());
             }
         }
-        let original = destination.stat(&request.destination_path).await?;
         if original
             .as_ref()
-            .is_some_and(|entry| entry.kind != EntryKind::File)
+            .is_some_and(|entry| entry.kind != source_stat.kind)
         {
-            return Err("The destination is not a regular file; it was left unchanged".into());
+            return Err(
+                "Source and destination entry types differ; destination was left unchanged".into(),
+            );
         }
         if original.is_some() && !request.overwrite {
             return Err("Destination already exists; choose an explicit collision action".into());
         }
+        let source_tree = if source_stat.kind == EntryKind::Directory {
+            Some(tree::Inventory::capture(source.as_ref(), &request.source_path, &token).await?)
+        } else {
+            None
+        };
+        if let Some(plan) = &source_tree {
+            plan.validate_destination(destination.as_ref(), &request.destination_path)?;
+        }
+        let original_tree = if original
+            .as_ref()
+            .is_some_and(|entry| entry.kind == EntryKind::Directory)
+        {
+            Some(
+                tree::Inventory::capture(destination.as_ref(), &request.destination_path, &token)
+                    .await?
+                    .fingerprint,
+            )
+        } else {
+            None
+        };
         let artifact_id = uuid::Uuid::new_v4();
         let mut receipt = Receipt {
             dismissed: false,
@@ -347,21 +423,35 @@ impl Service {
                 &request.destination_path,
                 &format!(".zync-transfer-{artifact_id}.backup"),
             )?,
-            backup_expected: original.is_some() && destination.requires_backup(),
+            backup_expected: original.is_some()
+                && (destination.requires_backup() || source_tree.is_some()),
             phase: Phase::Prepared,
             created_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64,
             transferred: 0,
-            total: source_stat.size,
+            total: source_tree
+                .as_ref()
+                .map_or(source_stat.size, |tree| tree.fingerprint.bytes),
             error: None,
             warning: None,
             destination_unchanged: true,
             stage_cleaned: false,
             original,
             staged: None,
+            original_tree,
+            staged_tree: None,
         };
+        let artifact_key = |path: &str| -> Result<String, String> {
+            Ok(format!(
+                "{}:{}",
+                receipt.destination_identity,
+                destination.reservation_key(&parent, &destination.filename(path)?)
+            ))
+        };
+        let _stage_lease = self.reserve_destination(artifact_key(&receipt.stage_path)?)?;
+        let _backup_lease = self.reserve_destination(artifact_key(&receipt.backup_path)?)?;
         receipt.validate()?;
         // Intent is durable before the first destination mutation. No progress-tick writes.
         self.journal.save(&receipt).await?;
@@ -372,6 +462,7 @@ impl Service {
             .write_and_publish(
                 &mut receipt,
                 &source_stat,
+                source_tree.as_ref(),
                 source.as_ref(),
                 destination.as_ref(),
                 request.stage_copy,
@@ -386,6 +477,14 @@ impl Service {
             );
             if !publication_started {
                 receipt.destination_unchanged = true;
+            }
+            if !publication_started
+                && error == "Cancelled"
+                && receipt.staged_tree.is_some()
+                && !receipt.stage_cleaned
+            {
+                self.cancel_before_publication(&mut receipt, destination.as_ref())
+                    .await;
             }
             receipt.phase = if publication_started {
                 Phase::NeedsReview
@@ -422,6 +521,7 @@ impl Service {
         &self,
         receipt: &mut Receipt,
         source_stat: &Snapshot,
+        source_tree: Option<&tree::Inventory>,
         source: &dyn FileEndpoint,
         destination: &dyn FileEndpoint,
         stage_copy: Option<Arc<dyn StageCopy>>,
@@ -429,90 +529,140 @@ impl Service {
         progress: impl Fn(u64, u64) + Send + Sync,
     ) -> Result<(), String> {
         self.advance(receipt, Phase::Writing).await?;
-        destination
-            .prepare_publish(
-                &receipt.destination_path,
-                receipt.original.is_some() && !receipt.backup_expected,
+        // Throttle once per job, not once per nested file. Small streamed files
+        // must advance progress too; accelerated leaves must not flood IPC.
+        let last_emit = Mutex::new(std::time::Instant::now());
+        let report_progress = |done, total| {
+            let emit = last_emit
+                .lock()
+                .is_ok_and(|mut last| progress_due(&mut last, std::time::Instant::now()));
+            if emit {
+                progress(done, total);
+            }
+        };
+        if let Some(plan) = source_tree {
+            destination
+                .prepare_directory_publish(&receipt.destination_path)
+                .await?;
+            progress(0, receipt.total);
+            self.write_tree(
+                receipt,
+                source,
+                destination,
+                plan,
+                stage_copy.as_deref(),
+                token,
+                &report_progress,
             )
             .await?;
-        let mut writer = destination.create_stage(&receipt.stage_path).await?;
-        progress(0, receipt.total);
-        let copy = async {
-            if let Some(acceleration) = stage_copy {
-                crate::transfers::check_cancelled(token)?;
-                if acceleration
-                    .copy(&receipt.source_path, &receipt.stage_path)
-                    .await
-                    .map_err(|error| {
-                        format!("Server-side copy outcome was not confirmed: {error}")
-                    })?
-                {
-                    receipt.transferred = receipt.total;
-                    return Ok(());
+        } else {
+            destination
+                .prepare_publish(
+                    &receipt.destination_path,
+                    receipt.original.is_some() && !receipt.backup_expected,
+                )
+                .await?;
+            progress(0, receipt.total);
+            let source_path = receipt.source_path.clone();
+            let stage_path = receipt.stage_path.clone();
+            let (copy, closed) = self
+                .copy_file_data(
+                    receipt,
+                    &source_path,
+                    &stage_path,
+                    source_stat.size,
+                    source,
+                    destination,
+                    stage_copy.as_deref(),
+                    token,
+                    &report_progress,
+                )
+                .await;
+            match copy {
+                Err(error) if error == "Cancelled" && closed => {
+                    self.cancel_before_publication(receipt, destination).await;
+                    return Err(error);
                 }
+                Err(error) => return Err(error),
+                Ok(()) => {}
             }
-            self.stream(receipt, source, writer.as_mut(), token, &progress)
-                .await
-        }
-        .await;
-        // Never abort/drop a pending write and pretend cancellation was acknowledged.
-        let closed = writer.finish().await;
-        drop(writer);
-        match (copy, closed) {
-            (Err(error), Err(close)) => return Err(format!("{error}; {close}")),
-            (Err(error), Ok(())) if error == "Cancelled" => {
+            // A final buffered write can finish after cancellation without another
+            // stream iteration. Honor that request before any post-copy metadata I/O.
+            if crate::transfers::check_cancelled(token).is_err() {
                 self.cancel_before_publication(receipt, destination).await;
-                return Err(error);
+                return Err("Cancelled".into());
             }
-            (Err(error), _) => return Err(error),
-            (_, Err(error)) => return Err(error),
-            _ => {}
-        }
-        // A final buffered write can finish after cancellation without another
-        // stream iteration. Honor that request before any post-copy metadata I/O.
-        if crate::transfers::check_cancelled(token).is_err() {
-            self.cancel_before_publication(receipt, destination).await;
-            return Err("Cancelled".into());
-        }
-        if receipt.transferred != source_stat.size
-            || source.stat(&receipt.source_path).await?.as_ref() != Some(source_stat)
-        {
-            return Err("Source changed during copying; replacement was not published".into());
-        }
-        destination
-            .set_mode(
-                &receipt.stage_path,
-                receipt
-                    .original
-                    .as_ref()
-                    .and_then(|s| s.mode)
-                    .or(source_stat.mode)
-                    .or(Some(0o644)),
-            )
-            .await?;
-        receipt.staged = destination.stat(&receipt.stage_path).await?;
-        if !receipt
-            .staged
-            .as_ref()
-            .is_some_and(|s| s.kind == EntryKind::File && s.size == receipt.transferred)
-        {
-            return Err("Staging file changed or its completed size could not be verified".into());
+            if receipt.transferred != source_stat.size
+                || source.stat(&receipt.source_path).await?.as_ref() != Some(source_stat)
+            {
+                return Err("Source changed during copying; replacement was not published".into());
+            }
+            destination
+                .set_mode(
+                    &receipt.stage_path,
+                    receipt
+                        .original
+                        .as_ref()
+                        .and_then(|s| s.mode)
+                        .or(source_stat.mode)
+                        .or(Some(0o644)),
+                )
+                .await?;
+            receipt.staged = destination.stat(&receipt.stage_path).await?;
+            if !receipt
+                .staged
+                .as_ref()
+                .is_some_and(|s| s.kind == EntryKind::File && s.size == receipt.transferred)
+            {
+                return Err(
+                    "Staging file changed or its completed size could not be verified".into(),
+                );
+            }
         }
         self.advance(receipt, Phase::Ready).await?;
         if crate::transfers::check_cancelled(token).is_err() {
-            self.cancel_before_publication(receipt, destination).await;
+            if receipt.staged_tree.is_none() {
+                self.cancel_before_publication(receipt, destination).await;
+            }
             return Err("Cancelled".into());
         }
-        if destination.stat(&receipt.destination_path).await? != receipt.original {
-            return Err("Destination changed during copying; replacement was not published".into());
+        if let Some(expected) = &receipt.staged_tree {
+            if tree::Inventory::capture(destination, &receipt.stage_path, token)
+                .await?
+                .fingerprint
+                != *expected
+            {
+                return Err(
+                    "Temporary folder changed before publication; destination unchanged".into(),
+                );
+            }
         }
         if destination.stat(&receipt.stage_path).await? != receipt.staged {
             return Err(
-                "Staging file changed before publication; destination was left unchanged".into(),
+                "Temporary copy changed before publication; destination was left unchanged".into(),
             );
         }
+        // Scan staging first: checking the original last avoids leaving the
+        // entire staging walk between its verification and publication.
+        if destination.stat(&receipt.destination_path).await? != receipt.original {
+            return Err("Destination changed during copying; replacement was not published".into());
+        }
+        if let Some(expected) = &receipt.original_tree {
+            if tree::Inventory::capture(destination, &receipt.destination_path, token)
+                .await?
+                .fingerprint
+                != *expected
+            {
+                return Err(
+                    "Destination folder changed during copying; replacement was not published"
+                        .into(),
+                );
+            }
+        }
         if crate::transfers::check_cancelled(token).is_err() {
-            self.cancel_before_publication(receipt, destination).await;
+            if receipt.staged_tree.is_none() {
+                self.cancel_before_publication(receipt, destination).await;
+            }
             return Err("Cancelled".into());
         }
         // Commit boundary: cancellation after this point is not an undo request.
@@ -538,7 +688,10 @@ impl Service {
         if backup {
             match destination.stat(&receipt.backup_path).await {
                 Ok(snapshot) if snapshot == receipt.original => {
-                    if let Err(error) = destination.remove(&receipt.backup_path).await {
+                    let removed = if let Some(expected) = &receipt.original_tree {
+                        tree::remove_verified_tree(destination, &receipt.backup_path, expected).await
+                    } else { destination.remove(&receipt.backup_path).await };
+                    if let Err(error) = removed {
                         receipt.warning = Some(format!("Published successfully, but original backup cleanup failed: {error}"));
                     }
                 }
@@ -585,10 +738,21 @@ impl Service {
             receipt.destination_identity,
             destination.reservation_key(&parent, &destination.filename(&receipt.destination_path)?)
         );
-        if key != receipt.destination_key {
+        if normalized_destination_key(&key) != normalized_destination_key(&receipt.destination_key)
+        {
             return Err("Destination parent changed".into());
         }
         if let Some(current) = destination.stat(&receipt.stage_path).await? {
+            if let Some(expected) = &receipt.staged_tree {
+                if current.kind != EntryKind::Directory || receipt.staged.as_ref() != Some(&current)
+                {
+                    return Err("The temporary folder changed; it was not deleted".into());
+                }
+                self.journal.save(receipt).await?;
+                tree::remove_verified_tree(destination, &receipt.stage_path, expected).await?;
+                receipt.stage_cleaned = true;
+                return Ok(());
+            }
             if current.kind != EntryKind::File
                 || current.size != receipt.transferred
                 || receipt
@@ -617,11 +781,12 @@ impl Service {
         &self,
         receipt: &mut Receipt,
         source: &dyn FileEndpoint,
+        source_path: &str,
         writer: &mut dyn endpoint::StageWriter,
         token: &Arc<AtomicBool>,
         progress: &(impl Fn(u64, u64) + Send + Sync),
     ) -> Result<(), String> {
-        let mut reader = source.reader(&receipt.source_path).await?;
+        let mut reader = source.reader(source_path).await?;
         // Overlap source reads and destination writes without a whole-file buffer.
         // At most two queued 256KiB chunks plus one reader and one writer chunk.
         let (sender, mut receiver) = tokio::sync::mpsc::channel::<Vec<u8>>(2);
@@ -644,16 +809,12 @@ impl Service {
             }
             Ok::<(), String>(())
         });
-        let mut last_emit = std::time::Instant::now();
         let copy = async {
             while let Some(buffer) = receiver.recv().await {
                 crate::transfers::check_cancelled(token)?;
                 writer.write(&buffer).await?;
                 receipt.transferred += buffer.len() as u64;
-                if last_emit.elapsed().as_millis() >= 100 {
-                    progress(receipt.transferred, receipt.total);
-                    last_emit = std::time::Instant::now();
-                }
+                progress(receipt.transferred, receipt.total);
             }
             Ok::<(), String>(())
         }
@@ -667,5 +828,98 @@ impl Service {
             .map_err(|_| "Source reader task failed unexpectedly".to_string())
             .and_then(|r| r);
         copy.and(read_result)
+    }
+
+    /// Share the exact same bounded data path and acknowledged CLOSE for a
+    /// standalone file and each file in a folder. Unknown exec/create/close
+    /// outcomes never authorize recursive cancellation cleanup.
+    async fn copy_file_data(
+        &self,
+        receipt: &mut Receipt,
+        source_path: &str,
+        stage_path: &str,
+        size: u64,
+        source: &dyn FileEndpoint,
+        destination: &dyn FileEndpoint,
+        acceleration: Option<&dyn StageCopy>,
+        token: &Arc<AtomicBool>,
+        progress: &(impl Fn(u64, u64) + Send + Sync),
+    ) -> (Result<(), String>, bool) {
+        let mut writer = match destination.create_stage(stage_path).await {
+            Ok(writer) => writer,
+            Err(error) => return (Err(error), false),
+        };
+        let mut confirmed = true;
+        let copied = async {
+            if let Some(acceleration) = acceleration {
+                crate::transfers::check_cancelled(token)?;
+                confirmed = false;
+                let accelerated =
+                    acceleration
+                        .copy(source_path, stage_path)
+                        .await
+                        .map_err(|error| {
+                            format!("Server-side copy outcome was not confirmed: {error}")
+                        })?;
+                confirmed = true;
+                if accelerated {
+                    receipt.transferred += size;
+                    progress(receipt.transferred, receipt.total);
+                    return Ok(());
+                }
+            }
+            self.stream(
+                receipt,
+                source,
+                source_path,
+                writer.as_mut(),
+                token,
+                progress,
+            )
+            .await
+        }
+        .await;
+        let closed = writer.finish().await;
+        let safe = confirmed && closed.is_ok();
+        let result = match (copied, closed) {
+            (Err(error), Err(close)) => Err(format!("{error}; {close}")),
+            (Err(error), _) | (_, Err(error)) => Err(error),
+            _ => Ok(()),
+        };
+        (result, safe)
+    }
+}
+
+/// A caller-supplied clock keeps the job-wide progress gate deterministic in tests.
+fn progress_due(last: &mut std::time::Instant, now: std::time::Instant) -> bool {
+    if now.duration_since(*last) < std::time::Duration::from_millis(100) {
+        return false;
+    }
+    *last = now;
+    true
+}
+
+/// Keys include endpoint identity and canonical parent. Ancestor reservations
+/// prevent a concurrent native child writer from racing folder publication.
+fn destination_keys_overlap(left: &str, right: &str) -> bool {
+    let left = normalized_destination_key(left);
+    let right = normalized_destination_key(right);
+    let (left, right) = (left.trim_end_matches('/'), right.trim_end_matches('/'));
+    left == right
+        || left
+            .strip_prefix(right)
+            .is_some_and(|tail| tail.starts_with('/'))
+        || right
+            .strip_prefix(left)
+            .is_some_and(|tail| tail.starts_with('/'))
+}
+
+/// Preserve ownership of pre-folder Windows receipts, whose canonical parent
+/// used backslashes. Remote POSIX backslashes remain literal filename bytes.
+fn normalized_destination_key(key: &str) -> std::borrow::Cow<'_, str> {
+    if cfg!(windows) && key.starts_with("local:") {
+        key.replace('\\', "/").into()
+    } else {
+        key.into()
     }
 }
