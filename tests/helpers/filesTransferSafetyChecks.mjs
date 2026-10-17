@@ -20,7 +20,7 @@ export async function runFilesTransferSafetyChecks({ page, check }) {
         await modal.waitFor();
     };
     const overwrite = async ({ twice = false, pendingCount = 1 } = {}) => {
-        const choice = modal.getByRole('button', { name: /^Overwrite/ });
+        const choice = modal.getByRole('button', { name: /^(Overwrite|Replace folder)/ });
         if (twice) await choice.evaluate(button => { button.click(); button.click(); });
         else await choice.click();
         await page.waitForFunction(count => window.filesTransferSafety.snapshot().pending.length >= count, pendingCount);
@@ -173,7 +173,7 @@ export async function runFilesTransferSafetyChecks({ page, check }) {
     await modal.getByRole('button', { name: /^Overwrite/ }).click();
     await modal.waitFor({ state: 'hidden' });
     const selfReplacement = await snapshot();
-    check('overwriting the exact same source rejects before any rename or write', selfReplacement.calls.every(call => call.command === 'fs_exists')
+    check('overwriting the exact same source rejects before any rename or write', selfReplacement.calls.every(call => ['fs_exists', 'fs_entry_kind'].includes(call.command))
         && selfReplacement.pending.length === 0);
     check('self-overwrite leaves the original at its exact path without a recovery rename', backups(selfReplacement).length === 0
         && selfReplacement.files[`${selfReplacement.host}:${selfReplacement.rootPath}/README.md`] === 'original:README.md');
@@ -331,7 +331,7 @@ export async function runFilesTransferSafetyChecks({ page, check }) {
     await page.getByRole('navigation', { name: 'Folder path', exact: true }).getByRole('button', { name: 'docs', exact: true }).waitFor();
     const queuedAtNewLocation = await snapshot();
     check('a queued conflict describes its captured destination after browsing elsewhere', await modal.getByText(queuedAtNewLocation.rootPath, { exact: true }).count() === 1);
-    check('navigating with a queued conflict does not begin any native mutation', queuedAtNewLocation.calls.every(call => call.command === 'fs_exists')
+    check('navigating with a queued conflict does not begin any native mutation', queuedAtNewLocation.calls.every(call => ['fs_exists', 'fs_entry_kind'].includes(call.command))
         && queuedAtNewLocation.pending.length === 0 && backups(queuedAtNewLocation).length === 0);
 
     await open();
@@ -354,7 +354,7 @@ export async function runFilesTransferSafetyChecks({ page, check }) {
     await page.evaluate(() => window.filesTransferSafety.switchEndpoint());
     await modal.waitFor({ state: 'hidden' });
     const switched = await snapshot();
-    check('changing endpoints clears the previous endpoint conflict queue without mutating it', switched.calls.every(call => call.command === 'fs_exists')
+    check('changing endpoints clears the previous endpoint conflict queue without mutating it', switched.calls.every(call => ['fs_exists', 'fs_entry_kind'].includes(call.command))
         && switched.activeConnectionId === switched.secondHost && switched.currentPath[switched.secondHost] === switched.secondPath);
 
     await open({ names: ['README.md', 'package.json'], cut: true, sameEndpoint: true });
@@ -377,7 +377,7 @@ export async function runFilesTransferSafetyChecks({ page, check }) {
     for (const sameEndpoint of [false, true]) {
         for (const outcome of [true, false, 'cancelled']) {
             await open({ nativeFiles: true, folder: true, names: ['docs'], sameEndpoint });
-            check('folder collision explains replacement rather than merge', await modal.getByText('Replace the existing item; folders are replaced, not merged', { exact: true }).isVisible());
+            check('folder collision warns that replacement removes destination-only items', await modal.getByText('Replace the entire folder. Items only in the destination will be removed.', { exact: true }).isVisible());
             await overwrite();
             await modal.waitFor({ state: 'hidden' });
             const active = await snapshot();
@@ -392,7 +392,64 @@ export async function runFilesTransferSafetyChecks({ page, check }) {
         }
     }
 
+    for (const sameEndpoint of [false, true]) {
+        await open({ nativeFiles: true, folder: true, names: ['docs'], sameEndpoint });
+        check('folder conflicts distinguish Combine from destructive Replace', await modal.getByRole('button', { name: /^Combine folders/ }).isVisible()
+            && await modal.getByRole('button', { name: /^Replace folder/ }).isVisible());
+        check('Combine explains matching-file replacement and preserves destination-only items', await modal.getByText('Add incoming items and replace matching files. Other existing items are kept.', { exact: true }).isVisible());
+        await modal.getByRole('button', { name: /^Combine folders/ }).click();
+        await page.waitForFunction(() => window.filesTransferSafety.snapshot().pending.length === 1);
+        await modal.waitFor({ state: 'hidden' });
+        const active = await snapshot();
+        check('Combine selects the shared native mode without renderer mutation', active.calls.filter(call => call.command === 'fs_transfer_file').length === 1
+            && active.calls.find(call => call.command === 'fs_transfer_file').args.folderMode === 'combine'
+            && !active.calls.some(call => ['fs_rename', 'fs_delete', 'sftp_put'].includes(call.command)));
+        await finish(true);
+        check('Combine completes one aggregate transfer', (await snapshot()).transfers[0].status === 'completed');
+    }
+    await open({ nativeFiles: true, names: ['docs', 'README.md'] });
+    await modal.getByRole('checkbox').check();
+    await modal.getByRole('button', { name: /^Combine folders/ }).click();
+    await page.waitForFunction(() => window.filesTransferSafety.snapshot().pending.length === 1);
+    check('Combine apply-to-all leaves file conflicts queued and untouched', await modal.getByText('An item named "README.md" already exists.', { exact: true }).isVisible()
+        && (await snapshot()).calls.filter(call => call.command === 'fs_transfer_file').length === 1);
+    await finish(true);
+    await modal.getByRole('button', { name: /^Skip/ }).click();
+    await modal.waitFor({ state: 'hidden' });
+    await open({ nativeFiles: true, names: ['docs'], cut: true, sameEndpoint: true, folder: true });
+    check('same-endpoint moves do not silently become copy-and-delete combines', await modal.getByRole('button', { name: /^Combine folders/ }).count() === 0);
+    await modal.getByRole('button', { name: /^Cancel/ }).click();
+
+    {
+        const url = new URL(fixtureUrl);
+        url.searchParams.set('transferSafety', '1');
+        await page.goto(url.href, { waitUntil: 'domcontentloaded' });
+        await page.getByRole('listbox').waitFor();
+        await page.evaluate(() => {
+            window.filesTransferSafety.nativeFiles();
+            window.filesTransferSafety.prepareCopyTarget();
+        });
+        await page.locator('[data-file-name="docs"]').click({ button: 'right' });
+        await page.getByRole('menuitem', { name: 'Copy to Server...', exact: true }).click();
+        const server = page.getByRole('dialog', { name: 'Copy File to Server', exact: true });
+        await server.getByLabel('Select Gateway', { exact: true }).click();
+        await page.getByRole('option', { name: /Other test host/ }).click();
+        await server.getByRole('button', { name: 'Start Transfer' }).click();
+        await modal.waitFor();
+        check('Copy to Server reuses folder choices for its captured destination', await modal.getByRole('button', { name: /^Combine folders/ }).isVisible());
+        await modal.getByRole('button', { name: /^Combine folders/ }).click();
+        await page.waitForFunction(() => window.filesTransferSafety.snapshot().pending.length === 1);
+        const pending = await snapshot();
+        const copy = pending.calls.find(call => call.command === 'fs_transfer_file');
+        check('Copy to Server cannot redirect Combine into the source or currently active host', copy.args.destinationConnectionId === pending.secondHost
+            && copy.args.destinationPath === `${pending.secondPath}/docs` && copy.args.sourceConnectionId === pending.host
+            && pending.activeConnectionId === pending.host);
+        await finish(true);
+        check('Copy to Server uses one outcome owner without routine transfer toasts', (await snapshot()).transfers.length === 1
+            && !(await snapshot()).messages.some(message => message.message.includes('Starting transfer')));
+    }
     await open({ nativeFiles: true });
+    check('regular file conflicts do not offer folder combination', await modal.getByRole('button', { name: /^Combine folders/ }).count() === 0);
     await page.evaluate(() => window.filesTransferSafety.preparationFailure());
     await modal.getByRole('button', { name: /^Overwrite/ }).click();
     await modal.waitFor({ state: 'hidden' });

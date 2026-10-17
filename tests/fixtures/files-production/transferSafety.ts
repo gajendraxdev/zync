@@ -19,7 +19,7 @@ interface PendingWrite {
     receipt?: NativeFileTransferReceipt;
 }
 
-const SIMULATED_COMMANDS = new Set(['fs_exists', 'fs_rename', 'fs_delete', 'fs_copy_batch', 'sftp_put', 'sftp:cancelTransfer', 'fs_transfer_file', 'fs_transfer_inspect', 'fs_transfer_cleanup', 'fs_transfer_history', 'fs_transfer_dismiss']);
+const SIMULATED_COMMANDS = new Set(['fs_entry_kind', 'fs_exists', 'fs_rename', 'fs_delete', 'fs_copy_batch', 'sftp_put', 'sftp:cancelTransfer', 'fs_transfer_file', 'fs_transfer_inspect', 'fs_transfer_cleanup', 'fs_transfer_history', 'fs_transfer_dismiss']);
 
 /** Opt-in, in-memory native boundary. This module never calls a real filesystem or network API. */
 export function createTransferSafetyFixture(host: string, rootPath: string) {
@@ -70,6 +70,12 @@ export function createTransferSafetyFixture(host: string, rootPath: string) {
         if (!SIMULATED_COMMANDS.has(command)) throw new Error(`Mutation unavailable in transfer simulation: ${command}`);
         if (calls.length >= 64) throw new Error('Unexpected unbounded simulated native calls');
         calls.push({ command, args: { ...args } });
+        if (command === 'fs_entry_kind') {
+            const path = text(args, 'path');
+            const selected = app().getState().clipboard?.files.find(file => file.path === path);
+            if (selected) return selected.type === 'd' ? 'Directory' : selected.type === 'l' ? 'Symlink' : 'File';
+            return path.endsWith('/docs') ? 'Directory' : 'File';
+        }
         if (command === 'fs_transfer_history') return receipts.filter(receipt => !dismissed.has(receipt.id));
         if (command === 'fs_transfer_dismiss') {
             if (dismissFails) throw new Error('Fixture journal dismissal denied');
@@ -103,12 +109,17 @@ export function createTransferSafetyFixture(host: string, rootPath: string) {
             const id = endpoint(args, 'destinationConnectionId');
             const destinationPath = text(args, 'destinationPath');
             const transferId = text(args, 'transferId');
-            const stagePath = `${rootPath}/.zync-transfer-${transferId}.part`;
-            const backupPath = `${rootPath}/.zync-transfer-${transferId}.backup`;
+            const destinationDirectory = destinationPath.slice(0, destinationPath.lastIndexOf('/'));
+            const stagePath = `${destinationDirectory}/.zync-transfer-${transferId}.part`;
+            const backupPath = `${destinationDirectory}/.zync-transfer-${transferId}.backup`;
             const receipt: NativeFileTransferReceipt = { version: 1, id: transferId,
                 sourceConnectionId: text(args, 'sourceConnectionId'), sourcePath: text(args, 'sourcePath'), destinationConnectionId: id, destinationPath,
                 stagePath, backupPath, backupExpected: true, phase: 'writing', createdAt: Date.now(), transferred: 0, total: 12,
                 destinationUnchanged: true, warning: null, error: null };
+            if (args.folderMode === 'combine') {
+                receipt.combine = { sourceRoot: receipt.sourcePath, destinationRoot: receipt.destinationPath,
+                    completedItems: 0, totalItems: 1, completedBytes: 0, totalBytes: 12, currentDone: false, finished: false };
+            }
             files.set(key(id, stagePath), 'partial');
             return new Promise<unknown>((resolve, reject) => {
                 writes.push({ id: `write-${++writeSerial}`, transferId, destination: key(id, destinationPath), move: false, receipt, resolve, reject });
@@ -186,6 +197,12 @@ export function createTransferSafetyFixture(host: string, rootPath: string) {
         attach,
         control: {
             nativeFiles: () => { nativeFiles = true; },
+            prepareCopyTarget: () => {
+                files.set(key(secondHost, `${secondPath}/docs`), 'original:docs');
+                app().setState(state => ({ connections: [...state.connections,
+                    { id: secondHost, name: 'Other test host', host: 'other.invalid', port: 22, username: 'other',
+                        status: 'connected', homePath: secondPath }] }));
+            },
             preparationFailure: () => { preparationFails = true; },
             dismissFailure: (fail: boolean) => { dismissFails = fail; },
             restoreReceipts: () => { for (const receipt of receipts) if (!dismissed.has(receipt.id)) app().getState().receiveNativeTransfer(receipt); },
@@ -194,7 +211,7 @@ export function createTransferSafetyFixture(host: string, rootPath: string) {
             resetTransferView: () => { app().setState({ transfers: [] }); },
             stage: (names = ['README.md'], op: 'copy' | 'cut' = 'copy', sameEndpoint = false, sourceDirectory = '/fixture/incoming', kind?: FileEntry['type']) => {
                 const entries: FileEntry[] = names.map(name => ({ name, path: `${sourceDirectory}/${name}`,
-                    type: kind ?? (nativeFiles ? '-' : 'l'), size: 12, lastModified: 1, permissions: '644', owner: '', group: '' }));
+                    type: kind ?? (nativeFiles ? name === 'docs' ? 'd' : '-' : 'l'), size: 12, lastModified: 1, permissions: '644', owner: '', group: '' }));
                 app().getState().setClipboard(entries, sameEndpoint ? host : 'local', sourceDirectory, op);
             },
             cleanupFailure: () => { cleanupFails = true; },
@@ -214,6 +231,9 @@ export function createTransferSafetyFixture(host: string, rootPath: string) {
                             ? 'Copy cancelled, but temporary-file cleanup could not be confirmed: Permission denied. Inspect recovery files before cleanup.'
                             : 'Destination left unchanged. A separate staging file may remain; inspect it before cleanup.',
                         error: outcome === true ? null : outcome === 'cancelled' ? 'Cancelled' : 'No space left on device' } as NativeFileTransferReceipt;
+                    if (receipt.combine) receipt.combine = { ...receipt.combine, finished: true,
+                        completedItems: outcome === true ? 1 : 0, completedBytes: outcome === true ? 12 : 0,
+                        currentDone: outcome === true };
                     if (outcome === true) {
                         files.set(write.destination, 'replacement'); files.delete(key(receipt.destinationConnectionId, receipt.stagePath));
                     }

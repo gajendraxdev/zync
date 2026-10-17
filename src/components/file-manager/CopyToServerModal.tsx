@@ -1,5 +1,5 @@
 import { Copy, Server, ArrowRight } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAppStore, type Connection } from '../../store/useAppStore';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
@@ -8,9 +8,7 @@ import { Select, type SelectOption } from '../ui/Select';
 import { OSIcon } from '../icons/OSIcon';
 import { getConnectionDisplayLabels } from '../../features/connections/domain/connectionDisplay';
 import { useShowHostAddressesInLists } from '../../features/connections/presentation/useConnectionDisplayLabels';
-import { executeFileTransfer } from '../../features/files/application/executeFileTransfer';
-import { createFileTransferExecution } from '../../features/files/application/transferEventProjection';
-import { runFileTransferBatch, fileTransferBatchFailure } from '../../features/files/application/runFileTransferBatch';
+import type { FileTransferRequest } from '../../features/files/application/executeFileTransfer';
 
 interface CopyToServerModalProps {
   isOpen: boolean;
@@ -22,6 +20,8 @@ interface CopyToServerModalProps {
   }[];
   destinationConnectionId?: string;
   destinationPath?: string;
+  /** Delegate to the Files operation/conflict owner, not a second copy workflow. */
+  onCopy: (requests: Omit<FileTransferRequest, 'transferId'>[], destinationDirectory: string) => Promise<void>;
 }
 
 export function CopyToServerModal({
@@ -29,10 +29,10 @@ export function CopyToServerModal({
   onClose,
   sourceFiles,
   destinationConnectionId,
-  destinationPath: initialDestPath
+  destinationPath: initialDestPath,
+  onCopy,
 }: CopyToServerModalProps) {
   const connections = useAppStore(state => state.connections);
-  const addTransfer = useAppStore(state => state.addTransfer);
   const showToast = useAppStore((state) => state.showToast);
   const connect = useAppStore(state => state.connect);
   const showHostAddressesInLists = useShowHostAddressesInLists();
@@ -42,6 +42,8 @@ export function CopyToServerModal({
   const [fileName, setFileName] = useState('');
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [isFetchingSuggestions, setIsFetchingSuggestions] = useState(false);
+  const submitted = useRef(false);
+  useEffect(() => { if (isOpen) submitted.current = false; }, [isOpen]);
 
   const isMultiSelect = sourceFiles.length > 1;
   const firstFile = sourceFiles[0];
@@ -178,7 +180,8 @@ export function CopyToServerModal({
   };
   });
 
-  const handleCopy = async () => {
+  const handleCopy = () => {
+    if (submitted.current) return;
     if (sourceFiles.length === 0 || !selectedServerId || !destinationPath) {
       showToast('error', 'Please fill in all fields');
       return;
@@ -189,42 +192,16 @@ export function CopyToServerModal({
       return;
     }
 
-    showToast('info', `Starting transfer of ${sourceFiles.length} item(s)`);
+    submitted.current = true;
     onClose();
-
-    (async () => {
-      try {
-        const destServer = connections.find((c: Connection) => c.id === selectedServerId);
-        if (destServer && destServer.status !== 'connected') {
-          await connect(selectedServerId);
-        }
-
-        // Process all files
-        const result = await runFileTransferBatch(sourceFiles, async file => {
-          const targetName = isMultiSelect ? file.name : fileName;
-          const fullDestPath = `${destinationPath}/${targetName}`.replace('//', '/');
-
-          const transferId = addTransfer({
-            sourceConnectionId: file.connectionId,
-            sourcePath: file.path,
-            destinationConnectionId: selectedServerId,
-            destinationPath: fullDestPath,
-          });
-
-          await executeFileTransfer({
-            sourceConnectionId: file.connectionId,
-            sourcePath: file.path,
-            destinationConnectionId: selectedServerId,
-            destinationPath: fullDestPath,
-            transferId,
-          }, createFileTransferExecution((command, args) => window.ipcRenderer.invoke(command, args), useAppStore.getState));
-        });
-        const failure = fileTransferBatchFailure(result);
-        if (failure) showToast('error', `Copy failed: ${failure}`);
-      } catch (error: any) {
-        showToast('error', `Batch transfer setup failed: ${error.message}`);
-      }
-    })();
+    void onCopy(sourceFiles.map(file => ({
+      sourceConnectionId: file.connectionId,
+      sourcePath: file.path,
+      destinationConnectionId: selectedServerId,
+      destinationPath: `${destinationPath}/${isMultiSelect ? file.name : fileName}`.replace('//', '/'),
+    })), destinationPath).catch(error => {
+      showToast('error', `Copy setup failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
   };
 
   const handleClose = () => {

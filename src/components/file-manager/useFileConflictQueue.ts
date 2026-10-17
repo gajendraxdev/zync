@@ -13,10 +13,12 @@ export function useFileConflictQueue<T>() {
     const clear = useCallback(() => replace([]), [replace]);
 
     // Consume synchronously before awaiting I/O, so a repeated event cannot submit twice.
-    const take = useCallback((expected: T, all: boolean): T[] => {
+    const take = useCallback((expected: T, all: boolean, eligible: (item: T) => boolean = () => true): T[] => {
         if (pending.current[0] !== expected) return [];
-        const accepted = all ? pending.current : pending.current.slice(0, 1);
-        replace(all ? [] : pending.current.slice(1));
+        if (!eligible(expected)) return [];
+        const accepted = all ? pending.current.filter(eligible) : pending.current.slice(0, 1);
+        const selected = new Set(accepted);
+        replace(all ? pending.current.filter(item => !selected.has(item)) : pending.current.slice(1));
         return accepted;
     }, [replace]);
 
