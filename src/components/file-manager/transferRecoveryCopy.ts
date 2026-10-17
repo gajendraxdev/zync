@@ -18,7 +18,7 @@ export function transferRecoveryCopy(transfer: Pick<Transfer,
 /** Inspection reports existence and entry type, not content integrity or cleanup success. */
 export function recoveryInspectionSummary(inspection: NativeTransferInspection): string {
     if (inspection.backup) return 'Backup remains; review needed.';
-    if (inspection.stage && inspection.stage.kind !== 'File') return 'Temporary path contains an unexpected entry; review needed.';
+    if (inspection.stage && !['File', 'Directory'].includes(inspection.stage.kind)) return 'Temporary path contains an unexpected entry; review needed.';
     if (inspection.stage) return inspection.cleanupAvailable
         ? 'Temporary copy remains; verified cleanup is available.'
         : 'Temporary copy retained; recovery review needed.';

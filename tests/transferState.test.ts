@@ -77,6 +77,9 @@ try {
         equal(recoveryInspectionSummary({ destination: null, stage: file, backup: file }), 'Backup remains; review needed.', 'Prioritize a possible original backup');
         equal(recoveryInspectionSummary({ destination: file, stage: { kind: 'Symlink', size: 0 }, backup: null }),
             'Temporary path contains an unexpected entry; review needed.', 'Do not label a substituted entry as a temporary file');
+        equal(recoveryInspectionSummary({ destination: null, stage: { kind: 'Directory', size: 0 }, backup: null,
+            cleanupAvailable: true, cleanupBlockedReason: null }), 'Temporary copy remains; verified cleanup is available.',
+            'Folder staging reuses the same recovery presentation');
     });
 
     run('native success completes an empty transfer immediately without a progress event', () => {

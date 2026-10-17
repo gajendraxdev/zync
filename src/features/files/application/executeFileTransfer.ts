@@ -75,7 +75,7 @@ async function runFileTransfer(request: FileTransferRequest, execution: FileTran
         if (stagedOnly) return false;
         const options = { transferId, waitForCompletion: true };
         if (sourceConnectionId === destinationConnectionId && sourceConnectionId !== 'local') {
-            throw new Error('Same-remote-endpoint directory copies require the filesystem copy operation');
+            throw new Error('Same-remote-endpoint link copies require the filesystem copy operation');
         }
         if (sourceConnectionId === 'local') {
             await execution.invoke('sftp_put', { ...options, id: destinationConnectionId, localPath: sourcePath, remotePath: destinationPath });
@@ -97,7 +97,7 @@ async function runFileTransfer(request: FileTransferRequest, execution: FileTran
     }
 }
 
-/** null means an existing directory/link policy, decided before mutation. Errors never select a fallback. */
+/** null means the existing top-level link policy, decided before mutation. Errors never select a fallback. */
 async function invokeStagedFileTransfer(request: FileTransferRequest, invoke: FileTransferExecution['invoke']): Promise<NativeFileTransferReceipt | null> {
     const result = await invoke('fs_transfer_file', {
         transferId: request.transferId, sourceConnectionId: request.sourceConnectionId, sourcePath: request.sourcePath,
@@ -113,7 +113,7 @@ async function invokeStagedFileTransfer(request: FileTransferRequest, invoke: Fi
     return receipt;
 }
 
-/** Only an explicit directory/link response permits the caller's existing policy. */
+/** Only an explicit unhandled-kind response permits the caller's existing policy. */
 export function tryStagedFileTransfer(request: FileTransferRequest, execution: FileTransferExecution,
     reservation?: FileDestinationReservation): Promise<boolean> {
     return runFileTransfer(request, execution, reservation, true);

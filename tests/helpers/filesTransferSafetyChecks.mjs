@@ -3,18 +3,18 @@ export async function runFilesTransferSafetyChecks({ page, check }) {
     const fixtureUrl = new URL(page.url());
     const snapshot = () => page.evaluate(() => window.filesTransferSafety.snapshot());
     const modal = page.getByRole('dialog', { name: 'File Name Collision', exact: true });
-    const open = async ({ names = ['README.md'], cut = false, sameEndpoint = false, cleanupFailure = false, sameTarget = false, nativeFiles = false, dottedPath = false } = {}) => {
+    const open = async ({ names = ['README.md'], cut = false, sameEndpoint = false, cleanupFailure = false, sameTarget = false, nativeFiles = false, dottedPath = false, folder = false } = {}) => {
         const url = new URL(fixtureUrl);
         url.searchParams.set('transferSafety', '1');
         if (dottedPath) url.searchParams.set('transferDottedPath', '1');
         await page.goto(url.href, { waitUntil: 'domcontentloaded' });
         await page.getByRole('listbox').waitFor();
-        await page.evaluate(({ names, cut, sameEndpoint, cleanupFailure, sameTarget, nativeFiles }) => {
+        await page.evaluate(({ names, cut, sameEndpoint, cleanupFailure, sameTarget, nativeFiles, folder }) => {
             if (nativeFiles) window.filesTransferSafety.nativeFiles();
             window.filesTransferSafety.stage(names, cut ? 'cut' : 'copy', sameEndpoint,
-                sameTarget ? window.filesTransferSafety.snapshot().rootPath : undefined);
+                sameTarget ? window.filesTransferSafety.snapshot().rootPath : undefined, folder ? 'd' : undefined);
             if (cleanupFailure) window.filesTransferSafety.cleanupFailure();
-        }, { names, cut, sameEndpoint, cleanupFailure, sameTarget, nativeFiles });
+        }, { names, cut, sameEndpoint, cleanupFailure, sameTarget, nativeFiles, folder });
         await page.getByRole('listbox').focus();
         await page.keyboard.press('Control+V');
         await modal.waitFor();
@@ -373,6 +373,24 @@ export async function runFilesTransferSafetyChecks({ page, check }) {
         && stale.activeConnectionId === stale.secondHost && await modal.count() === 0);
     check('an old completion cannot navigate or mutate the newly active endpoint', stale.currentPath[stale.secondHost] === stale.secondPath
         && stale.calls.every(call => call.args.connectionId !== stale.secondHost));
+
+    for (const sameEndpoint of [false, true]) {
+        for (const outcome of [true, false, 'cancelled']) {
+            await open({ nativeFiles: true, folder: true, names: ['docs'], sameEndpoint });
+            check('folder collision explains replacement rather than merge', await modal.getByText('Replace the existing item; folders are replaced, not merged', { exact: true }).isVisible());
+            await overwrite();
+            await modal.waitFor({ state: 'hidden' });
+            const active = await snapshot();
+            const target = `${active.host}:${active.rootPath}/docs`;
+            check('folder replacement keeps the original visible while native staging runs', active.files[target] === 'original:docs');
+            check('folder replacement never renames the original in the renderer', !active.calls.some(call => ['fs_rename', 'fs_delete', 'sftp_put'].includes(call.command)));
+            check('folder replacement owns one shared native job', active.calls.filter(call => call.command === 'fs_transfer_file').length === 1 && active.transfers.length === 1);
+            await finish(outcome);
+            const done = await snapshot();
+            check('folder outcome retains original on failure or cancellation', done.files[target] === (outcome === true ? 'replacement' : 'original:docs'));
+            check('folder outcome uses existing transfer status and recovery UI', done.transfers[0].status === (outcome === true ? 'completed' : outcome === 'cancelled' ? 'cancelled' : 'failed'));
+        }
+    }
 
     await open({ nativeFiles: true });
     await page.evaluate(() => window.filesTransferSafety.preparationFailure());

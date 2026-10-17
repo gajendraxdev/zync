@@ -446,7 +446,7 @@ export const FileManager = memo(function FileManager({
     return transferId;
   }, [addTransfer]);
 
-  /** Native regular-file replacement; only an explicit unhandled kind permits the existing directory/link policy. */
+  /** Native file/folder replacement; only an explicit unhandled kind permits the legacy policy. */
   const tryStagedReplacement = useCallback(async (request: Omit<FileTransferRequest, 'transferId'>) => {
     // Reject a busy replacement before creating another receipt for the same decision.
     const reservation = acquireFileDestination(request.destinationConnectionId, request.destinationPath);

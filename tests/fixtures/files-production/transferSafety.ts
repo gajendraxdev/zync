@@ -41,7 +41,7 @@ export function createTransferSafetyFixture(host: string, rootPath: string) {
     const dismissed = new Set<string>();
 
     const key = (connectionId: string, path: string) => `${connectionId}:${path}`;
-    for (const name of ['README.md', 'package.json', '.env', 'archive.tar.gz']) {
+    for (const name of ['README.md', 'package.json', '.env', 'archive.tar.gz', 'docs']) {
         files.set(key(host, `${rootPath}/${name}`), `original:${name}`);
         files.set(key(host, `/fixture/incoming/${name}`), `incoming:${name}`);
     }
@@ -96,8 +96,8 @@ export function createTransferSafetyFixture(host: string, rootPath: string) {
             return;
         }
         if (command === 'fs_transfer_file') {
-            // Legacy checks intentionally model directory-policy fallback. The
-            // native-files mode below separately exercises real receipt handling.
+            // Legacy checks model the remaining top-level-link fallback. The
+            // native-files mode exercises the shared file/folder receipt path.
             if (!nativeFiles) return null;
             if (preparationFails) throw new Error('TRANSFER_NOT_STARTED:Could not prepare source connection: session closed');
             const id = endpoint(args, 'destinationConnectionId');
@@ -192,9 +192,9 @@ export function createTransferSafetyFixture(host: string, rootPath: string) {
             captureReceipts: () => { capturedReceipts = receipts.map(receipt => ({ ...receipt })); },
             replayReceipts: () => { for (const receipt of capturedReceipts) app().getState().receiveNativeTransfer(receipt); },
             resetTransferView: () => { app().setState({ transfers: [] }); },
-            stage: (names = ['README.md'], op: 'copy' | 'cut' = 'copy', sameEndpoint = false, sourceDirectory = '/fixture/incoming') => {
+            stage: (names = ['README.md'], op: 'copy' | 'cut' = 'copy', sameEndpoint = false, sourceDirectory = '/fixture/incoming', kind?: FileEntry['type']) => {
                 const entries: FileEntry[] = names.map(name => ({ name, path: `${sourceDirectory}/${name}`,
-                    type: nativeFiles ? '-' : 'd', size: 12, lastModified: 1, permissions: '644', owner: '', group: '' }));
+                    type: kind ?? (nativeFiles ? '-' : 'l'), size: 12, lastModified: 1, permissions: '644', owner: '', group: '' }));
                 app().getState().setClipboard(entries, sameEndpoint ? host : 'local', sourceDirectory, op);
             },
             cleanupFailure: () => { cleanupFails = true; },

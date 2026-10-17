@@ -77,7 +77,7 @@ export function nativeTransferInspection(value: unknown): NativeTransferInspecti
         if (!['File', 'Directory', 'Symlink', 'Other'].includes(String(item.kind)) || typeof item.size !== 'number'
             || !Number.isFinite(item.size) || item.size < 0) throw new Error('Invalid recovery inspection');
     }
-    if (inspection.cleanupAvailable && (!inspection.stage || (inspection.stage as { kind: string }).kind !== 'File' || inspection.backup !== null)) {
+    if (inspection.cleanupAvailable && (!inspection.stage || !['File', 'Directory'].includes((inspection.stage as { kind: string }).kind) || inspection.backup !== null)) {
         throw new Error('Invalid recovery inspection');
     }
     return value as NativeTransferInspection;

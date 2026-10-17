@@ -50,8 +50,8 @@ await run('preparation failures distinguish unchanged targets without inventing 
 function execution(invoke: FileTransferExecution['invoke'], nativeFiles = false) {
     const outcomes: string[] = [];
     return { outcomes, ports: {
-        // These legacy characterization checks model a directory response. The
-        // regular-file contract has separate checks below and never falls back.
+        // Legacy characterization models a top-level-link response. The staged
+        // file/folder contract has separate checks and never falls back on error.
         invoke: (command: string, args: Record<string, unknown>) => !nativeFiles && command === 'fs_transfer_file' ? Promise.resolve(null) : invoke(command, args),
         completeTransfer: (id: string) => { outcomes.push(`completed:${id}`); },
         failTransfer: (id: string, error: string) => { outcomes.push(`failed:${id}:${error}`); },
@@ -90,12 +90,27 @@ await run('recovery cleanup eligibility is explicit and malformed permissions fa
     const entries = { destination: null, stage: { kind: 'File', size: 12 }, backup: null };
     equal(nativeTransferInspection(entries).cleanupAvailable, undefined, 'Older hosts never implicitly authorize removal');
     equal(nativeTransferInspection({ ...entries, cleanupAvailable: true, cleanupBlockedReason: null }).cleanupAvailable, true, 'Accept explicit verified eligibility');
+    equal(nativeTransferInspection({ ...entries, stage: { kind: 'Directory', size: 0 }, cleanupAvailable: true,
+        cleanupBlockedReason: null }).cleanupAvailable, true, 'Folder cleanup reuses explicit native authority, not file-size assumptions');
     for (const eligibility of [ { cleanupAvailable: 'true' }, { cleanupAvailable: true },
         { cleanupAvailable: true, cleanupBlockedReason: 'Unknown writer' }, { cleanupAvailable: false, cleanupBlockedReason: null } ]) {
         let refused = false;
         try { nativeTransferInspection({ ...entries, ...eligibility }); } catch { refused = true; }
         equal(refused, true, 'Reject invalid cleanup authority');
     }
+});
+
+await run('folder replacements reuse the same native outcome owner without legacy replay', async () => {
+    const native = deferred();
+    const calls: string[] = [];
+    const store = execution(async (command) => { calls.push(command); await native.promise; return nativeReceipt(); }, true);
+    const pending = tryStagedFileTransfer({ ...request, overwrite: true }, store.ports);
+    await Promise.resolve();
+    equal(calls.join(), 'fs_transfer_file', 'Folder staging uses the existing native command');
+    equal(store.outcomes.length, 0, 'Do not finish while native tree copying is in flight');
+    native.resolve();
+    equal(await pending, true, 'A staged folder never falls back to backup-first frontend copying');
+    equal(calls.length, 1, 'No second transfer API or replay');
 });
 
 await run('clean native cancellation clears recovery controls and ignores stale pre-cleanup history', async () => {

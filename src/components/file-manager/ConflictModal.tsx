@@ -71,7 +71,7 @@ export function ConflictModal({
                         </div>
                         <div>
                             <div className="text-[11px] font-bold text-app-text/90 uppercase tracking-wider">Overwrite</div>
-                            <div className="text-[10px] text-app-text/40">Replace the existing file with the new one</div>
+                            <div className="text-[10px] text-app-text/40">Replace the existing item; folders are replaced, not merged</div>
                         </div>
                     </button>
 
@@ -87,7 +87,7 @@ export function ConflictModal({
                             <div className="text-[10px] text-app-text/40">
                                 {(() => {
                                     const { base, ext } = splitFileName(fileName);
-                                    return `Auto-rename the new file to "${base} (1)${ext}"`;
+                                    return `Auto-rename the new item to "${base} (1)${ext}"`;
                                 })()}
                             </div>
                         </div>
@@ -102,7 +102,7 @@ export function ConflictModal({
                         </div>
                         <div>
                             <div className="text-[11px] font-bold text-app-text/90 uppercase tracking-wider">Skip</div>
-                            <div className="text-[10px] text-app-text/40">Don't move this file and keep the original</div>
+                            <div className="text-[10px] text-app-text/40">Keep the existing item without replacing it</div>
                         </div>
                     </button>
                 </div>
