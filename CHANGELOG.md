@@ -73,6 +73,13 @@ All notable changes to Zync are documented in this file. The format is based on 
   progress, recovery and history controls; folder replacement is not merging.
   ([241b0d4], [5bdc13e])
 
+- **Combine folders:** Offer a separate folder-conflict choice that adds incoming
+  items and replaces matching files while keeping destination-only items. Reuse
+  staged publication and one transfer/recovery owner, report partial completion
+  on interruption, and share the same conflict choices with Copy to Server.
+  Keep whole-folder replacement explicitly labelled **Replace folder**.
+  ([aee7155], [2e7e674], [11d005e])
+
 - **Transfer recovery:** Restore active transfers after a UI reload and unresolved
   recovery details after an app restart, without automatically resuming interrupted
   copies. Offer read-only inspection and guarded temporary-copy cleanup. Every
@@ -2780,3 +2787,6 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [d4469ff]: https://github.com/zync-sh/zync/commit/d4469ff66b5dee6e15f1e15e4a238271aea9cdf0
 [241b0d4]: https://github.com/zync-sh/zync/commit/241b0d48e9b61ed71b7b6eaad10e3811512ad3c1
 [5bdc13e]: https://github.com/zync-sh/zync/commit/5bdc13e5553d675d497a48fbd0c59340bbc9e113
+[aee7155]: https://github.com/zync-sh/zync/commit/aee7155d4e386c38a848e6617e7f3d31a2be92bd
+[2e7e674]: https://github.com/zync-sh/zync/commit/2e7e674e811b7e68741d4697f0aeaae1d33df811
+[11d005e]: https://github.com/zync-sh/zync/commit/11d005e04529bf9d1b7f972bdf8a17f4930f20b0
