@@ -6,6 +6,11 @@ import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import { runFilesDrawerChecks } from './helpers/filesDrawerChecks.mjs';
 import { runFilesWorkspaceMotionChecks } from './helpers/filesWorkspaceMotionChecks.mjs';
+import { runFilesTransferSafetyChecks } from './helpers/filesTransferSafetyChecks.mjs';
+import { runFilesFocusChecks } from './helpers/filesFocusChecks.mjs';
+
+const transferSafetyOnly = process.argv.includes('--transfer-safety-only');
+const focusOnly = process.argv.includes('--focus-only');
 
 const { chromium } = await import(process.env.ZYNC_PLAYWRIGHT_MODULE || 'playwright');
 const server = await createServer({
@@ -50,7 +55,7 @@ try {
     await page.screenshot({ path: `${process.env.ZYNC_FILES_SCREENSHOTS}/${name}.png` });
   };
   // Focused motion runs share the exact production fixture and browser boundaries.
-  if (!process.argv.includes('--drawers-only') && !process.argv.includes('--workspace-motion-only')) {
+  if (!focusOnly && !transferSafetyOnly && !process.argv.includes('--drawers-only') && !process.argv.includes('--workspace-motion-only')) {
   const clickMenu = async (label, itemName, role = 'menuitem') => {
     await page.getByRole('button', { name: label, exact: true }).click();
     await page.getByRole(role, { name: itemName, exact: true }).click();
@@ -947,8 +952,10 @@ try {
   check('enlarged text and narrow splits retain a reachable current folder', await firstPathBar.evaluate(el => el.scrollWidth <= el.clientWidth + 1) && await firstPathBar.locator('[data-file-path-current]').evaluate(el => el.getBoundingClientRect().width >= 24));
   await page.evaluate(() => document.documentElement.style.removeProperty('font-size'));
   }
-  if (!process.argv.includes('--workspace-motion-only')) await runFilesDrawerChecks({ page, check, screenshot });
-  if (!process.argv.includes('--drawers-only')) await runFilesWorkspaceMotionChecks({ page, check, screenshot });
+  if (transferSafetyOnly) await runFilesTransferSafetyChecks({ page, check });
+  if (focusOnly || (!transferSafetyOnly && !process.argv.includes('--drawers-only') && !process.argv.includes('--workspace-motion-only'))) await runFilesFocusChecks({ page, check });
+  if (!focusOnly && !transferSafetyOnly && !process.argv.includes('--workspace-motion-only')) await runFilesDrawerChecks({ page, check, screenshot });
+  if (!focusOnly && !transferSafetyOnly && !process.argv.includes('--drawers-only')) await runFilesWorkspaceMotionChecks({ page, check, screenshot });
   assert.deepEqual(errors, []);
   assert.deepEqual(requests, []);
   console.log(`Production Files browser checks passed (${checks}).`);

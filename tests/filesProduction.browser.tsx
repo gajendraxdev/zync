@@ -1,16 +1,20 @@
 import { createRoot } from 'react-dom/client';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Provider as TooltipProvider } from '@radix-ui/react-tooltip';
 import { LayoutMotionScope } from '../src/components/ui/LayoutMotion';
 import { SidebarChrome, SidebarContent } from '../src/components/layout/sidebar/SidebarChrome';
 import type { FileEntry } from '../src/components/file-manager/types';
 import builtinIconCatalog from '../plugin-api/builtin-icon-themes.json';
 import type { InstalledPlugin } from '../src/features/plugins/types';
+import { createTransferSafetyFixture } from './fixtures/files-production/transferSafety';
 import '../src/index.css';
 
 const host = 'files-ui-fixture';
-const rootPath = '/home/deploy/project';
+const rootPath = new URLSearchParams(location.search).get('transferDottedPath') === '1'
+  ? '/home/deploy/project.v1' : '/home/deploy/project';
 const showWorkspaceChrome = new URLSearchParams(location.search).get('layout') === 'sidebars';
+const transferSafety = new URLSearchParams(location.search).get('transferSafety') === '1'
+  ? createTransferSafetyFixture(host, rootPath) : undefined;
 const entry = (name: string, type: FileEntry['type'] = '-', size = 1234, minutesAgo = 0): FileEntry => ({ name, type, path: `${rootPath}/${name}`,
   size: type === 'd' ? 0 : size, permissions: type === 'd' ? '755' : '644', owner: 'deploy', group: 'team', lastModified: Date.now() - minutesAgo * 60_000 });
 const sample = [entry('assets', 'd'), entry('config', 'd'), entry('docs', 'd'), entry('scripts', 'd'), entry('src', 'd'), entry('tests', 'd'),
@@ -37,7 +41,8 @@ const parentFolders = ['archive', 'project', 'release candidate  ', '.private'].
 const parentListing = [...parentFolders, entry('notes.txt')];
 
 // The real component, real browsing slice and real hooks run against an isolated native boundary.
-// No native file operations, plugins, credentials, or persistence are available in this fixture.
+// No real native file operations, plugins, credentials, or persistence are available.
+// Mutation simulation is explicitly opt-in; normal UI tests retain the deny-by-default boundary.
 window.ipcRenderer = {
   invoke: async (command: string, args?: { path?: string }) => {
     if (command.startsWith('plugins:')) {
@@ -48,6 +53,7 @@ window.ipcRenderer = {
       throw new Error(`Unexpected plugin operation: ${command}`);
     }
     calls.push(command);
+    if (transferSafety?.handles(command)) return transferSafety.invoke(command, args ?? {});
     if (command === 'fs_list') {
       listingReads.push(args?.path ?? '');
       if (failNextListing) { failNextListing = false; throw new Error('Sample permission denied'); }
@@ -77,8 +83,11 @@ window.ipcRenderer = {
 } as unknown as typeof window.ipcRenderer;
 const { useAppStore } = await import('../src/store/useAppStore');
 const { FileManager } = await import('../src/components/FileManager');
+const { TransferPanel } = await import('../src/components/file-manager/TransferPanel');
 const { filesStoreKey } = await import('../src/store/fileSystemSlice');
 const { PluginProvider, usePlugins } = await import('../src/context/PluginContext');
+const detachTransferSafety = transferSafety?.attach(useAppStore);
+if (transferSafety) Object.assign(window, { filesTransferSafety: transferSafety.control });
 useAppStore.setState(state => ({
   activeConnectionId: host,
   connections: [{ id: host, name: 'Test host', host: 'test.invalid', port: 22, username: 'deploy', status: 'connected', homePath: '/home/deploy' }],
@@ -139,9 +148,21 @@ function StandaloneFilesPreview() {
   useEffect(() => { setSurfaceActive = setActive; return () => { setSurfaceActive = undefined; }; }, []);
   return <main style={{ height: '100vh', display: 'flex' }}>
     <div className="flex min-h-0 min-w-0 flex-1" style={{ display: active ? 'flex' : 'none' }}>
-      <FileManager connectionId={host} surface="pane" active={active} />
+      <FileManager connectionId={transferSafety ? undefined : host} surface="pane" active={active} />
     </div>
+    {transferSafety && <TransferReceiptPreview />}
   </main>;
+}
+
+/** Show the production receipt surface on demand without changing browsing test interactions. */
+function TransferReceiptPreview() {
+  const indicatorRef = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  return <>
+    <button ref={indicatorRef} onClick={() => setOpen(value => !value)} aria-expanded={open}
+      className="fixed bottom-4 right-4 z-30 rounded bg-app-panel p-2 text-xs">Transfer receipts</button>
+    {open && <TransferPanel indicatorRef={indicatorRef} onClose={() => setOpen(false)} />}
+  </>;
 }
 
 function RegistryProbe() {
@@ -186,4 +207,4 @@ function FilesWorkspacePreview({ peer = false }: { peer?: boolean }) {
 
 root.render(<FixtureProviders>{showWorkspaceChrome ? <FilesWorkspacePreview />
   : <StandaloneFilesPreview />}</FixtureProviders>);
-import.meta.hot?.dispose(() => root.unmount());
+import.meta.hot?.dispose(() => { detachTransferSafety?.(); root.unmount(); });

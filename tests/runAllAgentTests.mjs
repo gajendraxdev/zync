@@ -37,6 +37,11 @@ function normalizeEmittedImports(directory) {
 normalizeEmittedImports(path.resolve('.tmp-agent-tests'));
 
 const tests = [
+  'tests/fileDestinationReservations.test.mjs',
+  'tests/fileActivationFocus.test.mjs',
+  'tests/transferState.test.mjs',
+  'tests/transferOperations.test.mjs',
+  'tests/fileSystemRefresh.test.mjs',
   'tests/layoutMotion.test.mjs',
   'tests/filePanelLayout.test.mjs',
   'tests/fileViewportAnchor.test.mjs',
