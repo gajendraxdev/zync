@@ -4,6 +4,7 @@ mod commands;
 mod connection_latency;
 mod feedback_inbox;
 mod fs;
+mod file_permissions;
 mod fs_volumes;
 mod ghost;
 mod identity_migration;
@@ -216,6 +217,8 @@ pub fn run() {
             commands::fs_rename_batch,
             commands::fs_exists,
             commands::fs_entry_kind,
+            commands::fs_permissions_read,
+            commands::fs_permissions_apply,
             tunnels::commands::tunnel_get_all,
             tunnels::commands::tunnel_start_local,
             tunnels::commands::tunnel_start_remote,

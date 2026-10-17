@@ -144,33 +144,7 @@ impl FileEndpoint for Endpoint {
     async fn stat(&self, path: &str) -> Result<Option<Snapshot>, String> {
         match self {
             Self::Local => match tokio::fs::symlink_metadata(path).await {
-                Ok(metadata) => {
-                    #[cfg(unix)]
-                    let mode = {
-                        use std::os::unix::fs::PermissionsExt;
-                        Some(metadata.permissions().mode())
-                    };
-                    #[cfg(not(unix))]
-                    let mode = None;
-                    Ok(Some(Snapshot {
-                        kind: if metadata.file_type().is_symlink() {
-                            EntryKind::Symlink
-                        } else if metadata.is_file() {
-                            EntryKind::File
-                        } else if metadata.is_dir() {
-                            EntryKind::Directory
-                        } else {
-                            EntryKind::Other
-                        },
-                        size: metadata.len(),
-                        modified: metadata
-                            .modified()
-                            .ok()
-                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                            .map(|t| t.as_nanos()),
-                        mode,
-                    }))
-                }
+                Ok(metadata) => Ok(Some(local_snapshot(&metadata))),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
                 Err(e) => Err(format!("Could not inspect {path}: {e}")),
             },
@@ -586,7 +560,36 @@ impl FileEndpoint for Endpoint {
     }
 }
 
-fn remote_snapshot(metadata: &FileAttributes) -> Snapshot {
+/// One no-follow metadata result, shared by transfers and selected-item inspection.
+pub(crate) fn local_snapshot(metadata: &std::fs::Metadata) -> Snapshot {
+    #[cfg(unix)]
+    let mode = {
+        use std::os::unix::fs::PermissionsExt;
+        Some(metadata.permissions().mode())
+    };
+    #[cfg(not(unix))]
+    let mode = None;
+    Snapshot {
+        kind: if metadata.file_type().is_symlink() {
+            EntryKind::Symlink
+        } else if metadata.is_file() {
+            EntryKind::File
+        } else if metadata.is_dir() {
+            EntryKind::Directory
+        } else {
+            EntryKind::Other
+        },
+        size: metadata.len(),
+        modified: metadata
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|t| t.as_nanos()),
+        mode,
+    }
+}
+
+pub(crate) fn remote_snapshot(metadata: &FileAttributes) -> Snapshot {
     Snapshot {
         kind: if metadata.file_type().is_symlink() {
             EntryKind::Symlink

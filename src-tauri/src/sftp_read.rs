@@ -4,12 +4,17 @@ use std::{future::Future, sync::Arc};
 
 /// Clear only the failed cached instance; a late failure must not evict a replacement.
 pub(crate) fn invalidate_if_current<T>(cached: &mut Option<Arc<T>>, failed: &Arc<T>) {
-    if cached
-        .as_ref()
-        .is_some_and(|current| Arc::ptr_eq(current, failed))
-    {
+    if is_current_session(cached, failed) {
         *cached = None;
     }
+}
+
+/// Runtime identity, not equal contents or a reused connection/generation number.
+/// Retaining the expected Arc prevents address reuse while a request is pending.
+pub(crate) fn is_current_session<T>(cached: &Option<Arc<T>>, expected: &Arc<T>) -> bool {
+    cached
+        .as_ref()
+        .is_some_and(|current| Arc::ptr_eq(current, expected))
 }
 
 pub(crate) fn is_dead_session(err: &anyhow::Error) -> bool {
@@ -68,6 +73,15 @@ where
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn reused_connection_generation_cannot_authorize_a_different_transport() {
+        let old = Arc::new(0);
+        let replacement = Arc::new(0);
+        assert!(is_current_session(&Some(old.clone()), &old));
+        assert!(!is_current_session(&Some(replacement), &old));
+        assert!(!is_current_session(&None, &old));
+    }
 
     #[tokio::test]
     async fn closed_session_is_replaced_once_before_reading_again() {

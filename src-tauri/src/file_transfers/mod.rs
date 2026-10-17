@@ -196,7 +196,7 @@ pub struct Service {
     destinations: Arc<Mutex<HashSet<String>>>,
 }
 
-struct DestinationLease {
+pub(crate) struct DestinationLease {
     key: String,
     destinations: Arc<Mutex<HashSet<String>>>,
 }
@@ -221,6 +221,24 @@ impl Drop for DestinationLease {
 }
 
 impl Service {
+    /// Share transfer overlap and interrupted-publication admission with a narrow
+    /// metadata mutation. This lease is process-local, not an external file lock.
+    pub(crate) async fn reserve_metadata_change(
+        &self,
+        endpoint: &dyn FileEndpoint,
+        identity: &str,
+        path: &str,
+    ) -> Result<DestinationLease, String> {
+        let parent = endpoint.canonicalize(&endpoint.sibling(path, ".")?).await?;
+        let key = format!(
+            "{identity}:{}",
+            endpoint.reservation_key(&parent, &endpoint.filename(path)?)
+        );
+        let lease = self.reserve_destination(key.clone())?;
+        self.check_journal_destination("", &key, false).await?;
+        Ok(lease)
+    }
+
     fn reserve_destination(&self, key: String) -> Result<DestinationLease, String> {
         let mut destinations = self
             .destinations

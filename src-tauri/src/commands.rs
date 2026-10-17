@@ -668,6 +668,8 @@ pub struct ConnectionHandle {
     pub config: ConnectionConfig,
     pub session: Option<Arc<Mutex<Handle<Client>>>>,
     pub sftp_session: Option<Arc<russh_sftp::client::SftpSession>>,
+    /// Opaque runtime binding, renewed whenever an SFTP channel is installed.
+    pub file_permission_session: String,
     pub sftp_identity_maps: Arc<tokio::sync::OnceCell<SftpIdentityMaps>>,
     pub detected_os: Option<String>,
     pub detected_shell: Option<String>,
@@ -712,6 +714,7 @@ async fn reconnect_connection(
         config: config.clone(),
         session: Some(Arc::new(Mutex::new(session))),
         sftp_session: None,
+        file_permission_session: uuid::Uuid::new_v4().to_string(),
         sftp_identity_maps: Arc::new(tokio::sync::OnceCell::new()),
         detected_os: None,
         detected_shell: None,
@@ -2856,37 +2859,97 @@ pub async fn terminal_create(
     }
 }
 
+/// A changed generation under the same owner means a serialized sibling already
+/// reconnected (including counter wrap). It is reusable only with a session;
+/// a replacement lock always belongs to a different connection context.
+fn reconnect_completed_by_sibling(
+    expected_lock: &Arc<Mutex<()>>,
+    expected_generation: u64,
+    current_lock: &Arc<Mutex<()>>,
+    current_generation: u64,
+    has_session: bool,
+) -> Result<bool, ()> {
+    if !Arc::ptr_eq(current_lock, expected_lock) {
+        return Err(());
+    }
+    if current_generation != expected_generation {
+        return if has_session { Ok(true) } else { Err(()) };
+    }
+    Ok(false)
+}
+
+#[cfg(test)]
+mod reconnect_waiter_tests {
+    use super::reconnect_completed_by_sibling;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    #[test]
+    fn sibling_waiter_reuses_only_a_completed_reconnect_with_the_same_owner() {
+        let owner = Arc::new(Mutex::new(()));
+        assert_eq!(
+            reconnect_completed_by_sibling(&owner, 7, &owner, 7, false),
+            Ok(false)
+        );
+        assert_eq!(
+            reconnect_completed_by_sibling(&owner, 7, &owner, 8, true),
+            Ok(true)
+        );
+        assert_eq!(
+            reconnect_completed_by_sibling(&owner, 7, &owner, 9, true),
+            Ok(true)
+        );
+        assert_eq!(
+            reconnect_completed_by_sibling(&owner, u64::MAX, &owner, 0, true),
+            Ok(true)
+        );
+        assert_eq!(
+            reconnect_completed_by_sibling(&owner, 7, &owner, 8, false),
+            Err(())
+        );
+    }
+
+    #[test]
+    fn replacement_owner_is_rejected_even_with_a_session_or_reused_generation() {
+        let owner = Arc::new(Mutex::new(()));
+        let replacement = Arc::new(Mutex::new(()));
+        for generation in [7, 8] {
+            for has_session in [false, true] {
+                assert_eq!(
+                    reconnect_completed_by_sibling(&owner, 7, &replacement, generation, has_session),
+                    Err(())
+                );
+            }
+        }
+    }
+}
+
 async fn reconnect_stored_connection(
     connection_id: &str,
-    original_config: ConnectionConfig,
+    reconnect_lock: Arc<Mutex<()>>,
+    expected_generation: u64,
     state: &AppState,
 ) -> Result<(), String> {
-    // Acquire per-connection reconnect lock *without* holding connections lock across await (avoids deadlock with concurrent ops needing connections).
-    let reconnect_lock = {
-        let connections = state.connections.lock().await;
-        connections
-            .get(connection_id)
-            .map(|h| h.reconnect_lock.clone())
-            .ok_or_else(|| {
-                format!("Connection {connection_id} was disconnected during reconnect")
-            })?
-    };
+    // Keep the originally captured owner across admission. Reacquiring an owner
+    // by ID could reconnect old account/configuration over a replacement host.
     let _reconnect_guard = reconnect_lock.clone().lock_owned().await;
 
-    let (expected_generation, previous_detected_os, previous_detected_shell) = {
+    let (original_config, previous_detected_os, previous_detected_shell) = {
         let connections = state.connections.lock().await;
-        connections
-            .get(connection_id)
-            .map(|handle| {
-                (
-                    handle.reconnect_generation,
-                    handle.detected_os.clone(),
-                    handle.detected_shell.clone(),
-                )
-            })
-            .ok_or_else(|| {
-                format!("Connection {connection_id} was disconnected during reconnect")
-            })?
+        let handle = connections.get(connection_id)
+            .ok_or_else(|| format!("Connection {connection_id} was disconnected during reconnect"))?;
+        if reconnect_completed_by_sibling(
+            &reconnect_lock,
+            expected_generation,
+            &handle.reconnect_lock,
+            handle.reconnect_generation,
+            handle.session.is_some(),
+        )
+        .map_err(|()| format!("Connection {connection_id} changed before reconnect"))?
+        {
+            return Ok(());
+        }
+        (handle.config.clone(), handle.detected_os.clone(), handle.detected_shell.clone())
     };
 
     let uses_vault_auth = config_uses_vault_auth(&original_config);
@@ -2928,7 +2991,8 @@ async fn reconnect_stored_connection(
     new_handle.detected_shell = previous_detected_shell;
     let mut connections = state.connections.lock().await;
     match connections.get(connection_id) {
-        Some(existing) if existing.reconnect_generation == expected_generation => {
+        Some(existing) if existing.reconnect_generation == expected_generation
+            && Arc::ptr_eq(&existing.reconnect_lock, &reconnect_lock) => {
             new_handle.reconnect_generation = expected_generation.wrapping_add(1);
             // Preserve the *same* reconnect_lock Arc so any concurrent waiters on the old handle continue to serialize against this instance.
             new_handle.reconnect_lock = reconnect_lock.clone();
@@ -2953,25 +3017,17 @@ async fn get_live_ssh_session(
     connection_id: &str,
     state: &State<'_, AppState>,
 ) -> Result<Arc<Mutex<russh::client::Handle<crate::ssh::Client>>>, String> {
-    let existing = {
+    let (existing, reconnect_lock, generation) = {
         let connections = state.connections.lock().await;
-        connections
-            .get(connection_id)
-            .and_then(|c| c.session.clone())
+        let conn = connections.get(connection_id)
+            .ok_or_else(|| connection_not_ready_error(connection_id))?;
+        (conn.session.clone(), conn.reconnect_lock.clone(), conn.reconnect_generation)
     };
     if let Some(session) = existing {
         return Ok(session);
     }
 
-    let config = {
-        let connections = state.connections.lock().await;
-        connections
-            .get(connection_id)
-            .map(|c| c.config.clone())
-            .ok_or_else(|| connection_not_ready_error(connection_id))?
-    };
-
-    reconnect_stored_connection(connection_id, config, state).await?;
+    reconnect_stored_connection(connection_id, reconnect_lock, generation, state).await?;
     let session = {
         let connections = state.connections.lock().await;
         connections
@@ -3382,7 +3438,7 @@ async fn get_sftp_or_reconnect(
     state: &AppState,
     id: &str,
 ) -> Result<Arc<russh_sftp::client::SftpSession>, String> {
-    let (config, existing_session, reconnect_generation) = {
+    let (reconnect_lock, existing_session, reconnect_generation) = {
         let connections = state.connections.lock().await;
         let conn = connections
             .get(id)
@@ -3392,7 +3448,7 @@ async fn get_sftp_or_reconnect(
             return Ok(sftp.clone());
         }
         (
-            conn.config.clone(),
+            conn.reconnect_lock.clone(),
             conn.session.clone(),
             conn.reconnect_generation,
         )
@@ -3406,13 +3462,18 @@ async fn get_sftp_or_reconnect(
                     let conn = connections
                         .get_mut(id)
                         .ok_or_else(|| "Connection was removed while SFTP started".to_string())?;
-                    if conn.reconnect_generation != reconnect_generation {
+                    if conn.reconnect_generation != reconnect_generation
+                        || !crate::sftp_read::is_current_session(&conn.session, &session)
+                    {
                         return conn
                             .sftp_session
                             .clone()
                             .ok_or_else(|| "Connection changed while SFTP started".to_string());
                     }
                     let opened_first_sftp = conn.sftp_session.is_none();
+                    if opened_first_sftp {
+                        conn.file_permission_session = uuid::Uuid::new_v4().to_string();
+                    }
                     let sftp = conn
                         .sftp_session
                         .get_or_insert_with(|| opened.clone())
@@ -3426,11 +3487,13 @@ async fn get_sftp_or_reconnect(
             }
             Err(OpenSftpError::Transport(_)) => {
                 let mut connections = state.connections.lock().await;
-                if let Some(conn) = connections.get_mut(id) {
-                    if conn.reconnect_generation == reconnect_generation {
-                        conn.session = None;
-                    }
+                let conn = connections.get_mut(id).ok_or("Connection was removed while SFTP started")?;
+                if conn.reconnect_generation != reconnect_generation
+                    || !crate::sftp_read::is_current_session(&conn.session, &session)
+                {
+                    return Err("Connection changed while SFTP started".into());
                 }
+                crate::sftp_read::invalidate_if_current(&mut conn.session, &session);
             }
             Err(
                 error @ (OpenSftpError::ChannelRejected(_)
@@ -3447,7 +3510,7 @@ async fn get_sftp_or_reconnect(
     let timeout_duration = std::time::Duration::from_secs(12);
     match tokio::time::timeout(
         timeout_duration,
-        reconnect_stored_connection(id, config, state),
+        reconnect_stored_connection(id, reconnect_lock, reconnect_generation, state),
     )
     .await
     {
@@ -3479,10 +3542,15 @@ async fn get_sftp_or_reconnect(
         let mut connections = state.connections.lock().await;
         let conn = connections.get_mut(id)
             .ok_or("Connection was removed while SFTP started")?;
-        if conn.reconnect_generation != reconnect_generation {
+        if conn.reconnect_generation != reconnect_generation
+            || !crate::sftp_read::is_current_session(&conn.session, &session)
+        {
             return Err("Connection changed while SFTP started".into());
         }
         let opened_first_sftp = conn.sftp_session.is_none();
+        if opened_first_sftp {
+            conn.file_permission_session = uuid::Uuid::new_v4().to_string();
+        }
         let installed = conn.sftp_session.get_or_insert_with(|| sftp.clone()).clone();
         (installed, opened_first_sftp)
     };
@@ -4908,6 +4976,117 @@ pub async fn fs_entry_kind(
 ) -> Result<Option<crate::file_transfers::endpoint::EntryKind>, String> {
     let (_, _, metadata) = prepare_file_transfer_endpoint(&state, &connection_id, &path, "entry").await?;
     Ok(metadata.map(|entry| entry.kind))
+}
+
+/// Capture a metadata editor's exact live endpoint without creating a second
+/// connection owner. Mutation callers never reconnect or replay a closed channel.
+async fn file_permission_endpoint(
+    state: &AppState,
+    id: &str,
+    allow_connect: bool,
+) -> Result<
+    (Arc<crate::file_transfers::endpoint::Endpoint>, crate::file_permissions::Binding),
+    String,
+> {
+    use crate::file_permissions::{Binding, Model};
+    use crate::file_transfers::endpoint::Endpoint;
+    let (endpoint, identity) = file_transfer_endpoint(state, id, allow_connect).await?;
+    let binding = match endpoint.as_ref() {
+        Endpoint::Local => Binding {
+            identity,
+            session: "local".into(),
+            model: if cfg!(unix) { Model::Posix } else { Model::Windows },
+        },
+        Endpoint::Remote(sftp) => {
+            let connections = state.connections.lock().await;
+            let conn = connections.get(id).ok_or("Connection is no longer available")?;
+            if !conn.sftp_session.as_ref().is_some_and(|current| Arc::ptr_eq(current, sftp)) {
+                return Err("Connection changed. Refresh permissions.".into());
+            }
+            Binding {
+                identity,
+                session: conn.file_permission_session.clone(),
+                model: crate::file_permissions::remote_model(conn.detected_os.as_deref()),
+            }
+        }
+    };
+    Ok((endpoint, binding))
+}
+
+/// Read one selected item; listing display strings never authorize mode edits.
+#[tauri::command]
+pub async fn fs_permissions_read(
+    connection_id: String,
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<crate::file_permissions::Metadata, String> {
+    crate::file_permissions::validate_path(&path)?;
+    let initial = file_permission_endpoint(&state, &connection_id, true).await?;
+    let (binding, metadata) = if connection_id == "local" {
+        let metadata = crate::file_permissions::inspect(initial.0.as_ref(), initial.1.clone(), &path).await?;
+        (initial.1, metadata)
+    } else {
+        let ((_, binding), metadata) = crate::sftp_read::read_with_recovery(
+            initial,
+            |(endpoint, binding)| {
+                let path = &path;
+                async move { crate::file_permissions::inspect(endpoint.as_ref(), binding, path).await }
+            },
+            |(failed, previous)| {
+                let state = &state;
+                let id = connection_id.as_str();
+                async move {
+                if let crate::file_transfers::endpoint::Endpoint::Remote(failed) = failed.as_ref() {
+                    let mut connections = state.connections.lock().await;
+                    let conn = connections.get_mut(id).ok_or("Connection was disconnected while reading permissions")?;
+                    crate::sftp_read::invalidate_if_current(&mut conn.sftp_session, failed);
+                }
+                let fresh = file_permission_endpoint(state, id, true).await?;
+                if fresh.1.identity != previous.identity {
+                    return Err("Connection identity changed while reading permissions".into());
+                }
+                Ok(fresh)
+                }
+            },
+        ).await?;
+        (binding, metadata)
+    };
+    let (_, current) = file_permission_endpoint(&state, &connection_id, false).await?;
+    if current != binding {
+        return Err("Connection changed. Refresh permissions.".into());
+    }
+    Ok(metadata)
+}
+
+/// Apply one ordinary-mode change under existing native mutation admission.
+/// Neither session loss nor an uncertain SETSTAT acknowledgement triggers replay.
+#[tauri::command]
+pub async fn fs_permissions_apply(
+    connection_id: String,
+    expected: crate::file_permissions::Metadata,
+    set_bits: u32,
+    clear_bits: u32,
+    state: State<'_, AppState>,
+) -> Result<crate::file_permissions::Outcome, String> {
+    crate::file_permissions::changed_mode(0, set_bits, clear_bits)?;
+    crate::file_permissions::validate_path(&expected.path)?;
+    let (endpoint, binding) = file_permission_endpoint(&state, &connection_id, false).await?;
+    if binding != expected.binding {
+        return Err("Connection changed. Refresh permissions before editing.".into());
+    }
+    let _lease = state.file_transfers
+        .reserve_metadata_change(endpoint.as_ref(), &binding.identity, &expected.path).await?;
+    let captured = binding.clone();
+    crate::file_permissions::apply(
+        endpoint.as_ref(), binding, &expected, set_bits, clear_bits,
+        || async {
+            let (_, current) = file_permission_endpoint(&state, &connection_id, false).await?;
+            if current != captured {
+                return Err("Connection changed. Refresh permissions before editing.".into());
+            }
+            Ok(())
+        },
+    ).await
 }
 
 #[tauri::command]
