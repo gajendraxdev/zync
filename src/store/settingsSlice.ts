@@ -316,7 +316,7 @@ export interface AppSettings {
         fmRefresh: string;
         aiCommandBar: string;
     };
-    /** Shortcut routing policy (not individual chords). See docs/SHORTCUTS.md. */
+    /** Shortcut routing policy, separate from individual configurable keybindings. */
     keyboard: KeyboardSettings;
     expandedFolders: string[];
     ai: {
