@@ -12,6 +12,9 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Changed
 
+- **Maintenance:** Clarify shortcut, settings and terminal code comments without
+  changing runtime behavior. ([ac067a6])
+
 - **File operations and feedback:** Close accepted collision dialogs without
   blocking browsing, continue Keep Both batches after individual failures, and
   preserve dotfile names and dotted parent paths. Keep partial cut selections
@@ -2798,3 +2801,4 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [11d005e]: https://github.com/zync-sh/zync/commit/11d005e04529bf9d1b7f972bdf8a17f4930f20b0
 [d8d6586]: https://github.com/zync-sh/zync/commit/d8d6586bfa0790730bf8ea84c52acfe6c18adcaf
 [69a16cb]: https://github.com/zync-sh/zync/commit/69a16cbaf7401b57a0990760d3c21263e7844397
+[ac067a6]: https://github.com/zync-sh/zync/commit/ac067a6fe20f9b58e5c4cd8e6e67e47c0e89e85b
