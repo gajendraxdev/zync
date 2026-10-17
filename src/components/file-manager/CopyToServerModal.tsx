@@ -8,6 +8,9 @@ import { Select, type SelectOption } from '../ui/Select';
 import { OSIcon } from '../icons/OSIcon';
 import { getConnectionDisplayLabels } from '../../features/connections/domain/connectionDisplay';
 import { useShowHostAddressesInLists } from '../../features/connections/presentation/useConnectionDisplayLabels';
+import { executeFileTransfer } from '../../features/files/application/executeFileTransfer';
+import { createFileTransferExecution } from '../../features/files/application/transferEventProjection';
+import { runFileTransferBatch, fileTransferBatchFailure } from '../../features/files/application/runFileTransferBatch';
 
 interface CopyToServerModalProps {
   isOpen: boolean;
@@ -30,8 +33,6 @@ export function CopyToServerModal({
 }: CopyToServerModalProps) {
   const connections = useAppStore(state => state.connections);
   const addTransfer = useAppStore(state => state.addTransfer);
-  const completeTransfer = useAppStore(state => state.completeTransfer);
-  const failTransfer = useAppStore(state => state.failTransfer);
   const showToast = useAppStore((state) => state.showToast);
   const connect = useAppStore(state => state.connect);
   const showHostAddressesInLists = useShowHostAddressesInLists();
@@ -199,7 +200,7 @@ export function CopyToServerModal({
         }
 
         // Process all files
-        for (const file of sourceFiles) {
+        const result = await runFileTransferBatch(sourceFiles, async file => {
           const targetName = isMultiSelect ? file.name : fileName;
           const fullDestPath = `${destinationPath}/${targetName}`.replace('//', '/');
 
@@ -210,21 +211,16 @@ export function CopyToServerModal({
             destinationPath: fullDestPath,
           });
 
-          window.ipcRenderer.invoke('sftp_copy_to_server', {
+          await executeFileTransfer({
             sourceConnectionId: file.connectionId,
             sourcePath: file.path,
             destinationConnectionId: selectedServerId,
             destinationPath: fullDestPath,
             transferId,
-          }).then(() => {
-            completeTransfer(transferId);
-          }).catch((error: any) => {
-            if (error.message && !error.message.includes('destroy')) {
-              failTransfer(transferId, error.message);
-              showToast('error', `Copy failed for ${file.name}: ${error.message}`);
-            }
-          });
-        }
+          }, createFileTransferExecution((command, args) => window.ipcRenderer.invoke(command, args), useAppStore.getState));
+        });
+        const failure = fileTransferBatchFailure(result);
+        if (failure) showToast('error', `Copy failed: ${failure}`);
       } catch (error: any) {
         showToast('error', `Batch transfer setup failed: ${error.message}`);
       }

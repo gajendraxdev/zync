@@ -38,7 +38,7 @@ import { loadLocalFileVolumes, type FileVolume } from './file-manager/fileVolume
 import { FileSideDrawer } from './file-manager/FileSideDrawer';
 import { FileLayoutSurface } from './file-manager/FileLayoutSurface';
 import { FILE_GRID_ZOOM, FILE_LIST_ZOOM, FILE_PLACES_WIDTH_PX, FILE_PROPERTIES_WIDTH_PX, clampFileGridZoom, clampFileListZoom, clampFileRecentLimit } from './file-manager/fileChrome';
-import { filePathLeafLabel, inferHomePath, isFilePathEqual, normalizeFilePath } from './file-manager/filePathNav';
+import { filePathLeafLabel, inferHomePath, isFilePathEqual, normalizeFilePath, parentFilePath } from './file-manager/filePathNav';
 import { fileMatchesQuery, fileMatchesSearchType } from './file-manager/fileSearchFilter';
 import type { FileSearchTypeFilter } from './file-manager/FileQueryEditor';
 import type { FileEntry } from './file-manager/types';
@@ -51,6 +51,7 @@ import { fileSelectionSummary } from './file-manager/fileSelectionSummary';
 import { fileFolderOptions } from './file-manager/fileFolderOptions';
 import { useFileUploads } from './file-manager/useFileUploads';
 import { ConflictModal, type ConflictAction } from './file-manager/ConflictModal';
+import { useFileConflictQueue } from './file-manager/useFileConflictQueue';
 import { Button } from './ui/Button';
 import { ContextMenu, type ContextMenuItem } from './ui/ContextMenu';
 import { Input } from './ui/Input';
@@ -63,10 +64,15 @@ import { buildEditorProviderOptions, CODEMIRROR_EDITOR_ID } from './editor/provi
 import { clearEditorOverlayOpen, markEditorOverlayOpen } from './editor/overlayState';
 import { TerminalDisconnectedView } from './terminal/TerminalDisconnectedView';
 import { collectLeaves, isFeatureContent, layoutForCanvas, layoutForFeatureInstance } from '../lib/paneLayout';
-import { filesStoreKey } from '../store/fileSystemSlice';
+import { acknowledgeMovedClipboard, filesStoreKey, splitFileName } from '../store/fileSystemSlice';
 import { paneCloseScope, registerPaneCloseBlocker } from '../lib/paneCloseBlockers';
 import { isCurrentEditorRead, type EditorFileTarget } from './file-manager/editorReadIdentity';
+import { executeFileTransfer, tryStagedFileTransfer, isTransferCancellation, transferErrorMessage, fileTransferFailureMessage, isFileTransferNotStarted, type FileTransferRequest } from '../features/files/application/executeFileTransfer';
+import { createFileTransferExecution } from '../features/files/application/transferEventProjection';
+import { acquireFileDestination, type FileDestinationReservation } from '../features/files/application/fileDestinationReservations';
+import { replaceFileWithBackup, replacementPreconditionError } from '../features/files/application/replaceFileWithBackup';
 import type { AppStore } from '../store/useAppStore';
+import { runFileTransferBatch, fileTransferBatchFailure, recordFileTransferFailure, type FileTransferBatchResult } from '../features/files/application/runFileTransferBatch';
 import { canSplitBesideFiles, isUnconfirmedHomeToken, isUnresolvedFilesPath, openHerePlacementItems, openTerminalHere, pickFilesHomePath } from './layout/tabDock';
 
 export type FileManagerSurface = 'overlay' | 'pane';
@@ -221,7 +227,6 @@ export const FileManager = memo(function FileManager({
     pasteEntriesStore(cid, sources, op, dest, instanceId)
   ), [pasteEntriesStore, instanceId]);
   const clipboard = useAppStore(state => state.clipboard);
-  const clearClipboard = useAppStore(state => state.clearClipboard);
   const updateSettings = useAppStore(state => state.updateSettings);
   const updateFileManagerSettings = useAppStore(state => state.updateFileManagerSettings);
   const clearRecentPaths = useAppStore(state => state.clearRecentPaths);
@@ -349,8 +354,8 @@ export const FileManager = memo(function FileManager({
   const [dragSourceConnectionId, setDragSourceConnectionId] = useState<string | null>(null);
 
   // Conflict Resolution State
-  const [pendingConflicts, setPendingConflicts] = useState<Conflict[]>([]);
-  const [currentConflict, setCurrentConflict] = useState<Conflict | null>(null);
+  const { conflicts: pendingConflicts, current: currentConflict, replace: replaceConflicts,
+    clear: clearConflicts, take: takeConflicts } = useFileConflictQueue<Conflict>();
 
   // Copy to Server State
   const [isCopyModalOpen, setIsCopyModalOpen] = useState(false);
@@ -363,6 +368,7 @@ export const FileManager = memo(function FileManager({
   const [initialDestPath, setInitialDestPath] = useState<string | undefined>();
 
   const [isProcessing, setIsProcessing] = useState(false);
+  const operationGeneration = useRef(0);
   const [isZipping, setIsZipping] = useState(false);
   const { placesInline, propertiesInline } = useFilePanelLayout(containerRef);
   const isNarrow = !placesInline;
@@ -370,6 +376,13 @@ export const FileManager = memo(function FileManager({
   const showPlaces = isNarrow ? placesOverlayOpen : !placesCollapsed;
   useFileInspectorFocus(isPropertiesOpen, propertiesInline, containerRef, listingFocusRef, isFilesSurfaceActive);
   const editorProviderOptions = useMemo(() => buildEditorProviderOptions(editorProviders), [editorProviders]);
+
+  useLayoutEffect(() => {
+    operationGeneration.current += 1;
+    clearConflicts();
+    setIsProcessing(false);
+    return () => { operationGeneration.current += 1; };
+  }, [activeConnectionId, instanceId, clearConflicts]);
 
   useEffect(() => { if (!isNarrow) setPlacesOverlayOpen(false); }, [isNarrow]);
 
@@ -400,13 +413,6 @@ export const FileManager = memo(function FileManager({
     setDragType(null);
     setDragSourceConnectionId(null);
   }, []);
-  const { handleUpload, handleUploadFolder, isTauriDraggingOver } = useFileUploads({
-    connectionId: activeConnectionId ?? undefined,
-    isConnected,
-    onDragVisualClear: clearDragVisual,
-    instanceId,
-  });
-
   const handleConnectionError = useCallback((connectionId: string, err: any, preserveEditor = false) => {
     const msg = err.message || String(err);
     if (msg.includes('DISCONNECTED:')) {
@@ -432,6 +438,28 @@ export const FileManager = memo(function FileManager({
     return false;
   }, [instanceId]);
 
+  const transferFile = useCallback(async (request: Omit<FileTransferRequest, 'transferId'>,
+    options?: { recoveryBackupPath?: string; reservation?: FileDestinationReservation }) => {
+    const transferId = addTransfer({ ...request, recoveryBackupPath: options?.recoveryBackupPath });
+    const execution = createFileTransferExecution((command, args) => window.ipcRenderer.invoke(command, args), useAppStore.getState);
+    await executeFileTransfer({ ...request, transferId }, execution, options?.reservation);
+    return transferId;
+  }, [addTransfer]);
+
+  /** Native regular-file replacement; only an explicit unhandled kind permits the existing directory/link policy. */
+  const tryStagedReplacement = useCallback(async (request: Omit<FileTransferRequest, 'transferId'>) => {
+    // Reject a busy replacement before creating another receipt for the same decision.
+    const reservation = acquireFileDestination(request.destinationConnectionId, request.destinationPath);
+    try {
+      const store = useAppStore.getState();
+      const transferId = store.addTransfer(request);
+      const handled = await tryStagedFileTransfer({ ...request, transferId, overwrite: true },
+        createFileTransferExecution((command, args) => window.ipcRenderer.invoke(command, args), useAppStore.getState), reservation);
+      if (!handled) store.removeTransfer(transferId);
+      return handled;
+    } finally { reservation.release(); }
+  }, []);
+
   const executeFileOperations = useCallback(async (ops: {
     source: string;
     target: string;
@@ -441,9 +469,11 @@ export const FileManager = memo(function FileManager({
   }[], targetDirectory?: string) => {
     if (!activeConnectionId || ops.length === 0) return;
 
+    const generation = operationGeneration.current;
     setIsProcessing(true);
     const conflicts: typeof pendingConflicts = [];
     const executionList: typeof ops = [];
+    let refreshAfterMutation = false;
 
     try {
       // Pass 1: Check for existence (Parallelized)
@@ -453,6 +483,7 @@ export const FileManager = memo(function FileManager({
           path: op.target,
         })
       ));
+      if (generation !== operationGeneration.current) return;
 
       existenceResults.forEach((exists, i) => {
         if (exists) {
@@ -464,9 +495,15 @@ export const FileManager = memo(function FileManager({
 
       // Pass 2: Execute immediate actions
       if (executionList.length > 0) {
+        for (const item of executionList) {
+          const precondition = replacementPreconditionError({ sourceConnectionId: item.sourceConnectionId,
+            sourcePath: item.source, destinationConnectionId: activeConnectionId, destinationPath: item.target });
+          if (precondition) throw new Error(precondition);
+        }
         const sameConnection = executionList.every(item => item.sourceConnectionId === activeConnectionId);
 
         if (sameConnection) {
+          refreshAfterMutation = true;
           // Group by operation type (move/copy) to ensure correct store action
           const groups = executionList.reduce((acc, item) => {
             if (!acc[item.op]) acc[item.op] = [];
@@ -475,78 +512,69 @@ export const FileManager = memo(function FileManager({
           }, {} as Record<string, string[]>);
 
           for (const [opType, sources] of Object.entries(groups)) {
-            await pasteEntries(activeConnectionId, sources, opType === 'move' ? 'cut' : 'copy', targetDirectory);
+            if (!await pasteEntries(activeConnectionId, sources, opType === 'move' ? 'cut' : 'copy', targetDirectory ?? currentPath)) {
+              void useAppStore.getState().refreshConnectionFiles(activeConnectionId);
+              return;
+            }
           }
         } else {
-          // Cross connection: Loop through and start transfers
-          for (const item of executionList) {
-            const transferId = addTransfer({
+          // The background promise owns admission until native completion without blocking browsing.
+          void runFileTransferBatch(executionList, item => transferFile({
               sourceConnectionId: item.sourceConnectionId,
               sourcePath: item.source,
               destinationConnectionId: activeConnectionId,
               destinationPath: item.target,
+            })).then(result => {
+              const failure = fileTransferBatchFailure(result);
+              if (failure) showToast('error', `Copy failed: ${failure}`);
             });
-
-            let command = "sftp:copyToServer";
-            const args: any = { sourcePath: item.source, destinationPath: item.target, transferId };
-
-            if (item.sourceConnectionId === "local") {
-              command = "sftp:put";
-              args.id = activeConnectionId;
-              args.localPath = item.source;
-              args.remotePath = item.target;
-            } else if (activeConnectionId === "local") {
-              command = "sftp:get";
-              args.id = item.sourceConnectionId;
-              args.remotePath = item.source;
-              args.localPath = item.target;
-            } else {
-              args.sourceConnectionId = item.sourceConnectionId;
-              args.destinationConnectionId = activeConnectionId;
-            }
-
-            window.ipcRenderer.invoke(command, args).catch(err => {
-              failTransfer(transferId, err.message || String(err));
-            });
-          }
-          showToast('info', `Started background transfer of ${executionList.length} item(s)`);
+          const preservesSource = executionList.some(item => item.op === 'move');
+          if (preservesSource) showToast('info', 'Cross-connection moves copy files; source files are kept.');
         }
       }
 
       // Pass 3: Handle Conflicts
+      if (generation !== operationGeneration.current) return;
       if (conflicts.length > 0) {
-        setPendingConflicts(conflicts);
-        setCurrentConflict(conflicts[0]);
+        replaceConflicts(conflicts);
       } else {
-        // Only clear clipboard if it was a successful 'cut' (move)
-        const isCut = ops.some(o => o.op === 'move' && clipboard?.op === 'cut');
-        if (isCut) clearClipboard();
+        // The Files slice acknowledges only confirmed same-endpoint moves.
         setSelectedFiles([]);
       }
 
-      if (executionList.length > 0) {
-        loadFiles(activeConnectionId, currentPath);
+      if (refreshAfterMutation) {
+        void useAppStore.getState().refreshConnectionFiles(activeConnectionId);
       }
 
     } catch (e: any) {
+      if (generation !== operationGeneration.current) return;
       if (handleConnectionError(activeConnectionId, e)) return;
-      showToast('error', `Operation failed: ${e.message || String(e)}`);
-      loadFiles(activeConnectionId, currentPath);
+      showToast('error', `Operation failed: ${fileTransferFailureMessage(e)}`);
+      if (refreshAfterMutation) void useAppStore.getState().refreshConnectionFiles(activeConnectionId);
     } finally {
-      setIsProcessing(false);
+      if (generation === operationGeneration.current) setIsProcessing(false);
     }
   }, [
     activeConnectionId,
-    addTransfer,
-    clearClipboard,
-    clipboard?.op,
     currentPath,
-    failTransfer,
     handleConnectionError,
-    loadFiles,
     pasteEntries,
+    replaceConflicts,
     showToast,
+    transferFile,
   ]);
+
+  const uploadPaths = useCallback(async (paths: string[]) => {
+    await executeFileOperations(paths.map(source => {
+      const name = filePathLeafLabel(source);
+      return { source, name, sourceConnectionId: 'local', op: 'copy',
+        target: currentPath === '/' ? `/${name}` : `${currentPath}/${name}` };
+    }));
+  }, [executeFileOperations, currentPath]);
+  const { handleUpload, handleUploadFolder, isTauriDraggingOver } = useFileUploads({
+    connectionId: activeConnectionId ?? undefined, isConnected, onDragVisualClear: clearDragVisual, instanceId,
+    onUploadPaths: uploadPaths,
+  });
 
   const handlePaste = useCallback(async () => {
     if (!clipboard || !activeConnectionId) return;
@@ -583,9 +611,18 @@ export const FileManager = memo(function FileManager({
   const resolveConflict = async (action: ConflictAction, applyToAll = false) => {
     if (!currentConflict || !activeConnectionId || isProcessing) return;
 
-    setIsProcessing(true);
-    const toProcess = applyToAll ? [...pendingConflicts] : [currentConflict];
+    const toProcess = takeConflicts(currentConflict, applyToAll);
+    if (toProcess.length === 0) return;
+    if (applyToAll || pendingConflicts.length === 1) setSelectedFiles([]);
     let successCount = 0;
+    const copiesOnly = toProcess.some(item => item.op === 'move' && item.sourceConnectionId !== activeConnectionId);
+    const clipboardAtStart = clipboard;
+    const movedSources: string[] = [];
+    const sourceReservations: FileDestinationReservation[] = [];
+    let refreshAfterMutation = false;
+    const failures: FileTransferBatchResult = { failed: 0, cancelled: 0 };
+    let firstWarning: string | undefined;
+    let warningCount = 0;
 
     try {
       for (const conflict of toProcess) {
@@ -600,13 +637,13 @@ export const FileManager = memo(function FileManager({
           let finalTarget = target;
           if (action === 'rename') {
             let counter = 1;
-            const pathParts = target.match(/^(.*?)(\.[^.]*)?$/);
-            const base = pathParts ? pathParts[1] : target;
-            const ext = pathParts && pathParts[2] ? pathParts[2] : '';
+            const name = filePathLeafLabel(target);
+            const parent = target.slice(0, -name.length);
+            const { base, ext } = splitFileName(name);
 
             let exists = true;
             while (exists) {
-              const candidate = `${base} (${counter})${ext}`;
+              const candidate = `${parent}${base} (${counter})${ext}`;
               exists = await window.ipcRenderer.invoke('fs_exists', {
                 connectionId: activeConnectionId,
                 path: candidate,
@@ -617,7 +654,7 @@ export const FileManager = memo(function FileManager({
               }
               counter++;
               if (counter > 100) {
-                showToast('error', `Could not find a unique name for "${conflict.name}" after 100 attempts. Skipping.`);
+                recordFileTransferFailure(failures, `Could not find a unique name for "${conflict.name}" after 100 attempts. Skipping.`);
                 finalTarget = ''; // Flag as failed
                 break;
               }
@@ -629,27 +666,50 @@ export const FileManager = memo(function FileManager({
             continue;
           }
 
-          if (action === 'overwrite') {
-            // Safe Overwrite: Rename existing to backup first
-            const backupPath = `${target}.bak-${Date.now()}`;
-            try {
-              await window.ipcRenderer.invoke('fs_rename', {
-                connectionId: activeConnectionId,
-                oldPath: target,
-                newPath: backupPath,
-                autoRename: false
-              });
+          const preconditionError = replacementPreconditionError({ sourceConnectionId, sourcePath: source,
+            destinationConnectionId: activeConnectionId, destinationPath: finalTarget });
+          if (preconditionError) {
+            recordFileTransferFailure(failures, preconditionError);
+            continue;
+          }
 
-              // Now perform the move/copy
-              let opSuccess = false;
+          if (action === 'overwrite') {
+            if (op === 'copy' || sourceConnectionId !== activeConnectionId) {
               try {
+                if (await tryStagedReplacement({ sourceConnectionId, sourcePath: source,
+                  destinationConnectionId: activeConnectionId, destinationPath: finalTarget })) {
+                  successCount++;
+                  continue;
+                }
+              } catch (error) {
+                if (!isTransferCancellation(error)) recordFileTransferFailure(failures,
+                  `Cannot replace "${conflict.name}": ${fileTransferFailureMessage(error)}${isFileTransferNotStarted(error) ? '' : '. Check Transfers for details.'}`);
+                continue;
+              }
+            }
+            if (op === 'move' && sourceConnectionId === activeConnectionId) {
+              try {
+                sourceReservations.push(acquireFileDestination(sourceConnectionId, source));
+              } catch (error) {
+                recordFileTransferFailure(failures, `Cannot move "${conflict.name}": ${transferErrorMessage(error)}`);
+                continue;
+              }
+            }
+            let replacementTransferId: string | undefined;
+            refreshAfterMutation = true;
+            const result = await replaceFileWithBackup(target, {
+              destinationConnectionId: activeConnectionId,
+              createBackupId: () => crypto.randomUUID(),
+              rename: async (from, to) => {
+                await window.ipcRenderer.invoke('fs_rename', {
+                  connectionId: activeConnectionId, oldPath: from, newPath: to, autoRename: false,
+                });
+              },
+              write: async (backupPath, reservation) => {
                 if (sourceConnectionId === activeConnectionId) {
                   if (op === 'move') {
                     await window.ipcRenderer.invoke('fs_rename', {
-                      connectionId: activeConnectionId,
-                      oldPath: source,
-                      newPath: finalTarget,
-                      autoRename: false
+                      connectionId: activeConnectionId, oldPath: source, newPath: finalTarget, autoRename: false,
                     });
                   } else {
                     await window.ipcRenderer.invoke('fs_copy_batch', {
@@ -658,143 +718,102 @@ export const FileManager = memo(function FileManager({
                     });
                   }
                 } else {
-                  // Cross connection
-                  const transferId = addTransfer({
+                  replacementTransferId = await transferFile({
                     sourceConnectionId,
                     sourcePath: source,
                     destinationConnectionId: activeConnectionId,
                     destinationPath: finalTarget,
-                  });
-
-                  const args: any = { sourcePath: source, destinationPath: finalTarget, transferId };
-                  let command = "sftp:copyToServer";
-
-                  if (sourceConnectionId === "local") {
-                    command = "sftp:put";
-                    args.id = activeConnectionId;
-                    args.localPath = source;
-                    args.remotePath = finalTarget;
-                  } else if (activeConnectionId === "local") {
-                    command = "sftp:get";
-                    args.id = sourceConnectionId;
-                    args.remotePath = source;
-                    args.localPath = finalTarget;
-                  } else {
-                    args.sourceConnectionId = sourceConnectionId;
-                    args.destinationConnectionId = activeConnectionId;
-                  }
-
-                  await window.ipcRenderer.invoke(command, args);
+                  }, { recoveryBackupPath: backupPath, reservation });
                 }
-                opSuccess = true;
-              } finally {
-                if (opSuccess) {
-                  // Success: Delete the backup
-                  await window.ipcRenderer.invoke('fs_delete', {
-                    connectionId: activeConnectionId,
-                    path: backupPath,
-                  }).catch(() => { }); // If delete fails, it's just a stray file
-                } else {
-                  // Failure: Restore the backup
-                  await window.ipcRenderer.invoke('fs_rename', {
-                    connectionId: activeConnectionId,
-                    oldPath: backupPath,
-                    newPath: target,
-                    autoRename: false
-                  }).catch(() => { });
-                }
-              }
-              successCount++;
-              continue; // Handled specially
-            } catch (err) {
-              showToast('error', `Failed to prepare overwrite for "${conflict.name}"`);
+              },
+              remove: async (path) => {
+                await window.ipcRenderer.invoke('fs_delete', { connectionId: activeConnectionId, path });
+              },
+            });
+            if (result.outcome === 'blocked') {
+              recordFileTransferFailure(failures, result.error);
               continue;
             }
+            if (result.outcome === 'unconfirmed') {
+              if (!isTransferCancellation(result.error)) recordFileTransferFailure(failures,
+                `Replacement not confirmed for "${conflict.name}": ${transferErrorMessage(result.error)}. Check the destination and possible recovery backup at "${result.backupPath}" before retrying.`);
+              continue;
+            }
+            if (replacementTransferId) {
+              useAppStore.getState().setTransferRecovery(replacementTransferId,
+                result.outcome === 'replaced-backup-retained'
+                  ? { backupPath: result.backupPath, warning: `Could not remove the original backup: ${transferErrorMessage(result.error)}` }
+                  : null);
+            }
+            if (result.outcome === 'replaced-backup-retained') {
+              firstWarning ??= `Replaced "${conflict.name}", but could not remove its backup at "${result.backupPath}": ${transferErrorMessage(result.error)}`;
+              warningCount++;
+            }
+            if (op === 'move' && sourceConnectionId === activeConnectionId) movedSources.push(source);
+            successCount++;
+            continue;
           }
 
-          if (sourceConnectionId === activeConnectionId) {
-            // Same connection
-            if (op === 'move') {
-              await window.ipcRenderer.invoke('fs_rename', {
-                connectionId: activeConnectionId,
-                oldPath: source,
-                newPath: finalTarget,
-                autoRename: false, // We already handled it explicitly
-              });
-            } else {
-              // Same-connection copy: use fs_copy_batch with single operation for consistency
-              await window.ipcRenderer.invoke('fs_copy_batch', {
-                connectionId: activeConnectionId,
-                operations: [{ from: source, to: finalTarget }]
-              });
+          let reservation: FileDestinationReservation;
+          try {
+            reservation = acquireFileDestination(activeConnectionId, finalTarget);
+          } catch (error) {
+            recordFileTransferFailure(failures, `Cannot create "${conflict.name}": ${transferErrorMessage(error)}`);
+            continue;
+          }
+          try {
+            if (sourceConnectionId === activeConnectionId) {
+              // Same connection
+              refreshAfterMutation = true;
+              if (op === 'move') {
+                const sourceReservation = acquireFileDestination(sourceConnectionId, source);
+                try {
+                  await window.ipcRenderer.invoke('fs_rename', {
+                    connectionId: activeConnectionId, oldPath: source, newPath: finalTarget,
+                    autoRename: false, // We already handled it explicitly.
+                  });
+                } finally {
+                  sourceReservation.release();
+                }
+              } else {
+                // Same-connection copy: use fs_copy_batch with single operation for consistency
+                await window.ipcRenderer.invoke('fs_copy_batch', {
+                  connectionId: activeConnectionId,
+                  operations: [{ from: source, to: finalTarget }]
+                });
+              }
+            } else if (sourceConnectionId) {
+              await transferFile({ sourceConnectionId, sourcePath: source, destinationConnectionId: activeConnectionId, destinationPath: finalTarget }, { reservation });
             }
-          } else if (sourceConnectionId) {
-            // Cross connection
-            const transferId = addTransfer({
-              sourceConnectionId,
-              sourcePath: source,
-              destinationConnectionId: activeConnectionId,
-              destinationPath: finalTarget,
-            });
-
-            const args: any = { sourcePath: source, destinationPath: finalTarget, transferId };
-            let command = "sftp:copyToServer";
-
-            if (sourceConnectionId === "local") {
-              command = "sftp:put";
-              args.id = activeConnectionId;
-              args.localPath = source;
-              args.remotePath = finalTarget;
-            } else if (activeConnectionId === "local") {
-              command = "sftp:get";
-              args.id = sourceConnectionId;
-              args.remotePath = source;
-              args.localPath = finalTarget;
-            } else {
-              args.sourceConnectionId = sourceConnectionId;
-              args.destinationConnectionId = activeConnectionId;
-            }
-
-            try {
-              await window.ipcRenderer.invoke(command, args);
-            } catch (err: any) {
-              failTransfer(transferId, err.message || String(err));
-              continue; // Don't increment successCount if it failed to start
-            }
+            if (op === 'move' && sourceConnectionId === activeConnectionId) movedSources.push(source);
+          } catch (error) {
+            recordFileTransferFailure(failures, transferErrorMessage(error));
+            continue;
+          } finally {
+            reservation.release();
           }
         }
         successCount++;
       }
 
       const displayAction = action === 'overwrite' ? 'Overwritten' : (action === 'rename' ? 'Renamed' : 'Skipped');
-      showToast('success', `${displayAction} ${successCount} item(s)`);
-
-      // Refresh and move to next conflict or close
-      loadFiles(activeConnectionId, currentPath);
-
-      if (applyToAll) {
-        setPendingConflicts([]);
-        setCurrentConflict(null);
-        setSelectedFiles([]);
-        if (clipboard && clipboard.op === 'cut') clearClipboard();
-      } else {
-        const remaining = pendingConflicts.slice(1);
-        setPendingConflicts(remaining);
-        if (remaining.length > 0) {
-          setCurrentConflict(remaining[0]);
-        } else {
-          setCurrentConflict(null);
-          setSelectedFiles([]);
-          if (clipboard && clipboard.op === 'cut') clearClipboard();
-        }
-      }
+      if (successCount > 0) useAppStore.getState().setLastAction(`${displayAction} ${successCount} item(s)${copiesOnly ? '; source files are kept' : ''}`, 'info');
 
     } catch (e: any) {
-      showToast('error', `Failed to resolve conflict: ${e.message || String(e)}`);
-      setCurrentConflict(null);
-      setPendingConflicts([]);
+      recordFileTransferFailure(failures, e);
     } finally {
-      setIsProcessing(false);
+      const failure = fileTransferBatchFailure(failures);
+      if (failure) showToast('error', firstWarning ? `${failure} ${firstWarning}` : failure);
+      else if (firstWarning) showToast('warning', `${firstWarning}${warningCount > 1 ? ` (${warningCount} backups need attention.)` : ''}`);
+      sourceReservations.forEach(reservation => reservation.release());
+      if (movedSources.length > 0) {
+        useAppStore.setState(state => {
+          const next = acknowledgeMovedClipboard(state.clipboard, clipboardAtStart, activeConnectionId, movedSources);
+          return next === state.clipboard ? state : { clipboard: next };
+        });
+      }
+      // Refresh each instance's live location, never navigate back to a captured path.
+      if (refreshAfterMutation) void useAppStore.getState().refreshConnectionFiles(activeConnectionId);
     }
   };
 
@@ -965,7 +984,9 @@ export const FileManager = memo(function FileManager({
     if (!editingFile || !target || editorTargetRef.current !== target) {
       throw new Error('The file or its connection is no longer available');
     }
+    let reservation: FileDestinationReservation | undefined;
     try {
+      reservation = acquireFileDestination(target.connectionId, target.path);
       await window.ipcRenderer.invoke('fs_write_file', {
         connectionId: target.connectionId,
         path: target.path,
@@ -979,6 +1000,8 @@ export const FileManager = memo(function FileManager({
         showToast('error', `Failed to save file: ${error.message || String(error)}`);
       }
       throw error;
+    } finally {
+      reservation?.release();
     }
   }, [editingFile, editingFileTarget, handleConnectionError, showToast]);
 
@@ -1057,8 +1080,10 @@ export const FileManager = memo(function FileManager({
       showToast('error', `A file or folder named "${trimmedName}" already exists.`);
       return;
     }
+    let reservation: FileDestinationReservation | undefined;
     try {
       const fullPath = currentPath === '/' ? `/${trimmedName}` : `${currentPath}/${trimmedName}`;
+      reservation = acquireFileDestination(activeConnectionId, fullPath);
       await window.ipcRenderer.invoke('fs_touch', { connectionId: activeConnectionId, path: fullPath });
       refreshFiles(activeConnectionId);
       setIsNewFileModalOpen(false);
@@ -1066,6 +1091,8 @@ export const FileManager = memo(function FileManager({
     } catch (error: any) {
       if (handleConnectionError(activeConnectionId, error)) return;
       showToast('error', `Failed to create file: ${error.message || String(error)}`);
+    } finally {
+      reservation?.release();
     }
   };
 
@@ -1334,29 +1361,20 @@ export const FileManager = memo(function FileManager({
       // We process download locally in component for now as it involves local FS dialog
       setIsProcessing(true);
 
-      for (const fileName of selectedFiles) {
+      void runFileTransferBatch([...selectedFiles], fileName => {
         const remotePath = currentPath === '/' ? `/${fileName}` : `${currentPath}/${fileName}`;
         const localPath = targetDir.includes('\\') ? `${targetDir}\\${fileName}` : `${targetDir}/${fileName}`;
 
-        // Add transfer to store for progress tracking
-        const transferId = addTransfer({
+        return transferFile({
           sourceConnectionId: activeConnectionId,
           sourcePath: remotePath,
           destinationConnectionId: 'local',
           destinationPath: localPath,
         });
-
-        // Fire and forget - tracking happens via events
-        window.ipcRenderer.invoke('sftp:get', {
-          id: activeConnectionId,
-          remotePath,
-          localPath,
-          transferId,
-        }).catch(err => {
-          console.error('Download failed', err);
-          failTransfer(transferId, err.message || String(err));
-        });
-      }
+      }).then(result => {
+        const failure = fileTransferBatchFailure(result);
+        if (failure) showToast('error', `Download failed: ${failure}`);
+      });
       setIsProcessing(false);
     } catch (error: any) {
       setIsProcessing(false);
@@ -1416,17 +1434,28 @@ export const FileManager = memo(function FileManager({
         destinationPath: filePath,
         label: 'Compressing',
       });
+      let reservation: FileDestinationReservation;
+      try {
+        reservation = acquireFileDestination('local', filePath);
+      } catch (error) {
+        failTransfer(transferId, transferErrorMessage(error));
+        throw error;
+      }
 
-      // Fire-and-forget: completion/failure reported via transfer-success/transfer-error events
-      window.ipcRenderer.invoke('sftp:downloadAsZip', {
-        id: activeConnectionId,
-        remotePaths,
-        localPath: filePath,
-        transferId,
-      }).catch((err: any) => {
-        // Catches invoke-level errors (e.g. command not found) — backend errors come via transfer-error
-        failTransfer(transferId, err.message || String(err));
-      });
+      // The detached promise holds its destination through native finalization.
+      void (async () => {
+        try {
+          await window.ipcRenderer.invoke('sftp:downloadAsZip', {
+            id: activeConnectionId, remotePaths, localPath: filePath, transferId, waitForCompletion: true,
+          });
+          useAppStore.getState().completeTransfer(transferId);
+        } catch (error: unknown) {
+          if (isTransferCancellation(error)) useAppStore.getState().cancelTransfer(transferId);
+          else failTransfer(transferId, transferErrorMessage(error));
+        } finally {
+          reservation.release();
+        }
+      })();
     } catch (error: any) {
       if (handleConnectionError(activeConnectionId, error)) return;
       showToast('error', `Archive download failed: ${error.message || String(error)}`);
@@ -1835,8 +1864,8 @@ export const FileManager = memo(function FileManager({
       data-files-quiet-focus={activationFocus.quiet || undefined}
       style={selectionColors}
       onFocusCapture={activationFocus.onFocusCapture}
-      onKeyDownCapture={activationFocus.revealFocus}
-      onPointerDownCapture={activationFocus.revealFocus}
+      onKeyDownCapture={activationFocus.onKeyDownCapture}
+      onPointerDownCapture={activationFocus.onPointerDownCapture}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -2132,15 +2161,12 @@ export const FileManager = memo(function FileManager({
       <ConflictModal
         isOpen={!!currentConflict}
         onClose={() => {
-          if (isProcessing) return;
-          setCurrentConflict(null);
-          setPendingConflicts([]);
+          clearConflicts();
         }}
         onResolve={resolveConflict}
         fileName={currentConflict?.name || ''}
-        destinationPath={currentPath}
+        destinationPath={currentConflict ? parentFilePath(currentConflict.target) ?? currentConflict.target : currentPath}
         isBatch={pendingConflicts.length > 1}
-        isResolving={isProcessing}
       />
     </div>
   );
