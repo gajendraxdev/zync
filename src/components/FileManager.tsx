@@ -1494,7 +1494,10 @@ export const FileManager = memo(function FileManager({
   const executeDelete = useCallback(async () => {
     if (selectedFiles.length === 0 || !activeConnectionId) return;
 
-    const paths = selectedFiles.map(name => currentPath === '/' ? `/${name}` : `${currentPath}/${name}`);
+    // Native listing paths are identities; rebuilding them mixes Windows separators.
+    const selectedNames = new Set(selectedFiles);
+    const paths = files.filter(file => selectedNames.has(file.name)).map(file => file.path);
+    if (paths.length === 0) return;
 
     setIsDeleting(true);
     try {
@@ -1507,7 +1510,7 @@ export const FileManager = memo(function FileManager({
     } finally {
       setIsDeleting(false);
     }
-  }, [activeConnectionId, currentPath, deleteEntries, handleConnectionError, selectedFiles, showToast]);
+  }, [activeConnectionId, files, deleteEntries, handleConnectionError, selectedFiles, showToast]);
 
   const handleDelete = useCallback(() => {
     if (selectedFiles.length === 0 || !activeConnectionId) return;

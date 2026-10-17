@@ -37,8 +37,7 @@ Object.defineProperty(globalThis, 'window', { configurable: true, value: {
 const { acknowledgeMovedClipboard, createFileSystemSlice, filesStoreKey, splitFileName } = await import('../src/store/fileSystemSlice');
 let serial = 0;
 
-function fixture() {
-    const connectionId = `refresh-fixture-${++serial}`;
+function fixture(connectionId = `refresh-fixture-${++serial}`) {
     // Other application slices are intentionally absent: accidental cross-feature access must fail.
     const store = createStore<AppStore>()((...args) => {
         const initial: Partial<AppStore> = {
@@ -73,8 +72,9 @@ async function run(name: string, test: () => Promise<void>): Promise<void> {
 
 function deferred() {
     let resolve!: () => void;
-    const promise = new Promise<void>(yes => { resolve = yes; });
-    return { promise, resolve };
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
+    return { promise, resolve, reject };
 }
 
 try {
@@ -161,6 +161,209 @@ try {
         const { store, connectionId } = fixture();
         await store.getState().refreshConnectionFiles(connectionId);
         equal(requests.length, 0, 'Do not open a file manager implicitly');
+    });
+
+    await run('delete immediately hides native local/SSH paths and refreshes all matching panes after completion', async () => {
+        for (const [local, instanceId] of [[true, undefined], [true, 'peer'], [false, 'peer']] as const) {
+            const { store, connectionId } = fixture(local ? 'local' : undefined);
+            const key = filesStoreKey(connectionId, instanceId);
+            const directory = local ? 'C:/delete-fixture' : '/delete-fixture';
+            const removed = { ...entry('remove.txt', directory),
+                path: local ? 'C:\\delete-fixture\\remove.txt' : `${directory}/remove.txt` };
+            const kept = entry('keep.txt', directory);
+            const peer = filesStoreKey(connectionId, 'peer');
+            const other = filesStoreKey(connectionId, 'other');
+            const unrelated = [entry('unrelated', '/unrelated')];
+            store.setState({ currentPath: { [connectionId]: directory, [peer]: directory, [other]: '/other', foreign: '/unrelated' },
+                files: { [connectionId]: [removed, kept], [peer]: [removed, kept], [other]: [], foreign: unrelated } });
+            const native = deferred();
+            const reads: string[] = [];
+            let mutations = 0;
+            nativeOverride = async (command, args) => {
+                if (command === 'fs_list') {
+                    const request = args as { connectionId: string; path: string };
+                    equal(request.connectionId, connectionId, 'Never refresh another endpoint');
+                    reads.push(request.path);
+                    return request.path === directory ? [kept] : [];
+                }
+                equal(command, 'fs_delete_batch', 'Keep the existing native delete command');
+                sameValues(args, { connectionId, paths: [removed.path] }, 'Keep native listing path bytes unchanged');
+                mutations++;
+                await native.promise;
+            };
+            try {
+                const deletion = store.getState().deleteEntries(connectionId, [removed.path], instanceId);
+                sameValues(store.getState().files[key], [kept], 'Hide the deleted entry without waiting for native completion');
+                equal(reads.length, 0, 'Do not refresh before native acknowledges deletion');
+                native.resolve();
+                await deletion;
+                equal(mutations, 1, 'Submit the deletion once');
+                sameValues(reads.sort(), [directory, directory, '/other'].sort(), 'Reconcile base and split panes at their current paths');
+                sameValues(store.getState().files[peer].map(file => file.path), [kept.path], 'A sibling pane no longer shows the deleted item');
+                equal(store.getState().files.foreign, unrelated, 'Leave unrelated endpoint listings untouched');
+                acquireFileDestination(connectionId, removed.path).release();
+            } finally { native.resolve(); nativeOverride = null; }
+        }
+    });
+
+    await run('partial and opaque delete failures restore only the owned optimistic view', async () => {
+        for (const partial of [true, false]) {
+            const { store, connectionId } = fixture();
+            const deleted = entry('deleted', '/folder');
+            const failed = entry('failed', '/folder');
+            const kept = entry('kept', '/folder');
+            const expected = partial ? [failed, kept] : [deleted, failed, kept];
+            store.setState({ currentPath: { [connectionId]: '/folder' }, files: { [connectionId]: [deleted, failed, kept] } });
+            const native = deferred();
+            const read = deferred();
+            const refreshing = deferred();
+            const messages: string[] = [];
+            bindNotifyDispatcher((_level, message) => { messages.push(message); return 'delete-test'; });
+            nativeOverride = async command => {
+                if (command === 'fs_delete_batch') return native.promise;
+                equal(command, 'fs_list', 'A failed batch is reconciled with a fresh listing');
+                refreshing.resolve();
+                await read.promise;
+                return expected;
+            };
+            try {
+                const deletion = store.getState().deleteEntries(connectionId, [deleted.path, failed.path]);
+                native.reject(partial ? { message: 'Some files could not be deleted', failed_paths: [failed.path] } : new Error('Permission denied'));
+                await refreshing.promise;
+                sameValues(store.getState().files[connectionId], expected, 'Restore failures while awaiting the authoritative read');
+                equal(messages.length, 1, 'Report one delete error');
+                read.resolve();
+                await deletion;
+                sameValues(store.getState().files[connectionId].map(file => file.path), expected.map(file => file.path), 'Keep the reconciled listing');
+                acquireFileDestination(connectionId, failed.path).release();
+            } finally { read.resolve(); nativeOverride = null; unbindNotifyDispatcher(); }
+        }
+    });
+
+    await run('empty deletion does no IPC and disconnected deletion does not trigger refresh or reconnect', async () => {
+        const { store, connectionId } = fixture();
+        const original = [entry('keep', '/folder')];
+        store.setState({ currentPath: { [connectionId]: '/folder' }, files: { [connectionId]: original } });
+        const calls: string[] = [];
+        nativeOverride = async command => { calls.push(command); throw new Error('DISCONNECTED: Connection closed'); };
+        try {
+            await store.getState().deleteEntries(connectionId, []);
+            equal(calls.length, 0, 'An empty selection has no side effects');
+            equal(store.getState().files[connectionId], original, 'Keep the existing listing identity');
+            await store.getState().deleteEntries(connectionId, [original[0].path]);
+            sameValues(calls, ['fs_delete_batch'], 'Do not automatically repeat a mutation or reconnect through refresh');
+            sameValues(store.getState().files[connectionId], original, 'Restore the unchanged failed entry');
+            equal(store.getState().error[connectionId], 'DISCONNECTED', 'Keep the established disconnected presentation');
+        } finally { nativeOverride = null; }
+    });
+
+    await run('a late failed delete cannot restore a snapshot over navigation or a newer listing update', async () => {
+        for (const navigate of [true, false]) {
+            const { store, connectionId } = fixture();
+            const removed = entry('old', '/old');
+            store.setState({ currentPath: { [connectionId]: '/old' }, files: { [connectionId]: [removed] } });
+            const native = deferred();
+            const read = deferred();
+            const refreshing = deferred();
+            const newPath = navigate ? '/new' : '/old';
+            const newer = [entry('newer', newPath)];
+            let refreshStarted = false;
+            nativeOverride = async command => {
+                if (command === 'fs_delete_batch') return native.promise;
+                equal(command, 'fs_list', 'Reconcile through the shared listing reader');
+                if (!refreshStarted) return newer;
+                refreshing.resolve();
+                await read.promise;
+                return newer;
+            };
+            try {
+                const deletion = store.getState().deleteEntries(connectionId, [removed.path]);
+                if (navigate) await store.getState().loadFiles(connectionId, newPath);
+                else store.setState({ files: { [connectionId]: newer } });
+                const currentFiles = store.getState().files[connectionId];
+                refreshStarted = true;
+                native.reject(new Error('Permission denied'));
+                await refreshing.promise;
+                equal(store.getState().files[connectionId], currentFiles, 'Never replay the old snapshot into a newer view');
+                read.resolve();
+                await deletion;
+                equal(store.getState().currentPath[connectionId], newPath, 'Do not navigate back after the failure');
+            } finally { read.resolve(); nativeOverride = null; }
+        }
+    });
+
+    await run('delete completion refreshes an in-flight navigation target rather than the old displayed folder', async () => {
+        const { store, connectionId } = fixture();
+        const removed = entry('old', '/old');
+        store.setState({ currentPath: { [connectionId]: '/old' }, files: { [connectionId]: [removed] } });
+        const native = deferred();
+        const refreshing = deferred();
+        let reads = 0;
+        nativeOverride = async (command, args) => {
+            if (command === 'fs_delete_batch') return native.promise;
+            equal(command, 'fs_list', 'Completion only reads metadata');
+            const request = args as { connectionId: string; path: string };
+            return new Promise<FileEntry[]>(resolve => {
+                requests.push({ ...request, resolve });
+                if (++reads === 2) refreshing.resolve();
+            });
+        };
+        try {
+            const deletion = store.getState().deleteEntries(connectionId, [removed.path]);
+            const navigation = store.getState().loadFiles(connectionId, '/new');
+            const original = takeRequest('/new');
+            native.resolve();
+            // The navigation request was taken above, so this waits for its fresh successor.
+            await refreshing.promise;
+            const refreshed = takeRequest('/new');
+            refreshed.resolve([entry('fresh', '/new')]);
+            await deletion;
+            original.resolve([entry('stale', '/new')]);
+            await navigation;
+            equal(store.getState().currentPath[connectionId], '/new', 'The pending user navigation wins');
+            equal(store.getState().files[connectionId][0].name, 'fresh', 'Its older reply cannot replace the post-delete read');
+        } finally { native.resolve(); nativeOverride = null; }
+    });
+
+    await run('a completion refresh cannot cancel navigation while its home path is resolving', async () => {
+        const { store, connectionId } = fixture();
+        store.setState({ currentPath: { [connectionId]: '/old' }, files: { [connectionId]: [] },
+            history: { [connectionId]: ['/old'] }, historyIndex: { [connectionId]: 0 } });
+        const cwd = deferred();
+        const reads: string[] = [];
+        nativeOverride = async (command, args) => {
+            if (command === 'fs_cwd') { await cwd.promise; return '/home/test'; }
+            equal(command, 'fs_list', 'Home resolution only reads directory metadata');
+            const path = (args as { path: string }).path;
+            reads.push(path);
+            return [entry('home-result', path)];
+        };
+        try {
+            const navigation = store.getState().loadFiles(connectionId, '~');
+            const refresh = store.getState().refreshConnectionFiles(connectionId);
+            cwd.resolve();
+            await Promise.all([navigation, refresh]);
+            sameValues(reads, ['/home/test'], 'Home resolution performs the fresh read, not a refresh of the old folder');
+            equal(store.getState().currentPath[connectionId], '/home/test', 'Preserve the user navigation');
+            sameValues(store.getState().history[connectionId], ['/old', '/home/test'], 'Preserve its history entry');
+        } finally { cwd.resolve(); nativeOverride = null; }
+    });
+
+    await run('an unresolved home request does not leave ordinary refresh permanently pending', async () => {
+        const { store, connectionId } = fixture();
+        store.setState({ currentPath: { [connectionId]: '/old' }, files: { [connectionId]: [] } });
+        const reads: string[] = [];
+        nativeOverride = async (command, args) => {
+            if (command === 'fs_cwd') return '~';
+            equal(command, 'fs_list', 'After failed home resolution refresh the current real folder');
+            reads.push((args as { path: string }).path);
+            return [];
+        };
+        try {
+            await store.getState().loadFiles(connectionId, '~');
+            await store.getState().refreshFiles(connectionId);
+            sameValues(reads, ['/old'], 'A completed unresolved request must not block later refresh');
+        } finally { nativeOverride = null; }
     });
 
     await run('same-endpoint copy cancellation is quiet without hiding an uncertain close', async () => {

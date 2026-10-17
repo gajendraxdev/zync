@@ -12,7 +12,9 @@ import { acquireFileDestination, acquireFileDestinations, type FileDestinationRe
 
 // @ts-ignore
 const ipc = window.ipcRenderer;
-const filesLoadGeneration = new Map<string, number>();
+// Request identity fences stale replies; its target also keeps refreshes from
+// redirecting an in-flight navigation back to the previously displayed folder.
+const filesLoadGeneration = new Map<string, { path: string; pending: boolean }>();
 const recentPathsGeneration = new Map<string, number>();
 
 /** Listing/cwd key. Overlay Files uses `connectionId`; split panes use `connectionId::instanceId`. */
@@ -150,7 +152,7 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
         let targetPath = path !== undefined ? path : state.currentPath[key] || '';
         if (!targetPath) return;
         const recentGen = recentPathsGeneration.get(connectionId) || 0;
-        const loadGen = (filesLoadGeneration.get(key) || 0) + 1;
+        const loadGen = { path: targetPath, pending: true };
         filesLoadGeneration.set(key, loadGen);
         if (targetPath === '~' || targetPath.startsWith('~/')) {
             const conn = get().connections.find((c) => c.id === connectionId);
@@ -167,7 +169,10 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
             }
             if (filesLoadGeneration.get(key) !== loadGen) return;
             const expanded = expandTildeWithHome(targetPath, home);
-            if (!expanded || expanded === '~' || expanded.startsWith('~/')) return;
+            if (!expanded || expanded === '~' || expanded.startsWith('~/')) {
+                loadGen.pending = false;
+                return;
+            }
             targetPath = expanded;
         }
 
@@ -204,6 +209,7 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
             }));
         }
 
+        loadGen.path = targetPath;
         try {
             const entries = await ipc.invoke('fs_list', { connectionId, path: targetPath });
 
@@ -282,12 +288,18 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
             if (osError.includes('Connection not found')) {
                 get().disconnect(connectionId);
             }
+        } finally {
+            loadGen.pending = false;
         }
     },
 
     refreshFiles: async (connectionId, instanceId) => {
         const key = filesStoreKey(connectionId, instanceId);
-        const path = get().currentPath[key];
+        const request = filesLoadGeneration.get(key);
+        // Home resolution has not started its listing read yet. Let that
+        // navigation perform the fresh read and retain its history ownership.
+        if (request?.pending && (request.path === '~' || request.path.startsWith('~/'))) return;
+        const path = request?.pending ? request.path : get().currentPath[key];
         if (path) {
             await get().loadFiles(connectionId, path, true, true, instanceId);
         }
@@ -358,48 +370,57 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
     },
 
     deleteEntries: async (connectionId, paths, instanceId) => {
+        if (paths.length === 0) return;
         const key = filesStoreKey(connectionId, instanceId);
+        const viewPath = get().currentPath[key];
+        const viewGeneration = filesLoadGeneration.get(key);
         const previousFiles = get().files[key] || [];
+        const deletedPaths = new Set(paths);
         const reservations: FileDestinationReservation[] = [];
+        let optimisticFiles: FileEntry[] | undefined;
+        let submitted = false;
+        let disconnected = false;
 
         try {
             reservations.push(...acquireFileDestinations(connectionId, paths));
             // Only hide entries after the whole mutation has been admitted.
             set(state => {
                 const currentFiles = state.files[key] || [];
-                const newFiles = currentFiles.filter(f => !paths.includes(f.path));
-                return { files: { ...state.files, [key]: newFiles } };
+                optimisticFiles = currentFiles.filter(file => !deletedPaths.has(file.path));
+                return { files: { ...state.files, [key]: optimisticFiles } };
             });
+            submitted = true;
             await ipc.invoke('fs_delete_batch', { connectionId, paths });
             get().setLastAction(`Deleted ${paths.length} item(s)`, 'success');
         } catch (error: any) {
             const failedPaths: string[] = error.failed_paths || [];
             const msg = error.message || String(error);
             
-            // Targeted rollback: Only restore paths that actually failed
-            if (failedPaths.length > 0) {
-                const successfullyDeleted = paths.filter(p => !failedPaths.includes(p));
+            // Restore only this optimistic view, never a newer read/navigation
+            // or another mutation's listing. A fresh read reconciles partial errors.
+            if (submitted) {
+                const failed = new Set(failedPaths.length > 0 ? failedPaths : paths);
                 set(state => {
-                    const finalFiles = previousFiles.filter(f => !successfullyDeleted.includes(f.path));
+                    if (state.currentPath[key] !== viewPath || filesLoadGeneration.get(key) !== viewGeneration
+                        || state.files[key] !== optimisticFiles) return state;
+                    const finalFiles = previousFiles.filter(file => !deletedPaths.has(file.path) || failed.has(file.path));
                     return { files: { ...state.files, [key]: finalFiles } };
                 });
-            } else {
-                // Full rollback if error is opaque or all failed
-                set(state => ({
-                    files: { ...state.files, [key]: previousFiles }
-                }));
             }
 
             if (msg.includes('DISCONNECTED:')) {
-                set(state => ({ error: { ...state.error, [key]: 'DISCONNECTED' } }));
+                disconnected = true;
+                set(state => state.currentPath[key] === viewPath && filesLoadGeneration.get(key) === viewGeneration
+                    ? { error: { ...state.error, [key]: 'DISCONNECTED' } } : state);
                 return;
             } else {
                 notify.error(`Delete failed: ${msg}`, { source: 'files' });
             }
-            // Final safety refresh
-            await get().refreshFiles(connectionId, instanceId);
         } finally {
             reservations.forEach(reservation => reservation.release());
+            // Reuse the connection-wide refresh for base/split panes at their
+            // live paths. A rejected admission did not mutate anything.
+            if (submitted && !disconnected) await get().refreshConnectionFiles(connectionId);
         }
     },
 
