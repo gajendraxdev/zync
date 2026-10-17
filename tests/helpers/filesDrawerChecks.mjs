@@ -248,7 +248,7 @@ export async function runFilesDrawerChecks({ page, check, screenshot }) {
     el.scrollTop === 0 && el.scrollHeight <= el.clientHeight && document.scrollingElement.scrollTop === 0));
   await screenshot('files-production-places-scroll');
   check('motion and scrolling create no native file mutations or unrelated preference writes', await page.evaluate(() =>
-    window.filesUiTest.calls.every(command => ['fs_list', 'fs_cwd'].includes(command))
+    window.filesUiTest.calls.every(command => ['fs_list', 'fs_cwd', 'fs_permissions_read'].includes(command))
     && window.filesUiTest.settingsWrites.every(write => Object.keys(write).every(key => ['placesCollapsed', 'defaultView'].includes(key)))));
   await page.emulateMedia({ reducedMotion: 'reduce' });
 }

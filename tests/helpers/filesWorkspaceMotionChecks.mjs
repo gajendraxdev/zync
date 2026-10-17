@@ -183,6 +183,6 @@ export async function runFilesWorkspaceMotionChecks({ page, check, screenshot })
   await settle(page);
   await screenshot('files-production-workspace-sidebars');
   check('workspace motion performs no native mutations or Files preference migration', await page.evaluate(() =>
-    window.filesUiTest.calls.every(command => ['fs_list', 'fs_cwd'].includes(command))
+    window.filesUiTest.calls.every(command => ['fs_list', 'fs_cwd', 'fs_permissions_read'].includes(command))
     && window.filesUiTest.settingsWrites.every(write => Object.keys(write).every(key => ['placesCollapsed', 'defaultView'].includes(key)))));
 }

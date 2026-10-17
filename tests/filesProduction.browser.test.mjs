@@ -11,6 +11,8 @@ import { runFilesFocusChecks } from './helpers/filesFocusChecks.mjs';
 
 const transferSafetyOnly = process.argv.includes('--transfer-safety-only');
 const focusOnly = process.argv.includes('--focus-only');
+const permissionsOnly = process.argv.includes('--permissions-only');
+const editorOnly = process.argv.includes('--editor-only');
 
 const { chromium } = await import(process.env.ZYNC_PLAYWRIGHT_MODULE || 'playwright');
 const server = await createServer({
@@ -44,7 +46,7 @@ try {
     return route.abort();
   });
   const address = server.httpServer.address();
-  await page.goto(`http://127.0.0.1:${address.port}/tests/filesProduction.browser.html`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.goto(`http://127.0.0.1:${address.port}/tests/filesProduction.browser.html${permissionsOnly ? '?permissions=1' : editorOnly ? '?editor=1' : ''}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   const item = name => page.locator(`[data-file-name=${JSON.stringify(name)}]`);
   const summary = page.locator('.files-summary-count');
   const listing = page.getByRole('listbox');
@@ -54,6 +56,61 @@ try {
     await mkdir(process.env.ZYNC_FILES_SCREENSHOTS, { recursive: true });
     await page.screenshot({ path: `${process.env.ZYNC_FILES_SCREENSHOTS}/${name}.png` });
   };
+  if (editorOnly) {
+    await page.waitForFunction(() => typeof window.runFileEditorSaveBrowserChecks === 'function');
+    for (const label of await page.evaluate(() => window.runFileEditorSaveBrowserChecks())) check(label, true);
+    const writesBefore = await page.evaluate(() => window.filesUiTest.editor.editorWrites.length);
+    await page.locator('.cm-content').click();
+    await page.keyboard.press('Control+s');
+    await page.keyboard.press('Control+s');
+    check('real browser Ctrl+S is silent on a read-only CodeMirror document', await page.evaluate(() => window.filesUiTest.editor.editorWrites.length) === writesBefore);
+    await screenshot('files-editor-read-only');
+    await page.setViewportSize({ width: 360, height: 800 });
+    const accessTrigger = page.getByRole('button', { name: 'Read-only file', exact: true });
+    await accessTrigger.waitFor();
+    check('read-only explanation and actions remain usable in a narrow Files pane', await accessTrigger.evaluate(element => {
+      const notice = element.getBoundingClientRect();
+      const save = document.querySelector('[aria-label="Save file"]').getBoundingClientRect();
+      return notice.left >= 0 && notice.right <= innerWidth && save.left >= 0 && save.right <= innerWidth
+        && (save.top >= notice.bottom || save.left >= notice.right);
+    }));
+    await accessTrigger.focus();
+    await page.keyboard.press('ArrowDown');
+    const accessMenu = page.getByRole('menu', { name: 'Read-only file', exact: true });
+    await accessMenu.waitFor();
+    check('keyboard opens the existing access menu at its safe refresh action', await page.getByRole('menuitem', { name: 'Check permissions again', exact: true }).evaluate(element => document.activeElement === element));
+    check('advanced options fit inside the narrow viewport', await accessMenu.evaluate(element => {
+      const bounds = element.getBoundingClientRect();
+      return bounds.left >= 0 && bounds.right <= innerWidth && bounds.top >= 0 && bounds.bottom <= innerHeight;
+    }));
+    await screenshot('files-editor-access-options');
+    await page.keyboard.press('Escape');
+    await accessMenu.waitFor({ state: 'detached' });
+    check('Escape closes access options and restores focus without enabling saving', await accessTrigger.evaluate(element => document.activeElement === element)
+      && await page.getByRole('button', { name: 'Save file', exact: true }).isDisabled());
+    await screenshot('files-editor-read-only-narrow');
+    assert.deepEqual(errors, []); assert.deepEqual(requests, []);
+    console.log(`Production Files editor save-access checks passed (${checks}).`);
+    process.exitCode = 0;
+  } else if (permissionsOnly) {
+    await page.waitForFunction(() => typeof window.runFilePermissionBrowserChecks === 'function');
+    for (const label of await page.evaluate(() => window.runFilePermissionBrowserChecks())) check(label, true);
+    const permissionWrites = await page.evaluate(() => window.filesUiTest.calls.filter(command => command === 'fs_permissions_apply').length);
+    const ownerWrite = page.getByRole('checkbox', { name: 'Owner write', exact: true });
+    const checkedBeforeSpace = await ownerWrite.isChecked();
+    await ownerWrite.focus();
+    await page.keyboard.press('Space');
+    check('Space toggles the native permission control without submitting a write', await ownerWrite.isChecked() !== checkedBeforeSpace
+      && await page.evaluate(() => window.filesUiTest.calls.filter(command => command === 'fs_permissions_apply').length) === permissionWrites);
+    await page.emulateMedia({ forcedColors: 'active' });
+    check('forced colors restores system-owned native checkbox artwork', await ownerWrite.evaluate(element => getComputedStyle(element).appearance === 'auto'));
+    await page.emulateMedia({ forcedColors: 'none' });
+    await screenshot('files-permission-editor');
+    assert.deepEqual(errors, []);
+    assert.deepEqual(requests, []);
+    console.log(`Production Files permission checks passed (${checks}).`);
+    process.exitCode = 0;
+  } else {
   // Focused motion runs share the exact production fixture and browser boundaries.
   if (!focusOnly && !transferSafetyOnly && !process.argv.includes('--drawers-only') && !process.argv.includes('--workspace-motion-only')) {
   const clickMenu = async (label, itemName, role = 'menuitem') => {
@@ -623,7 +680,7 @@ try {
   });
   await page.setViewportSize({ width: 1200, height: 800 });
   check('UI changes only save explicitly chosen view/visibility preferences', await page.evaluate(() => window.filesUiTest.settingsWrites.every(write => Object.keys(write).every(key => ['defaultView', 'showHiddenFiles'].includes(key)))));
-  check('no unexpected native, network or browser errors', errors.length === 0 && requests.length === 0 && await page.evaluate(() => window.filesUiTest.calls.every(command => ['fs_list', 'fs_exists', 'fs_cwd', 'dialog:openFile', 'dialog:openDirectory'].includes(command))));
+  check('no unexpected native, network or browser errors', errors.length === 0 && requests.length === 0 && await page.evaluate(() => window.filesUiTest.calls.every(command => ['fs_list', 'fs_exists', 'fs_cwd', 'fs_permissions_read', 'dialog:openFile', 'dialog:openDirectory'].includes(command))));
   await page.evaluate(() => window.filesUiTest.preference({ showHiddenFiles: false }));
   await item('README.md').locator('[data-file-select]').click();
   const folderSwitch = page.getByRole('button', { name: 'Folders in Home', exact: true });
@@ -959,6 +1016,7 @@ try {
   assert.deepEqual(errors, []);
   assert.deepEqual(requests, []);
   console.log(`Production Files browser checks passed (${checks}).`);
+  }
 } finally {
   await browser?.close();
   await server.close();

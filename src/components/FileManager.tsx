@@ -44,6 +44,7 @@ import type { FileSearchTypeFilter } from './file-manager/FileQueryEditor';
 import type { FileEntry } from './file-manager/types';
 import { EDITOR_READ_LIMIT_MESSAGE, exceedsEditorReadLimit, isEditorReadLimitError, MAX_EDITOR_FILE_BYTES } from './file-manager/editorReadPolicy';
 import { PropertiesPanel } from './file-manager/PropertiesPanel';
+import { useFilePermissionEditor } from '../features/files/application/useFilePermissionEditor';
 import { useFileClipboard } from './file-manager/useFileClipboard';
 import { isFileManagerPanelShown, useFileKeyboard } from './file-manager/useFileKeyboard';
 import { useFileSelection } from './file-manager/useFileSelection';
@@ -1023,14 +1024,13 @@ export const FileManager = memo(function FileManager({
         setEditorContent(content);
       }
     } catch (error: any) {
-      if (editorTargetRef.current === target && !handleConnectionError(target.connectionId, error, true)) {
-        showToast('error', `Failed to save file: ${error.message || String(error)}`);
-      }
+      // The editor owns save feedback; Files only updates connection state.
+      if (editorTargetRef.current === target) handleConnectionError(target.connectionId, error, true);
       throw error;
     } finally {
       reservation?.release();
     }
-  }, [editingFile, editingFileTarget, handleConnectionError, showToast]);
+  }, [editingFile, editingFileTarget, handleConnectionError]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent, file?: FileEntry) => {
     e.preventDefault();
@@ -1874,6 +1874,11 @@ export const FileManager = memo(function FileManager({
     setHeldPropertiesFiles(propertiesEntries);
   }, [isPropertiesOpen, propertiesEntries]);
   const inspectorFiles = isPropertiesOpen ? propertiesEntries : heldPropertiesFiles;
+  const permissionTarget = activeConnectionId && propertiesEntries.length === 1
+    ? { connectionId: activeConnectionId, path: propertiesEntries[0].path } : null;
+  const permissionEditor = useFilePermissionEditor(permissionTarget,
+    isPropertiesOpen && isFilesSurfaceActive && isConnected,
+    useAppStore.getState().refreshConnectionFiles);
   const placesContent = <FilePlacesSidebar
     homePath={homePath} currentPath={currentPath} recents={recentPaths} bookmarks={bookmarks}
     volumes={isLocal ? volumes : []} platform={typeof window !== 'undefined' ? window.electronUtils?.platform : undefined}
@@ -2047,6 +2052,7 @@ export const FileManager = memo(function FileManager({
         {propertiesInline && <FileSideDrawer open={isPropertiesOpen} width={FILE_PROPERTIES_WIDTH_PX} side="right">
           <PropertiesPanel
             files={inspectorFiles}
+            permissionEditor={permissionEditor}
             onClose={() => setIsPropertiesOpen(false)}
             dateTimeFormat={settings.fileManager.dateTimeFormat || 'simple'}
           />
@@ -2058,6 +2064,7 @@ export const FileManager = memo(function FileManager({
       </Modal>
       <Modal isOpen={isFilesSurfaceActive && !propertiesInline && isPropertiesOpen} restoreFocus={isFilesSurfaceActive} onClose={() => setIsPropertiesOpen(false)} title="Properties" width="max-w-sm" contentClassName="p-0">
         <PropertiesPanel files={inspectorFiles} onClose={() => setIsPropertiesOpen(false)} showHeader={false}
+          permissionEditor={permissionEditor}
           dateTimeFormat={settings.fileManager.dateTimeFormat || 'simple'} />
       </Modal>
       </div>
@@ -2155,7 +2162,9 @@ export const FileManager = memo(function FileManager({
       {/* File Editor Overlay */}
       {editingFile && editingFileTarget && (
         <FileEditor
+          key={`${editingFileTarget.connectionId}:${editingFileTarget.path}`}
           documentId={`${editingFileTarget.connectionId}:${editingFileTarget.path}`}
+          permissionTarget={editingFileTarget}
           filename={editingFile.name}
           initialContent={editorContent}
           preferredProviderId={editorProviderOverride ?? undefined}

@@ -6,6 +6,8 @@ import { Button } from '../../ui/Button';
 import { KeyboardKey } from '../../ui/KeyboardKey';
 import { Modal } from '../../ui/Modal';
 import { Tooltip } from '../../ui/Tooltip';
+import { EditorSaveAccessStatus } from '../EditorSaveAccessStatus';
+import { editorSaveBlocked, type EditorSaveAccess } from '../../../features/files/domain/editorSaveAccess';
 
 interface CodeMirrorToolbarProps {
   filename: string;
@@ -15,6 +17,7 @@ interface CodeMirrorToolbarProps {
   onGoToLine: () => void;
   onOpenSearch: () => void;
   onSave: () => void;
+  saveAccess?: EditorSaveAccess;
 }
 
 export function CodeMirrorToolbar({
@@ -25,13 +28,18 @@ export function CodeMirrorToolbar({
   onGoToLine,
   onOpenSearch,
   onSave,
+  saveAccess,
 }: CodeMirrorToolbarProps) {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const saveDisabled = isSaving || !isDirty || editorSaveBlocked(saveAccess);
 
   return (
     <>
-      <div className="@container flex h-10 items-center justify-between gap-2 border-b border-app-border px-3">
-        <div className="min-w-0 flex-1 truncate text-sm font-semibold text-app-text">{filename}</div>
+      <div className="@container flex min-h-10 flex-wrap items-center justify-between gap-x-2 gap-y-1 border-b border-app-border px-3 py-1">
+        <div className="flex min-w-0 flex-1 basis-48 items-center gap-3">
+          <div className="truncate text-sm font-semibold text-app-text">{filename}</div>
+          <EditorSaveAccessStatus access={saveAccess} />
+        </div>
 
         <div className="flex shrink-0 items-center gap-1">
           <Tooltip content="Editor shortcuts" position="bottom">
@@ -48,15 +56,15 @@ export function CodeMirrorToolbar({
             </Button>
           </Tooltip>
 
-          <Tooltip content={isDirty ? 'Save · Ctrl/Cmd+S' : 'No unsaved changes'} position="bottom">
+          <Tooltip content={editorSaveBlocked(saveAccess) ? saveAccess!.reason : isDirty ? 'Save · Ctrl/Cmd+S' : 'No unsaved changes'} position="bottom" disabledTrigger={saveDisabled}>
             <Button
               type="button"
               variant="ghost"
               size="sm"
-              className={`h-8 gap-1.5 px-2 text-[11px] ${isDirty ? '!text-app-accent' : '!text-app-muted'}`}
-              aria-disabled={isSaving}
+              className={`h-8 gap-1.5 px-2 text-[11px] ${!saveDisabled ? '!text-app-accent' : '!text-app-muted'}`}
+              disabled={saveDisabled}
               onClick={() => {
-                if (isDirty && !isSaving) onSave();
+                if (!saveDisabled) onSave();
               }}
               aria-label={isSaving ? 'Saving file' : 'Save file'}
             >

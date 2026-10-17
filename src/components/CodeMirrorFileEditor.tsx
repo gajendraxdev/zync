@@ -29,6 +29,8 @@ import {
   publishEditorStatus,
 } from '../features/editor/editorStatus';
 import { useAppStore } from '../store/useAppStore';
+import { EditorSaveBlockedError, editorSaveBlocked, editorSaveErrorMessage, type EditorSaveAccess } from '../features/files/domain/editorSaveAccess';
+import { EditorSaveAccessStatus } from './editor/EditorSaveAccessStatus';
 
 interface CodeMirrorFileEditorProps {
   documentId?: string;
@@ -38,6 +40,7 @@ interface CodeMirrorFileEditorProps {
   onClose: () => void;
   onDirtyChange?: (dirty: boolean) => void;
   hideToolbar?: boolean;
+  saveAccess?: EditorSaveAccess;
 }
 
 function parseGoToLineInput(input: string, maxLine: number) {
@@ -82,11 +85,14 @@ export function CodeMirrorFileEditor({
   onClose,
   onDirtyChange,
   hideToolbar = false,
+  saveAccess,
 }: CodeMirrorFileEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const languageCompartment = useRef(new Compartment()).current;
   const themeCompartment = useRef(new Compartment()).current;
+  const readOnlyCompartment = useRef(new Compartment()).current;
+  const saveBlocked = editorSaveBlocked(saveAccess);
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [showGoToLine, setShowGoToLine] = useState(false);
@@ -144,7 +150,7 @@ export function CodeMirrorFileEditor({
 
   const handleSave = useCallback(async () => {
     const view = viewRef.current;
-    if (!view || isSavingRef.current) return;
+    if (!view || isSavingRef.current || saveBlocked) return;
 
     isSavingRef.current = true;
     setIsSaving(true);
@@ -163,14 +169,13 @@ export function CodeMirrorFileEditor({
       );
       publishStatus(view.state);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to save file';
-      showToast('error', message);
+      if (!(error instanceof EditorSaveBlockedError)) showToast('error', editorSaveErrorMessage(error));
     } finally {
       isSavingRef.current = false;
       setIsSaving(false);
       requestAnimationFrame(() => view.focus());
     }
-  }, [onSave, publishStatus, showToast, updateDirtyState]);
+  }, [onSave, publishStatus, saveBlocked, showToast, updateDirtyState]);
 
   const handleClose = useCallback(async () => {
     if (!isDirtyRef.current) {
@@ -232,6 +237,7 @@ export function CodeMirrorFileEditor({
   }, [goToLineValue, publishStatus]);
 
   const toggleLineComment = useCallback((view: EditorView) => {
+    if (view.state.readOnly) return true;
     if (!lineCommentToken) return false;
     const changes = buildLineCommentChanges(
       view.state.doc.toString(),
@@ -317,6 +323,7 @@ export function CodeMirrorFileEditor({
         },
       }),
       languageCompartment.of([]),
+      readOnlyCompartment.of(EditorState.readOnly.of(saveBlocked)),
       themeCompartment.of([
         initialTheme,
         syntaxHighlighting(createCodeMirrorHighlightStyle(resolvedThemeMode), { fallback: true }),
@@ -383,6 +390,10 @@ export function CodeMirrorFileEditor({
       savedDocRef.current = null;
     };
   }, [filename, openGoToLineDialog, performanceMode.kind, publishStatus, sessionKey, updateDirtyState]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: readOnlyCompartment.reconfigure(EditorState.readOnly.of(saveBlocked)) });
+  }, [readOnlyCompartment, saveBlocked]);
 
   useEffect(() => {
     const view = viewRef.current;
@@ -502,6 +513,7 @@ export function CodeMirrorFileEditor({
           filename={filename}
           isDirty={isDirty}
           isSaving={isSaving}
+          saveAccess={saveAccess}
           onClose={() => { void closeRef.current(); }}
           onGoToLine={openGoToLineDialog}
           onOpenSearch={openSearch}
@@ -510,6 +522,7 @@ export function CodeMirrorFileEditor({
       )}
 
       <div className="flex min-h-0 flex-1 flex-col">
+        {hideToolbar && saveBlocked && <div className="border-b border-app-border px-3 py-1"><EditorSaveAccessStatus access={saveAccess} /></div>}
         {performanceMode.kind === 'large-file' && (
           <div className="border-b border-app-border bg-app-surface/40 px-3 py-1.5 text-xs text-app-muted">
             Large-file mode: syntax analysis, folding, and completion are paused to keep editing responsive.

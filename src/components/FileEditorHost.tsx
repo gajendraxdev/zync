@@ -5,6 +5,7 @@ import { BUILTIN_PLAIN_EDITOR_ID, CODEMIRROR_EDITOR_ID } from './editor/provider
 import { PlainFileEditor } from './PlainFileEditor';
 import { usePlugins } from '../context/PluginContext';
 import { useAppStore } from '../store/useAppStore';
+import { useEditorSaveAccess, type EditorPermissionTarget } from '../features/files/application/useEditorSaveAccess';
 
 const CodeMirrorFileEditor = lazy(async () => {
   const module = await import('./CodeMirrorFileEditor');
@@ -24,16 +25,16 @@ interface FileEditorHostProps {
    * Used by embedded/editor-with-parent-toolbar surfaces.
    */
   hideToolbar?: boolean;
+  permissionTarget?: EditorPermissionTarget;
 }
 
 /**
- * Stage-1 editor host boundary.
- *
- * Today this still falls back to the built-in lightweight editor, but it
- * centralizes provider selection so the FileManager no longer points directly
- * at one concrete editor implementation.
+ * Shared provider and save-access boundary. Built-in and community editors use
+ * the same document policy; missing/broken providers retain the plain fallback.
  */
 export function FileEditorHost(props: FileEditorHostProps) {
+  const { access: saveAccess, save } = useEditorSaveAccess(props.permissionTarget, props.onSave);
+  const editorProps = { ...props, onSave: save, saveAccess };
   const { editorProviders, plugins } = usePlugins();
   const defaultProvider = useAppStore((state) => state.settings.editor.defaultProvider);
   const showToast = useAppStore((state) => state.showToast);
@@ -82,11 +83,11 @@ export function FileEditorHost(props: FileEditorHostProps) {
   }, [fallbackReason, providerId, selectedProviderAnyState?.manifest.name, showToast]);
 
   if (providerId === BUILTIN_PLAIN_EDITOR_ID) {
-    return <PlainFileEditor {...props} />;
+    return <PlainFileEditor {...editorProps} />;
   }
 
   if (fallbackReason) {
-    return <PlainFileEditor {...props} />;
+    return <PlainFileEditor {...editorProps} />;
   }
 
   if (selectedProvider?.manifest.id === CODEMIRROR_EDITOR_ID) {
@@ -98,7 +99,7 @@ export function FileEditorHost(props: FileEditorHostProps) {
           </div>
         )}
       >
-        <CodeMirrorFileEditor {...props} />
+        <CodeMirrorFileEditor {...editorProps} />
       </Suspense>
     );
   }
@@ -108,10 +109,10 @@ export function FileEditorHost(props: FileEditorHostProps) {
       <EditorPluginFrame
         plugin={selectedProvider}
         onFatalError={() => setDegradedProviderId(selectedProvider.manifest.id)}
-        {...props}
+        {...editorProps}
       />
     );
   }
 
-  return <PlainFileEditor {...props} />;
+  return <PlainFileEditor {...editorProps} />;
 }

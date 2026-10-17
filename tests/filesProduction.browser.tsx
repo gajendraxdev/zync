@@ -7,9 +7,14 @@ import type { FileEntry } from '../src/components/file-manager/types';
 import builtinIconCatalog from '../plugin-api/builtin-icon-themes.json';
 import type { InstalledPlugin } from '../src/features/plugins/types';
 import { createTransferSafetyFixture } from './fixtures/files-production/transferSafety';
+import { createPermissionFixture } from './fixtures/files-production/permissions';
+import { runFilePermissionBrowserChecks } from './helpers/filePermissionBrowserChecks';
+import { runFileEditorSaveBrowserChecks } from './helpers/fileEditorSaveBrowserChecks';
+import { permissionTestEditor } from './fixtures/files-production/editorProvider';
 import '../src/index.css';
 
 const host = 'files-ui-fixture';
+const editorTests = new URLSearchParams(location.search).get('editor') === '1';
 const rootPath = new URLSearchParams(location.search).get('transferDottedPath') === '1'
   ? '/home/deploy/project.v1' : '/home/deploy/project';
 const showWorkspaceChrome = new URLSearchParams(location.search).get('layout') === 'sidebars';
@@ -25,10 +30,15 @@ const sample = [entry('assets', 'd'), entry('config', 'd'), entry('docs', 'd'), 
 for (const [key,value] of Object.entries({ '--color-app-bg':'#20211f', '--color-app-panel':'#242522', '--color-app-surface':'#30332b',
   '--color-app-border':'#373a32', '--color-app-text':'#e8e9e3', '--color-app-muted':'#adb1a5', '--color-app-accent':'#f59c77' })) document.documentElement.style.setProperty(key,value);
 const calls: string[] = [];
+const permissionFixture = createPermissionFixture(new URLSearchParams(location.search).get('permissions') === '1', editorTests);
 const listingReads: string[] = [];
 const settingsWrites: unknown[] = [];
 const pluginCalls: string[] = [];
 let iconPlugins: InstalledPlugin[] = JSON.parse(JSON.stringify(builtinIconCatalog)).map((plugin: InstalledPlugin) => ({ ...plugin, enabled: true }));
+if (editorTests) iconPlugins.push({
+  path: 'builtin://codemirror', enabled: true,
+  manifest: { id: 'com.zync.editor.codemirror', name: 'CodeMirror', version: '1.0.0', type: 'editor-provider', editor: { supports: ['save', 'search', 'readonly'] } },
+}, permissionTestEditor);
 const MATERIAL_ICON_THEME_ID = iconPlugins.find(plugin => plugin.manifest.iconTheme)!.manifest.id;
 let reloadIconPlugins: (() => Promise<boolean>) | undefined;
 let setSurfaceActive: ((active: boolean) => void) | undefined;
@@ -53,6 +63,7 @@ window.ipcRenderer = {
       throw new Error(`Unexpected plugin operation: ${command}`);
     }
     calls.push(command);
+    if (permissionFixture.handles(command)) return permissionFixture.invoke(command, args ?? {});
     if (transferSafety?.handles(command)) return transferSafety.invoke(command, args ?? {});
     if (command === 'fs_list') {
       listingReads.push(args?.path ?? '');
@@ -88,7 +99,14 @@ const { filesStoreKey } = await import('../src/store/fileSystemSlice');
 const { PluginProvider, usePlugins } = await import('../src/context/PluginContext');
 const detachTransferSafety = transferSafety?.attach(useAppStore);
 if (transferSafety) Object.assign(window, { filesTransferSafety: transferSafety.control });
+Object.assign(window, { runFilePermissionBrowserChecks: () => runFilePermissionBrowserChecks(permissionFixture, active => setSurfaceActive?.(active)) });
+Object.assign(window, { runFileEditorSaveBrowserChecks: () => runFileEditorSaveBrowserChecks(permissionFixture.control, {
+  provider: defaultProvider => useAppStore.setState(state => ({ settings: { ...state.settings, editor: { ...state.settings.editor, defaultProvider } } })),
+  toasts: () => useAppStore.getState().toasts,
+  clearToasts: () => useAppStore.setState({ toasts: [] }),
+}) });
 useAppStore.setState(state => ({
+  ...(editorTests ? { showConfirmDialog: async () => true } : {}),
   activeConnectionId: host,
   connections: [{ id: host, name: 'Test host', host: 'test.invalid', port: 22, username: 'deploy', status: 'connected', homePath: '/home/deploy' }],
   files: { [host]: sample }, currentPath: { [host]: rootPath }, history: { [host]: [rootPath] }, historyIndex: { [host]: 0 },
@@ -100,9 +118,14 @@ useAppStore.setState(state => ({
     settingsWrites.push(updates);
     useAppStore.setState(current => ({ settings: { ...current.settings, fileManager: { ...current.settings.fileManager, ...updates } } }));
   },
+  refreshConnectionFiles: async connectionId => {
+    await permissionFixture.control.awaitListingRefresh();
+    return state.refreshConnectionFiles(connectionId);
+  },
 }));
 
 Object.assign(window, { filesUiTest: {
+  editor: editorTests ? permissionFixture.control : undefined,
   calls, settingsWrites, listingReads, pluginCalls,
   surfaceActive: (active: boolean) => setSurfaceActive?.(active),
   iconPluginEnabled: async (id: string, enabled: boolean) => {

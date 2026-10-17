@@ -321,7 +321,7 @@ try {
   await page.setViewportSize({ width: 1280, height: 720 });
   // Existing context menus exercise the same renderer, including nested portal ownership.
   await page.evaluate(() => controlsTest.openMenu());
-  const tools = page.getByRole('button', { name: 'Tools', exact: true });
+  const tools = page.getByRole('menuitem', { name: 'Tools', exact: true });
   await tools.hover();
   await page.getByRole('menu', { name: 'Tools', exact: true }).waitFor();
   await tools.focus();
@@ -331,7 +331,7 @@ try {
   assert.equal(await tools.getAttribute('aria-expanded'), 'false', 'Escape on an expanded trigger closes its flyout');
   assert.equal(await page.getByText('Test menu action', { exact: true }).isVisible(), true, 'Escape on a submenu trigger preserves the parent menu');
   await tools.press('ArrowRight');
-  const nestedTools = page.getByRole('button', { name: 'Nested tools', exact: true });
+  const nestedTools = page.getByRole('menuitem', { name: 'Nested tools', exact: true });
   await nestedTools.press('ArrowRight');
   const nestedAction = page.getByRole('menuitem', { name: 'Nested action', exact: true });
   await nestedAction.waitFor();

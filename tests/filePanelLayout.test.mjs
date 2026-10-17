@@ -90,6 +90,8 @@ test('inline Properties owns Escape even after tooltip dismissal, while modal de
   const { PropertiesPanel } = loadSource('components/file-manager/PropertiesPanel.tsx', {
     'react/jsx-runtime': jsx, 'lucide-react': { Folder: stub, Info: stub, X: stub },
     './FileEntryIcon': { FileEntryIcon: stub }, '../../lib/keyboard': { isMatch },
+    '../../features/files/domain/filePermissions': { unixModeString: stub },
+    './FilePermissionsSection': { FilePermissionsSection: stub },
     '../../lib/utils': { cn: (...values) => values.filter(Boolean).join(' '), formatBytes: String },
     './fileGridLayout': { formatFileListDate: String, formatFileListType: String },
     '../ui/IconButton': { IconButton: stub }, '../ui/Tooltip': { Tooltip: stub },

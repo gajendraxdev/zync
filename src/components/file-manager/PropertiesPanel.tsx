@@ -7,37 +7,21 @@ import { IconButton } from '../ui/IconButton';
 import { Tooltip } from '../ui/Tooltip';
 import type { ReactNode } from 'react';
 import type { FileEntry } from './types';
+import { unixModeString } from '../../features/files/domain/filePermissions';
+import type { FilePermissionEditor } from '../../features/files/application/useFilePermissionEditor';
+import { FilePermissionsSection } from './FilePermissionsSection';
 
 interface PropertiesPanelProps {
   files: FileEntry[];
   onClose: () => void;
   dateTimeFormat?: 'simple' | 'detailed';
   showHeader?: boolean;
+  permissionEditor?: FilePermissionEditor;
 }
 
 function fileKindLabel(file: FileEntry): string {
   if (file.type === 'd') return 'Folder';
   return formatFileListType(file);
-}
-
-function unixModeString(octal: string): string {
-  const digits = octal.trim();
-  if (!/^[0-7]{3,4}$/.test(digits)) return digits || '—';
-  const padded = digits.padStart(4, '0');
-  const special = parseInt(padded[0], 8);
-  const three = padded.slice(-3);
-  const execChar = (hasExec: boolean, specialBit: number, marked: 's' | 't') => {
-    if (special & specialBit) return hasExec ? marked : marked.toUpperCase();
-    return hasExec ? 'x' : '-';
-  };
-  const bit = (n: number, specialBit: number, marked: 's' | 't') => (
-    `${n & 4 ? 'r' : '-'}${n & 2 ? 'w' : '-'}${execChar(Boolean(n & 1), specialBit, marked)}`
-  );
-  return [
-    bit(parseInt(three[0], 8), 4, 's'),
-    bit(parseInt(three[1], 8), 2, 's'),
-    bit(parseInt(three[2], 8), 1, 't'),
-  ].join('');
 }
 
 function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
@@ -60,7 +44,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   </section>;
 }
 
-export function PropertiesPanel({ files, onClose, dateTimeFormat = 'simple', showHeader = true }: PropertiesPanelProps) {
+export function PropertiesPanel({ files, onClose, dateTimeFormat = 'simple', showHeader = true, permissionEditor }: PropertiesPanelProps) {
   const single = files.length === 1 ? files[0] : null;
   const folderCount = files.filter((file) => file.type === 'd').length;
   const otherCount = files.length - folderCount;
@@ -122,13 +106,13 @@ export function PropertiesPanel({ files, onClose, dateTimeFormat = 'simple', sho
                   <Row label="Type" value={fileKindLabel(single)} />
                   <Row label="Modified" value={formatFileListDate(single.lastModified, Date.now(), dateTimeFormat) || '—'} />
                 </Section>
-                <Section title="Permissions">
+                {permissionEditor ? <FilePermissionsSection editor={permissionEditor} ownerLabel={single.owner} groupLabel={single.group} /> : <Section title="Permissions">
                   <Row label="Owner" value={(single.owner || '').trim() || '—'} />
                   <Row label="Group" value={(single.group || '').trim() || '—'} />
                   <Row label="Mode" value={unixModeString(single.permissions || '')} mono />
                   <Row label="Octal" value={single.permissions?.trim() || '—'} mono />
-                </Section>
-                <p className="pb-4 text-xs leading-relaxed text-app-muted">Reported metadata only. Effective access may also depend on ACLs and server policy.</p>
+                </Section>}
+                {!permissionEditor && <p className="pb-4 text-xs leading-relaxed text-app-muted">Reported metadata only. Effective access may also depend on ACLs and server policy. File mode alone does not determine rename or delete access.</p>}
               </>
             ) : (
               <Section title="Selection">
