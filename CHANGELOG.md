@@ -6,6 +6,18 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Fixed
 
+- **SSH reconnects:** Let waiting requests reuse a completed reconnect for the
+  same connection owner. Reject replaced connections and missing-session results,
+  and prevent stale SFTP requests from installing or invalidating another
+  connection's transport. ([65fd388])
+
+- **Read-only editing:** Open regular POSIX files without write permission bits
+  in read-only mode, disable Save and block Ctrl/Cmd+S across built-in and plugin
+  editors. Explain the state in a shared access menu, retain drafts after denied
+  saves and permission refreshes, and report each failed save only once. Offer
+  an explicit, open-file-only **Allow save attempts** option for accounts with
+  additional access; it does not change permissions or use sudo. ([d652434])
+
 - **File deletion:** Update local Windows listings immediately after deletion and
   refresh other open panes without interrupting folder navigation. Prevent failed
   deletions from restoring stale folder contents. ([d8d6586], [69a16cb])
@@ -67,6 +79,14 @@ All notable changes to Zync are documented in this file. The format is based on 
   restoration; existing callers retain the default behavior. ([c44431b])
 
 ### Added
+
+- **File permissions:** View full modes and numeric owner/group IDs in Properties
+  and edit a selected POSIX SFTP item's ordinary read/write/execute permissions
+  with explicit Apply and Discard controls. Check fresh metadata and connection
+  identity, preserve special bits, and verify the resulting mode without automatic
+  write retries or elevation. Support detected Unix and distro identifiers without
+  a fixed allowlist; missing OS metadata stays unknown. Windows exposes read-only
+  attributes, not a POSIX permission editor. ([65fd388], [d652434])
 
 - **Safer regular-file copies:** Copy into a separate temporary file before
   publishing the result, keeping an existing destination unchanged during copying.
@@ -2802,3 +2822,5 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [d8d6586]: https://github.com/zync-sh/zync/commit/d8d6586bfa0790730bf8ea84c52acfe6c18adcaf
 [69a16cb]: https://github.com/zync-sh/zync/commit/69a16cbaf7401b57a0990760d3c21263e7844397
 [ac067a6]: https://github.com/zync-sh/zync/commit/ac067a6fe20f9b58e5c4cd8e6e67e47c0e89e85b
+[65fd388]: https://github.com/zync-sh/zync/commit/65fd388a03262ac8502376021459679430e38893
+[d652434]: https://github.com/zync-sh/zync/commit/d652434460ba7d175b0cd069037a98e36d46e5b9
