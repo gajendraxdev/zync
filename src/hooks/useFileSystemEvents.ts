@@ -26,12 +26,12 @@ export function useFileSystemEvents() {
                 else if (op === 'upload') message = `Uploaded "${name}"`;
 
                 store.setLastAction(message, 'success');
-                store.refreshFiles(connection_id);
+                void store.refreshConnectionFiles(connection_id);
             } else {
                 // Error handling
                 store.setLastAction(`Operation failed: ${error}`, 'error');
                 // Refresh just in case to show true state
-                store.refreshFiles(connection_id);
+                void store.refreshConnectionFiles(connection_id);
             }
         });
 
