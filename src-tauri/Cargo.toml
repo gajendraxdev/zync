@@ -14,6 +14,10 @@ edition = "2021"
 name = "tauri_app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+# Explicit qualification tests require a supported Linux kernel and ordinary UID.
+permission-runtime-tests = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 sha2 = "0.11"
@@ -73,7 +77,10 @@ tauri-plugin-single-instance = { version = "2", default-features = false }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winreg = "0.56"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_Security_Authorization", "Win32_System_Threading", "Win32_System_WindowsProgramming", "Win32_System_Registry", "Win32_System_SystemServices", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "=0.2.180"
 
 # Thin LTO for the PTY/SSH path without fat-LTO link times. codegen-units 8 is
 # tighter than Cargo's default 16 and cheaper than 1 on Windows/macOS release CI.

@@ -326,6 +326,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn batch_delete_never_replays_after_a_partial_or_unknown_ssh_outcome() {
+        use russh::ChannelMsg;
+        for messages in [
+            vec![
+                ChannelMsg::Success,
+                ChannelMsg::ExitStatus { exit_status: 1 },
+            ],
+            vec![ChannelMsg::Success],
+            vec![],
+        ] {
+            let result = mutation_with_safe_fallback(
+                remote_mutation_outcome(
+                    futures_util::stream::iter(messages),
+                    tokio::time::Instant::now() + std::time::Duration::from_millis(5),
+                    "Delete",
+                ),
+                async { panic!("SFTP must not replay a possibly executed batch delete") },
+            )
+            .await;
+            assert!(result.is_err());
+        }
+        let calls = std::cell::Cell::new(0);
+        let result = mutation_with_safe_fallback(
+            remote_mutation_outcome(
+                futures_util::stream::iter([ChannelMsg::Failure]),
+                tokio::time::Instant::now() + std::time::Duration::from_millis(5),
+                "Delete",
+            ),
+            async {
+                calls.set(calls.get() + 1);
+                Err("one SFTP path failed".to_string())
+            },
+        )
+        .await;
+        assert_eq!(result, Err("one SFTP path failed".to_string()));
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[tokio::test]
     async fn failed_directory_creation_requires_a_confirmed_existing_directory() {
         assert!(
             ensure_directory(async { Ok(()) }, async { panic!("probe not needed") })

@@ -622,6 +622,7 @@ pub struct AppState {
     pub connect_tasks: Arc<Mutex<HashMap<String, ConnectAttempt>>>,
     pub transfers: crate::transfers::TransferRegistry,
     pub file_transfers: Arc<crate::file_transfers::Service>,
+    pub permission_elevation: Arc<crate::file_permissions::elevation::Service>,
     // Agent v2: active run cancellation tokens
     pub agent_runs: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     // Agent v2: pending checkpoint responders (ask_user tool)
@@ -649,6 +650,7 @@ impl AppState {
             snippets_manager: Arc::new(crate::snippets::SnippetsManager::new(data_dir.clone())),
             connect_tasks: Arc::new(Mutex::new(HashMap::new())),
             transfers: Arc::new(Mutex::new(HashMap::new())),
+            permission_elevation: Arc::default(),
             file_transfers: Arc::new(crate::file_transfers::Service::new(data_dir.clone()).with_started_callback({
                 let app = app_handle.clone();
                 move |receipt| { let _ = app.emit("file-transfer-started", receipt); }
@@ -3408,9 +3410,9 @@ mod sftp_open_error_tests {
     }
 }
 
-async fn open_sftp_session(
+async fn open_sftp_stream(
     session: &Arc<Mutex<russh::client::Handle<crate::ssh::Client>>>,
-) -> Result<Arc<russh_sftp::client::SftpSession>, OpenSftpError> {
+) -> Result<russh::ChannelStream<russh::client::Msg>, OpenSftpError> {
     let channel = {
         let guard = session.lock().await;
         guard
@@ -3424,7 +3426,13 @@ async fn open_sftp_session(
         .map_err(|error| {
             OpenSftpError::Subsystem(format!("Failed to request SFTP subsystem: {error}"))
         })?;
-    let sftp = russh_sftp::client::SftpSession::new(channel.into_stream())
+    Ok(channel.into_stream())
+}
+
+async fn open_sftp_session(
+    session: &Arc<Mutex<russh::client::Handle<crate::ssh::Client>>>,
+) -> Result<Arc<russh_sftp::client::SftpSession>, OpenSftpError> {
+    let sftp = russh_sftp::client::SftpSession::new(open_sftp_stream(session).await?)
         .await
         .map_err(|error| {
             OpenSftpError::Initialize(format!("Failed to initialize SFTP: {error}"))
@@ -4544,7 +4552,9 @@ pub async fn fs_delete(
     let server_attempt = async {
         if should_optimize {
             if let Some(session) = session {
-                return try_remote_files_mutation(&session, remote_remove_command(&[path.clone()]), "Delete").await;
+                if let Some(command) = remote_remove_command_for_exec(&[path.clone()]) {
+                    return try_remote_files_mutation(&session, command, "Delete").await;
+                }
             }
         }
         Ok(false)
@@ -4601,67 +4611,31 @@ pub async fn fs_delete_batch(
         }
         Ok(())
     } else {
-        // Optimization: Single SSH channel for combined rm -rf calls
+        // Share the single-delete no-replay policy: only definite pre-execution
+        // refusal permits SFTP fallback, never a partial or unknown outcome.
         let (session_opt, should_optimize) = {
             let connections = state.connections.lock().await;
             let conn = connections.get(&connection_id);
             (
                 conn.and_then(|c| c.session.clone()),
-                conn.map(|c| c.detected_os.is_some()).unwrap_or(false),
+                conn.and_then(|c| c.detected_os.as_deref())
+                    .is_some_and(|os| !os.eq_ignore_ascii_case("windows")),
             )
         };
 
-        if should_optimize {
-            if let Some(session) = session_opt {
-                let timeout_duration = std::time::Duration::from_secs(15);
-
-                let ssh_optimize_fut = async {
-                    let mut channel = session
-                        .lock()
-                        .await
-                        .channel_open_session()
-                        .await
-                        .map_err(|e| format!("Failed to open channel: {}", e))?;
-
-                    let cmd = remote_remove_command(&paths);
-                    println!("[FS] Attempting batch server-side delete: {}", cmd);
-
-                    channel
-                        .exec(true, cmd)
-                        .await
-                        .map_err(|e| format!("Exec failed: {}", e))?;
-
-                    let mut success = false;
-                    while let Some(msg) = channel.wait().await {
-                        if let russh::ChannelMsg::ExitStatus { exit_status } = msg {
-                            if exit_status == 0 {
-                                success = true;
-                            }
-                            break;
-                        }
+        let server_attempt = async {
+            if should_optimize {
+                if let Some(session) = session_opt {
+                    if let Some(command) = remote_remove_command_for_exec(&paths) {
+                        return try_remote_files_mutation(&session, command, "Delete").await;
                     }
-                    Ok::<bool, String>(success)
-                };
-
-                match tokio::time::timeout(timeout_duration, ssh_optimize_fut).await {
-                    Ok(Ok(true)) => {
-                        println!("[FS] Batch server-side delete successful.");
-                        return Ok(());
-                    }
-                    Ok(Err(e)) => println!(
-                        "[FS] Batch SSH delete error: {}. Falling back to SFTP...",
-                        e
-                    ),
-                    Err(_) => println!(
-                        "[FS] Batch SSH delete timed out after {}s. Falling back to SFTP...",
-                        timeout_duration.as_secs()
-                    ),
-                    _ => println!("[FS] Batch SSH delete failed, falling back to SFTP..."),
                 }
             }
-        }
+            Ok(false)
+        };
 
-        // Fallback: Individual SFTP deletes with retry logic
+        // Each requested path is submitted at most once; even a failed response
+        // can describe a deletion that already happened on the server.
         async fn perform_sftp_batch_delete(
             sftp: &Arc<russh_sftp::client::SftpSession>,
             paths: &[String],
@@ -4677,46 +4651,20 @@ pub async fn fs_delete_batch(
             failed
         }
 
-        let sftp = match get_sftp_or_reconnect(&state, &connection_id).await {
-            Ok(s) => s,
-            Err(e) => {
-                return Err(BatchDeleteError {
-                    message: e,
-                    failed_paths: paths,
-                })
+        // An SSH failure cannot identify a confirmed subset. SFTP can report
+        // precisely which responses failed, without retrying those paths.
+        let mut failed_paths = paths.clone();
+        crate::transfers::mutation_with_safe_fallback(server_attempt, async {
+            let sftp = get_sftp_or_reconnect(&state, &connection_id).await?;
+            failed_paths = perform_sftp_batch_delete(&sftp, &paths, &state.file_system).await;
+            if failed_paths.is_empty() {
+                Ok(())
+            } else {
+                Err("Some remote deletions failed or have an unconfirmed outcome. Check the folder before retrying".to_string())
             }
-        };
-
-        let mut failed_paths = perform_sftp_batch_delete(&sftp, &paths, &state.file_system).await;
-
-        // If some failed, maybe it was a session disconnect? Try reconnecting ONCE for the failures
-        if !failed_paths.is_empty() {
-            println!(
-                "[FS] Some batch deletes failed, attempting one-time reconnect for {} items...",
-                failed_paths.len()
-            );
-            {
-                let mut connections = state.connections.lock().await;
-                if let Some(c) = connections.get_mut(&connection_id) {
-                    c.sftp_session = None;
-                }
-            }
-            if let Ok(retry_sftp) = get_sftp_or_reconnect(&state, &connection_id).await {
-                // Only retry the previously failed paths
-                let still_failed =
-                    perform_sftp_batch_delete(&retry_sftp, &failed_paths, &state.file_system).await;
-                failed_paths = still_failed;
-            }
-        }
-
-        if !failed_paths.is_empty() {
-            return Err(BatchDeleteError {
-                message: "Some remote files could not be deleted".to_string(),
-                failed_paths,
-            });
-        }
-
-        Ok(())
+        })
+        .await
+        .map_err(|message| BatchDeleteError { message, failed_paths })
     }
 }
 
@@ -5013,6 +4961,72 @@ async fn file_permission_endpoint(
     Ok((endpoint, binding))
 }
 
+/// Read-only local action hints, bounded to one directory and immediate child.
+/// SFTP v3 has no equivalent effective-access query; never guess from mode/UID.
+#[tauri::command]
+pub async fn fs_permissions_access(
+    connection_id: String,
+    directory: String,
+    target: Option<String>,
+) -> Result<crate::file_permissions::access::Evidence, String> {
+    if connection_id != "local" {
+        return Err("Effective access inspection is unavailable over SFTP".into());
+    }
+    tokio::task::spawn_blocking(move || crate::file_permissions::access::inspect(directory, target))
+        .await.map_err(|_| "Local access inspection was interrupted".to_string())?
+}
+
+/// Explicit Copy preflight only, not browsing-time permission inference. A short-
+/// lived channel permits OPENDIR/CLOSE without the library's full directory scan.
+/// Drop closes only the probe channel on failure/timeout; shared SFTP transfers
+/// are untouched. No reconnect, shell, recursive walk or file data is requested.
+#[tauri::command]
+pub async fn fs_copy_access(
+    connection_id: String,
+    paths: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    if connection_id == "local" || paths.is_empty() || paths.len() > 64 {
+        return Err("Copy access checks require 1–64 SSH source paths".into());
+    }
+    for path in &paths {
+        crate::file_permissions::validate_path(path)?;
+    }
+    let session = {
+        let connections = state.connections.lock().await;
+        connections
+            .get(&connection_id)
+            .and_then(|connection| connection.session.clone())
+            .ok_or("Connection is not available. Reconnect before copying.")?
+    };
+    tokio::time::timeout(copy_access_timeout(paths.len() as u32), async {
+        let raw = russh_sftp::client::RawSftpSession::new(
+            open_sftp_stream(&session).await.map_err(|error| error.to_string())?,
+        );
+        raw.init().await.map_err(|error| error.to_string())?;
+        for path in &paths {
+            crate::file_permissions::access::check_remote_copy(&raw, path).await?;
+        }
+        let connections = state.connections.lock().await;
+        if !connections
+            .get(&connection_id)
+            .and_then(|connection| connection.session.as_ref())
+            .is_some_and(|current| Arc::ptr_eq(current, &session))
+        {
+            return Err("Connection changed while checking Copy access. Try again.".into());
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|_| "Copy access check timed out. Try again.".to_string())?
+}
+
+/// Preserve setup/connection allowance while budgeting the sequential source
+/// checks. The command validates the count (1–64) before calculating this bound.
+fn copy_access_timeout(path_count: u32) -> Duration {
+    Duration::from_secs(30 + 3 * u64::from(path_count))
+}
+
 /// Read one selected item; listing display strings never authorize mode edits.
 #[tauri::command]
 pub async fn fs_permissions_read(
@@ -5058,6 +5072,43 @@ pub async fn fs_permissions_read(
     Ok(metadata)
 }
 
+/// Explicit Windows-owned UI; never return a chmod/ACL mutation acknowledgement.
+/// The main window owns native UI and Windows owns its authorization decisions.
+#[tauri::command]
+pub async fn fs_permissions_open_system_editor(
+    window: tauri::WebviewWindow,
+    connection_id: String,
+    expected: crate::file_permissions::Metadata,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    if window.label() != "main" || connection_id != "local" {
+        return Err("Windows permissions are only available from the local host window".into());
+    }
+    crate::file_permissions::validate_path(&expected.path)?;
+    #[cfg(not(windows))]
+    { let _ = (expected, state); Err("The Windows permission editor is not available on this platform".into()) }
+    #[cfg(windows)]
+    {
+        let path = expected.path.clone();
+        if !tokio::task::spawn_blocking(move || crate::file_permissions::system_editor::supported(&path))
+            .await.map_err(|_| "Windows target inspection was interrupted".to_string())? {
+            return Err("Windows permissions require a supported local file or folder".into());
+        }
+        let (endpoint, binding) = file_permission_endpoint(&state, &connection_id, false).await?;
+        let lease = state.file_transfers.reserve_metadata_change(endpoint.as_ref(), &binding.identity, &expected.path).await?;
+        crate::file_permissions::system_editor::prepare(endpoint.as_ref(), binding, &expected).await?;
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let owner = window.clone();
+        window.run_on_main_thread(move || {
+            let _lease = lease;
+            let result = owner.hwnd().map_err(|error| error.to_string())
+                .and_then(|hwnd| crate::file_permissions::system_editor::open(&expected.path, hwnd.0));
+            let _ = sender.send(result);
+        }).map_err(|error| error.to_string())?;
+        receiver.await.map_err(|_| "Windows permission editor invocation was interrupted".to_string())?
+    }
+}
+
 /// Apply one ordinary-mode change under existing native mutation admission.
 /// Neither session loss nor an uncertain SETSTAT acknowledgement triggers replay.
 #[tauri::command]
@@ -5087,6 +5138,82 @@ pub async fn fs_permissions_apply(
             Ok(())
         },
     ).await
+}
+
+/// Explicit no-helper administrator review. Capture the existing verified SSH
+/// transport, SFTP identity and generation; this path never connects/reconnects.
+#[tauri::command]
+pub async fn fs_permissions_admin_start(
+    window: tauri::WebviewWindow,
+    connection_id: String,
+    expected: crate::file_permissions::Metadata,
+    state: State<'_, AppState>,
+) -> Result<crate::file_permissions::elevation::Reply, String> {
+    use crate::file_permissions::{elevation::Guard, Model};
+    if window.label() != "main" || connection_id == "local" || expected.binding.model != Model::Posix {
+        return Err("Administrator review requires the main window and a live POSIX SSH connection".into());
+    }
+    crate::file_permissions::validate_path(&expected.path)?;
+    if !expected.path.starts_with('/') { return Err("Administrator review requires an absolute SSH host path".into()); }
+    let (endpoint, binding) = file_permission_endpoint(&state, &connection_id, false).await?;
+    if binding != expected.binding { return Err("Connection changed. Refresh permissions before administrator review.".into()); }
+    let (session, generation) = {
+        let connections = state.connections.lock().await;
+        let connection = connections.get(&connection_id).ok_or("Connection is no longer available")?;
+        (connection.session.clone().ok_or("SSH session is closed")?, connection.reconnect_generation)
+    };
+    let captured = binding.clone();
+    let context = state.inner().clone();
+    let id = connection_id.clone();
+    let transport = session.clone();
+    let guard: Guard = Arc::new(move || {
+        let (context, id, captured, transport) = (context.clone(), id.clone(), captured.clone(), transport.clone());
+        Box::pin(async move {
+            let (_, current) = file_permission_endpoint(&context, &id, false).await?;
+            let connections = context.connections.lock().await;
+            let connection = connections.get(&id).ok_or("Connection was disconnected")?;
+            if current != captured || connection.reconnect_generation != generation
+                || !connection.session.as_ref().is_some_and(|session| Arc::ptr_eq(session, &transport)) {
+                return Err("Connection changed. Administrator review was not reused. Refresh permissions.".into());
+            }
+            Ok(())
+        })
+    });
+    guard().await?;
+    let lease = state.file_transfers.reserve_metadata_change(endpoint.as_ref(), &binding.identity, &expected.path).await?;
+    state.permission_elevation.start(connection_id, binding, expected.path, session, guard, lease).await
+}
+
+/// Password input is transient, main-window-only and never sent to generic exec,
+/// credential storage, events or logs. Sudo, not Zync, decides authorization.
+#[tauri::command]
+pub async fn fs_permissions_admin_authenticate(
+    window: tauri::WebviewWindow,
+    challenge_id: String,
+    password: String,
+    state: State<'_, AppState>,
+) -> Result<crate::file_permissions::elevation::Reply, String> {
+    let password = zeroize::Zeroizing::new(password);
+    if window.label() != "main" { return Err("Administrator review is only available in the main window".into()); }
+    state.permission_elevation.authenticate(&challenge_id, password).await
+}
+
+#[tauri::command]
+pub async fn fs_permissions_admin_apply(
+    window: tauri::WebviewWindow, challenge_id: String, review_token: String, set_bits: u32, clear_bits: u32,
+    state: State<'_, AppState>,
+) -> Result<crate::file_permissions::elevation::Reply, String> {
+    if window.label() != "main" { return Err("Administrator review is only available in the main window".into()); }
+    state.permission_elevation.apply(&challenge_id, review_token, set_bits, clear_bits).await
+}
+
+#[tauri::command]
+pub async fn fs_permissions_admin_cancel(
+    window: tauri::WebviewWindow, challenge_id: String, state: State<'_, AppState>,
+) -> Result<(), String> {
+    if window.label() != "main" { return Err("Administrator review is only available in the main window".into()); }
+    state.permission_elevation.cancel(&challenge_id);
+    Ok(())
 }
 
 #[tauri::command]
@@ -8139,6 +8266,15 @@ fn remote_remove_command(paths: &[String]) -> String {
     format!("rm -rf -- {}", paths.iter().map(|path| shell_quote(path)).collect::<Vec<_>>().join(" "))
 }
 
+const MAX_REMOTE_REMOVE_COMMAND_BYTES: usize = 32 * 1024;
+
+/// Budget the final UTF-8 shell argument, including quoting expansion. Oversize
+/// requests skip exec before any mutation, retaining the existing SFTP fallback.
+fn remote_remove_command_for_exec(paths: &[String]) -> Option<String> {
+    let command = remote_remove_command(paths);
+    (command.len() <= MAX_REMOTE_REMOVE_COMMAND_BYTES).then_some(command)
+}
+
 /// Each tar member is an explicit relative operand, never a command-line option.
 fn remote_archive_command(paths: &[String]) -> Result<String, String> {
     let mut args = String::new();
@@ -8157,7 +8293,45 @@ fn remote_archive_command(paths: &[String]) -> Result<String, String> {
 
 #[cfg(test)]
 mod remote_mutation_command_tests {
-    use super::{remote_copy_command, remote_remove_command, remote_archive_command, transfer_not_started_error};
+    use super::{copy_access_timeout, remote_copy_command, remote_remove_command, remote_remove_command_for_exec,
+        remote_archive_command, transfer_not_started_error, MAX_REMOTE_REMOVE_COMMAND_BYTES};
+
+    #[test]
+    fn copy_access_timeout_scales_with_the_validated_source_count() {
+        assert_eq!(copy_access_timeout(1).as_secs(), 33);
+        assert_eq!(copy_access_timeout(16).as_secs(), 78);
+        assert_eq!(copy_access_timeout(64).as_secs(), 222);
+        assert!(copy_access_timeout(64) > copy_access_timeout(1));
+    }
+
+    #[test]
+    fn delete_exec_budget_measures_final_utf8_and_shell_quoting_bytes() {
+        let overhead = remote_remove_command(&[String::new()]).len();
+        let boundary = "a".repeat(MAX_REMOTE_REMOVE_COMMAND_BYTES - overhead);
+        let command = remote_remove_command_for_exec(&[boundary.clone()]).unwrap();
+        assert_eq!(command.len(), MAX_REMOTE_REMOVE_COMMAND_BYTES);
+        assert!(remote_remove_command_for_exec(&[format!("{boundary}a")]).is_none());
+        assert!(remote_remove_command_for_exec(&["'".repeat(MAX_REMOTE_REMOVE_COMMAND_BYTES / 2)]).is_none());
+        assert!(remote_remove_command_for_exec(&["文".repeat(MAX_REMOTE_REMOVE_COMMAND_BYTES / 2)]).is_none());
+        let paths = vec!["/folder/name".repeat(500); 10];
+        assert!(remote_remove_command_for_exec(&paths).is_none());
+        let small = vec!["-backup".into(), "quote'file".into()];
+        assert_eq!(remote_remove_command_for_exec(&small), Some(remote_remove_command(&small)));
+    }
+
+    #[tokio::test]
+    async fn oversized_delete_exec_uses_the_existing_pre_execution_fallback() {
+        let command = remote_remove_command_for_exec(&["x".repeat(MAX_REMOTE_REMOVE_COMMAND_BYTES)]);
+        let mut fallback_calls = 0;
+        crate::transfers::mutation_with_safe_fallback(async {
+            assert!(command.is_none(), "Oversized commands cannot enter the SSH attempt");
+            Ok(false)
+        }, async {
+            fallback_calls += 1;
+            Ok(())
+        }).await.unwrap();
+        assert_eq!(fallback_calls, 1);
+    }
 
     #[test]
     fn archive_members_cannot_be_interpreted_as_tar_options() {
