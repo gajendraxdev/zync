@@ -37,10 +37,18 @@ import { getTerminalDocument } from '../../lib/terminal/terminalDocument';
 import { canTrackTerminalShell } from '../../lib/terminal/terminalShellContext';
 
 /** Run heavy renderer work after the next paint so tab/UI clicks feel instant. */
-function deferAfterPaint(task: () => void): void {
-  requestAnimationFrame(() => {
-    requestAnimationFrame(task);
+function deferAfterPaint(task: () => void): () => void {
+  let cancelled = false;
+  let frame = requestAnimationFrame(() => {
+    if (cancelled) return;
+    frame = requestAnimationFrame(() => {
+      if (!cancelled) task();
+    });
   });
+  return () => {
+    cancelled = true;
+    cancelAnimationFrame(frame);
+  };
 }
 
 export interface TerminalMountContext {
@@ -274,21 +282,34 @@ export function useTerminalLifecycle({
       return;
     }
 
+    const owner = terminalCache.get(sessionId);
+    if (!owner || owner.term !== term) return;
+    let cancelled = false;
+    let cancelDeferred = () => {};
+    const ownsTerminal = () => !cancelled && terminalCache.get(sessionId) === owner && owner.term === term
+      && termRef.current === term && isConnectedRef.current;
+    const isForeground = () => ownsTerminal() && isVisibleRef.current
+      && isWorkspaceActiveRef.current && isTerminalViewRef.current;
+    const cleanup = () => {
+      cancelled = true;
+      cancelDeferred();
+    };
     const rendererState = getTerminalRendererState(sessionId);
 
     // Inactive shell tabs: release WebGL so we do not exhaust browser context limits.
     // Keep GPU when Files/Dashboard is open (isTerminalView=false) — scrollback fix.
     if (isTerminalView && !isVisible) {
       if (rendererState.webglAddon) {
-        deferAfterPaint(() => {
+        cancelDeferred = deferAfterPaint(() => {
+          if (!ownsTerminal() || !isTerminalViewRef.current || isVisibleRef.current) return;
           void activateDomRenderer(term, rendererState);
         });
       }
-      return;
+      return cleanup;
     }
 
     if (!isVisible || !terminalGpuAllowed) {
-      return;
+      return cleanup;
     }
 
     const effectiveSettings = buildEffectiveRendererSettings(terminalSettings, terminalGpuAllowed);
@@ -300,15 +321,17 @@ export function useTerminalLifecycle({
     if (!needsSetup && !settingsChanged) {
       if (rendererState.webglContextLossBlocked && rendererState.kind !== 'dom') {
         void activateDomRenderer(term, rendererState).then(() => {
+          if (!isForeground()) return;
           restoreTerminalDisplay(term, fitAddonRef.current);
         });
       } else {
         restoreTerminalDisplay(term, fitAddonRef.current);
       }
-      return;
+      return cleanup;
     }
 
-    deferAfterPaint(() => {
+    cancelDeferred = deferAfterPaint(() => {
+      if (!isForeground()) return;
       void applyTerminalRendererAndLigatures(
         sessionId,
         term,
@@ -316,6 +339,7 @@ export function useTerminalLifecycle({
         fitAddonRef.current,
         syncTerminalResize,
       ).then(() => {
+        if (!isForeground()) return;
         lastAppliedRendererSettingsBySessionRef.current.set(sessionId, terminalRendererSettingsKey);
         safeFitTerminal(fitAddonRef.current, term);
         syncTerminalTheme(term);
@@ -323,6 +347,7 @@ export function useTerminalLifecycle({
 
       safeFitTerminal(fitAddonRef.current, term);
     });
+    return cleanup;
   }, [sessionId, terminalRendererSettingsKey, terminalGpuAllowed, isConnected, isVisible, isTerminalView, termRef, fitAddonRef, terminalSettings, syncTerminalTheme]);
 
   const prevIsVisibleRef = useRef(isVisible);
