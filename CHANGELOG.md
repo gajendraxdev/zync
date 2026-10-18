@@ -6,6 +6,19 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Fixed
 
+- **File access and Copy:** Share known-access guards across menus, shortcuts,
+  uploads and editors without guessing effective access from permission bits.
+  Check explicitly selected SSH sources before updating the Copy clipboard;
+  retain the previous clipboard after denied or inconclusive checks and ignore
+  stale results. Distinguish clipboard readiness from completed transfers, keep
+  Cut independent of content-read rights, and avoid recursive preflight scans.
+  ([e4febfe], [70168e8])
+
+- **Batch delete safety:** Do not replay deletions after partial or uncertain SSH
+  execution or failed SFTP responses. Use the existing SFTP fallback before
+  execution when a quoted delete command exceeds the exec byte budget.
+  ([e4febfe])
+
 - **SSH reconnects:** Let waiting requests reuse a completed reconnect for the
   same connection owner. Reject replaced connections and missing-session results,
   and prevent stale SFTP requests from installing or invalidating another
@@ -79,6 +92,20 @@ All notable changes to Zync are documented in this file. The format is based on 
   restoration; existing callers retain the default behavior. ([c44431b])
 
 ### Added
+
+- **Extended permission controls:** Edit ordinary modes for supported local Linux
+  files and folders using qualified Linux 6.6+ filesystem support. On Windows,
+  open OS-owned Properties/Security from Files Properties or the editor access
+  menu. Keep drafts intact and require a fresh check after the Windows handoff;
+  opening settings does not change permissions or save content.
+  ([e4febfe], [70168e8])
+
+- **SSH administrator permission review:** Offer explicit, single-item sudo
+  permission edits on compatible Linux 6.6+ servers with existing
+  `/usr/bin/python3` and authorized sudo policy, without installing a server
+  helper. Review the SSH host filesystem path separately from any SFTP path
+  mapping. Passwords remain transient; no root SFTP session, automatic elevation
+  or recursive permission changes are introduced. ([e4febfe], [70168e8])
 
 - **File permissions:** View full modes and numeric owner/group IDs in Properties
   and edit a selected POSIX SFTP item's ordinary read/write/execute permissions
@@ -2824,3 +2851,5 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [ac067a6]: https://github.com/zync-sh/zync/commit/ac067a6fe20f9b58e5c4cd8e6e67e47c0e89e85b
 [65fd388]: https://github.com/zync-sh/zync/commit/65fd388a03262ac8502376021459679430e38893
 [d652434]: https://github.com/zync-sh/zync/commit/d652434460ba7d175b0cd069037a98e36d46e5b9
+[e4febfe]: https://github.com/zync-sh/zync/commit/e4febfed671ce30c48a2b5825aaa0710b040fa40
+[70168e8]: https://github.com/zync-sh/zync/commit/70168e81ba307f82c9a527afb9422c7fed856fcd
