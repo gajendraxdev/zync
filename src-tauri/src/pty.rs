@@ -448,7 +448,7 @@ pub enum TerminalHandle {
         /// Handle for the PowerShell prompt-injection task.
         /// Aborted on session close so it can't write to a dead PTY.
         inject_handle: Option<tokio::task::JoinHandle<()>>,
-        master: Box<dyn MasterPty + Send>,
+        master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
         child_killer: Box<dyn ChildKiller + Send + Sync>,
         child_pid: Option<u32>,
     },
@@ -522,12 +522,11 @@ impl PtyManager {
         }
     }
 
-    fn cleanup_session_handles(handle: &mut TerminalHandle) {
+    fn stop_session_tasks(handle: &mut TerminalHandle) {
         match handle {
             TerminalHandle::Local {
                 reader_handle,
                 inject_handle,
-                child_killer,
                 ..
             } => {
                 if let Some(task) = inject_handle.take() {
@@ -536,13 +535,19 @@ impl PtyManager {
                 if let Some(task) = reader_handle.take() {
                     task.abort();
                 }
-                let _ = child_killer.kill();
             }
             TerminalHandle::Remote { task_handle, .. } => {
                 if let Some(task) = task_handle.take() {
                     task.abort();
                 }
             }
+        }
+    }
+
+    fn cleanup_session_handles(handle: &mut TerminalHandle) {
+        Self::stop_session_tasks(handle);
+        if let TerminalHandle::Local { child_killer, .. } = handle {
+            let _ = child_killer.kill();
         }
     }
 
@@ -737,7 +742,7 @@ impl PtyManager {
                 writer: writer_arc,
                 reader_handle: None,
                 inject_handle,
-                master: pair.master,
+                master: Arc::new(Mutex::new(pair.master)),
                 child_killer,
                 child_pid,
             },
@@ -823,12 +828,7 @@ impl PtyManager {
                                     let sessions_ref = sessions_for_exit.clone();
                                     let term_id_cleanup = term_id_for_exit.clone();
                                     tokio::spawn(async move {
-                                        let mut sessions = sessions_ref.lock().await;
-                                        if let Some(mut session) = sessions.remove(&term_id_cleanup) {
-                                            PtyManager::finalize_session_after_natural_exit(
-                                                &mut session.handle,
-                                            );
-                                        }
+                                        PtyManager::finish_session(&sessions_ref, &term_id_cleanup, generation).await;
                                     });
                                 }
                                 break;
@@ -1079,11 +1079,7 @@ impl PtyManager {
             flush_policy_tail(&output_channel_clone, generation, &mut policy);
             let _ = channel.close().await;
 
-            let mut sessions = sessions_for_exit.lock().await;
-            if let Some(mut session) = sessions.remove(&term_id_for_exit) {
-                PtyManager::finalize_session_after_natural_exit(&mut session.handle);
-            }
-            drop(sessions);
+            PtyManager::finish_session(&sessions_for_exit, &term_id_for_exit, generation).await;
             if drop_transport {
                 // Host is gone: suspend every pane. Never emit terminal-exit
                 // (that would look like the user typed `exit` in this pane).
@@ -1235,13 +1231,7 @@ impl PtyManager {
         }; // sessions lock is dropped here
 
         if let Some(writer) = local_writer_opt {
-            let mut writer = writer.lock().await;
-            writer
-                .write_all(data.as_bytes())
-                .map_err(|e| anyhow!("Failed to write to PTY: {}", e))?;
-            writer
-                .flush()
-                .map_err(|e| anyhow!("Failed to flush PTY: {}", e))?;
+            write_local_pty(writer, data.as_bytes().to_vec()).await?;
         } else if let Some(input) = remote_input_opt {
             // Mark interaction before waiting for the send gate. Deferred
             // startup will either finish first or observe this and stand down.
@@ -1258,28 +1248,35 @@ impl PtyManager {
     }
 
     pub async fn resize(&self, term_id: &str, cols: u16, rows: u16) -> Result<()> {
-        let remote_tx_opt = {
-            let mut sessions = self.sessions.lock().await;
+        let (local_master, remote_tx_opt) = {
+            let sessions = self.sessions.lock().await;
             let session = sessions
-                .get_mut(term_id)
+                .get(term_id)
                 .ok_or_else(|| anyhow!("Session not found: {}", term_id))?;
 
-            match &mut session.handle {
-                TerminalHandle::Local { master, .. } => {
-                    // Local resize is synchronous and doesn't block on network I/O
-                    master
-                        .resize(PtySize {
-                            rows,
-                            cols,
-                            pixel_width: 0,
-                            pixel_height: 0,
-                        })
-                        .map_err(|e| anyhow!("Failed to resize PTY: {}", e))?;
-                    None
-                }
-                TerminalHandle::Remote { resize_tx, .. } => Some(resize_tx.clone()),
+            match &session.handle {
+                TerminalHandle::Local { master, .. } => (Some(master.clone()), None),
+                TerminalHandle::Remote { resize_tx, .. } => (None, Some(resize_tx.clone())),
             }
         }; // sessions lock is dropped here
+
+        if let Some(master) = local_master {
+            // Acquire before dispatch so competing resizes preserve lock order
+            // without occupying blocking workers while waiting for the same PTY.
+            let master = master.lock_owned().await;
+            tokio::task::spawn_blocking(move || {
+                master
+                    .resize(PtySize {
+                        rows,
+                        cols,
+                        pixel_width: 0,
+                        pixel_height: 0,
+                    })
+                    .map_err(|e| anyhow!("Failed to resize PTY: {}", e))
+            })
+            .await
+            .map_err(|e| anyhow!("PTY resize task failed: {}", e))??;
+        }
 
         if let Some(resize_tx) = remote_tx_opt {
             resize_tx
@@ -1314,31 +1311,93 @@ impl PtyManager {
     }
 
     pub async fn close(&self, term_id: &str) -> Result<()> {
-        let mut sessions = self.sessions.lock().await;
-        if let Some(mut session) = sessions.remove(term_id) {
-            Self::cleanup_session_handles(&mut session.handle);
+        let session = self.sessions.lock().await.remove(term_id);
+        if let Some(session) = session {
+            Self::close_sessions(vec![session]).await?;
         }
         Ok(())
+    }
+
+    /// An old reader may finish after respawn. Remove only its generation and
+    /// release the manager lock before platform cleanup, just as explicit close
+    /// does. Do not abort the reader that reported this natural exit.
+    async fn finish_session(
+        sessions: &Mutex<HashMap<String, PtySession>>,
+        term_id: &str,
+        generation: u32,
+    ) {
+        let session = {
+            let mut sessions = sessions.lock().await;
+            if sessions
+                .get(term_id)
+                .is_some_and(|s| s.generation == generation)
+            {
+                sessions.remove(term_id)
+            } else {
+                None
+            }
+        };
+        if let Some(mut session) = session {
+            if let Err(error) = tokio::task::spawn_blocking(move || {
+                Self::finalize_session_after_natural_exit(&mut session.handle);
+            })
+            .await
+            {
+                eprintln!("[PTY] Natural-exit cleanup task failed: {}", error);
+            }
+        }
     }
 
     pub async fn close_by_connection(&self, connection_id: &str) -> Result<()> {
-        let mut sessions = self.sessions.lock().await;
-        let mut ids_to_remove = Vec::new();
+        let removed = {
+            let mut sessions = self.sessions.lock().await;
+            let ids: Vec<_> = sessions
+                .iter()
+                .filter(|(_, session)| session.connection_id == connection_id)
+                .map(|(id, _)| id.clone())
+                .collect();
+            ids.into_iter()
+                .filter_map(|id| sessions.remove(&id))
+                .collect()
+        };
+        Self::close_sessions(removed).await
+    }
 
-        for (id, session) in sessions.iter() {
-            if session.connection_id == connection_id {
-                ids_to_remove.push(id.clone());
-            }
+    /// Detach sessions before platform teardown: a slow kill/drop must not hold
+    /// the manager lock or block Tokio's workers serving other terminals.
+    async fn close_sessions(mut sessions: Vec<PtySession>) -> Result<()> {
+        if sessions.is_empty() {
+            return Ok(());
         }
-
-        for id in ids_to_remove {
-            if let Some(mut session) = sessions.remove(&id) {
+        // Stop delivery immediately, even if the blocking pool is busy.
+        for session in &mut sessions {
+            Self::stop_session_tasks(&mut session.handle);
+        }
+        tokio::task::spawn_blocking(move || {
+            for session in &mut sessions {
                 Self::cleanup_session_handles(&mut session.handle);
             }
-        }
-
-        Ok(())
+        })
+        .await
+        .map_err(|e| anyhow!("PTY close task failed: {}", e))
     }
+}
+
+/// Serialize local input before dispatching blocking pipe I/O. Holding an owned
+/// guard through flush prevents paste/keystroke interleaving, including when the
+/// invoking future is cancelled after the blocking operation has started.
+async fn write_local_pty(writer: Arc<Mutex<Box<dyn Write + Send>>>, data: Vec<u8>) -> Result<()> {
+    let mut writer = writer.lock_owned().await;
+    tokio::task::spawn_blocking(move || {
+        writer
+            .write_all(&data)
+            .map_err(|e| anyhow!("Failed to write to PTY: {}", e))?;
+        writer
+            .flush()
+            .map_err(|e| anyhow!("Failed to flush PTY: {}", e))
+    })
+    .await
+    .map_err(|e| anyhow!("PTY input task failed: {}", e))?
 }
 
 #[cfg(test)]
@@ -1349,6 +1408,307 @@ mod tests {
         DeferredStartupClaim, NavigateShellStyle, RemoteInput, RemoteWaitAction,
     };
     use russh::ChannelMsg;
+
+    /// A finite safety timeout keeps a synchronous-I/O regression from hanging
+    /// the test process. Tests release this gate explicitly, without sleeps.
+    #[derive(Debug)]
+    struct BlockingIo {
+        entered: tokio::sync::Notify,
+        release_tx: std::sync::mpsc::Sender<()>,
+        release_rx: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+        finished: std::sync::atomic::AtomicBool,
+    }
+
+    impl BlockingIo {
+        fn new() -> std::sync::Arc<Self> {
+            let (release_tx, release_rx) = std::sync::mpsc::channel();
+            std::sync::Arc::new(Self {
+                entered: tokio::sync::Notify::new(),
+                release_tx,
+                release_rx: std::sync::Mutex::new(release_rx),
+                finished: std::sync::atomic::AtomicBool::new(false),
+            })
+        }
+
+        fn block(&self) {
+            self.entered.notify_one();
+            let _ = self
+                .release_rx
+                .lock()
+                .unwrap()
+                .recv_timeout(std::time::Duration::from_secs(2));
+            self.finished
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+
+        async fn release_after_yield(&self) -> bool {
+            tokio::time::timeout(std::time::Duration::from_secs(3), self.entered.notified())
+                .await
+                .unwrap();
+            let yielded = !self.finished.load(std::sync::atomic::Ordering::SeqCst);
+            self.release_tx.send(()).unwrap();
+            yielded
+        }
+    }
+
+    struct TestWriter {
+        gate: Option<std::sync::Arc<BlockingIo>>,
+        bytes: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+        fail_write: bool,
+        fail_flush: bool,
+    }
+
+    impl std::io::Write for TestWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if let Some(gate) = self.gate.take() {
+                gate.block();
+            }
+            if self.fail_write {
+                return Err(std::io::ErrorKind::BrokenPipe.into());
+            }
+            // Exercise write_all, not just a writer that accepts every byte.
+            let count = bytes.len().min(2);
+            self.bytes
+                .lock()
+                .unwrap()
+                .extend_from_slice(&bytes[..count]);
+            Ok(count)
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            if self.fail_flush {
+                Err(std::io::ErrorKind::BrokenPipe.into())
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    struct TestMaster(Option<std::sync::Arc<BlockingIo>>);
+    impl portable_pty::MasterPty for TestMaster {
+        fn resize(&self, _: portable_pty::PtySize) -> anyhow::Result<()> {
+            if let Some(gate) = &self.0 {
+                gate.block();
+            }
+            Ok(())
+        }
+        fn get_size(&self) -> anyhow::Result<portable_pty::PtySize> {
+            Ok(Default::default())
+        }
+        fn try_clone_reader(&self) -> anyhow::Result<Box<dyn std::io::Read + Send>> {
+            unreachable!()
+        }
+        fn take_writer(&self) -> anyhow::Result<Box<dyn std::io::Write + Send>> {
+            unreachable!()
+        }
+        #[cfg(unix)]
+        fn process_group_leader(&self) -> Option<libc::pid_t> {
+            None
+        }
+        #[cfg(unix)]
+        fn as_raw_fd(&self) -> Option<std::os::fd::RawFd> {
+            None
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    struct TestKiller(Option<std::sync::Arc<BlockingIo>>);
+    impl portable_pty::ChildKiller for TestKiller {
+        fn kill(&mut self) -> std::io::Result<()> {
+            if let Some(gate) = &self.0 {
+                gate.block();
+            }
+            Ok(())
+        }
+        fn clone_killer(&self) -> Box<dyn portable_pty::ChildKiller + Send + Sync> {
+            Box::new(self.clone())
+        }
+    }
+
+    fn test_local_session(
+        resize: Option<std::sync::Arc<BlockingIo>>,
+        kill: Option<std::sync::Arc<BlockingIo>>,
+    ) -> super::PtySession {
+        super::PtySession {
+            connection_id: "test-local".into(),
+            generation: 1,
+            output_channel: tauri::ipc::Channel::new(|_| Ok(())),
+            navigate_shell: NavigateShellStyle::Posix,
+            handle: super::TerminalHandle::Local {
+                writer: std::sync::Arc::new(tokio::sync::Mutex::new(Box::new(std::io::sink()))),
+                reader_handle: None,
+                inject_handle: None,
+                master: std::sync::Arc::new(tokio::sync::Mutex::new(Box::new(TestMaster(resize)))),
+                child_killer: Box::new(TestKiller(kill)),
+                child_pid: None,
+            },
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn local_write_yields_runtime_and_preserves_partial_writes() {
+        let gate = BlockingIo::new();
+        let bytes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let writer = TestWriter {
+            gate: Some(gate.clone()),
+            bytes: bytes.clone(),
+            fail_write: false,
+            fail_flush: false,
+        };
+        let task = tokio::spawn(super::write_local_pty(
+            std::sync::Arc::new(tokio::sync::Mutex::new(Box::new(writer))),
+            b"paste-data".to_vec(),
+        ));
+        let yielded = gate.release_after_yield().await;
+        task.await.unwrap().unwrap();
+        assert!(yielded, "blocking pipe write starved the async runtime");
+        assert_eq!(*bytes.lock().unwrap(), b"paste-data");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn local_write_cancellation_does_not_interleave_later_input() {
+        let gate = BlockingIo::new();
+        let bytes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let writer: std::sync::Arc<tokio::sync::Mutex<Box<dyn std::io::Write + Send>>> =
+            std::sync::Arc::new(tokio::sync::Mutex::new(Box::new(TestWriter {
+                gate: Some(gate.clone()),
+                bytes: bytes.clone(),
+                fail_write: false,
+                fail_flush: false,
+            })));
+        let first = tokio::spawn(super::write_local_pty(writer.clone(), b"first".to_vec()));
+        gate.entered.notified().await;
+        first.abort();
+        let second = tokio::spawn(super::write_local_pty(writer, b"second".to_vec()));
+        tokio::task::yield_now().await;
+        let remained_serial = !second.is_finished();
+        gate.release_tx.send(()).unwrap();
+        second.await.unwrap().unwrap();
+        assert!(remained_serial);
+        assert_eq!(*bytes.lock().unwrap(), b"firstsecond");
+    }
+
+    #[tokio::test]
+    async fn local_write_and_flush_errors_are_returned() {
+        for (fail_write, fail_flush, expected) in [(true, false, "write"), (false, true, "flush")] {
+            let writer = TestWriter {
+                gate: None,
+                bytes: Default::default(),
+                fail_write,
+                fail_flush,
+            };
+            let error = super::write_local_pty(
+                std::sync::Arc::new(tokio::sync::Mutex::new(Box::new(writer))),
+                b"x".to_vec(),
+            )
+            .await
+            .unwrap_err();
+            assert!(error.to_string().contains(expected));
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn local_resize_yields_and_releases_manager_lock() {
+        let gate = BlockingIo::new();
+        let manager = std::sync::Arc::new(super::PtyManager::new());
+        manager.sessions.lock().await.insert(
+            "resize".into(),
+            test_local_session(Some(gate.clone()), None),
+        );
+        let operation = manager.clone();
+        let task = tokio::spawn(async move { operation.resize("resize", 120, 40).await });
+        gate.entered.notified().await;
+        let unlocked = manager.sessions.try_lock().is_ok();
+        let yielded = !gate.finished.load(std::sync::atomic::Ordering::SeqCst);
+        gate.release_tx.send(()).unwrap();
+        task.await.unwrap().unwrap();
+        assert!(
+            yielded && unlocked,
+            "resize blocked the runtime or session manager"
+        );
+        manager.close("resize").await.unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn local_close_yields_and_detaches_before_kill() {
+        for by_connection in [false, true] {
+            let gate = BlockingIo::new();
+            let manager = std::sync::Arc::new(super::PtyManager::new());
+            manager
+                .sessions
+                .lock()
+                .await
+                .insert("close".into(), test_local_session(None, Some(gate.clone())));
+            let operation = manager.clone();
+            let task = tokio::spawn(async move {
+                if by_connection {
+                    operation.close_by_connection("test-local").await
+                } else {
+                    operation.close("close").await
+                }
+            });
+            gate.entered.notified().await;
+            let detached = manager
+                .sessions
+                .try_lock()
+                .is_ok_and(|sessions| !sessions.contains_key("close"));
+            let yielded = !gate.finished.load(std::sync::atomic::Ordering::SeqCst);
+            gate.release_tx.send(()).unwrap();
+            task.await.unwrap().unwrap();
+            assert!(
+                yielded && detached,
+                "close blocked the runtime or retained the session lock"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn natural_exit_does_not_remove_replacement_generation() {
+        let manager = super::PtyManager::new();
+        let mut replacement = test_local_session(None, None);
+        replacement.generation = 2;
+        manager
+            .sessions
+            .lock()
+            .await
+            .insert("reused".into(), replacement);
+        super::PtyManager::finish_session(&manager.sessions, "reused", 1).await;
+        assert_eq!(
+            manager
+                .sessions
+                .lock()
+                .await
+                .get("reused")
+                .unwrap()
+                .generation,
+            2
+        );
+        super::PtyManager::finish_session(&manager.sessions, "reused", 2).await;
+        assert!(manager.sessions.lock().await.is_empty());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn natural_exit_releases_manager_lock_before_kill() {
+        let gate = BlockingIo::new();
+        let manager = std::sync::Arc::new(super::PtyManager::new());
+        manager
+            .sessions
+            .lock()
+            .await
+            .insert("exit".into(), test_local_session(None, Some(gate.clone())));
+        let operation = manager.clone();
+        let task = tokio::spawn(async move {
+            super::PtyManager::finish_session(&operation.sessions, "exit", 1).await
+        });
+        gate.entered.notified().await;
+        let detached = manager
+            .sessions
+            .try_lock()
+            .is_ok_and(|sessions| sessions.is_empty());
+        let yielded = !gate.finished.load(std::sync::atomic::Ordering::SeqCst);
+        gate.release_tx.send(()).unwrap();
+        task.await.unwrap();
+        assert!(yielded && detached);
+    }
 
     #[test]
     fn remote_wait_eof_is_not_pane_exit_or_host_drop() {
