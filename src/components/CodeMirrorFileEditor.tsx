@@ -360,7 +360,7 @@ export function CodeMirrorFileEditor({
     updateDirtyState(!view.state.doc.eq(savedDocRef.current));
     discardSessionRef.current = false;
     publishStatus(view.state);
-    requestAnimationFrame(() => {
+    const initialFocusFrame = requestAnimationFrame(() => {
       if (restoredSession) {
         view.scrollDOM.scrollLeft = restoredSession.scrollLeft;
         view.scrollDOM.scrollTop = restoredSession.scrollTop;
@@ -369,6 +369,7 @@ export function CodeMirrorFileEditor({
     });
 
     return () => {
+      cancelAnimationFrame(initialFocusFrame);
       if (statusFrameRef.current !== null) {
         cancelAnimationFrame(statusFrameRef.current);
         statusFrameRef.current = null;
@@ -486,13 +487,6 @@ export function CodeMirrorFileEditor({
       cancelled = true;
     };
   }, [filename, initialContent, publishStatus, showConfirmDialog, updateDirtyState]);
-
-  useEffect(() => {
-    const focusEditor = () => viewRef.current?.focus();
-    requestAnimationFrame(focusEditor);
-    const timer = window.setTimeout(focusEditor, 60);
-    return () => window.clearTimeout(timer);
-  }, [filename]);
 
   useEffect(() => () => clearEditorStatus(statusSourceRef.current), []);
 

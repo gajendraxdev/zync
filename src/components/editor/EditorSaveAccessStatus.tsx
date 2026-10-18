@@ -19,9 +19,12 @@ export function EditorSaveAccessStatus({ access }: { access?: EditorSaveAccess }
         <MenuSubmenu label="Read-only file" icon={<LockKeyhole size={13} />} descriptionId={descriptionId}
             localKeyboard triggerClassName="h-7 min-h-7 gap-1.5 px-1.5 py-0 text-[11px] !text-app-muted">
             <p id={descriptionId} className="px-3 py-2 text-xs leading-relaxed text-app-muted">{access.reason}</p>
-            <Button type="button" role="menuitem" variant="ghost" size="sm" className="w-full justify-start gap-2 rounded-none px-3 text-xs" onClick={access.refresh}>
+            <Button type="button" role="menuitem" variant="ghost" size="sm" className="w-full justify-start gap-2 rounded-none px-3 text-xs" disabled={access.openingPermissions} onClick={access.refresh}>
                 <RefreshCw aria-hidden="true" size={13} />Check permissions again
             </Button>
+            {access.openPermissions && <Button type="button" role="menuitem" variant="ghost" size="sm"
+                className="w-full justify-start rounded-none px-3 text-xs" disabled={access.openingPermissions}
+                onClick={access.openPermissions}>Windows permissions…</Button>}
             {access.overridable && <>
                 <div role="separator" className="my-1 border-t border-app-border" />
                 <p className="px-3 py-1 text-[11px] leading-relaxed text-app-muted">

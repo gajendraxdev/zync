@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FilePermissionMetadata } from '../domain/filePermissions';
+import { openSystemPermissionEditor } from './openSystemPermissionEditor';
 import {
     EditorSaveBlockedError, editorSaveBlocked, editorSaveErrorMessage, editorSavePolicy,
     isEditorWriteDenied, uncheckedEditorSavePolicy, type EditorSaveAccess, type EditorSavePolicy,
@@ -20,6 +21,12 @@ export function useEditorSaveAccess(target: EditorPermissionTarget | undefined, 
     current.current = { key, policy, onSave };
     const generation = useRef(0);
     const pending = useRef<{ key: string; promise: Promise<FilePermissionMetadata> } | null>(null);
+    const metadataRef = useRef<{ key: string; metadata: FilePermissionMetadata } | null>(null);
+    const openingRef = useRef(false);
+    const [opening, setOpening] = useState({ key: '', active: false });
+    const openingPermissions = opening.key === key && opening.active;
+    const mounted = useRef(true);
+    useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
     const updatePolicy = useCallback((value: EditorSavePolicy) => {
         current.current.policy = value;
@@ -27,9 +34,10 @@ export function useEditorSaveAccess(target: EditorPermissionTarget | undefined, 
     }, []);
 
     const refresh = useCallback(async () => {
-        if (!target || current.current.key !== key) return;
+        if (!target || current.current.key !== key || openingRef.current) return;
         const request = ++generation.current;
         updatePolicy(checking);
+        metadataRef.current = null;
         const ownsReply = () => request === generation.current && current.current.key === key;
         let read = pending.current;
         // StrictMode and repeated explicit refreshes share only an in-flight read.
@@ -46,6 +54,7 @@ export function useEditorSaveAccess(target: EditorPermissionTarget | undefined, 
             }
             const metadata = await read.promise;
             if (!ownsReply()) return;
+            if (metadata.path === target.path) metadataRef.current = { key, metadata };
             updatePolicy(metadata.path === target.path ? editorSavePolicy(metadata) : uncheckedEditorSavePolicy);
         } catch {
             if (ownsReply()) updatePolicy(uncheckedEditorSavePolicy);
@@ -53,6 +62,37 @@ export function useEditorSaveAccess(target: EditorPermissionTarget | undefined, 
             if (pending.current === read) pending.current = null;
         }
     }, [key, updatePolicy]);
+    const refreshCurrent = useRef(refresh);
+    refreshCurrent.current = refresh;
+
+    const openPermissions = async () => {
+        const metadata = metadataRef.current;
+        if (!target || openingRef.current || current.current.key !== key
+            || metadata?.key !== key || !metadata.metadata.systemEditor) return;
+        const request = ++generation.current;
+        openingRef.current = true;
+        // Consume this captured handoff. Success only acknowledges invocation;
+        // failure also requires an explicit fresh check before another attempt.
+        metadataRef.current = null;
+        setOpening({ key, active: true });
+        try {
+            await openSystemPermissionEditor(target.connectionId, metadata.metadata);
+            if (generation.current === request && current.current.key === key) {
+                updatePolicy({ ...current.current.policy,
+                    reason: 'Windows Properties opened. Use Security to change account access, then choose Check permissions again. Your editor draft is unchanged; no save was attempted.' });
+            }
+        } catch (error) {
+            if (generation.current === request && current.current.key === key) {
+                updatePolicy({ ...current.current.policy, reason: `Could not open Windows permissions: ${editorSaveErrorMessage(error)}. Check permissions again before retrying.` });
+            }
+        } finally {
+            openingRef.current = false;
+            if (mounted.current) {
+                setOpening(previous => previous.key === key ? { key, active: false } : previous);
+                if (generation.current !== request) void refreshCurrent.current();
+            }
+        }
+    };
 
     useEffect(() => {
         void refresh();
@@ -83,6 +123,9 @@ export function useEditorSaveAccess(target: EditorPermissionTarget | undefined, 
         enableSaving: () => {
             if (current.current.key === key && current.current.policy.overridable) updatePolicy(uncheckedEditorSavePolicy);
         },
+        openPermissions: metadataRef.current?.key === key && metadataRef.current.metadata.systemEditor
+            ? () => { void openPermissions(); } : undefined,
+        openingPermissions,
     };
     return { access, save };
 }

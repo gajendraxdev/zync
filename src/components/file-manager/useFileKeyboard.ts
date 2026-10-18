@@ -41,15 +41,13 @@ export function useFileKeyboard({
   handlePaste,
   handleDelete,
   toggleBookmark,
-  refreshFiles,
+  handleRefresh,
   navigateBack,
   navigateForward,
   setViewMode,
   updateFileManagerSettings,
   setIsEditingPath,
-  setRenameOldName,
-  setRenameNewName,
-  setIsRenameModalOpen,
+  openRenameModal,
 }: {
   requestFocusReveal: () => void;
   containerRef: RefObject<HTMLDivElement | null>;
@@ -81,15 +79,13 @@ export function useFileKeyboard({
   handlePaste: () => void;
   handleDelete: () => void;
   toggleBookmark: () => void;
-  refreshFiles: (connectionId: string) => void;
+  handleRefresh: () => void;
   navigateBack: (connectionId: string) => void;
   navigateForward: (connectionId: string) => void;
   setViewMode: (mode: 'grid' | 'list') => void;
   updateFileManagerSettings: (updates: Partial<AppSettings['fileManager']>) => Promise<void>;
   setIsEditingPath: (editing: boolean) => void;
-  setRenameOldName: (name: string) => void;
-  setRenameNewName: (name: string) => void;
-  setIsRenameModalOpen: (open: boolean) => void;
+  openRenameModal: (name: string) => void;
 }) {
   useEffect(() => {
     if (!isConnected) return;
@@ -165,7 +161,7 @@ export function useFileKeyboard({
       }
       if (matches('fmRefresh')) {
         e.preventDefault();
-        if (activeConnectionId) void refreshFiles(activeConnectionId);
+        handleRefresh();
         return;
       }
       if (!e.ctrlKey && !e.altKey && !e.metaKey && (e.key === '/' || e.key === '~')) {
@@ -210,9 +206,7 @@ export function useFileKeyboard({
       if (matches('fmRename') && (focusedFile || selectedFiles.length === 1)) {
         e.preventDefault();
         const fileToRename = focusedFile || selectedFiles[0];
-        setRenameOldName(fileToRename);
-        setRenameNewName(fileToRename);
-        setIsRenameModalOpen(true);
+        openRenameModal(fileToRename);
         return;
       }
 
@@ -338,17 +332,15 @@ export function useFileKeyboard({
     navigateBack,
     navigateForward,
     paintedFiles,
-    refreshFiles,
+    handleRefresh,
     requestFocusReveal,
     searchTerm,
     selectedFiles,
     setFocusedFile,
     setIsEditingPath,
     setIsPropertiesOpen,
-    setIsRenameModalOpen,
     setIsSearchOpen,
-    setRenameNewName,
-    setRenameOldName,
+    openRenameModal,
     setSearchTerm,
     setSelectedFiles,
     setViewMode,

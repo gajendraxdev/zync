@@ -13,6 +13,7 @@ interface ConfirmModalProps {
     cancelLabel?: string;
     variant?: 'primary' | 'danger';
     isLoading?: boolean;
+    confirmDisabled?: boolean;
 }
 
 export function ConfirmModal({
@@ -24,7 +25,8 @@ export function ConfirmModal({
     confirmLabel = 'Confirm',
     cancelLabel = 'Cancel',
     variant = 'primary',
-    isLoading
+    isLoading,
+    confirmDisabled = false,
 }: ConfirmModalProps) {
     const isDanger = variant === 'danger';
 
@@ -65,6 +67,7 @@ export function ConfirmModal({
                         variant={variant}
                         onClick={onConfirm}
                         isLoading={isLoading}
+                        disabled={confirmDisabled}
                         className={cn(
                             "px-6 h-8 font-bold text-[10px] uppercase tracking-widest min-w-[100px]",
                             isDanger && "bg-red-500 hover:bg-red-600 border-0 text-white shadow-lg shadow-red-500/20"

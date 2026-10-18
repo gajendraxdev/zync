@@ -5,6 +5,7 @@ import type { createPermissionFixture } from '../fixtures/files-production/permi
 export async function runFileEditorSaveBrowserChecks(
     fixture: ReturnType<typeof createPermissionFixture>['control'],
     controls: { provider: (id: string) => void; toasts: () => { message: string }[]; clearToasts: () => void },
+    windowsOnly = false,
 ): Promise<string[]> {
     const passed: string[] = [];
     const check = (label: string, value: unknown) => { if (!value) throw new Error(label); passed.push(label); };
@@ -12,7 +13,7 @@ export async function runFileEditorSaveBrowserChecks(
     const until = async (predicate: () => unknown) => {
         const deadline = performance.now() + 10_000;
         while (!predicate()) {
-            if (performance.now() > deadline) throw new Error(`Editor did not settle: ${document.body.innerText.slice(-1200)}`);
+            if (performance.now() > deadline) throw new Error(`Editor did not settle after ${passed.at(-1) ?? 'setup'}: ${document.body.innerText.slice(-1200)}`);
             await settle();
         }
     };
@@ -74,7 +75,9 @@ export async function runFileEditorSaveBrowserChecks(
         pluginState = null;
     };
     const accessMenu = async () => {
-        button('Read-only file')!.click();
+        const trigger = button('Read-only file')!;
+        trigger.focus();
+        trigger.click();
         await until(() => document.querySelector('[role="menu"][aria-label="Read-only file"]'));
     };
     const refresh = async () => { await accessMenu(); button('Check permissions again')!.click(); await settle(); await until(() => !document.body.innerText.includes('Checking permissions…')); };
@@ -82,6 +85,49 @@ export async function runFileEditorSaveBrowserChecks(
     try {
     await until(() => document.querySelector('[role="listbox"]'));
     check('Files rows do not trigger editor permission probes', fixture.reads.length === 0);
+    if (windowsOnly) {
+        for (const provider of ['builtin-plain', 'com.zync.editor.codemirror', 'test.permission-editor']) {
+            controls.provider(provider); controls.clearToasts(); fixture.setReadOnly(false); fixture.failWrite(null);
+            await open(); await edit('keep this Windows draft');
+            fixture.failWrite('Access is denied. (os error 5)'); await shortcut();
+            await until(() => Boolean(readOnly())); controls.clearToasts();
+            const before = fixture.editorWrites.length;
+            const opens = fixture.systemEditorOpens.length;
+            await accessMenu();
+            check(`${provider}: Windows permissions is available from the existing read-only menu`, Boolean(button('Windows permissions…')) && !button('Allow save attempts'));
+            fixture.deferSystemEditor(); button('Windows permissions…')!.click();
+            await until(fixture.systemEditorPending);
+            check(`${provider}: pending Windows handoff is single flight and cannot enable Save`, !button('Windows permissions…')
+                && button('Check permissions again')?.disabled && save()?.disabled && fixture.systemEditorOpens.length === opens + 1);
+            fixture.finishSystemEditor();
+            await until(() => document.body.innerText.includes('Your editor draft is unchanged; no save was attempted.'));
+            check(`${provider}: native settings invocation preserves draft and creates neither writes nor toasts`, content() === 'keep this Windows draft'
+                && fixture.editorWrites.length === before && fixture.writes.length === 0 && controls.toasts().length === 0 && save()?.disabled);
+            check(`${provider}: another handoff requires an explicit metadata recheck`, !button('Windows permissions…'));
+            fixture.failWrite(null); button('Check permissions again')!.click();
+            await until(() => !readOnly());
+            check(`${provider}: explicit recheck restores saving without saving or replacing the draft`, !save()?.disabled
+                && content() === 'keep this Windows draft' && fixture.editorWrites.length === before);
+            await close();
+        }
+        controls.provider('com.zync.editor.codemirror'); fixture.setReadOnly(true);
+        await open(); await accessMenu();
+        // The old duplicate mount-focus timer stole focus and closed this menu.
+        await new Promise<void>(resolve => setTimeout(resolve, 90));
+        check('CodeMirror initial focus does not later steal an explicitly opened access menu', Boolean(button('Windows permissions…'))
+            && document.activeElement === button('Check permissions again'));
+        fixture.deferSystemEditor(); button('Windows permissions…')!.click();
+        await until(fixture.systemEditorPending); await close(); fixture.setReadOnly(false); await open('package.json');
+        fixture.finishSystemEditor(); await settle();
+        check('late closed-document handoff does not lock or relabel the next editor', !readOnly() && content()?.includes('package.json')
+            && !document.body.innerText.includes('Windows Properties opened.'));
+        await close(); fixture.setReadOnly(true); fixture.failSystemEditor(true); await open(); await accessMenu();
+        button('Windows permissions…')!.click();
+        await until(() => document.body.innerText.includes('Simulated Windows settings invocation failed'));
+        check('editor invocation failure stays inline, preserves read-only and requires recheck', !button('Windows permissions…')
+            && save()?.disabled && !button('Check permissions again')?.disabled && controls.toasts().length === 0);
+        return passed;
+    }
     for (const provider of ['builtin-plain', 'com.zync.editor.codemirror', 'test.permission-editor']) {
         controls.provider(provider); controls.clearToasts();
         fixture.setMode(0o100400); fixture.failWrite(null); fixture.failRead(false);
@@ -132,6 +178,18 @@ export async function runFileEditorSaveBrowserChecks(
         await shortcut(); await until(() => controls.toasts().length === 1);
         check(`${provider}: non-permission errors keep drafts and do not latch read-only`, !readOnly() && content() === 'keep draft on disk-full' && !save()?.disabled);
         await close(); fixture.failRead(false); fixture.failWrite(null);
+        fixture.setMode(0o100644); fixture.setWriteAccess(false); controls.clearToasts();
+        const beforeAcl = fixture.editorWrites.length;
+        await open();
+        await accessMenu();
+        check(`${provider}: native local ACL denial has no mode-hint override`, readOnly() && save()?.disabled && !button('Allow save attempts'));
+        button('Read-only file')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+        await until(() => !document.querySelector('[role="menu"][aria-label="Read-only file"]'));
+        await shortcut();
+        check(`${provider}: native local ACL denial blocks all save routes without a first error`, fixture.editorWrites.length === beforeAcl && controls.toasts().length === 0);
+        fixture.setWriteAccess(null); await refresh();
+        check(`${provider}: explicit access recheck restores unknown/attemptable saving`, !readOnly());
+        await close();
     }
     controls.provider('com.zync.editor.codemirror'); controls.clearToasts(); fixture.setMode(0o100400); fixture.deferRead();
     // Do not wait for access: close while the old metadata request is in flight.

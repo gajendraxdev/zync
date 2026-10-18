@@ -45,6 +45,7 @@ import type { FileEntry } from './file-manager/types';
 import { EDITOR_READ_LIMIT_MESSAGE, exceedsEditorReadLimit, isEditorReadLimitError, MAX_EDITOR_FILE_BYTES } from './file-manager/editorReadPolicy';
 import { PropertiesPanel } from './file-manager/PropertiesPanel';
 import { useFilePermissionEditor } from '../features/files/application/useFilePermissionEditor';
+import { useFileActionAccess } from '../features/files/application/useFileActionAccess';
 import { useFileClipboard } from './file-manager/useFileClipboard';
 import { isFileManagerPanelShown, useFileKeyboard } from './file-manager/useFileKeyboard';
 import { useFileSelection } from './file-manager/useFileSelection';
@@ -208,6 +209,11 @@ export const FileManager = memo(function FileManager({
   const currentError = useAppStore(state => (
     storeKey ? (state.error[storeKey] ?? null) : null
   ));
+  const readDeniedPath = useAppStore(state => {
+    const denial = state.listingReadDenial[storeKey];
+    return state.error[storeKey] && denial && denial.connection === state.connections.find(item => item.id === activeConnectionId)
+      ? denial.path : undefined;
+  });
   const loadFilesStore = useAppStore(state => state.loadFiles);
   const loadFiles = useCallback((cid: string, path?: string, skipHistory?: boolean, silent?: boolean) => (
     loadFilesStore(cid, path, skipHistory, silent, instanceId)
@@ -275,13 +281,6 @@ export const FileManager = memo(function FileManager({
     handleSelectMany,
     selectContextFile,
   } = useFileSelection(currentPath, activeConnectionId ?? undefined, files);
-  const { handleCopy } = useFileClipboard({
-    connectionId: activeConnectionId ?? undefined,
-    currentPath,
-    files,
-    selectedFiles,
-    instanceId,
-  });
   const [sortColumn, setSortColumn] = useState<FileSortColumn>('name');
   const [sortDirection, setSortDirection] = useState<FileSortDirection>('asc');
   const [detailColumns, setDetailColumns] = useState<FileDetailColumn[]>([]);
@@ -409,6 +408,16 @@ export const FileManager = memo(function FileManager({
   // Combine store loading and local processing
   const isLoading = loading || isProcessing;
   const isReconnectPending = !isLocal && connection?.status === 'connecting';
+  const actionTargetName = selectedFiles.length === 1 ? selectedFiles[0] : selectedFiles.length === 0 ? focusedFile : null;
+  const actionAccess = useFileActionAccess(activeConnectionId ?? undefined, currentPath,
+    actionTargetName ? files.find(file => file.name === actionTargetName)?.path ?? null : null,
+    isFilesSurfaceActive && isConnected && !loading, files, readDeniedPath);
+  const actionBlocked = actionAccess.blocked;
+  const { handleCopy, copyUnavailable, cutUnavailable } = useFileClipboard({
+    connectionId: activeConnectionId ?? undefined, currentPath, files, selectedFiles, instanceId,
+    isBlocked: actionBlocked,
+    active: isFilesSurfaceActive && isConnected,
+  });
   const canGoBack = Boolean(activeConnectionId) && activeHistoryIndex > 0;
   const canGoForward = Boolean(activeConnectionId) && activeHistoryIndex < activeHistoryLength - 1;
 
@@ -473,6 +482,8 @@ export const FileManager = memo(function FileManager({
   }[], targetDirectory?: string, targetConnectionId?: string) => {
     const destinationConnectionId = targetConnectionId ?? activeConnectionId;
     if (!destinationConnectionId || ops.length === 0) return;
+    if (destinationConnectionId === activeConnectionId
+      && isFilePathEqual(targetDirectory ?? currentPath, currentPath) && actionBlocked('receive')) return;
 
     const generation = operationGeneration.current;
     setIsProcessing(true);
@@ -586,6 +597,7 @@ export const FileManager = memo(function FileManager({
     replaceConflicts,
     showToast,
     transferFile,
+    actionBlocked,
   ]);
 
   const uploadPaths = useCallback(async (paths: string[]) => {
@@ -598,6 +610,7 @@ export const FileManager = memo(function FileManager({
   const { handleUpload, handleUploadFolder, isTauriDraggingOver } = useFileUploads({
     connectionId: activeConnectionId ?? undefined, isConnected, onDragVisualClear: clearDragVisual, instanceId,
     onUploadPaths: uploadPaths,
+    isBlocked: actionBlocked,
   });
 
   const handlePaste = useCallback(async () => {
@@ -927,6 +940,7 @@ export const FileManager = memo(function FileManager({
 
   const handleOpenFile = useCallback(async (file: FileEntry, providerOverride?: string) => {
     if (!activeConnectionId) return false;
+    if (actionBlocked('read', file.path)) return false;
     if (exceedsEditorReadLimit(file.size)) {
       showToast('error', EDITOR_READ_LIMIT_MESSAGE);
       return false;
@@ -960,7 +974,7 @@ export const FileManager = memo(function FileManager({
     } finally {
       if (requestId === editorReadRequestRef.current) setIsFileLoading(false);
     }
-  }, [activeConnectionId, currentPath, handleConnectionError, showToast]);
+  }, [activeConnectionId, currentPath, handleConnectionError, showToast, actionBlocked]);
 
   const handleOpenFileWithProvider = useCallback(async (file: FileEntry, providerId: string) => {
     if (!await handleOpenFile(file, providerId)) return;
@@ -1081,6 +1095,7 @@ export const FileManager = memo(function FileManager({
   const handleCreateFolder = async () => {
     const trimmedName = newFolderName.trim();
     if (!trimmedName || !activeConnectionId) return;
+    if (actionBlocked('createFolder')) return;
     if (trimmedName.includes('/') || trimmedName.includes('\\') || trimmedName === '.' || trimmedName === '..') {
       showToast('error', 'Invalid folder name: Contains invalid characters');
       return;
@@ -1098,6 +1113,7 @@ export const FileManager = memo(function FileManager({
   const handleCreateFile = async () => {
     const trimmedName = newFileName.trim();
     if (!trimmedName || !activeConnectionId) return;
+    if (actionBlocked('createFile')) return;
     if (trimmedName.includes('/') || trimmedName.includes('\\') || trimmedName === '.' || trimmedName === '..') {
       showToast('error', 'Invalid file name: Contains invalid characters');
       return;
@@ -1127,6 +1143,7 @@ export const FileManager = memo(function FileManager({
   const handleRename = async () => {
     const trimmedName = renameNewName.trim();
     if (!trimmedName || !activeConnectionId) return;
+    if (actionBlocked('rename', files.find(file => file.name === renameOldName)?.path)) return;
     if (trimmedName.includes('/') || trimmedName.includes('\\') || trimmedName === '.' || trimmedName === '..') {
       showToast('error', 'Invalid name: Contains invalid characters');
       return;
@@ -1144,11 +1161,13 @@ export const FileManager = memo(function FileManager({
     setRenameNewName('');
   };
 
-  const openRenameModal = (filename: string) => {
+  const openRenameModal = useCallback((filename: string) => {
+    const file = files.find(file => file.name === filename);
+    if (!file || actionBlocked('rename', file.path)) return;
     setRenameOldName(filename);
     setRenameNewName(filename);
     setIsRenameModalOpen(true);
-  };
+  }, [files, actionBlocked]);
 
   // Move performUpload up to be stable and reusable
   // (Done above)
@@ -1277,8 +1296,9 @@ export const FileManager = memo(function FileManager({
 
   const handleRefresh = useCallback(() => {
     if (!activeConnectionId) return;
+    actionAccess.refresh();
     void refreshFiles(activeConnectionId);
-  }, [activeConnectionId, refreshFiles]);
+  }, [activeConnectionId, refreshFiles, actionAccess.refresh]);
 
   const handleToggleSearch = useCallback((open: boolean) => {
     if (!open) {
@@ -1351,8 +1371,8 @@ export const FileManager = memo(function FileManager({
     void openTerminalHere(activeConnectionId, currentPath);
   }, [activeConnectionId, currentPath]);
 
-  const handleNewFolder = useCallback(() => setIsNewFolderModalOpen(true), []);
-  const handleNewFile = useCallback(() => setIsNewFileModalOpen(true), []);
+  const handleNewFolder = useCallback(() => { if (!actionBlocked('createFolder')) setIsNewFolderModalOpen(true); }, [actionBlocked]);
+  const handleNewFile = useCallback(() => { if (!actionBlocked('createFile')) setIsNewFileModalOpen(true); }, [actionBlocked]);
 
   const handleRemoveBookmark = useCallback((path: string) => {
     if (!activeConnectionId) return;
@@ -1368,6 +1388,7 @@ export const FileManager = memo(function FileManager({
 
   const handleDownload = async () => {
     if (selectedFiles.length === 0 || !activeConnectionId) return;
+    if (actionBlocked('read')) return;
     try {
       const preferredDownloadDir = settings.fileManager.defaultDownloadPath?.trim();
       const { filePaths, canceled } = await window.ipcRenderer.invoke('dialog:openDirectory', {
@@ -1412,6 +1433,7 @@ export const FileManager = memo(function FileManager({
 
   const handleDownloadAsZip = async () => {
     if (selectedFiles.length === 0 || !activeConnectionId) return;
+    if (actionBlocked('read')) return;
     if (isZipping) return; // Prevent double-click opening two dialogs
     if (activeConnectionId === 'local') {
       showToast('error', 'Download as Archive is only available for remote server connections');
@@ -1493,6 +1515,7 @@ export const FileManager = memo(function FileManager({
 
   const executeDelete = useCallback(async () => {
     if (selectedFiles.length === 0 || !activeConnectionId) return;
+    if (actionBlocked('delete')) return;
 
     // Native listing paths are identities; rebuilding them mixes Windows separators.
     const selectedNames = new Set(selectedFiles);
@@ -1510,17 +1533,18 @@ export const FileManager = memo(function FileManager({
     } finally {
       setIsDeleting(false);
     }
-  }, [activeConnectionId, files, deleteEntries, handleConnectionError, selectedFiles, showToast]);
+  }, [activeConnectionId, files, deleteEntries, handleConnectionError, selectedFiles, showToast, actionBlocked]);
 
   const handleDelete = useCallback(() => {
     if (selectedFiles.length === 0 || !activeConnectionId) return;
+    if (actionBlocked('delete')) return;
 
     if (settings.fileManager.confirmDelete) {
       setIsDeleteModalOpen(true);
     } else {
       void executeDelete();
     }
-  }, [activeConnectionId, executeDelete, selectedFiles, settings.fileManager.confirmDelete]);
+  }, [activeConnectionId, executeDelete, selectedFiles, settings.fileManager.confirmDelete, actionBlocked]);
 
   // Drag and Drop
   const handleDragOver = (e: React.DragEvent) => {
@@ -1635,10 +1659,12 @@ export const FileManager = memo(function FileManager({
           label: 'Download',
           icon: <Download size={14} />,
           action: handleDownload,
+          disabled: actionBlocked('read'),
         },
         ...(contextMenu.file.type === '-' ? [{
           label: 'Open With…',
           icon: <FilePlus size={14} />,
+          disabled: actionBlocked('read', contextMenu.file.path),
           children: editorProviderOptions.map((option) => ({
             label: `${option.value === (settings.editor?.defaultProvider ?? 'com.zync.editor.codemirror') ? '✓ ' : ''}${option.label}`,
             action: () => {
@@ -1658,23 +1684,30 @@ export const FileManager = memo(function FileManager({
           label: 'Download as Archive (.tar.gz)',
           icon: <FileArchive size={14} />,
           action: handleDownloadAsZip,
+          disabled: actionBlocked('read'),
         },
         { separator: true },
         {
           label: 'Copy',
           icon: <Copy size={14} />,
           action: () => handleCopy(false),
+          disabled: Boolean(copyUnavailable),
+          disabledReason: copyUnavailable,
         },
         {
           label: 'Cut',
           icon: <Scissors size={14} />,
           action: () => handleCopy(true),
+          disabled: Boolean(cutUnavailable),
+          disabledReason: cutUnavailable,
         },
         {
           label: 'Copy to Server...',
           icon: <Server size={14} />,
+          disabled: actionBlocked('read'),
           action: () => {
             if (!contextMenu?.file || !activeConnectionId) return;
+            if (actionBlocked('read')) return;
 
             // If the right-clicked file is part of a selection, copy all selected
             const targetFiles = selectedFiles.includes(contextMenu.file.name)
@@ -1719,12 +1752,14 @@ export const FileManager = memo(function FileManager({
           label: 'Rename',
           icon: <FolderInput size={14} />,
           action: () => openRenameModal(contextMenu.file?.name as string),
+          disabled: actionBlocked('rename', contextMenu.file.path),
         },
         {
           label: 'Delete',
           icon: <Trash2 size={14} />,
           variant: 'danger',
           action: handleDelete,
+          disabled: actionBlocked('delete'),
         },
         {
           label: 'Properties',
@@ -1747,7 +1782,7 @@ export const FileManager = memo(function FileManager({
         label: clipboard ? `Paste ${clipboard.files.length > 1 ? `(${clipboard.files.length})` : ''}` : 'Paste',
         icon: <Clipboard size={14} />,
         action: handlePaste,
-        disabled: !clipboard,
+        disabled: !clipboard || actionBlocked('receive'),
       });
 
       contextMenuItems.push(
@@ -1755,6 +1790,7 @@ export const FileManager = memo(function FileManager({
           label: 'Upload Files',
           icon: <Upload size={14} />,
           action: handleUpload,
+          disabled: actionBlocked('createFile'),
         },
         { separator: true },
         ...(activeConnectionId
@@ -1774,19 +1810,21 @@ export const FileManager = memo(function FileManager({
             {
               label: 'New File',
               icon: <FilePlus size={14} />,
-              action: () => setIsNewFileModalOpen(true),
+              action: handleNewFile,
+              disabled: actionBlocked('createFile'),
             },
             {
               label: 'New Folder',
               icon: <FolderInput size={14} />,
-              action: () => setIsNewFolderModalOpen(true),
+              action: handleNewFolder,
+              disabled: actionBlocked('createFolder'),
             },
           ]
         },
         {
           label: 'Refresh',
           icon: <RotateCw size={14} />,
-          action: () => activeConnectionId && loadFiles(activeConnectionId, currentPath),
+          action: handleRefresh,
         },
       );
     }
@@ -1825,15 +1863,13 @@ export const FileManager = memo(function FileManager({
     handlePaste,
     handleDelete,
     toggleBookmark,
-    refreshFiles,
+    handleRefresh,
     navigateBack,
     navigateForward,
     setViewMode,
     updateFileManagerSettings,
     setIsEditingPath,
-    setRenameOldName,
-    setRenameNewName,
-    setIsRenameModalOpen,
+    openRenameModal,
   });
 
 
@@ -1936,6 +1972,8 @@ export const FileManager = memo(function FileManager({
         onUploadFolder={handleUploadFolder}
         onNewFolder={handleNewFolder}
         onNewFile={handleNewFile}
+        createFileDisabled={actionBlocked('createFile')}
+        createFolderDisabled={actionBlocked('createFolder')}
         isEditingPath={isEditingPath}
         onTogglePathEdit={setIsEditingPath}
         disabled={!isConnected || isLoading || !currentPath}
@@ -1976,7 +2014,7 @@ export const FileManager = memo(function FileManager({
           isBookmarked={isBookmarked}
           onOpenTerminal={activeConnectionId ? handleOpenTerminalChrome : undefined}
           onPaste={handlePaste}
-          canPaste={Boolean(clipboard)}
+          canPaste={Boolean(clipboard) && !actionBlocked('receive')}
           onSelectAll={handleSelectAllFiles}
           onClearSelection={() => { setSelectedFiles([]); listingFocusRef.current?.focus({ preventScroll: true }); }}
           disabled={!isConnected || isLoading || !currentPath}
@@ -1985,6 +2023,10 @@ export const FileManager = memo(function FileManager({
             canZoomIn, canZoomOut, sortColumn, sortDirection, onSort: applySort,
             detailColumns, onToggleColumn: column => setDetailColumns(current => current.includes(column) ? current.filter(item => item !== column) : [...current, column]) }}
         />
+        {actionAccess.unavailable && <div className="flex shrink-0 items-center gap-3 border-b border-app-border/30 px-3 py-2">
+          <p role="status" className="flex-1 text-xs text-app-muted">Unavailable for this account: {actionAccess.unavailable}. Check again if permissions have changed.</p>
+          <Button type="button" size="sm" variant="secondary" onClick={handleRefresh}>Check access again</Button>
+        </div>}
         {isConnected && currentError && currentError !== 'DISCONNECTED' && !isLoading && (
           <div className="flex shrink-0 items-center gap-3 border-b border-app-border/30 px-3 py-2">
             <StateMessage variant="error" className="flex-1 text-xs">{currentError}</StateMessage>
@@ -2086,6 +2128,7 @@ export const FileManager = memo(function FileManager({
       {/* Modals */}
       <Modal isOpen={isNewFileModalOpen} onClose={() => setIsNewFileModalOpen(false)} title="New File">
         <div className="space-y-4">
+          {actionBlocked('createFile') && <StateMessage variant="status">Creating files is unavailable for this account. Close and check access again if permissions have changed.</StateMessage>}
           <Input
             label="File Name"
             placeholder="my-file.txt"
@@ -2098,7 +2141,7 @@ export const FileManager = memo(function FileManager({
             <Button variant="ghost" onClick={() => setIsNewFileModalOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleCreateFile}>Create</Button>
+            <Button onClick={handleCreateFile} disabled={actionBlocked('createFile')}>Create</Button>
           </div>
         </div>
       </Modal>
@@ -2106,6 +2149,7 @@ export const FileManager = memo(function FileManager({
 
       <Modal isOpen={isNewFolderModalOpen} onClose={() => setIsNewFolderModalOpen(false)} title="New Folder">
         <div className="space-y-4">
+          {actionBlocked('createFolder') && <StateMessage variant="status">Creating folders is unavailable for this account. Close and check access again if permissions have changed.</StateMessage>}
           <Input
             label="Folder Name"
             placeholder="my-folder"
@@ -2118,13 +2162,14 @@ export const FileManager = memo(function FileManager({
             <Button variant="ghost" onClick={() => setIsNewFolderModalOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleCreateFolder}>Create</Button>
+            <Button onClick={handleCreateFolder} disabled={actionBlocked('createFolder')}>Create</Button>
           </div>
         </div>
       </Modal>
 
       <Modal isOpen={isRenameModalOpen} onClose={() => setIsRenameModalOpen(false)} title="Rename">
         <div className="space-y-4">
+          {actionBlocked('rename', files.find(file => file.name === renameOldName)?.path) && <StateMessage variant="status">Rename is unavailable for this account. Close and check access again if permissions have changed.</StateMessage>}
           <Input
             label="New Name"
             value={renameNewName}
@@ -2136,7 +2181,7 @@ export const FileManager = memo(function FileManager({
             <Button variant="ghost" onClick={() => setIsRenameModalOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleRename}>Rename</Button>
+            <Button onClick={handleRename} disabled={actionBlocked('rename', files.find(file => file.name === renameOldName)?.path)}>Rename</Button>
           </div>
         </div>
       </Modal>
@@ -2194,10 +2239,12 @@ export const FileManager = memo(function FileManager({
         onClose={() => setIsDeleteModalOpen(false)}
         onConfirm={executeDelete}
         title="Delete Confirmation"
-        message={`Are you sure you want to delete ${selectedFiles.length} item(s)? This action cannot be undone.`}
+        message={actionBlocked('delete') ? 'Delete is unavailable for this account. Close and check access again if permissions have changed.'
+          : `Are you sure you want to delete ${selectedFiles.length} item(s)? This action cannot be undone.`}
         confirmLabel="Delete"
         variant="danger"
         isLoading={isDeleting}
+        confirmDisabled={actionBlocked('delete')}
       />
 
       {/* Conflict Resolution Modal */}

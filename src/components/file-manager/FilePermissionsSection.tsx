@@ -18,6 +18,7 @@ export function FilePermissionsSection({ editor, ownerLabel, groupLabel }: {
     const firstCheckbox = useRef<HTMLInputElement>(null);
     const editButton = useRef<HTMLButtonElement>(null);
     const refreshButton = useRef<HTMLButtonElement>(null);
+    const passwordInput = useRef<HTMLInputElement>(null);
     const prior = useRef({ key: '', editing: false });
     const targetKey = JSON.stringify([state?.target.connectionId, state?.target.path]);
     useEffect(() => {
@@ -27,10 +28,17 @@ export function FilePermissionsSection({ editor, ownerLabel, groupLabel }: {
         if (state?.editing && !previous.editing) firstCheckbox.current?.focus();
         else if (!state?.editing && previous.editing && previous.key === targetKey
             && (document.activeElement === document.body || sectionRef.current?.contains(document.activeElement))) {
-            (editButton.current?.disabled ? refreshButton.current : editButton.current)?.focus();
+            (editButton.current && !editButton.current.disabled ? editButton.current : refreshButton.current)?.focus();
         }
     }, [state?.editing, targetKey, editor.active]);
     const metadata = state?.metadata;
+    const administrator = Boolean(state?.administrator && state.administrator !== 'password');
+    const canReviewAdministrator = state?.target.connectionId !== 'local' && metadata?.binding.model === 'posix'
+        && (metadata.snapshot.kind === 'File' || metadata.snapshot.kind === 'Directory');
+    useEffect(() => {
+        if (state?.administrator === 'password' && !state.applying) passwordInput.current?.focus();
+        return () => { if (passwordInput.current) passwordInput.current.value = ''; };
+    }, [state?.administrator, state?.applying]);
     const mode = metadata?.snapshot.mode;
     const availability = metadata ? modeEditAvailability(metadata) : null;
     const parsed = parseOrdinaryMode(state?.draft ?? '');
@@ -45,14 +53,21 @@ export function FilePermissionsSection({ editor, ownerLabel, groupLabel }: {
     return <section ref={sectionRef} className="border-t border-app-border/30 py-3" aria-labelledby={`${id}-title`}>
         <div className="mb-2 flex items-center justify-between gap-2">
             <h3 id={`${id}-title`} className="text-xs font-medium text-app-text">Permissions</h3>
-            <Button ref={refreshButton} type="button" variant="ghost" size="sm" onClick={() => void editor.refresh()}
+            <Button ref={refreshButton} type="button" variant="ghost" size="sm" onClick={() => void editor.refresh(true)}
                 disabled={state?.loading || state?.applying}>Refresh</Button>
         </div>
         {state?.loading && <p className="text-xs text-app-muted" role="status">Reading permissions…</p>}
         {metadata && <>
+            {administrator && <div className="mb-3 space-y-1 border-l-2 border-app-accent pl-2 text-xs leading-relaxed text-app-muted" role="note">
+                <p className="font-medium text-app-text">Administrator review · SSH host filesystem</p>
+                <p className="break-all">{metadata.path}</p>
+                <p>This can differ from the SFTP view. Review this host path and mode before Apply. One item only; review expires after 90 seconds.</p>
+            </div>}
             <dl className="space-y-1 text-xs text-app-text">
-                <div className="flex justify-between gap-3"><dt className="text-app-muted">Owner</dt><dd className="min-w-0 break-all text-right">{ownerLabel && `${ownerLabel} · `}UID {metadata.uid ?? 'not reported'}</dd></div>
-                <div className="flex justify-between gap-3"><dt className="text-app-muted">Group</dt><dd className="min-w-0 break-all text-right">{groupLabel && `${groupLabel} · `}GID {metadata.gid ?? 'not reported'}</dd></div>
+                {metadata.binding.model === 'windows' ? <div className="flex justify-between gap-3"><dt className="text-app-muted">Access model</dt><dd>Windows accounts and ACLs</dd></div> : <>
+                    <div className="flex justify-between gap-3"><dt className="text-app-muted">Owner</dt><dd className="min-w-0 break-all text-right">{!administrator && ownerLabel && `${ownerLabel} · `}UID {metadata.uid ?? 'not reported'}</dd></div>
+                    <div className="flex justify-between gap-3"><dt className="text-app-muted">Group</dt><dd className="min-w-0 break-all text-right">{!administrator && groupLabel && `${groupLabel} · `}GID {metadata.gid ?? 'not reported'}</dd></div>
+                </>}
                 {metadata.binding.model === 'posix' && <div className="flex justify-between gap-3"><dt className="text-app-muted">{state?.needsRefresh ? 'Last observed mode' : 'Current mode'}</dt>
                     <dd className="font-mono">{unixModeString(octal)} · {octal}</dd></div>}
                 {metadata.readOnly != null && <div className="flex justify-between gap-3"><dt className="text-app-muted">Read-only attribute</dt><dd>{metadata.readOnly ? 'Yes' : 'No'}</dd></div>}
@@ -60,16 +75,43 @@ export function FilePermissionsSection({ editor, ownerLabel, groupLabel }: {
                     <dd className="font-mono">{(mode & 0o7000).toString(8)} (not editable)</dd></div>}
             </dl>
             <p id={`${id}-access`} className="mt-2 text-xs leading-relaxed text-app-muted">{availability?.reason}</p>
-            {!state?.editing && <Button ref={editButton} type="button" variant="secondary" size="sm" className="mt-3"
+            {!state?.editing && !state?.administrator && <Button ref={editButton} type="button" variant="secondary" size="sm" className="mt-3"
                 aria-describedby={`${id}-access`} disabled={unsupported || state?.needsRefresh || state?.applying}
-                onClick={editor.edit}>Edit permissions</Button>}
+                isLoading={state?.applying} onClick={editor.edit}>{metadata.systemEditor ? 'Windows permissions…' : 'Edit permissions'}</Button>}
+            {canReviewAdministrator && !state?.editing && !state?.administrator && <details className="mt-3 text-xs leading-relaxed text-app-muted">
+                <summary className="cursor-pointer">Administrator permissions</summary>
+                <p className="mt-2">Requires existing Python 3 at /usr/bin/python3, Linux 6.6+ and compatible sudo policy. No helper is installed. This reviews the SSH host path below, not a proven SFTP object mapping.</p>
+                <p className="mt-1 break-all font-mono">{metadata.path}</p>
+                <p className="mt-1">Only an explicitly reviewed mode change is supported—not privileged file browsing, saving, ownership changes or recursive edits. Server audit policy still applies.</p>
+                <Button type="button" variant="secondary" size="sm" className="mt-2" disabled={state?.needsRefresh || state?.applying}
+                    onClick={() => void editor.reviewAdministrator()}>Review administrator edit…</Button>
+            </details>}
+            {state?.administrator === 'password' && <form className="mt-3 space-y-2" onSubmit={event => {
+                event.preventDefault();
+                if (state.applying || !passwordInput.current) return;
+                const password = passwordInput.current.value;
+                passwordInput.current.value = '';
+                void editor.authenticateAdministrator(password);
+            }}>
+                <p className="text-xs leading-relaxed text-app-muted">Administrator review uses the SSH host filesystem, not a proven SFTP object mapping.</p>
+                <p className="break-all font-mono text-xs text-app-text">{metadata.path}</p>
+                <p className="text-xs leading-relaxed text-app-muted">The server’s sudo policy requests a password. It is sent once over this SSH session, not saved in Zync. MFA and terminal-based prompts are unsupported. Authentication only prepares a review; it does not change permissions.</p>
+                <Input ref={passwordInput} label="Password requested by sudo" type="password" autoComplete="off" maxLength={4096}
+                    spellCheck={false} autoCapitalize="none" disabled={state.applying} required />
+                <div className="flex flex-wrap gap-2">
+                    <Button type="submit" size="sm" disabled={state.applying} isLoading={state.applying}>Continue to review</Button>
+                    <Button type="button" size="sm" variant="secondary" disabled={state.applying} onClick={editor.discard}>Cancel review</Button>
+                </div>
+            </form>}
             {state?.editing && <div className="mt-3 space-y-3">
                 <p id={`${id}-caution`} className="text-xs leading-relaxed text-app-muted">
-                    This item only. Path-based SFTP changes may affect ACL masks and hard-linked names.
+                    This item only. Mode changes may affect ACL masks and hard-linked names.
                 </p>
                 <details className="text-xs leading-relaxed text-app-muted"><summary className="cursor-pointer">Permission safety details</summary>
-                    <p className="mt-1">Server ACLs are not inspected. Path checks cannot prevent another client replacing this item during Apply.
-                        Existing special bits are requested unchanged, but the server may adjust them. Current mode is read back after acknowledgement.</p>
+                    <p className="mt-1">ACLs are not inspected. {administrator || metadata.localIdentity
+                        ? 'Changes use a captured native object handle. This is not atomic against concurrent metadata changes.'
+                        : 'SFTP path checks cannot prevent another client replacing this item during Apply.'}
+                        {' '}Existing special bits are requested unchanged, but the filesystem may adjust them. Current mode is read back after acknowledgement.</p>
                 </details>
                 {metadata.linkCount != null && metadata.linkCount > 1 && <p className="text-xs text-app-accent">This item has {metadata.linkCount} hard links. All names share permission changes.</p>}
                 <fieldset disabled={state.applying} aria-describedby={`${id}-caution`}>

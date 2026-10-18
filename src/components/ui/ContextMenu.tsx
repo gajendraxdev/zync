@@ -5,6 +5,7 @@ import { cn } from '../../lib/utils.js';
 import { isInsideMenu, MENU_PANEL_CLASS, MenuSubmenu } from './MenuSubmenu';
 import { MENU_ITEM_CLASSES } from './surfaceStyles';
 import { moveMenuFocus } from './menuFocus';
+import { Tooltip } from './Tooltip';
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -16,6 +17,8 @@ export type ContextMenuItem =
     children?: never;
     variant?: 'default' | 'danger';
     disabled?: boolean;
+    /** Explain a disabled action with the shared tooltip and accessible description. */
+    disabledReason?: string;
     /** Explicit checked state supplies both the visual mark and native ARIA menu semantics. */
     checked?: boolean;
     checkType?: 'checkbox' | 'radio';
@@ -219,8 +222,9 @@ function MenuItem({ item, onClose }: { item: ContextMenuItem; onClose: () => voi
   const checked = 'checked' in item ? item.checked : undefined;
   const shortcut = 'shortcut' in item ? item.shortcut : undefined;
   const checkType = 'checkType' in item ? item.checkType : undefined;
-  return <button type="button" role={checked === undefined ? 'menuitem' : checkType === 'radio' ? 'menuitemradio' : 'menuitemcheckbox'}
-    aria-checked={checked} disabled={item.disabled} className={itemClass}
+  const disabledReason = item.disabled && 'disabledReason' in item ? item.disabledReason : undefined;
+  const button = <button type="button" role={checked === undefined ? 'menuitem' : checkType === 'radio' ? 'menuitemradio' : 'menuitemcheckbox'}
+    aria-checked={checked} aria-description={disabledReason} disabled={item.disabled} className={itemClass}
     onClick={() => { item.action?.(); onClose(); }}>
     {checked !== undefined && <span className="inline-flex w-3.5 shrink-0 justify-center" aria-hidden="true">
       {checked && <Check size={14} />}
@@ -229,4 +233,9 @@ function MenuItem({ item, onClose }: { item: ContextMenuItem; onClose: () => voi
     <span className="min-w-0">{item.label}</span>
     {shortcut && <span className="ml-auto shrink-0 pl-3 text-xs text-app-muted">{shortcut}</span>}
   </button>;
+  // A disabled native button cannot own hover/focus; its non-focusable wrapper
+  // lets the existing tooltip explain why without enabling the action.
+  return disabledReason ? <Tooltip content={disabledReason} contentClassName="max-w-xs whitespace-normal">
+    <span className="flex">{button}</span>
+  </Tooltip> : button;
 }

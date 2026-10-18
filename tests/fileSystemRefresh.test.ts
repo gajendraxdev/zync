@@ -163,6 +163,55 @@ try {
         equal(requests.length, 0, 'Do not open a file manager implicitly');
     });
 
+    await run('listing denials retain the attempted path, not the still-visible parent, and clear on retry', async () => {
+        const { store, connectionId } = fixture();
+        const pane = filesStoreKey(connectionId, 'pane');
+        const other = filesStoreKey(connectionId, 'other');
+        store.getState().setPath(connectionId, '/parent', 'pane');
+        nativeOverride = async () => { throw 'SFTP read_dir failed: Permission denied: Permission denied'; };
+        try {
+            await store.getState().loadFiles(connectionId, '/parent/private', false, false, 'pane');
+            equal(store.getState().currentPath[pane], '/parent', 'Failed navigation retains the successful parent');
+            equal(store.getState().listingReadDenial[pane]?.path, '/parent/private', 'Bind denial to the attempted child');
+            equal(store.getState().listingReadDenial[other], undefined, 'Other panes do not acquire this failure');
+            store.getState().copyFilesListing(connectionId, 'pane', 'other');
+            equal(store.getState().listingReadDenial[other]?.path, '/parent/private', 'A copied error retains its own target');
+            nativeOverride = async () => [];
+            await store.getState().refreshFiles(connectionId, 'pane');
+            equal(store.getState().listingReadDenial[pane], null, 'Fresh reads clear old evidence');
+            equal(store.getState().error[pane], null, 'Retry clears the corresponding banner');
+        } finally { nativeOverride = null; }
+    });
+
+    await run('late failures and replaced connections cannot supply read-denial evidence', async () => {
+        const { store, connectionId } = fixture();
+        const failure = deferred();
+        nativeOverride = async (_command, args) => {
+            if ((args as { path: string }).path === '/private') await failure.promise;
+            return [];
+        };
+        try {
+            const oldRead = store.getState().loadFiles(connectionId, '/private');
+            await store.getState().loadFiles(connectionId, '/newer');
+            failure.reject(new Error('Permission denied'));
+            await oldRead;
+            equal(store.getState().listingReadDenial[connectionId], null, 'Stale rejection cannot overwrite a newer read');
+            const connection = { id: connectionId, status: 'connected' } as AppStore['connections'][number];
+            store.setState({ connections: [connection] });
+            nativeOverride = async () => {
+                store.setState({ connections: [{ ...connection }] });
+                throw 'Permission denied';
+            };
+            await store.getState().loadFiles(connectionId, '/private');
+            equal(store.getState().listingReadDenial[connectionId], null, 'A previous connection cannot deny access for its replacement');
+            for (const reason of ['session closed', 'Read-only file system', 'Cannot read /Permission denied: No such file']) {
+                nativeOverride = async () => { throw reason; };
+                await store.getState().loadFiles(connectionId, '/');
+                equal(store.getState().listingReadDenial[connectionId], null, 'Only a read-access denial supplies evidence');
+            }
+        } finally { nativeOverride = null; }
+    });
+
     await run('delete immediately hides native local/SSH paths and refreshes all matching panes after completion', async () => {
         for (const [local, instanceId] of [[true, undefined], [true, 'peer'], [false, 'peer']] as const) {
             const { store, connectionId } = fixture(local ? 'local' : undefined);

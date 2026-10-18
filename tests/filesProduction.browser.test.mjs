@@ -12,6 +12,11 @@ import { runFilesFocusChecks } from './helpers/filesFocusChecks.mjs';
 const transferSafetyOnly = process.argv.includes('--transfer-safety-only');
 const focusOnly = process.argv.includes('--focus-only');
 const permissionsOnly = process.argv.includes('--permissions-only');
+const administratorOnly = process.argv.includes('--admin-permissions-only');
+const windowsPermissionsOnly = process.argv.includes('--windows-permissions-only');
+const windowsEditorOnly = process.argv.includes('--windows-editor-only');
+const accessOnly = process.argv.includes('--access-only');
+const listingAccessOnly = process.argv.includes('--listing-access-only');
 const editorOnly = process.argv.includes('--editor-only');
 
 const { chromium } = await import(process.env.ZYNC_PLAYWRIGHT_MODULE || 'playwright');
@@ -46,7 +51,7 @@ try {
     return route.abort();
   });
   const address = server.httpServer.address();
-  await page.goto(`http://127.0.0.1:${address.port}/tests/filesProduction.browser.html${permissionsOnly ? '?permissions=1' : editorOnly ? '?editor=1' : ''}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.goto(`http://127.0.0.1:${address.port}/tests/filesProduction.browser.html${administratorOnly ? '?permissions=1&admin=1' : windowsEditorOnly ? '?permissions=1&windows=1&editor=1' : windowsPermissionsOnly ? '?permissions=1&windows=1' : accessOnly ? '?access=1' : permissionsOnly ? '?permissions=1' : editorOnly ? '?editor=1' : ''}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   const item = name => page.locator(`[data-file-name=${JSON.stringify(name)}]`);
   const summary = page.locator('.files-summary-count');
   const listing = page.getByRole('listbox');
@@ -56,7 +61,30 @@ try {
     await mkdir(process.env.ZYNC_FILES_SCREENSHOTS, { recursive: true });
     await page.screenshot({ path: `${process.env.ZYNC_FILES_SCREENSHOTS}/${name}.png` });
   };
-  if (editorOnly) {
+  if (listingAccessOnly) {
+    await listing.waitFor();
+    for (const label of await page.evaluate(() => window.runFileListingAccessBrowserChecks())) check(label, true);
+    assert.deepEqual(errors, []); assert.deepEqual(requests, []);
+    console.log(`Production Files observed-read access checks passed (${checks}).`);
+  } else if (windowsEditorOnly) {
+    await page.waitForFunction(() => typeof window.runFileEditorSaveBrowserChecks === 'function');
+    for (const label of await page.evaluate(() => window.runFileEditorSaveBrowserChecks())) check(label, true);
+    assert.deepEqual(errors, []); assert.deepEqual(requests, []);
+    console.log(`Production Files Windows editor permission checks passed (${checks}).`);
+  } else if (administratorOnly || accessOnly || windowsPermissionsOnly) {
+    await page.waitForFunction(() => typeof window.runFilePermissionBrowserChecks === 'function');
+    for (const label of await page.evaluate(() => window.runFilePermissionBrowserChecks())) check(label, true);
+    if (accessOnly) {
+      await page.getByRole('menuitem', { name: 'Copy', exact: true }).locator('..').hover();
+      const tooltip = page.getByRole('tooltip');
+      await tooltip.waitFor();
+      check('hovering disabled Copy explains the read denial using the shared tooltip', (await tooltip.innerText()).includes('permission to read'));
+      await page.keyboard.press('Escape');
+    }
+    assert.deepEqual(errors, []);
+    assert.deepEqual(requests, []);
+    console.log(`Production Files ${administratorOnly ? 'administrator permissions' : windowsPermissionsOnly ? 'Windows permissions' : 'access'} checks passed (${checks}).`);
+  } else if (editorOnly) {
     await page.waitForFunction(() => typeof window.runFileEditorSaveBrowserChecks === 'function');
     for (const label of await page.evaluate(() => window.runFileEditorSaveBrowserChecks())) check(label, true);
     const writesBefore = await page.evaluate(() => window.filesUiTest.editor.editorWrites.length);
@@ -637,6 +665,7 @@ try {
   await page.getByRole('button', { name: 'Back', exact: true }).click();
   await item('README.md').waitFor();
   check('folder navigation and history use real browsing state', await page.getByRole('button', { name: 'Forward', exact: true }).isEnabled());
+  for (const label of await page.evaluate(() => window.runFileListingAccessBrowserChecks())) check(label, true);
   await page.evaluate(() => window.filesUiTest.failListing());
   await clickMenu('Folder actions', 'Reload');
   await page.getByRole('alert').waitFor();
@@ -680,7 +709,7 @@ try {
   });
   await page.setViewportSize({ width: 1200, height: 800 });
   check('UI changes only save explicitly chosen view/visibility preferences', await page.evaluate(() => window.filesUiTest.settingsWrites.every(write => Object.keys(write).every(key => ['defaultView', 'showHiddenFiles'].includes(key)))));
-  check('no unexpected native, network or browser errors', errors.length === 0 && requests.length === 0 && await page.evaluate(() => window.filesUiTest.calls.every(command => ['fs_list', 'fs_exists', 'fs_cwd', 'fs_permissions_read', 'dialog:openFile', 'dialog:openDirectory'].includes(command))));
+  check('no unexpected native, network or browser errors', errors.length === 0 && requests.length === 0 && await page.evaluate(() => window.filesUiTest.calls.every(command => ['fs_list', 'fs_exists', 'fs_cwd', 'fs_permissions_read', 'fs_copy_access', 'dialog:openFile', 'dialog:openDirectory'].includes(command))));
   await page.evaluate(() => window.filesUiTest.preference({ showHiddenFiles: false }));
   await item('README.md').locator('[data-file-select]').click();
   const folderSwitch = page.getByRole('button', { name: 'Folders in Home', exact: true });

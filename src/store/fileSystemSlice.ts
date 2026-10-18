@@ -9,6 +9,7 @@ import { executeFileTransfer, fileTransferFailureMessage, isTransferCancellation
 import { createFileTransferExecution } from '../features/files/application/transferEventProjection';
 import { runFileTransferBatch, fileTransferBatchFailure } from '../features/files/application/runFileTransferBatch';
 import { acquireFileDestination, acquireFileDestinations, type FileDestinationReservation } from '../features/files/application/fileDestinationReservations';
+import { filePermissionFailure } from '../features/files/domain/filePermissions';
 
 // @ts-ignore
 const ipc = window.ipcRenderer;
@@ -49,6 +50,8 @@ export interface FileSystemState {
     recentPaths: Record<string, string[]>;
     isLoading: Record<string, boolean>; // keyed by connectionId
     error: Record<string, string | null>; // keyed by connectionId
+    /** Latest failed directory read only; transient, pane- and connection-bound. */
+    listingReadDenial: Record<string, { path: string; connection: AppStore['connections'][number] | undefined } | null>;
     clipboard: {
         intentId: string;
         files: FileEntry[];
@@ -107,6 +110,7 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
     recentPaths: {},
     isLoading: {},
     error: {},
+    listingReadDenial: {},
     clipboard: null,
 
     setClipboard: (files, sourceConnectionId, sourcePath, op, sourceInstanceId) => {
@@ -134,6 +138,7 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
             history: { ...state.history, [toKey]: [...(state.history[fromKey] ?? [])] },
             historyIndex: { ...state.historyIndex, [toKey]: state.historyIndex[fromKey] ?? 0 },
             error: { ...state.error, [toKey]: state.error[fromKey] ?? null },
+            listingReadDenial: { ...state.listingReadDenial, [toKey]: state.listingReadDenial[fromKey] ?? null },
             isLoading: { ...state.isLoading, [toKey]: false },
         }));
     },
@@ -201,15 +206,18 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
         if (!silent) {
             set(state => ({
                 isLoading: { ...state.isLoading, [key]: true },
+                listingReadDenial: { ...state.listingReadDenial, [key]: null },
                 error: { ...state.error, [key]: null }
             }));
         } else {
             set(state => ({
+                listingReadDenial: { ...state.listingReadDenial, [key]: null },
                 error: { ...state.error, [key]: null }
             }));
         }
 
         loadGen.path = targetPath;
+        const listingConnection = get().connections.find(connection => connection.id === connectionId);
         try {
             const entries = await ipc.invoke('fs_list', { connectionId, path: targetPath });
 
@@ -265,6 +273,9 @@ export const createFileSystemSlice: StateCreator<AppStore, [], [], FileSystemSli
 
             set(state => ({
                 isLoading: { ...state.isLoading, [key]: false },
+                listingReadDenial: { ...state.listingReadDenial, [key]: filePermissionFailure(osError) === 'denied'
+                    && state.connections.find(connection => connection.id === connectionId) === listingConnection
+                    ? { path: targetPath, connection: listingConnection } : null },
                 error: { ...state.error, [key]: osError }
             }));
 

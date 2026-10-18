@@ -46,7 +46,7 @@ function moduleReferences(source, file) {
 }
 
 const pureRoots = ['features/workspace/domain/', 'features/appearance/domain/', 'lib/paneLayout/'];
-const uiPackages = new Set(['react', 'react-dom', 'lucide-react', 'framer-motion', 'cmdk', 'clsx', 'tailwind-merge']);
+const uiPackages = new Set(['react', 'react-dom', 'lucide-react', 'framer-motion', 'cmdk', 'clsx', 'tailwind-merge', '@radix-ui/react-tooltip']);
 const purePolicy = (from, target, typeOnly, external) => external
     // Existing geometry styling uses a compile-time CSS shape; no React runtime.
     ? from === 'lib/paneLayout/intro.ts' && typeOnly && target === 'react'
@@ -125,7 +125,9 @@ test('dependency inspection handles static, type-only, re-export and lazy syntax
 test('guard catches indirect, alias, type-only and computed violations without loading forbidden modules', () => {
     const sources = new Map(Object.entries({
         'components/ui/Example.tsx': "export * from './helper.js'; import type { State } from '../../store/state';",
-        'components/ui/helper.ts': "import '@/store'; import('../../store/state'); require(name);",
+        // The reviewed tooltip library is UI-only; allowing it must not hide or
+        // admit the indirect/aliased feature-state dependencies alongside it.
+        'components/ui/helper.ts': "import '@radix-ui/react-tooltip'; import '@/store'; import('../../store/state'); require(name);",
         'store/state.ts': 'throw new Error("must not execute")',
     }).map(([file, source]) => [path.join(sourceRoot, file), source]));
     const actual = dependencyViolations([path.join(sourceRoot, 'components/ui/Example.tsx')], uiPolicy,

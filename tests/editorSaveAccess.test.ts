@@ -21,12 +21,17 @@ for (const mode of [0o200, 0o020, 0o002, 0o640, 0o644, 0o777]) {
     equal(editorSaveBlocked(policy), false, 'unknown effective access remains attemptable');
 }
 equal(editorSavePolicy(metadata(null)).state, 'unknown', 'missing mode is not zero');
+equal(editorSavePolicy({ ...metadata(0o400), writeAccess: true }).state, 'unknown', 'a current positive local kernel check takes precedence over a no-write-bit hint without promising a future save');
 equal(editorSavePolicy(metadata(0o400, 'unknown')).state, 'unknown', 'unknown filesystem model does not get synthetic POSIX policy');
 equal(editorSavePolicy(metadata(0o400, 'posix', 'Symlink')).state, 'unknown', 'link mode does not prove target access');
 const windows = { ...metadata(null, 'windows'), readOnly: true };
 equal(editorSaveBlocked(editorSavePolicy(windows)), true, 'Windows read-only attribute disables saving');
 equal(editorSavePolicy(windows).overridable, false, 'Windows attribute needs a fresh check after changing it');
 equal(editorSavePolicy({ ...windows, readOnly: false }).state, 'unknown', 'writable attribute does not prove ACL access');
+const deniedByNative = editorSavePolicy({ ...windows, readOnly: false, writeAccess: false });
+equal(editorSaveBlocked(deniedByNative), true, 'native ACL denial disables saving independently of the readonly attribute');
+equal(deniedByNative.overridable, false, 'native ACL denial is not an overridable mode hint');
+equal(editorSavePolicy({ ...windows, readOnly: false, writeAccess: true }).state, 'unknown', 'a positive native check is not a future write guarantee');
 equal(editorSaveBlocked({ state: 'checking', reason: '', overridable: false }), true, 'pending metadata cannot be saved through');
 equal(editorSaveBlocked(undefined), false, 'other editor consumers retain ordinary saving');
 

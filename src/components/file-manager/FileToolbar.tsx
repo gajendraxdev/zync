@@ -29,6 +29,8 @@ interface FileToolbarProps {
   isEditingPath: boolean;
   onTogglePathEdit: (editing: boolean) => void;
   disabled?: boolean;
+  createFileDisabled?: boolean;
+  createFolderDisabled?: boolean;
   placesCollapsed?: boolean;
   onTogglePlaces?: () => void;
   onBack: () => void;
@@ -54,6 +56,8 @@ function FileToolbarInner({
   isEditingPath,
   onTogglePathEdit,
   disabled = false,
+  createFileDisabled = false,
+  createFolderDisabled = false,
   placesCollapsed = false,
   onTogglePlaces,
   onBack,
@@ -124,12 +128,12 @@ function FileToolbarInner({
       </div>
 
       <FileActionMenu label="New" icon={<Plus size={14} />} disabled={disabled} items={[
-        { label: 'New file', icon: <FilePlus size={14} />, action: onNewFile },
-        { label: 'New folder', icon: <FolderPlus size={14} />, action: onNewFolder },
+        { label: 'New file', icon: <FilePlus size={14} />, action: onNewFile, disabled: createFileDisabled },
+        { label: 'New folder', icon: <FolderPlus size={14} />, action: onNewFolder, disabled: createFolderDisabled },
       ]} />
       <FileActionMenu label="Upload" icon={<Upload size={14} />} disabled={disabled} items={[
-        { label: 'Upload files', icon: <Upload size={14} />, action: onUpload },
-        { label: 'Upload folder', icon: <FolderInput size={14} />, action: onUploadFolder },
+        { label: 'Upload files', icon: <Upload size={14} />, action: onUpload, disabled: createFileDisabled },
+        { label: 'Upload folder', icon: <FolderInput size={14} />, action: onUploadFolder, disabled: createFolderDisabled },
       ]} />
     </div>
   );

@@ -11,6 +11,7 @@ import * as jsx from 'react/jsx-runtime';
 import * as React from 'react';
 import { Check } from 'lucide-react';
 import { moveMenuFocus } from '../.tmp-agent-tests/src/components/ui/menuFocus.js';
+import { Tooltip } from '../.tmp-agent-tests/src/components/ui/Tooltip.js';
 
 const render = (component, props) => renderToStaticMarkup(createElement(component, props));
 const options = [{ value: 'sh', label: 'Shell' }, { value: 'bash', label: 'Bash' }];
@@ -86,7 +87,7 @@ test('context-menu initial focus is opt-in and cannot scroll its containing page
       '../../lib/utils.js': { cn: (...values) => values.filter(Boolean).join(' ') },
       './MenuSubmenu': { isInsideMenu: () => false, MENU_PANEL_CLASS: '', MenuSubmenu: () => null },
       './surfaceStyles': { MENU_ITEM_CLASSES: '' },
-      'lucide-react': { Check }, './menuFocus': { moveMenuFocus },
+      'lucide-react': { Check }, './menuFocus': { moveMenuFocus }, './Tooltip': { Tooltip },
     }, { document: { body: {} }, window: { innerHeight: 800, innerWidth: 1280 } });
     ContextMenu({ x: 1, y: 1, items: [], onClose: () => {}, autoFocus });
     effects[0]();
@@ -113,7 +114,7 @@ test('context-menu outside dismissal excludes only its own optional trigger and 
       '../../lib/utils.js': { cn: (...values) => values.filter(Boolean).join(' ') },
       './MenuSubmenu': { isInsideMenu: (root, target) => root.contains(target) || target === flyout, MENU_PANEL_CLASS: '', MenuSubmenu: () => null },
       './surfaceStyles': { MENU_ITEM_CLASSES: '' },
-      'lucide-react': { Check }, './menuFocus': { moveMenuFocus },
+      'lucide-react': { Check }, './menuFocus': { moveMenuFocus }, './Tooltip': { Tooltip },
     }, {
       Node, document: { body: {}, addEventListener: (type, handler) => listeners.set(type, handler),
         removeEventListener: (type, handler) => { assert.equal(listeners.get(type), handler); listeners.delete(type); } },
@@ -136,7 +137,7 @@ test('checked context-menu rows announce visibility/position and expose display-
   let actions = 0;
   const { ContextMenu } = loadSource('components/ui/ContextMenu.tsx', {
     react: React, 'react/jsx-runtime': jsx, 'react-dom': { createPortal: content => content },
-    'lucide-react': { Check }, './menuFocus': { moveMenuFocus },
+    'lucide-react': { Check }, './menuFocus': { moveMenuFocus }, './Tooltip': { Tooltip },
     '../../lib/utils.js': { cn: (...values) => values.filter(Boolean).join(' ') },
     './MenuSubmenu': { isInsideMenu: () => false, MENU_PANEL_CLASS: '', MenuSubmenu: () => null },
     './surfaceStyles': { MENU_ITEM_CLASSES: '' },

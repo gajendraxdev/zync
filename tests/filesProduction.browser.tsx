@@ -8,12 +8,15 @@ import builtinIconCatalog from '../plugin-api/builtin-icon-themes.json';
 import type { InstalledPlugin } from '../src/features/plugins/types';
 import { createTransferSafetyFixture } from './fixtures/files-production/transferSafety';
 import { createPermissionFixture } from './fixtures/files-production/permissions';
-import { runFilePermissionBrowserChecks } from './helpers/filePermissionBrowserChecks';
+import { runFileListingAccessBrowserChecks, runFilePermissionBrowserChecks } from './helpers/filePermissionBrowserChecks';
 import { runFileEditorSaveBrowserChecks } from './helpers/fileEditorSaveBrowserChecks';
 import { permissionTestEditor } from './fixtures/files-production/editorProvider';
 import '../src/index.css';
 
-const host = 'files-ui-fixture';
+const accessTests = new URLSearchParams(location.search).get('access') === '1';
+const windowsTests = new URLSearchParams(location.search).get('windows') === '1';
+const administratorTests = new URLSearchParams(location.search).get('admin') === '1';
+const host = accessTests || windowsTests ? 'local' : 'files-ui-fixture';
 const editorTests = new URLSearchParams(location.search).get('editor') === '1';
 const rootPath = new URLSearchParams(location.search).get('transferDottedPath') === '1'
   ? '/home/deploy/project.v1' : '/home/deploy/project';
@@ -31,6 +34,10 @@ for (const [key,value] of Object.entries({ '--color-app-bg':'#20211f', '--color-
   '--color-app-border':'#373a32', '--color-app-text':'#e8e9e3', '--color-app-muted':'#adb1a5', '--color-app-accent':'#f59c77' })) document.documentElement.style.setProperty(key,value);
 const calls: string[] = [];
 const permissionFixture = createPermissionFixture(new URLSearchParams(location.search).get('permissions') === '1', editorTests);
+if (windowsTests) {
+  permissionFixture.control.setModel('windows');
+  permissionFixture.control.setSystemEditor(true);
+}
 const listingReads: string[] = [];
 const settingsWrites: unknown[] = [];
 const pluginCalls: string[] = [];
@@ -42,7 +49,7 @@ if (editorTests) iconPlugins.push({
 const MATERIAL_ICON_THEME_ID = iconPlugins.find(plugin => plugin.manifest.iconTheme)!.manifest.id;
 let reloadIconPlugins: (() => Promise<boolean>) | undefined;
 let setSurfaceActive: ((active: boolean) => void) | undefined;
-let failNextListing = false;
+let failNextListing: string | null = null;
 let deferNextFolderRead = false;
 let finishFolderRead: (() => void) | undefined;
 let deferNextPathCheck = false;
@@ -67,7 +74,7 @@ window.ipcRenderer = {
     if (transferSafety?.handles(command)) return transferSafety.invoke(command, args ?? {});
     if (command === 'fs_list') {
       listingReads.push(args?.path ?? '');
-      if (failNextListing) { failNextListing = false; throw new Error('Sample permission denied'); }
+      if (failNextListing) { const message = failNextListing; failNextListing = null; throw new Error(message); }
       if (args?.path === '/home/deploy') {
         if (deferNextFolderRead) {
           deferNextFolderRead = false;
@@ -99,12 +106,14 @@ const { filesStoreKey } = await import('../src/store/fileSystemSlice');
 const { PluginProvider, usePlugins } = await import('../src/context/PluginContext');
 const detachTransferSafety = transferSafety?.attach(useAppStore);
 if (transferSafety) Object.assign(window, { filesTransferSafety: transferSafety.control });
-Object.assign(window, { runFilePermissionBrowserChecks: () => runFilePermissionBrowserChecks(permissionFixture, active => setSurfaceActive?.(active)) });
+Object.assign(window, { runFilePermissionBrowserChecks: () => runFilePermissionBrowserChecks(permissionFixture, active => setSurfaceActive?.(active), accessTests, calls, windowsTests, administratorTests) });
+Object.assign(window, { runFileListingAccessBrowserChecks: () => runFileListingAccessBrowserChecks(host, rootPath,
+  () => { failNextListing = 'Sample permission denied: Permission denied'; }, permissionFixture.control, active => setSurfaceActive?.(active), calls) });
 Object.assign(window, { runFileEditorSaveBrowserChecks: () => runFileEditorSaveBrowserChecks(permissionFixture.control, {
   provider: defaultProvider => useAppStore.setState(state => ({ settings: { ...state.settings, editor: { ...state.settings.editor, defaultProvider } } })),
   toasts: () => useAppStore.getState().toasts,
   clearToasts: () => useAppStore.setState({ toasts: [] }),
-}) });
+}, windowsTests) });
 useAppStore.setState(state => ({
   ...(editorTests ? { showConfirmDialog: async () => true } : {}),
   activeConnectionId: host,
@@ -147,7 +156,7 @@ Object.assign(window, { filesUiTest: {
   path: () => useAppStore.getState().currentPath[host],
   iconTheme: (iconTheme: string) => useAppStore.setState(state=>({settings:{...state.settings,iconTheme}})),
   preference: (updates: Partial<ReturnType<typeof useAppStore.getState>['settings']['fileManager']>) => useAppStore.setState(state=>({settings:{...state.settings,fileManager:{...state.settings.fileManager,...updates}}})),
-  failListing: () => { failNextListing = true; },
+  failListing: () => { failNextListing = 'Sample permission denied'; },
   manyFiles: (count = 1000) => useAppStore.setState({ files: { [host]: Array.from({ length: count }, (_, i) => entry(`file-${String(i).padStart(4, '0')}.ts`)) } }),
   marqueeFiles: () => useAppStore.setState({ files: { [host]: Array.from({ length: 31 }, (_, i) => entry(`file-${String(i).padStart(4, '0')}.ts`)) } }),
   restore: () => useAppStore.setState(state => ({ files: { ...state.files, [host]: sample }, currentPath: { ...state.currentPath, [host]: rootPath }, error: { ...state.error, [host]: null } })),

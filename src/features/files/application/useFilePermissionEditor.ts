@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { acquireFileDestination } from './fileDestinationReservations';
-import { modeEditAvailability, ordinaryMode, parseOrdinaryMode, permissionMasks, type FilePermissionMetadata, type FilePermissionOutcome } from '../domain/filePermissions';
+import { openSystemPermissionEditor } from './openSystemPermissionEditor';
+import { modeEditAvailability, ordinaryMode, parseOrdinaryMode, permissionMasks, type AdministratorPermissionReply, type FilePermissionMetadata, type FilePermissionOutcome } from '../domain/filePermissions';
 
 interface PermissionTarget { connectionId: string; path: string }
 interface EditorState {
@@ -13,6 +14,7 @@ interface EditorState {
     message: string;
     error: string;
     needsRefresh: boolean;
+    administrator: 'password' | 'prepared' | 'finished' | null;
 }
 
 const sameTarget = (first: PermissionTarget | null, second: PermissionTarget | null) =>
@@ -30,20 +32,33 @@ export function useFilePermissionEditor(
     const [state, setState] = useState<EditorState | null>(null);
     const current = useRef({ target, active });
     current.current = { target, active };
+    // Reconciliation must use the latest callback without becoming a reason
+    // to reload metadata, discard a draft or cancel an administrator review.
+    const refreshListingsRef = useRef(refreshListings);
+    refreshListingsRef.current = refreshListings;
     const generation = useRef(0);
     const pendingApply = useRef(false);
+    const administrator = useRef<{ id: string; token: string | null; dispatched: boolean } | null>(null);
+    const cancelReview = useCallback(() => {
+        const captured = administrator.current;
+        administrator.current = null;
+        if (captured && !captured.dispatched) {
+            void window.ipcRenderer.invoke('fs_permissions_admin_cancel', { challengeId: captured.id }).catch(() => { /* Native expiry is the fallback, never replay. */ });
+        }
+    }, []);
     const pendingRead = useRef<{ target: PermissionTarget; promise: Promise<FilePermissionMetadata> } | null>(null);
     const mounted = useRef(true);
     useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
-    const refresh = useCallback(async () => {
+    const refresh = useCallback(async (reconcileListings = false) => {
         if (!target || !active || pendingApply.current) return;
+        cancelReview();
         const captured = target;
         const request = ++generation.current;
         const ownsReply = () => mounted.current && generation.current === request
             && current.current.active && sameTarget(current.current.target, captured);
         setState({ target: captured, metadata: null, loading: true, applying: false,
-            editing: false, draft: '', message: '', error: '', needsRefresh: false });
+            editing: false, draft: '', message: '', error: '', needsRefresh: false, administrator: null });
         let read: typeof pendingRead.current = null;
         try {
             // Coalesce selection churn behind the one outstanding native read.
@@ -66,12 +81,18 @@ export function useFilePermissionEditor(
             if (metadata.path !== captured.path) throw new Error('Permission metadata did not match the selected item.');
             setState(previous => previous && ({ ...previous, loading: false, metadata,
                 draft: metadata.snapshot.mode == null ? '' : ordinaryMode(metadata.snapshot.mode) }));
+            if (reconcileListings && metadata.systemEditor) {
+                void Promise.resolve().then(() => refreshListingsRef.current(captured.connectionId)).catch(error => {
+                    if (ownsReply()) setState(previous => previous && ({ ...previous,
+                        error: `Permission metadata refreshed, but the folder listing could not be refreshed: ${String(error)}` }));
+                });
+            }
         } catch (error) {
             if (ownsReply()) setState(previous => previous && ({ ...previous, loading: false, error: String(error), needsRefresh: true }));
         } finally {
             if (pendingRead.current === read) pendingRead.current = null;
         }
-    }, [target?.connectionId, target?.path, active]);
+    }, [target?.connectionId, target?.path, active, cancelReview]);
     const refreshCurrent = useRef(refresh);
     refreshCurrent.current = refresh;
 
@@ -81,12 +102,77 @@ export function useFilePermissionEditor(
             generation.current++;
             setState(previous => previous && ({ ...previous, editing: false }));
         }
-        return () => { generation.current++; };
+        return () => { generation.current++; cancelReview(); };
     }, [refresh, active]);
 
     const visible = state && sameTarget(state.target, target) ? state : null;
+
+    // Share this owner's target/generation fencing, draft and Apply controls.
+    // Authentication only prepares a host-filesystem preview; it never edits.
+    const reviewAdministrator = async (password?: string) => {
+        if (!active || pendingApply.current || !visible?.metadata || visible.needsRefresh) return;
+        const captured = visible.target;
+        if (captured.connectionId === 'local' || visible.metadata.binding.model !== 'posix') return;
+        const challenge = administrator.current;
+        if (password !== undefined && (!challenge || visible.administrator !== 'password')) return;
+        if (password === undefined && visible.administrator) return;
+        const request = ++generation.current;
+        pendingApply.current = true;
+        setState(previous => previous && ({ ...previous, applying: true, editing: false, error: '', message: '' }));
+        try {
+            const reply: AdministratorPermissionReply = await window.ipcRenderer.invoke(
+                password === undefined ? 'fs_permissions_admin_start' : 'fs_permissions_admin_authenticate',
+                password === undefined ? { connectionId: captured.connectionId, expected: visible.metadata }
+                    : { challengeId: challenge!.id, password },
+            );
+            if (!mounted.current || generation.current !== request || !current.current.active || !sameTarget(current.current.target, captured)) {
+                void window.ipcRenderer.invoke('fs_permissions_admin_cancel', { challengeId: reply.challengeId }).catch(() => {});
+                return;
+            }
+            administrator.current = { id: reply.challengeId, token: reply.reviewToken, dispatched: false };
+            if (reply.status !== 'password' && (reply.status !== 'prepared' || !reply.reviewToken || reply.metadata?.path !== captured.path)) {
+                throw new Error('Administrator target did not match the reviewed host path.');
+            }
+            setState(previous => previous && ({ ...previous, applying: false, administrator: reply.status === 'password' ? 'password' : 'prepared',
+                editing: reply.status === 'prepared', metadata: reply.metadata ?? previous.metadata,
+                draft: reply.metadata?.snapshot.mode == null ? previous.draft : ordinaryMode(reply.metadata.snapshot.mode) }));
+        } catch (error) {
+            cancelReview();
+            if (mounted.current && generation.current === request && sameTarget(current.current.target, captured)) {
+                setState(previous => previous && ({ ...previous, applying: false, editing: false, administrator: null,
+                    error: String(error), needsRefresh: true }));
+            }
+        } finally {
+            pendingApply.current = false;
+            if (mounted.current) setState(previous => previous && sameTarget(previous.target, captured) ? { ...previous, applying: false } : previous);
+            if (mounted.current && generation.current !== request && current.current.active) void refreshCurrent.current();
+        }
+    };
+    const openSystemEditor = async () => {
+        if (!active || pendingApply.current || !visible?.metadata?.systemEditor || visible.needsRefresh) return;
+        const captured = visible.target;
+        const request = ++generation.current;
+        pendingApply.current = true;
+        setState(previous => previous && ({ ...previous, applying: true, message: '', error: '' }));
+        try {
+            await openSystemPermissionEditor(captured.connectionId, visible.metadata);
+            if (mounted.current && generation.current === request && sameTarget(current.current.target, captured)) {
+                setState(previous => previous && ({ ...previous, needsRefresh: true,
+                    message: 'Windows Properties opened. Choose Security to edit account permissions. After closing it, use Refresh to check current access. Opening settings does not mean permissions changed.' }));
+            }
+        } catch (error) {
+            if (mounted.current && generation.current === request && sameTarget(current.current.target, captured)) {
+                setState(previous => previous && ({ ...previous, needsRefresh: true, error: String(error) }));
+            }
+        } finally {
+            pendingApply.current = false;
+            if (mounted.current) setState(previous => previous && sameTarget(previous.target, captured) ? { ...previous, applying: false } : previous);
+            if (mounted.current && generation.current !== request && current.current.active) void refreshCurrent.current();
+        }
+    };
     const apply = async () => {
         if (!active || pendingApply.current || !visible?.metadata || visible.needsRefresh || !visible.editing) return;
+        if (visible.administrator && visible.administrator !== 'prepared') return;
         const captured = visible.target;
         const metadata = visible.metadata;
         if (metadata.snapshot.mode == null || parseOrdinaryMode(visible.draft) == null
@@ -98,20 +184,32 @@ export function useFilePermissionEditor(
         let reservation: ReturnType<typeof acquireFileDestination> | undefined;
         try {
             reservation = acquireFileDestination(captured.connectionId, captured.path);
-            const outcome: FilePermissionOutcome = await window.ipcRenderer.invoke('fs_permissions_apply', {
-                connectionId: captured.connectionId, expected: metadata, ...masks,
-            });
+            const review = administrator.current;
+            let outcome: FilePermissionOutcome;
+            if (visible.administrator === 'prepared') {
+                if (!review?.token || review.dispatched) throw new Error('Administrator review expired. Refresh permissions.');
+                review.dispatched = true;
+                const reply: AdministratorPermissionReply = await window.ipcRenderer.invoke('fs_permissions_admin_apply', { challengeId: review.id, reviewToken: review.token, ...masks });
+                if (reply.status !== 'finished' || !reply.outcome) throw new Error('Administrator result is unknown. Refresh and inspect the host path before retrying.');
+                outcome = reply.outcome;
+                administrator.current = null;
+            } else {
+                outcome = await window.ipcRenderer.invoke('fs_permissions_apply', {
+                    connectionId: captured.connectionId, expected: metadata, ...masks,
+                });
+            }
             if (mounted.current && generation.current === request && sameTarget(current.current.target, captured)) {
                 setState(previous => previous && ({ ...previous, metadata: outcome.metadata ?? metadata,
                     draft: outcome.metadata?.snapshot.mode == null ? previous.draft : ordinaryMode(outcome.metadata.snapshot.mode),
-                    applying: false, editing: false, needsRefresh: outcome.status !== 'verified',
+                    applying: false, editing: false, needsRefresh: Boolean(visible.administrator) || outcome.status !== 'verified',
+                    administrator: visible.administrator ? 'finished' : null,
                     message: outcome.message }));
             }
             // Refresh the captured endpoint, never whichever pane/host is active now.
-            if (outcome.status === 'verified' || outcome.status === 'adjusted') {
+            if (!visible.administrator && (outcome.status === 'verified' || outcome.status === 'adjusted')) {
                 // Listing reconciliation is not mutation acknowledgement. Do not
                 // keep the editor locked, or turn a verified chmod into a failure.
-                void Promise.resolve().then(() => refreshListings(captured.connectionId)).catch(error => {
+                void Promise.resolve().then(() => refreshListingsRef.current(captured.connectionId)).catch(error => {
                     if (mounted.current && generation.current === request && sameTarget(current.current.target, captured)) {
                         setState(previous => previous && !previous.editing
                             ? { ...previous, message: `${outcome.message} Folder listing refresh failed: ${String(error)}` } : previous);
@@ -137,11 +235,22 @@ export function useFilePermissionEditor(
         state: visible,
         refresh,
         apply,
-        edit: () => setState(previous => previous?.metadata && !previous.needsRefresh && !pendingApply.current
-            && modeEditAvailability(previous.metadata).state !== 'unsupported'
-            ? { ...previous, editing: true, message: '', error: '' } : previous),
-        discard: () => setState(previous => previous && !pendingApply.current
-            ? { ...previous, editing: false, draft: previous.metadata?.snapshot.mode == null ? '' : ordinaryMode(previous.metadata.snapshot.mode) } : previous),
+        reviewAdministrator: () => reviewAdministrator(),
+        authenticateAdministrator: (password: string) => reviewAdministrator(password),
+        edit: () => {
+            if (visible?.metadata?.systemEditor) { void openSystemEditor(); return; }
+            setState(previous => previous?.metadata && !previous.needsRefresh && !pendingApply.current
+                && !previous.administrator
+                && modeEditAvailability(previous.metadata).state !== 'unsupported'
+                ? { ...previous, editing: true, message: '', error: '' } : previous);
+        },
+        discard: () => {
+            if (pendingApply.current) return;
+            cancelReview();
+            setState(previous => previous && ({ ...previous, editing: false, needsRefresh: Boolean(previous.administrator) || previous.needsRefresh,
+                administrator: previous.administrator === 'prepared' || previous.administrator === 'finished' ? 'finished' : null,
+                draft: previous.metadata?.snapshot.mode == null ? '' : ordinaryMode(previous.metadata.snapshot.mode) }));
+        },
         setDraft: (draft: string) => setState(previous => previous && !pendingApply.current ? { ...previous, draft } : previous),
     };
 }
