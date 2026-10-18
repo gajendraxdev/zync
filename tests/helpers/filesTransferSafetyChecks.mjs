@@ -64,6 +64,27 @@ export async function runFilesTransferSafetyChecks({ page, check }) {
         }
     }));
 
+    const mixedUrl = new URL(fixtureUrl);
+    mixedUrl.searchParams.set('transferSafety', '1');
+    await page.goto(mixedUrl.href, { waitUntil: 'domcontentloaded' });
+    await page.getByRole('listbox').waitFor();
+    const readsBeforeFailure = await page.evaluate(() => {
+        const state = window.filesTransferSafety.snapshot();
+        window.filesTransferSafety.stage(['README.md', 'package.json'], 'copy', true);
+        window.filesTransferSafety.reportMissingOnce(`${state.rootPath}/README.md`);
+        return window.filesUiTest.listingReads.length;
+    });
+    await page.getByRole('listbox').focus();
+    await page.keyboard.press('Control+V');
+    await page.waitForFunction(() => window.filesTransferSafety.snapshot().pending.length === 1);
+    await page.evaluate(() => window.filesTransferSafety.settle(false));
+    await modal.waitFor();
+    check('an immediate paste failure refreshes the listing and still exposes queued collisions',
+        await modal.getByText('An item named "package.json" already exists.', { exact: true }).isVisible()
+        && await page.evaluate(() => window.filesUiTest.listingReads.length) > readsBeforeFailure);
+    await modal.getByRole('button', { name: /^Skip/ }).click();
+    await modal.waitFor({ state: 'hidden' });
+
     await open();
     await overwrite({ twice: true });
     await modal.waitFor({ state: 'hidden' });

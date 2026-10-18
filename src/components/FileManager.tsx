@@ -490,6 +490,7 @@ export const FileManager = memo(function FileManager({
     const conflicts: typeof pendingConflicts = [];
     const executionList: typeof ops = [];
     let refreshAfterMutation = false;
+    let immediateFailed = false;
 
     try {
       const destination = useAppStore.getState().connections.find(item => item.id === destinationConnectionId);
@@ -535,7 +536,9 @@ export const FileManager = memo(function FileManager({
           for (const [opType, sources] of Object.entries(groups)) {
             if (!await pasteEntries(destinationConnectionId, sources, opType === 'move' ? 'cut' : 'copy', targetDirectory ?? currentPath)) {
               void useAppStore.getState().refreshConnectionFiles(destinationConnectionId);
-              return;
+              refreshAfterMutation = false;
+              immediateFailed = true;
+              break;
             }
           }
         } else {
@@ -572,7 +575,7 @@ export const FileManager = memo(function FileManager({
         });
         if (generation !== operationGeneration.current) return;
         replaceConflicts(conflicts);
-      } else {
+      } else if (!immediateFailed) {
         // The Files slice acknowledges only confirmed same-endpoint moves.
         setSelectedFiles([]);
       }
