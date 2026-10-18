@@ -6,6 +6,19 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Fixed
 
+- **Terminal path suggestions:** Distinguish existing matches, confirmed misses
+  and unavailable directory checks without reviving expired filename listings.
+  Preserve POSIX casing, isolate native Windows/WSL/SSH lookup behavior and keep
+  ordinary command history separate from filesystem evidence. ([f7bb076])
+
+- **Terminal password prompts and context:** Prevent old prompt output from
+  clearing hidden-input protection or resetting typed commands. Keep password
+  submissions and retries out of suggestion/history inference, and recover custom
+  prompts through current OSC 7 reports only after submission and password checks.
+  Use observed current-session directories instead of speculative `cd` targets;
+  reject stale output, CWD replies and shell-plugin probes after context changes.
+  Disabled or native-suppressed suggestions bypass input inference. ([43d59da])
+
 - **Paste collisions:** Keep existing-item collision choices available after an
   immediate same-connection paste fails. Refresh the destination listing without
   clearing the failed selection. ([d98c359])
@@ -2869,3 +2882,5 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [d98c359]: https://github.com/zync-sh/zync/commit/d98c35951560eba18f012ac0e3abeb658c84c5b5
 [99856dd]: https://github.com/zync-sh/zync/commit/99856dd1217ef016a311ace4f8314b0e78f02152
 [2b1d77d]: https://github.com/zync-sh/zync/commit/2b1d77d18192d5b76e9b494d5cebbfb1c925cf92
+[f7bb076]: https://github.com/zync-sh/zync/commit/f7bb076e86979523d28fa970ddc6752d8836c8df
+[43d59da]: https://github.com/zync-sh/zync/commit/43d59da1cdf91177c8c01683cbc0294f4da156f3
