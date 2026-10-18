@@ -12,10 +12,10 @@ pub(crate) mod pane_document;
 pub(crate) mod recovery;
 pub(crate) mod registry;
 pub(crate) mod rollback;
-pub(crate) mod ssh_filesystem;
 pub(crate) mod ssh_command;
-pub(crate) mod terminal;
+pub(crate) mod ssh_filesystem;
 pub(crate) mod storage;
+pub(crate) mod terminal;
 
 pub use self::manifest::{EditorManifest, Manifest, ManifestExtensions};
 use self::package::read_manifest_file;
@@ -123,6 +123,9 @@ impl PluginScanner {
         inject(builtins::builtin_tokyo_light());
         inject(builtins::builtin_synthwave());
         inject(builtins::builtin_nordic());
+        for theme in builtins::builtin_icon_themes() {
+            inject(theme);
+        }
 
         Ok(plugins)
     }
@@ -236,9 +239,12 @@ impl PluginScanner {
             .context("Plugin package signature verification failed")?;
 
         let canonical_root = fs::canonicalize(dir)?;
+        manifest.validate_package_assets(&canonical_root)?;
 
         // Load Main Script (worker.js or specified entry)
-        let script = if let Some(main_file) = manifest.runtime_entry() {
+        let script = if manifest.extensions.icon_theme.is_some() {
+            None // Declarative packs must never discover an implicit worker.js.
+        } else if let Some(main_file) = manifest.runtime_entry() {
             Some(Self::read_plugin_text_asset(
                 dir,
                 &canonical_root,
@@ -353,7 +359,7 @@ fn user_plugin_enabled_by_policy(
 
 #[cfg(test)]
 mod scanner_tests {
-    use super::{should_scan_plugin_dir, user_plugin_enabled_by_policy};
+    use super::{should_scan_plugin_dir, user_plugin_enabled_by_policy, PluginScanner};
     use std::ffi::OsStr;
 
     #[test]
@@ -369,5 +375,42 @@ mod scanner_tests {
         assert!(user_plugin_enabled_by_policy(1, true, false));
         assert!(user_plugin_enabled_by_policy(2, false, true));
         assert!(!user_plugin_enabled_by_policy(2, true, false));
+    }
+
+    #[test]
+    fn declarative_icons_ignore_implicit_workers_and_recheck_assets_without_changing_legacy_loading(
+    ) {
+        let root = tempfile::tempdir().unwrap();
+        let package = root.path().to_path_buf();
+        let manifest_path = package.join("manifest.json");
+        let manifest = include_str!("../../tests/fixtures/plugins/icon-theme/manifest.json");
+        std::fs::write(&manifest_path, manifest).unwrap();
+        std::fs::create_dir(package.join("icons")).unwrap();
+        for name in ["file", "folder", "source"] {
+            std::fs::write(package.join(format!("icons/{name}.svg")), "<svg/>").unwrap();
+        }
+        // Even an undeclared, unreadable-as-text worker is never discovered by a data-only pack.
+        std::fs::write(package.join("worker.js"), [0xff]).unwrap();
+        let loaded = PluginScanner::load_plugin(&package).unwrap();
+        assert!(loaded.script.is_none());
+        assert!(loaded.style.is_none());
+        assert!(loaded.editor_html.is_none());
+
+        let mut legacy: serde_json::Value = serde_json::from_str(manifest).unwrap();
+        legacy.as_object_mut().unwrap().remove("iconTheme");
+        legacy["iconsPath"] = serde_json::json!("icons");
+        std::fs::write(&manifest_path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+        std::fs::write(package.join("worker.js"), "legacy worker").unwrap();
+        assert_eq!(
+            PluginScanner::load_plugin(&package)
+                .unwrap()
+                .script
+                .as_deref(),
+            Some("legacy worker")
+        );
+
+        std::fs::write(manifest_path, manifest).unwrap();
+        std::fs::remove_file(package.join("icons/file.svg")).unwrap();
+        assert!(PluginScanner::load_plugin(&package).is_err());
     }
 }

@@ -4,6 +4,171 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Paste collisions:** Keep existing-item collision choices available after an
+  immediate same-connection paste fails. Refresh the destination listing without
+  clearing the failed selection. ([d98c359])
+
+- **File access and Copy:** Share known-access guards across menus, shortcuts,
+  uploads and editors without guessing effective access from permission bits.
+  Check explicitly selected SSH sources before updating the Copy clipboard;
+  retain the previous clipboard after denied or inconclusive checks and ignore
+  stale results. Distinguish clipboard readiness from completed transfers, keep
+  Cut independent of content-read rights, and avoid recursive preflight scans.
+  ([e4febfe], [70168e8])
+
+- **Batch delete safety:** Do not replay deletions after partial or uncertain SSH
+  execution or failed SFTP responses. Use the existing SFTP fallback before
+  execution when a quoted delete command exceeds the exec byte budget.
+  ([e4febfe])
+
+- **SSH reconnects:** Let waiting requests reuse a completed reconnect for the
+  same connection owner. Reject replaced connections and missing-session results,
+  and prevent stale SFTP requests from installing or invalidating another
+  connection's transport. ([65fd388])
+
+- **Read-only editing:** Open regular POSIX files without write permission bits
+  in read-only mode, disable Save and block Ctrl/Cmd+S across built-in and plugin
+  editors. Explain the state in a shared access menu, retain drafts after denied
+  saves and permission refreshes, and report each failed save only once. Offer
+  an explicit, open-file-only **Allow save attempts** option for accounts with
+  additional access; it does not change permissions or use sudo. ([d652434])
+
+- **File deletion:** Update local Windows listings immediately after deletion and
+  refresh other open panes without interrupting folder navigation. Prevent failed
+  deletions from restoring stale folder contents. ([d8d6586], [69a16cb])
+
+### Changed
+
+- **Maintenance:** Clarify shortcut, settings and terminal code comments without
+  changing runtime behavior. ([ac067a6])
+
+- **File operations and feedback:** Close accepted collision dialogs without
+  blocking browsing, continue Keep Both batches after individual failures, and
+  preserve dotfile names and dotted parent paths. Keep partial cut selections
+  accurate and refresh open destination panes at their current paths. Consolidate
+  batch errors and remove routine start, success and cancellation toasts; automatic
+  focus restoration stays quiet while keyboard navigation remains visible.
+  ([822c8c9], [1842b93], [d4469ff])
+
+- **Files interface:** Use compact navigation and folder-summary rows, separate New
+  and Upload menus, one View menu, and direct List/Grid controls. Keep selection
+  feedback in place and distinguish empty, hidden-only, filtered and failed
+  listings with Clear filter or Retry. Preserve existing file operations, editor
+  ownership, virtualized listings and saved preferences. ([6f0bf22], [90d9ea5])
+
+- **Responsive Files layout:** Align list headings, rows, grid and actions to
+  shared gutters. Give filenames more room while keeping Size and Modified
+  compact; optional Type/Owner columns remain sortable when hidden. Preserve
+  short extensions and icon zoom preferences, use readable list/Places artwork,
+  and place Pins before Recent. Show wide Places by default only when no explicit
+  visibility preference exists. ([a356400], [6f0bf22])
+
+- **Folder navigation:** Keep breadcrumbs visible while filtering, fold parent
+  folders into a keyboard-accessible menu, and offer on-demand sibling choices.
+  Add debounced folder suggestions during path editing, click/Tab completion,
+  arrow selection and Enter navigation, with bounded results, retry and stale-reply
+  protection. Preserve literal folder-name spaces, manual entry, history and
+  cancellation without changing native path identity. ([1bcfd30], [28ae8ee])
+
+- **Files selection and focus:** Share checkbox-style selection across list and
+  grid, with modifier-free toggles that never navigate. Use the theme accent and
+  contrasting ticks, retaining forced-colors support and distinct keyboard focus.
+  Total loaded regular-file sizes without implying recursive folder sizes.
+  Keep same-host panes isolated and rubber-band selection separate from browser
+  text selection, while preserving native Properties text copy. Automatic Files
+  activation stays visually quiet without losing keyboard shortcuts.
+  ([6ab62e4], [a356400], [6f0bf22])
+
+- **Sidebars and Properties:** Share native width-transition coordination across
+  main/tools sidebars and nested Files drawers. Keep drawer contents stable and
+  scrolling independent, wrap fixed grid tracks directly without per-file
+  animations, and preserve the viewed file during reflow. Retain direct pointer
+  resizing, reduced motion and pane-local ownership. Use inline Properties when
+  space permits and shared dialogs otherwise; dismiss transient dialogs when
+  Files becomes inactive without stealing focus or losing inline inspector state.
+  ([5bed17b], [6f0bf22])
+
+- **Shared popups:** Keep menu trigger clicks within their dismissal boundary,
+  expose submenu semantics in context menus, and prevent noninteractive tooltip
+  wrappers from blocking controls. Allow inactive owners to suppress modal focus
+  restoration; existing callers retain the default behavior. ([c44431b])
+
+### Added
+
+- **Folder sizes:** Calculate logical file bytes in the background for local and
+  SSH folders, with a saved **View → Show folder sizes** toggle enabled by default.
+  Bound work by concurrency, entry, depth, time and memory budgets; label incomplete
+  totals and explain limits through the info control. Include available folder
+  sizes in selection totals and Properties, keep waiting states unobtrusive, and
+  allow explicit retry of failed or cancelled scans. No file contents are read;
+  links are skipped and results are not allocated disk usage or a snapshot.
+  ([99856dd], [2b1d77d])
+
+- **Extended permission controls:** Edit ordinary modes for supported local Linux
+  files and folders using qualified Linux 6.6+ filesystem support. On Windows,
+  open OS-owned Properties/Security from Files Properties or the editor access
+  menu. Keep drafts intact and require a fresh check after the Windows handoff;
+  opening settings does not change permissions or save content.
+  ([e4febfe], [70168e8])
+
+- **SSH administrator permission review:** Offer explicit, single-item sudo
+  permission edits on compatible Linux 6.6+ servers with existing
+  `/usr/bin/python3` and authorized sudo policy, without installing a server
+  helper. Review the SSH host filesystem path separately from any SFTP path
+  mapping. Passwords remain transient; no root SFTP session, automatic elevation
+  or recursive permission changes are introduced. ([e4febfe], [70168e8])
+
+- **File permissions:** View full modes and numeric owner/group IDs in Properties
+  and edit a selected POSIX SFTP item's ordinary read/write/execute permissions
+  with explicit Apply and Discard controls. Check fresh metadata and connection
+  identity, preserve special bits, and verify the resulting mode without automatic
+  write retries or elevation. Support detected Unix and distro identifiers without
+  a fixed allowlist; missing OS metadata stays unknown. Windows exposes read-only
+  attributes, not a POSIX permission editor. ([65fd388], [d652434])
+
+- **Safer regular-file copies:** Copy into a separate temporary file before
+  publishing the result, keeping an existing destination unchanged during copying.
+  Bound concurrent transfers and attempt temporary-file cleanup after confirmed
+  cancellation. Retain recovery details when the outcome is uncertain. These
+  staging guarantees do not cover moves or archives.
+  ([bfb9231], [822c8c9], [d4469ff])
+
+- **Staged folder copies:** Extend the same transfer service to copy complete
+  folders into temporary siblings before replacing an existing folder. Keep the
+  original available during copying, check nested contents before publication,
+  and clean owned temporary trees after confirmed cancellation. Reuse existing
+  progress, recovery and history controls; folder replacement is not merging.
+  ([241b0d4], [5bdc13e])
+
+- **Combine folders:** Offer a separate folder-conflict choice that adds incoming
+  items and replaces matching files while keeping destination-only items. Reuse
+  staged publication and one transfer/recovery owner, report partial completion
+  on interruption, and share the same conflict choices with Copy to Server.
+  Keep whole-folder replacement explicitly labelled **Replace folder**.
+  ([aee7155], [2e7e674], [11d005e])
+
+- **Transfer recovery:** Restore active transfers after a UI reload and unresolved
+  recovery details after an app restart, without automatically resuming interrupted
+  copies. Offer read-only inspection and guarded temporary-copy cleanup. Every
+  finished entry retains the existing × clear action; cleared history stays hidden
+  without deleting recovery files. ([bfb9231], [822c8c9], [d32d8bc], [d4469ff])
+
+- **Bundled Material icons:** Add an optional offline Material Icon Theme choice
+  with 65 unchanged, attributed MIT-licensed assets and programming-language and
+  special-folder mappings. Reuse one renderer for Files, Places and Properties
+  without replacing existing defaults or saved icon selections.
+  ([de93c92], [a8e470a])
+
+- **Declarative icon packs:** Register built-in choices through the existing plugin
+  lifecycle and derive enabled picker choices from that registry. Add versioned
+  community mappings, bounded static-SVG validation and plugin API 2.2 compatibility
+  gates through normal review, activation and rollback paths. Preserve legacy
+  packs and saved selections on fallback. Bound unused renderer cache entries and
+  ignore late results from released requests. Packaged-host release testing and
+  SDK publication remain separate steps. ([7c7c5db], [a8e470a])
+
 ## [2.35.1] - 2026-10-14
 
 This release combines the unpublished 2.35.0 draft with the activity-bar default change.
@@ -2673,3 +2838,34 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [2e9c615]: https://github.com/zync-sh/zync/commit/2e9c6154e8849dc4454ae948e4f29a49d34eb28b
 [acd9f33]: https://github.com/zync-sh/zync/commit/acd9f33dcc20ff92e175e6b0d8e9dac1f2496c4c
 [905f8eb]: https://github.com/zync-sh/zync/commit/905f8eb304391ffdb135c207167a767512d62b11
+[6ab62e4]: https://github.com/zync-sh/zync/commit/6ab62e4ffa18cd89c4fb74bb02c5d48cd2a2959a
+[c44431b]: https://github.com/zync-sh/zync/commit/c44431bd4c9f237c4fb2dffd8c699cbffe47a296
+[5bed17b]: https://github.com/zync-sh/zync/commit/5bed17b6e73a58a2b763dcd83a6ff5a446789f35
+[7c7c5db]: https://github.com/zync-sh/zync/commit/7c7c5db11256178b299e5853dcbfe9ffd26bd8f8
+[de93c92]: https://github.com/zync-sh/zync/commit/de93c92483f3cb0eba668573ead87223966b1239
+[a8e470a]: https://github.com/zync-sh/zync/commit/a8e470a1504ab22ad3c95ad82ec2fd5001d8c5bf
+[28ae8ee]: https://github.com/zync-sh/zync/commit/28ae8eeb09101a5e8b0be590a1e9c18865df0090
+[a356400]: https://github.com/zync-sh/zync/commit/a356400de65ea09118dee96cfcdc2391b6756d1b
+[1bcfd30]: https://github.com/zync-sh/zync/commit/1bcfd30eda8bd76dd5caece0cbf5f1f6ba34a87c
+[6f0bf22]: https://github.com/zync-sh/zync/commit/6f0bf22e41a54186b27f70a931dc367e9a55cd7a
+[90d9ea5]: https://github.com/zync-sh/zync/commit/90d9ea5cdc9da1ef8dec5b7e5070ae9b0d99c4e4
+[bfb9231]: https://github.com/zync-sh/zync/commit/bfb9231d4ec73f1810b1abd277dc7f641e9696be
+[822c8c9]: https://github.com/zync-sh/zync/commit/822c8c99943d4834a6ee6db66458ce636ba40cc8
+[d32d8bc]: https://github.com/zync-sh/zync/commit/d32d8bcc546035dd79e2744603c0f6f359d83df0
+[1842b93]: https://github.com/zync-sh/zync/commit/1842b93ffaf5d1054b20a597d660222c5e2ea918
+[d4469ff]: https://github.com/zync-sh/zync/commit/d4469ff66b5dee6e15f1e15e4a238271aea9cdf0
+[241b0d4]: https://github.com/zync-sh/zync/commit/241b0d48e9b61ed71b7b6eaad10e3811512ad3c1
+[5bdc13e]: https://github.com/zync-sh/zync/commit/5bdc13e5553d675d497a48fbd0c59340bbc9e113
+[aee7155]: https://github.com/zync-sh/zync/commit/aee7155d4e386c38a848e6617e7f3d31a2be92bd
+[2e7e674]: https://github.com/zync-sh/zync/commit/2e7e674e811b7e68741d4697f0aeaae1d33df811
+[11d005e]: https://github.com/zync-sh/zync/commit/11d005e04529bf9d1b7f972bdf8a17f4930f20b0
+[d8d6586]: https://github.com/zync-sh/zync/commit/d8d6586bfa0790730bf8ea84c52acfe6c18adcaf
+[69a16cb]: https://github.com/zync-sh/zync/commit/69a16cbaf7401b57a0990760d3c21263e7844397
+[ac067a6]: https://github.com/zync-sh/zync/commit/ac067a6fe20f9b58e5c4cd8e6e67e47c0e89e85b
+[65fd388]: https://github.com/zync-sh/zync/commit/65fd388a03262ac8502376021459679430e38893
+[d652434]: https://github.com/zync-sh/zync/commit/d652434460ba7d175b0cd069037a98e36d46e5b9
+[e4febfe]: https://github.com/zync-sh/zync/commit/e4febfed671ce30c48a2b5825aaa0710b040fa40
+[70168e8]: https://github.com/zync-sh/zync/commit/70168e81ba307f82c9a527afb9422c7fed856fcd
+[d98c359]: https://github.com/zync-sh/zync/commit/d98c35951560eba18f012ac0e3abeb658c84c5b5
+[99856dd]: https://github.com/zync-sh/zync/commit/99856dd1217ef016a311ace4f8314b0e78f02152
+[2b1d77d]: https://github.com/zync-sh/zync/commit/2b1d77d18192d5b76e9b494d5cebbfb1c925cf92

@@ -165,6 +165,7 @@ const ipcRenderer = {
       'fs_delete': 'fs_delete',
       'fs_copy': 'fs_copy',
       'fs_exists': 'fs_exists',
+      'fs_entry_kind': 'fs_entry_kind',
       'tunnel:getAll': 'tunnel_get_all',
       'tunnel:startLocal': 'tunnel_start_local',
       'tunnel:start_local': 'tunnel_start_local', // Add snake_case mapping
@@ -392,7 +393,7 @@ const ipcRenderer = {
         if (args.length === 1 && typeof args[0] === 'object') {
           payload = args[0];
         }
-      } else if (tauriCommand === 'fs_list' || tauriCommand === 'fs_read_file' || tauriCommand === 'fs_mkdir' || tauriCommand === 'fs_delete' || tauriCommand === 'fs_exists') {
+      } else if (tauriCommand === 'fs_list' || tauriCommand === 'fs_read_file' || tauriCommand === 'fs_mkdir' || tauriCommand === 'fs_delete' || tauriCommand === 'fs_exists' || tauriCommand === 'fs_entry_kind') {
         if (args.length === 1 && hasConnectionId(args[0])) {
           payload = args[0]; // Already has camelCase keys { connectionId, path }
         } else {

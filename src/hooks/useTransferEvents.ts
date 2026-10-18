@@ -1,56 +1,56 @@
 import { useEffect } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useAppStore } from '../store/useAppStore';
-
-interface TransferProgressPayload {
-    id: string;
-    transferred: number;
-    total: number;
-}
-
-interface TransferSuccessPayload {
-    id: string;
-    destination_connection_id: string;
-}
-
-interface TransferErrorPayload {
-    id: string;
-    error: string;
-}
+import { getTransferEventProjection, type TransferProgressEvent, type TransferSuccessEvent, type TransferErrorEvent } from '../features/files/application/transferEventProjection';
+import { nativeFileTransferReceipt } from '../features/files/application/nativeFileTransfer';
 
 export function useTransferEvents() {
-    const updateProgress = useAppStore(state => state.updateTransferProgress);
-    const completeTransfer = useAppStore(state => state.completeTransfer);
-    const failTransfer = useAppStore(state => state.failTransfer);
-    const refreshFiles = useAppStore(state => state.refreshFiles);
-
     useEffect(() => {
-        const unlistenProgress = listen<TransferProgressPayload>('transfer-progress', (event) => {
-            const { id, transferred, total } = event.payload;
-            updateProgress(id, {
-                transferred,
-                total,
-                percentage: total > 0 ? (transferred / total) * 100 : 0
-            });
+        const projection = getTransferEventProjection(useAppStore.getState, () => {
+            useAppStore.getState().setLastAction('Could not refresh the transfer destination', 'error');
         });
-
-        const unlistenSuccess = listen<TransferSuccessPayload>('transfer-success', (event) => {
-            const { id, destination_connection_id } = event.payload;
-            completeTransfer(id);
-            if (destination_connection_id) {
-                refreshFiles(destination_connection_id);
+        let disposed = false;
+        const unlisteners: Array<() => void> = [];
+        const register = async <T,>(name: string, handler: (payload: T) => void) => {
+            try {
+                const unlisten = await listen<T>(name, event => {
+                    if (!disposed) handler(event.payload);
+                });
+                if (disposed) unlisten();
+                else unlisteners.push(unlisten);
+            } catch {
+                if (!disposed) useAppStore.getState().setLastAction('Transfer status updates are unavailable', 'error');
             }
-        });
-
-        const unlistenError = listen<TransferErrorPayload>('transfer-error', (event) => {
-            const { id, error } = event.payload;
-            failTransfer(id, error);
+        };
+        const receiveNative = (value: unknown) => {
+            projection.native(nativeFileTransferReceipt(value));
+        };
+        // Subscribe before reading history. A late snapshot cannot resurrect a
+        // terminal event received while that read was in flight.
+        void Promise.all([
+            register<TransferProgressEvent>('transfer-progress', projection.progress),
+            register<TransferSuccessEvent>('transfer-success', projection.success),
+            register<TransferErrorEvent>('transfer-error', projection.error),
+            register<unknown>('file-transfer-started', value => {
+                try { receiveNative(value); }
+                catch { useAppStore.getState().setLastAction('Invalid native transfer status', 'error'); }
+            }),
+            register<unknown>('file-transfer-outcome', value => {
+                try { receiveNative(value); }
+                catch { useAppStore.getState().setLastAction('Invalid native transfer status', 'error'); }
+            }),
+        ]).then(async () => {
+            const history: unknown = await window.ipcRenderer.invoke('fs_transfer_history');
+            if (disposed) return;
+            if (!Array.isArray(history) || history.length > 256) throw new Error('Invalid transfer recovery history');
+            for (const value of history) useAppStore.getState().receiveNativeTransfer(nativeFileTransferReceipt(value));
+        }).catch(() => {
+            if (!disposed) useAppStore.getState().setLastAction('Transfer recovery history is unavailable; existing files were not modified', 'error');
         });
 
         return () => {
-            unlistenProgress.then(f => f());
-            unlistenSuccess.then(f => f());
-            unlistenError.then(f => f());
+            disposed = true;
+            unlisteners.forEach(unlisten => unlisten());
         };
-    }, [updateProgress, completeTransfer, failTransfer, refreshFiles]);
+    }, []);
 }

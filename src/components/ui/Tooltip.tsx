@@ -63,6 +63,7 @@ export function Tooltip({
       {!disabled && (
         <RadixTooltip.Portal>
           <RadixTooltip.Content
+            data-zync-tooltip=""
             side={position}
             sideOffset={8}
             collisionPadding={8}

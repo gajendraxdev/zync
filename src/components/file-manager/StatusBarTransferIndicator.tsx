@@ -3,6 +3,7 @@ import { CheckCircle } from 'lucide-react';
 import { ZPortal } from '../ui/ZPortal';
 import { useAppStore, Transfer } from '../../store/useAppStore';
 import { TransferPanel } from './TransferPanel';
+import { isActiveTransferStatus } from '../../store/transferSlice';
 
 /** Build an SVG arc path for a filled pie slice (0-100%). Starts from 12 o'clock. */
 function describeArc(cx: number, cy: number, r: number, percent: number): string {
@@ -24,28 +25,26 @@ export function StatusBarTransferIndicator() {
   const [hasCompleted, setHasCompleted] = useState(false);
   const [tooltip, setTooltip] = useState<string | null>(null);
   const indicatorRef = useRef<HTMLButtonElement>(null);
-  const completedCountRef = useRef(0);
+  const completedIdsRef = useRef<Set<string>>(new Set());
   const prevActiveIdsRef = useRef<Set<string>>(new Set());
 
   const activeTransfers = transfers.filter(
-    (t: Transfer) => t.status === 'pending' || t.status === 'transferring',
+    (t: Transfer) => isActiveTransferStatus(t.status),
   );
 
   // Track completion — stay green until circle disappears
-  const currentCompleted = transfers.filter((t: Transfer) => t.status === 'completed').length;
+  const completedIds = transfers.filter((t: Transfer) => t.status === 'completed').map(transfer => transfer.id);
   useEffect(() => {
-    if (currentCompleted > completedCountRef.current) {
+    const hasNewCompletion = completedIds.some(id => !completedIdsRef.current.has(id));
+    completedIdsRef.current = new Set(completedIds);
+    if (hasNewCompletion) {
       setHasCompleted(true);
       setTooltip('Transfer complete');
-      const tooltipTimer = setTimeout(() => setTooltip(null), 2000);
-      completedCountRef.current = currentCompleted;
-      return () => clearTimeout(tooltipTimer);
     }
-    if (currentCompleted === 0 && completedCountRef.current > 0) {
+    if (completedIds.length === 0) {
       setHasCompleted(false);
     }
-    completedCountRef.current = currentCompleted;
-  }, [currentCompleted]);
+  }, [completedIds.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Show tooltip when a new transfer starts (track by IDs, not just count)
   const activeIds = activeTransfers.map((t: Transfer) => t.id);
@@ -64,9 +63,13 @@ export function StatusBarTransferIndicator() {
       ? `${newest.label}...`
       : isUpload ? 'Upload in progress' : 'Download in progress';
     setTooltip(label);
+  }, [activeIds.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!tooltip) return;
     const timer = setTimeout(() => setTooltip(null), 2000);
     return () => clearTimeout(timer);
-  }, [activeIds.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tooltip]);
 
   // Auto-open panel when a new transfer starts
   useEffect(() => {

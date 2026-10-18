@@ -1,7 +1,13 @@
-import { createContext, useContext, useMemo, type ReactNode, type RefObject, type TransitionEvent } from 'react';
+import { createContext, useContext, useMemo, type ReactNode, type RefObject } from 'react';
 import { cn } from '../../../lib/utils';
 import { DEFAULT_SIDEBAR_WIDTH_LIMITS, useSidebarResize, type SidebarWidthLimits } from './useSidebarResize';
 import { CONTROL_INSET_FOCUS_CLASSES } from '../../ui/controlStyles';
+import { SIDEBAR_WIDTH_TRANSITION_CLASSES } from '../../ui/sidebarStyles';
+import { useLayoutWidthTransition } from '../../ui/LayoutMotion';
+
+function notifyLayoutTransition(moving: boolean) {
+    window.dispatchEvent(new CustomEvent(`zync:layout-transition-${moving ? 'start' : 'end'}`));
+}
 
 const SidebarContentContext = createContext<{ width: number; contentRef: RefObject<HTMLDivElement | null> } | null>(null);
 
@@ -21,20 +27,13 @@ export function SidebarChrome({ children, position, collapsed, savedWidth, onRes
     widthLimits?: SidebarWidthLimits; resizeLabel?: string; order?: number; landmarkLabel?: string;
 }) {
     const { width, isResizing, sidebarRef, contentRef, handlers } = useSidebarResize(savedWidth, onResize, position, widthLimits, !collapsed);
+    useLayoutWidthTransition(sidebarRef, { enabled: !isResizing, onMovingChange: notifyLayoutTransition });
     const contentSizing = useMemo(() => ({ width, contentRef }), [width, contentRef]);
-    const notifyTransition = (event: TransitionEvent<HTMLDivElement>, phase: 'start' | 'end') => {
-        if (event.target === event.currentTarget && event.propertyName === 'width') {
-            window.dispatchEvent(new CustomEvent(`zync:layout-transition-${phase}`));
-        }
-    };
     return <div ref={sidebarRef} data-shared-sidebar data-sidebar-position={position} data-zync-color="sidebar"
         role={landmarkLabel ? 'complementary' : undefined} aria-label={landmarkLabel} inert={collapsed}
-        onTransitionRun={event => notifyTransition(event, 'start')}
-        onTransitionEnd={event => notifyTransition(event, 'end')}
-        onTransitionCancel={event => notifyTransition(event, 'end')}
         className={cn('bg-app-panel flex flex-col h-full min-h-0 shrink-0 relative z-50 overflow-hidden',
             !collapsed && (position === 'right' ? 'border-l border-app-border/50' : 'border-r border-app-border/50'),
-            !isResizing && 'transition-[width] duration-300 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none', className)}
+            !isResizing && SIDEBAR_WIDTH_TRANSITION_CLASSES, className)}
         style={{ width: collapsed ? 0 : width, order: order ?? (position === 'right' ? 1 : 0),
             willChange: isResizing ? 'auto' : 'width' }}>
         {!collapsed && <div {...handlers} role="separator" aria-label={resizeLabel} aria-orientation="vertical"

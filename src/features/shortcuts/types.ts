@@ -3,7 +3,7 @@ import type { GlobalNavigationAction } from '../workspace/application/globalNavi
 
 export type KeyboardFocus = 'xterm' | 'field' | 'app';
 
-/** Closed set — see docs/SHORTCUTS.md §5. */
+/** Closed set of focus contexts shared by the shortcut catalog and dispatcher. */
 export type ShortcutWhen = 'always' | 'xterm' | 'app' | 'field' | 'files';
 
 export type ShortcutSection = 'global' | 'tabs' | 'terminal' | 'view' | 'files' | 'hidden';

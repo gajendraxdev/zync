@@ -1,8 +1,13 @@
-import { Clock, Cloud, Disc, HardDrive, Home, Pin, Plus, Server, Settings, Usb, X } from 'lucide-react';
+import { Cloud, Disc, HardDrive, Home, Pin, Plus, Server, Settings, Usb, X } from 'lucide-react';
 import { memo, useState, type MouseEvent, type ReactNode } from 'react';
 import { cn } from '../../lib/utils';
 import { ContextMenu, type ContextMenuItem } from '../ui/ContextMenu';
-import { FILE_RECENT_LIMIT_CHOICES, clampFileRecentLimit } from './fileChrome';
+import { FileActionMenu } from './FileActionMenu';
+import { Button } from '../ui/Button';
+import { IconButton } from '../ui/IconButton';
+import { Tooltip } from '../ui/Tooltip';
+import { FileEntryIcon } from './FileEntryIcon';
+import { FILE_PLACE_ICON_PX, FILE_RECENT_LIMIT_CHOICES, clampFileRecentLimit } from './fileChrome';
 import type { DragData } from './dragDropUtils';
 import { filePathLeafLabel, isFilePathEqual, normalizeFilePath } from './filePathNav';
 import {
@@ -29,6 +34,7 @@ export const FilePlacesSidebar = memo(function FilePlacesSidebar({
   onRecentEnabledChange,
   onRecentLimitChange,
   onClearRecent,
+  showHeader = true,
 }: {
   homePath: string;
   currentPath: string;
@@ -45,6 +51,7 @@ export const FilePlacesSidebar = memo(function FilePlacesSidebar({
   onRecentEnabledChange?: (enabled: boolean) => void;
   onRecentLimitChange?: (limit: number) => void;
   onClearRecent?: () => void;
+  showHeader?: boolean;
 }) {
   const home = homePath ? normalizeFilePath(homePath) : '';
   const current = normalizeFilePath(currentPath);
@@ -66,13 +73,13 @@ export const FilePlacesSidebar = memo(function FilePlacesSidebar({
 
   const placesMenuItems: ContextMenuItem[] = [
     {
-      label: recentEnabled ? 'Hide Recent' : 'Show Recent',
+      label: 'Show Recent', checked: recentEnabled,
       action: () => onRecentEnabledChange?.(!recentEnabled),
     },
     {
       label: 'Keep',
       children: FILE_RECENT_LIMIT_CHOICES.map((count) => ({
-        label: `${count === keep ? '✓ ' : ''}${count} folders`,
+        label: `${count} folders`, checked: count === keep, checkType: 'radio',
         action: () => onRecentLimitChange?.(count),
       })),
     },
@@ -86,17 +93,24 @@ export const FilePlacesSidebar = memo(function FilePlacesSidebar({
 
   return (
     <aside
-      className="flex h-full w-full min-w-0 flex-col"
+      aria-label="File places"
+      className="flex h-full w-full min-w-0 flex-col bg-app-panel/70"
       onContextMenu={(event) => {
         event.preventDefault();
         openPlacesMenu(event.clientX, event.clientY);
       }}
     >
-      <nav className="flex min-h-0 flex-1 flex-col overflow-y-auto p-2">
+      <div className="flex min-h-9 shrink-0 items-center justify-between px-3 py-1">
+        {showHeader ? <h2 className="text-xs font-medium text-app-muted">Places</h2> : <span />}
+        <FileActionMenu label="Places settings" icon={<Settings size={14} />} iconOnly items={placesMenuItems} />
+      </div>
+      <nav aria-label="File locations" className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-y-contain p-2 [scrollbar-gutter:stable]">
         <PlaceButton
           label="Home"
+          title={home || 'Home path unavailable'}
           active={inHome}
-          icon={<Home size={14} />}
+          current={isFilePathEqual(home, current)}
+          icon={<Home size={FILE_PLACE_ICON_PX} />}
           onClick={() => {
             if (home) onNavigate(home);
           }}
@@ -131,23 +145,9 @@ export const FilePlacesSidebar = memo(function FilePlacesSidebar({
             ))}
           </>
         )}
-        {recentEnabled && recentRows.length > 0 && (
-          <>
-            <SectionLabel>Recent</SectionLabel>
-            {recentRows.map((path) => (
-              <PlaceButton
-                key={path}
-                label={filePathLeafLabel(path, { homePath: home })}
-                active={isFilePathEqual(path, current)}
-                icon={<Clock size={14} />}
-                onClick={() => onNavigate(path)}
-              />
-            ))}
-          </>
-        )}
         <div
           className={cn(
-            'mt-1 flex min-h-[7.5rem] flex-1 flex-col rounded-lg',
+                'mt-1 flex min-h-[4rem] flex-col rounded-lg',
             pinsDrop && 'bg-app-accent/10 ring-1 ring-inset ring-app-accent/40',
           )}
           onDragEnter={(event) => {
@@ -193,8 +193,9 @@ export const FilePlacesSidebar = memo(function FilePlacesSidebar({
             <PlaceButton
               key={path}
               label={filePathLeafLabel(path, { homePath: home })}
+              title={path}
               active={isFilePathEqual(normalizeFilePath(path), current)}
-              icon={<Pin size={14} />}
+              icon={<FileEntryIcon file={{ name: filePathLeafLabel(path), type: 'd' }} size={FILE_PLACE_ICON_PX} />}
               onClick={() => onNavigate(normalizeFilePath(path))}
               onRemove={() => onRemoveBookmark(path)}
             />
@@ -208,27 +209,27 @@ export const FilePlacesSidebar = memo(function FilePlacesSidebar({
             }}
           >
             <span className="shrink-0 opacity-70">{bookmarked ? <Pin size={14} /> : <Plus size={14} />}</span>
-            <span className="ml-3 truncate text-[10px] font-medium uppercase tracking-wider opacity-80">
+            <span className="ml-2 truncate text-xs">
               {bookmarked ? 'Unpin' : 'Pin folder'}
             </span>
           </button>
         </div>
+        {recentEnabled && recentRows.length > 0 && (
+          <>
+            <SectionLabel>Recent</SectionLabel>
+            {recentRows.map((path) => (
+              <PlaceButton
+                key={path}
+                label={filePathLeafLabel(path, { homePath: home })}
+                title={path}
+                active={isFilePathEqual(path, current)}
+                icon={<FileEntryIcon file={{ name: filePathLeafLabel(path), type: 'd' }} size={FILE_PLACE_ICON_PX} />}
+                onClick={() => onNavigate(path)}
+              />
+            ))}
+          </>
+        )}
       </nav>
-      <div className="flex shrink-0 justify-end px-2 pb-1.5">
-        <button
-          type="button"
-          className="flex h-6 w-6 items-center justify-center rounded-md text-app-muted/70 hover:bg-app-surface/50 hover:text-app-text"
-          aria-label="Places settings"
-          title="Places settings"
-          onClick={(event) => {
-            event.stopPropagation();
-            const rect = event.currentTarget.getBoundingClientRect();
-            openPlacesMenu(rect.right - 8, rect.bottom + 4);
-          }}
-        >
-          <Settings size={13} />
-        </button>
-      </div>
       {placesMenu && (
         <ContextMenu
           x={placesMenu.x}
@@ -253,7 +254,7 @@ function SectionLabel({
   return (
     <div
       title={title}
-      className="px-3 pb-1 pt-3 text-[10px] font-medium uppercase tracking-wider text-app-muted/70"
+      className="px-2 pb-1 pt-3 text-[11px] text-app-muted"
       onContextMenu={onContextMenu}
     >
       {children}
@@ -262,17 +263,18 @@ function SectionLabel({
 }
 
 function volumeKindIcon(kind: FileVolume['kind']) {
-  if (kind === 'removable') return <Usb size={14} />;
-  if (kind === 'optical') return <Disc size={14} />;
-  if (kind === 'network') return <Cloud size={14} />;
-  if (kind === 'linux') return <Server size={14} />;
-  return <HardDrive size={14} />;
+  if (kind === 'removable') return <Usb size={FILE_PLACE_ICON_PX} />;
+  if (kind === 'optical') return <Disc size={FILE_PLACE_ICON_PX} />;
+  if (kind === 'network') return <Cloud size={FILE_PLACE_ICON_PX} />;
+  if (kind === 'linux') return <Server size={FILE_PLACE_ICON_PX} />;
+  return <HardDrive size={FILE_PLACE_ICON_PX} />;
 }
 
 function PlaceButton({
   label,
   icon,
   active,
+  current = active,
   onClick,
   onRemove,
   title,
@@ -280,6 +282,7 @@ function PlaceButton({
   label: string;
   icon: ReactNode;
   active: boolean;
+  current?: boolean;
   onClick: () => void;
   onRemove?: () => void;
   title?: string;
@@ -288,27 +291,25 @@ function PlaceButton({
     <div
       className={cn(
         'group flex items-center rounded-lg border border-transparent transition-colors duration-150',
-        active ? 'bg-app-surface/50 text-app-text' : 'text-app-muted hover:border-app-border/20 hover:bg-app-surface/40 hover:text-app-text',
+        active ? (current ? 'bg-app-surface/70 text-app-text' : 'bg-app-surface/30 text-app-muted') : 'text-app-muted hover:border-app-border/20 hover:bg-app-surface/40 hover:text-app-text',
       )}
     >
-      <button
-        type="button"
-        title={title}
-        className="flex min-w-0 flex-1 items-center px-3 py-1.5 text-left"
+      <Tooltip content={title || label} position="right" className="min-w-0 flex-1">
+      <Button
+        type="button" variant="ghost" size="sm" aria-current={current ? 'location' : undefined}
+        className="h-8 min-w-0 justify-start px-2 text-left"
         onClick={onClick}
       >
-        <span className="shrink-0 opacity-70">{icon}</span>
-        <span className="ml-3 truncate text-[12px] font-medium">{label}</span>
-      </button>
+        <span aria-hidden="true" className="shrink-0">{icon}</span>
+        <span className="ml-2 truncate text-[13px]">{label}</span>
+        {current && <span aria-hidden="true" className="ml-auto h-1 w-1 shrink-0 rounded-full bg-app-accent" />}
+      </Button>
+      </Tooltip>
       {onRemove && (
-        <button
-          type="button"
-          className="mr-1 flex h-6 w-6 items-center justify-center rounded-md text-app-muted opacity-0 hover:bg-app-surface/60 hover:text-app-text focus-visible:opacity-100 group-hover:opacity-100"
-          aria-label={`Remove ${label}`}
-          onClick={onRemove}
-        >
-          <X size={12} />
-        </button>
+        <Tooltip content={`Remove ${label}`} position="right">
+          <IconButton label={`Remove ${label}`} icon={<X size={12} />} onClick={onRemove}
+            className="files-place-remove mr-1 opacity-0 focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100" />
+        </Tooltip>
       )}
     </div>
   );

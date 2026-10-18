@@ -207,6 +207,8 @@ export interface AppSettings {
     };
     fileManager: {
         showHiddenFiles: boolean;
+        /** Bounded background folder-size scans. Missing older values default on. */
+        showFolderSizes?: boolean;
         confirmDelete: boolean;
         defaultDownloadPath: string;
         bookmarksByConnection: Record<string, string[]>;
@@ -316,7 +318,7 @@ export interface AppSettings {
         fmRefresh: string;
         aiCommandBar: string;
     };
-    /** Shortcut routing policy (not individual chords). See docs/SHORTCUTS.md. */
+    /** Shortcut routing policy, separate from individual configurable keybindings. */
     keyboard: KeyboardSettings;
     expandedFolders: string[];
     ai: {
@@ -389,6 +391,7 @@ export const defaultSettings: AppSettings = {
     },
     fileManager: {
         showHiddenFiles: true,
+        showFolderSizes: true,
         confirmDelete: true,
         defaultDownloadPath: '',
         bookmarksByConnection: {},

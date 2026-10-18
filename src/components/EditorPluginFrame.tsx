@@ -11,6 +11,8 @@ import { clearEditorStatus, createEditorStatusSource, publishEditorStatus } from
 import { formatCodeMirrorStatus } from './editor/codemirror/status';
 import { usePluginEditorDocument } from '../features/plugins/usePluginPaneDocument';
 import { PluginEditorToolbar, type PluginEditorCommand } from './editor/PluginEditorToolbar';
+import { EditorSaveBlockedError, editorSaveBlocked, type EditorSaveAccess } from '../features/files/domain/editorSaveAccess';
+import { EditorSaveAccessStatus } from './editor/EditorSaveAccessStatus';
 
 interface EditorPluginFrameProps {
   plugin: Plugin;
@@ -22,6 +24,7 @@ interface EditorPluginFrameProps {
   onDirtyChange?: (dirty: boolean) => void;
   hideToolbar?: boolean;
   onFatalError?: (reason: string) => void;
+  saveAccess?: EditorSaveAccess;
 }
 
 interface EditorDocumentPayload {
@@ -74,6 +77,7 @@ export function EditorPluginFrame({
   onDirtyChange,
   hideToolbar = false,
   onFatalError,
+  saveAccess,
 }: EditorPluginFrameProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [isReady, setIsReady] = useState(false);
@@ -94,6 +98,8 @@ export function EditorPluginFrame({
   const frameGenerationRef = useRef(0);
   const pendingSaveCountsRef = useRef(new Map<string, number>());
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const saveAccessRef = useRef(saveAccess);
+  saveAccessRef.current = saveAccess;
   const setEditorDirty = useCallback((value: boolean) => {
     saveStateRef.current.dirty = value;
     setDirty(value);
@@ -106,7 +112,7 @@ export function EditorPluginFrame({
     filename,
     language: detectLanguage(filename),
     content: initialContent,
-    readOnly: false,
+    readOnly: editorSaveBlocked(saveAccessRef.current),
   }), [documentId, filename, initialContent]);
 
   useEffect(() => {
@@ -169,6 +175,7 @@ export function EditorPluginFrame({
 
   const sendEditorCommand = useCallback((command: PluginEditorCommand) => {
     if (!isReady || !currentDocIdRef.current) return;
+    if (command === 'save' && editorSaveBlocked(saveAccessRef.current)) return;
     postToFrame({
       type: 'zync:editor:command',
       payload: { command, docId: currentDocIdRef.current },
@@ -216,22 +223,21 @@ export function EditorPluginFrame({
     if (!isSameDoc || !saveStateRef.current.dirty) {
       postToFrame({
         type: isSameDoc ? 'zync:editor:update-document' : 'zync:editor:open-document',
-        payload: isSameDoc ? { docId: doc.docId, content: doc.content } : doc,
+        payload: isSameDoc ? { docId: doc.docId, content: doc.content } : { ...doc, readOnly: editorSaveBlocked(saveAccessRef.current) },
       });
     }
-    postToFrame({
-      type: 'zync:editor:set-readonly',
-      payload: {
-        docId: doc.docId,
-        readOnly: doc.readOnly,
-      },
-    });
     postToFrame({
       type: 'zync:editor:focus',
       payload: { docId: doc.docId },
     });
     currentDocIdRef.current = doc.docId;
   }, [doc, isReady, postToFrame]);
+
+  // Access-only updates must not resend document content or move editor focus.
+  useEffect(() => {
+    if (!isReady || !readyForDocRef.current) return;
+    postToFrame({ type: 'zync:editor:set-readonly', payload: { docId: doc.docId, readOnly: editorSaveBlocked(saveAccess) } });
+  }, [doc.docId, isReady, postToFrame, saveAccess?.state]);
 
   useEffect(() => {
     const handler = async (event: MessageEvent) => {
@@ -289,10 +295,15 @@ export function EditorPluginFrame({
               const content = saveStateRef.current.requestSave(payload?.content);
               setEditorDirty(saveStateRef.current.dirty);
               const requestId = typeof payload?.requestId === 'number' ? payload.requestId : undefined;
+              if (editorSaveBlocked(saveAccessRef.current)) {
+                if (requestId !== undefined) postToFrame({ type: 'zync:editor:save-result', payload: { docId, requestId, ok: false } });
+                break;
+              }
               const frameGeneration = frameGenerationRef.current;
               markSavePending(frameGeneration, docId);
               const save = async () => {
                 try {
+                  if (editorSaveBlocked(saveAccessRef.current)) throw new EditorSaveBlockedError(saveAccessRef.current?.reason);
                   await onSave(content);
                   if (
                     frameGeneration === frameGenerationRef.current &&
@@ -318,7 +329,7 @@ export function EditorPluginFrame({
                     setSaveError(message);
                     setEditorDirty(saveStateRef.current.saveFailed(content));
                   }
-                  showToast('error', `Plugin editor save failed: ${message}`);
+                  if (!(error instanceof EditorSaveBlockedError)) showToast('error', message);
                   if (
                     requestId !== undefined &&
                     frameGeneration === frameGenerationRef.current
@@ -468,6 +479,7 @@ export function EditorPluginFrame({
             filename={filename}
             isReady={isReady}
             isSaving={isSaving}
+            saveAccess={saveAccess}
             onClose={() => { void requestClose(); }}
             onCommand={sendEditorCommand}
             providerName={plugin.manifest.editor?.displayName || plugin.manifest.name}
@@ -475,6 +487,7 @@ export function EditorPluginFrame({
           />
         )}
         <div className="flex min-h-0 flex-1 flex-col">
+        {hideToolbar && editorSaveBlocked(saveAccess) && <div className="border-b border-app-border px-3 py-1"><EditorSaveAccessStatus access={saveAccess} /></div>}
         {saveError && (
           <div className="border-b border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
             Save failed: {saveError}

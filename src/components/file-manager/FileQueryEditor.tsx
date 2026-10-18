@@ -1,13 +1,13 @@
 import { Filter, Search, X } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { cn } from '../../lib/utils';
-import { TopbarDropdown } from '../ui/TopbarDropdown';
+import { useEffect, useId, useRef } from 'react';
+import { FileActionMenu } from './FileActionMenu';
+import { IconButton } from '../ui/IconButton';
+import { Tooltip } from '../ui/Tooltip';
 import type { FileSearchTypeFilter } from './fileSearchFilter';
-import { useDismiss } from './useDismiss';
 
 export type { FileSearchTypeFilter };
 
-const TYPE_CHIPS: Array<{ id: FileSearchTypeFilter; label: string }> = [
+const TYPE_FILTERS: Array<{ id: FileSearchTypeFilter; label: string }> = [
   { id: 'folders', label: 'Folders' },
   { id: 'documents', label: 'Documents' },
   { id: 'images', label: 'Images' },
@@ -31,79 +31,48 @@ export function FileQueryEditor({
   onTypeFilter: (value: FileSearchTypeFilter) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const filterRef = useRef<HTMLDivElement>(null);
-  const [filtersOpen, setFiltersOpen] = useState(false);
-  const closeFilters = useCallback(() => setFiltersOpen(false), []);
-  useDismiss(filtersOpen, closeFilters, filterRef);
+  const hintId = useId();
+  const hasFilter = value.length > 0 || typeFilter !== 'all';
+  const typeLabel = TYPE_FILTERS.find(option => option.id === typeFilter)?.label ?? 'All types';
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
   return (
-    <div className="flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-md bg-app-bg/45 px-2 animate-in fade-in duration-150">
+    <div className="files-query-editor flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-md bg-app-bg/45 px-2"
+      onKeyDown={event => {
+        if (event.key === 'Escape' && !event.defaultPrevented) {
+          event.preventDefault();
+          event.stopPropagation();
+          onClose();
+        }
+      }}>
       <Search size={13} className="shrink-0 text-app-muted" />
       <input
         ref={inputRef}
         aria-label="Search this folder"
+        aria-describedby={hintId}
+        data-file-filter-input=""
         className="h-full min-w-0 flex-1 bg-transparent text-[12px] text-app-text outline-none placeholder:text-app-muted/50"
         placeholder="Search this folder…"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') onClose();
-        }}
       />
-      <div className="relative" ref={filterRef}>
-        <button
-          type="button"
-          aria-label="Filter results"
-          className={cn(
-            'flex h-6 w-6 items-center justify-center rounded-md text-app-muted hover:bg-app-surface/70 hover:text-app-text',
-            filtersOpen && 'bg-app-surface text-app-text',
-          )}
-          onClick={() => setFiltersOpen((open) => !open)}
-        >
-          <Filter size={13} />
-        </button>
-        {filtersOpen && (
-          <TopbarDropdown align="right" widthClass="w-72" className="z-50 p-3">
-            <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-app-muted">File types</div>
-            <div className="flex flex-wrap gap-1.5">
-              {TYPE_CHIPS.map((chip) => (
-                <button
-                  key={chip.id}
-                  type="button"
-                  aria-pressed={typeFilter === chip.id}
-                  className={cn(
-                    'rounded-md px-2.5 py-1 text-[11px] font-medium',
-                    typeFilter === chip.id
-                      ? 'bg-app-surface text-app-text shadow-sm'
-                      : 'text-app-muted hover:bg-app-surface/50 hover:text-app-text',
-                  )}
-                  onClick={() => onTypeFilter(typeFilter === chip.id ? 'all' : chip.id)}
-                >
-                  {chip.label}
-                </button>
-              ))}
-            </div>
-            <p className="mt-3 text-[11px] text-app-muted">
-              Matches names in this folder. Content search is not enabled yet.
-            </p>
-          </TopbarDropdown>
-        )}
-      </div>
-      <button
-        type="button"
-        aria-label="Close search"
-        className="flex h-6 w-6 items-center justify-center rounded-md text-app-muted hover:bg-app-surface/70 hover:text-app-text"
-        onClick={() => {
+      <span id={hintId} className="sr-only">Filters filenames in this folder only, not file contents.</span>
+      <FileActionMenu label="Filter file types" text={typeLabel} tooltip={`Filter file types · ${typeLabel}`} keepLabel
+        icon={<Filter size={13} />} items={[{ label: 'All types', checked: typeFilter === 'all', action: () => onTypeFilter('all') }, ...TYPE_FILTERS.map(chip => ({
+          label: chip.label, checked: typeFilter === chip.id,
+          action: () => onTypeFilter(typeFilter === chip.id ? 'all' : chip.id),
+        }))]} />
+      <Tooltip content={hasFilter ? 'Clear filters' : 'Close search'} position="bottom">
+        <IconButton label={hasFilter ? 'Clear filters' : 'Close search'} icon={<X size={13} />} onClick={() => {
+          if (!hasFilter) { onClose(); return; }
           onChange('');
-          onClose();
-        }}
-      >
-        <X size={13} />
-      </button>
+          onTypeFilter('all');
+          inputRef.current?.focus({ preventScroll: true });
+        }} />
+      </Tooltip>
     </div>
   );
 }

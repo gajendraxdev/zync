@@ -11,7 +11,9 @@ function isFileManagerPanelShown(container: HTMLDivElement | null): boolean {
 }
 
 export function useFileKeyboard({
+  requestFocusReveal,
   containerRef,
+  listingFocusRef,
   isConnected,
   isFilesSurfaceActive,
   settings,
@@ -39,17 +41,17 @@ export function useFileKeyboard({
   handlePaste,
   handleDelete,
   toggleBookmark,
-  refreshFiles,
+  handleRefresh,
   navigateBack,
   navigateForward,
   setViewMode,
   updateFileManagerSettings,
   setIsEditingPath,
-  setRenameOldName,
-  setRenameNewName,
-  setIsRenameModalOpen,
+  openRenameModal,
 }: {
+  requestFocusReveal: () => void;
   containerRef: RefObject<HTMLDivElement | null>;
+  listingFocusRef: RefObject<HTMLDivElement | null>;
   isConnected: boolean;
   isFilesSurfaceActive: boolean;
   settings: AppSettings;
@@ -77,25 +79,31 @@ export function useFileKeyboard({
   handlePaste: () => void;
   handleDelete: () => void;
   toggleBookmark: () => void;
-  refreshFiles: (connectionId: string) => void;
+  handleRefresh: () => void;
   navigateBack: (connectionId: string) => void;
   navigateForward: (connectionId: string) => void;
   setViewMode: (mode: 'grid' | 'list') => void;
   updateFileManagerSettings: (updates: Partial<AppSettings['fileManager']>) => Promise<void>;
   setIsEditingPath: (editing: boolean) => void;
-  setRenameOldName: (name: string) => void;
-  setRenameNewName: (name: string) => void;
-  setIsRenameModalOpen: (open: boolean) => void;
+  openRenameModal: (name: string) => void;
 }) {
   useEffect(() => {
     if (!isConnected) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Shared chrome/menu controls own their native keys, not the listing behind them.
+      if (e.defaultPrevented || e.isComposing) return;
+      if (!(e.target instanceof Node) || !containerRef.current?.contains(e.target)) return;
+      if (e.target instanceof Element && e.target.closest('[role="menu"], [role="dialog"], select, [contenteditable="true"]')) return;
+      // Preserve native button activation/navigation, but keep Escape available for Files dismissal.
+      if (e.key !== 'Escape' && !e.ctrlKey && !e.metaKey && !e.altKey && e.target instanceof Element && e.target.closest('button, a')) return;
       if (!isFilesSurfaceActive || !isFileManagerPanelShown(containerRef.current) || isNewFolderModalOpen || isNewFileModalOpen || isRenameModalOpen || editingFile || isCopyModalOpen) return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && window.getSelection()?.toString()) return;
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        const isSearchInput = e.target.placeholder?.includes('Search');
-        const isNavigationKey = ['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Enter'].includes(e.key);
+        const isSearchInput = e.target.hasAttribute('data-file-filter-input');
+        const isNavigationKey = !e.ctrlKey && !e.metaKey && !e.altKey && ['ArrowDown', 'ArrowUp', 'Enter'].includes(e.key);
         if (!(isSearchInput && isNavigationKey)) return;
+        listingFocusRef.current?.focus({ preventScroll: true });
       }
 
       const matches = (id: string) => {
@@ -153,7 +161,7 @@ export function useFileKeyboard({
       }
       if (matches('fmRefresh')) {
         e.preventDefault();
-        if (activeConnectionId) void refreshFiles(activeConnectionId);
+        handleRefresh();
         return;
       }
       if (!e.ctrlKey && !e.altKey && !e.metaKey && (e.key === '/' || e.key === '~')) {
@@ -198,9 +206,7 @@ export function useFileKeyboard({
       if (matches('fmRename') && (focusedFile || selectedFiles.length === 1)) {
         e.preventDefault();
         const fileToRename = focusedFile || selectedFiles[0];
-        setRenameOldName(fileToRename);
-        setRenameNewName(fileToRename);
-        setIsRenameModalOpen(true);
+        openRenameModal(fileToRename);
         return;
       }
 
@@ -275,6 +281,7 @@ export function useFileKeyboard({
         const newFocused = paintedFiles[newIndex]?.name;
         if (!newFocused) return;
         setFocusedFile(newFocused);
+        requestFocusReveal();
         if (e.shiftKey) {
           setSelectedFiles((prev) => {
             const next = new Set(prev);
@@ -290,12 +297,14 @@ export function useFileKeyboard({
       if (e.key === 'Home') {
         e.preventDefault();
         if (paintedFiles.length > 0) setFocusedFile(paintedFiles[0].name);
+        requestFocusReveal();
         return;
       }
 
       if (e.key === 'End') {
         e.preventDefault();
         if (paintedFiles.length > 0) setFocusedFile(paintedFiles[paintedFiles.length - 1].name);
+        requestFocusReveal();
       }
     };
 
@@ -304,6 +313,7 @@ export function useFileKeyboard({
   }, [
     activeConnectionId,
     containerRef,
+    listingFocusRef,
     editingFile,
     focusedFile,
     gridColumnCount,
@@ -322,16 +332,15 @@ export function useFileKeyboard({
     navigateBack,
     navigateForward,
     paintedFiles,
-    refreshFiles,
+    handleRefresh,
+    requestFocusReveal,
     searchTerm,
     selectedFiles,
     setFocusedFile,
     setIsEditingPath,
     setIsPropertiesOpen,
-    setIsRenameModalOpen,
     setIsSearchOpen,
-    setRenameNewName,
-    setRenameOldName,
+    openRenameModal,
     setSearchTerm,
     setSelectedFiles,
     setViewMode,

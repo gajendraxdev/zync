@@ -7,6 +7,33 @@ use std::io::Read;
 use std::os::unix::fs::MetadataExt;
 use std::time::UNIX_EPOCH;
 
+/// Decode the complete SFTP entry kind, not overlapping mode-bit predicates.
+fn remote_entry_is_directory(attributes: &russh_sftp::protocol::FileAttributes) -> bool {
+    attributes.file_type().is_dir()
+}
+
+/// Creates a transfer destination without treating inaccessible or symlink paths as directories.
+pub async fn ensure_remote_transfer_directory(
+    sftp: &russh_sftp::client::SftpSession,
+    path: &str,
+) -> Result<(), String> {
+    crate::transfers::ensure_directory(
+        async {
+            sftp.create_dir(path)
+                .await
+                .map_err(|error| format!("Failed to create remote directory '{}': {}", path, error))
+        },
+        async {
+            let attributes = sftp
+                .symlink_metadata(path)
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok(remote_entry_is_directory(&attributes))
+        },
+    )
+    .await
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct FileEntry {
@@ -486,10 +513,10 @@ impl FileSystem {
         path: &str,
     ) -> Result<()> {
         let metadata = sftp
-            .metadata(path)
+            .symlink_metadata(path)
             .await
             .map_err(|e| anyhow!("Failed to stat file: {}", e))?;
-        if metadata.is_dir() {
+        if remote_entry_is_directory(&metadata) {
             self.delete_dir_recursive_remote(sftp, path).await
         } else {
             sftp.remove_file(path)
@@ -551,7 +578,7 @@ impl FileSystem {
             .await
             .map_err(|e| anyhow!("Failed to stat source '{}': {}", from, e))?;
 
-        if metadata.is_dir() {
+        if remote_entry_is_directory(&metadata) {
             self.copy_dir_recursive_remote(sftp, from, to).await
         } else {
             self.copy_file_remote(sftp, from, to).await
@@ -589,26 +616,32 @@ impl FileSystem {
         let mut buffer = vec![0u8; 4194304];
         let mut total_bytes = 0;
 
-        loop {
-            let n = source
-                .read(&mut buffer)
-                .await
-                .map_err(|e| anyhow!("Read error at {} bytes: {}", total_bytes, e))?;
+        let copy_result = async {
+            loop {
+                let n = source
+                    .read(&mut buffer)
+                    .await
+                    .map_err(|e| format!("Read error at {} bytes: {}", total_bytes, e))?;
 
-            if n == 0 {
-                break;
+                if n == 0 {
+                    break;
+                }
+
+                dest.write_all(&buffer[..n])
+                    .await
+                    .map_err(|e| format!("Write error at {} bytes: {}", total_bytes, e))?;
+
+                total_bytes += n;
             }
 
-            dest.write_all(&buffer[..n])
-                .await
-                .map_err(|e| anyhow!("Write error at {} bytes: {}", total_bytes, e))?;
-
-            total_bytes += n;
+            // Preserve the existing optional remote fsync, then always await CLOSE.
+            dest.flush().await.map_err(|error| format!("Flush error: {error}"))?;
+            Ok(())
         }
-
-        dest.flush()
+        .await;
+        crate::transfers::finish_destination(&mut dest, copy_result)
             .await
-            .map_err(|e| anyhow!("Flush error: {}", e))?;
+            .map_err(|error| anyhow!(error))?;
 
         println!("[FS] Copied {} bytes", total_bytes);
         Ok(())
@@ -624,9 +657,7 @@ impl FileSystem {
         Box::pin(async move {
             println!("[FS] Copying directory from '{}' to '{}'", from, to);
 
-            // Create dest dir
-            // Ignore error if it already exists (could be merging)
-            let _ = sftp.create_dir(to).await;
+            ensure_remote_transfer_directory(sftp, to).await.map_err(|error| anyhow!(error))?;
 
             // List source
             let entries = sftp
@@ -752,6 +783,25 @@ impl FileSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remote_directory_routing_requires_exact_directory_kind() {
+        use russh_sftp::protocol::FileAttributes;
+        for (mode, expected) in [
+            (Some(0o040755), true),
+            (Some(0o100644), false),
+            (Some(0o120777), false),
+            (Some(0o060600), false),
+            (Some(0o140600), false),
+            (Some(0o020600), false),
+            (Some(0o010600), false),
+            (None, false),
+        ] {
+            let mut attributes = FileAttributes::default();
+            attributes.permissions = mode;
+            assert_eq!(remote_entry_is_directory(&attributes), expected, "mode {mode:?}");
+        }
+    }
 
     #[test]
     fn parse_unix_name_map_reads_passwd_lines() {

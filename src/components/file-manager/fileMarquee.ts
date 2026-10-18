@@ -47,7 +47,7 @@ export function namesInDomMarquee(root: HTMLElement, marquee: MarqueeRect): stri
       width: rect.width,
       height: rect.height,
     })) continue;
-    const name = node.id.slice('file-item-'.length);
+    const name = node.dataset?.fileName ?? node.id.slice('file-item-'.length);
     if (name) names.push(name);
   }
   return names;

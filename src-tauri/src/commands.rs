@@ -25,7 +25,6 @@ use serde_json::Value;
 const MAX_IMPORT_TEXT_BYTES: usize = 1_048_576; // 1 MiB
 const MAX_CONNECTION_IMPORT_BYTES: u64 = 5 * 1024 * 1024; // 5 MiB
 const SETTINGS_CHANGED_ON_DISK_ERROR_CODE: &str = "SETTINGS_CHANGED_ON_DISK";
-const MAX_SFTP_RETRIES: u8 = 3;
 static DATA_DIR_CACHE: StdMutex<Option<std::path::PathBuf>> = StdMutex::new(None);
 static DATA_DIR_WARNED: StdMutex<Option<String>> = StdMutex::new(None);
 
@@ -621,7 +620,10 @@ pub struct AppState {
     pub tunnel_manager: Arc<TunnelManager>,
     pub snippets_manager: Arc<crate::snippets::SnippetsManager>,
     pub connect_tasks: Arc<Mutex<HashMap<String, ConnectAttempt>>>,
-    pub transfers: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
+    pub transfers: crate::transfers::TransferRegistry,
+    pub file_transfers: Arc<crate::file_transfers::Service>,
+    pub permission_elevation: Arc<crate::file_permissions::elevation::Service>,
+    pub folder_sizes: Arc<crate::folder_sizes::Service>,
     // Agent v2: active run cancellation tokens
     pub agent_runs: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     // Agent v2: pending checkpoint responders (ask_user tool)
@@ -649,6 +651,12 @@ impl AppState {
             snippets_manager: Arc::new(crate::snippets::SnippetsManager::new(data_dir.clone())),
             connect_tasks: Arc::new(Mutex::new(HashMap::new())),
             transfers: Arc::new(Mutex::new(HashMap::new())),
+            permission_elevation: Arc::default(),
+            folder_sizes: Default::default(),
+            file_transfers: Arc::new(crate::file_transfers::Service::new(data_dir.clone()).with_started_callback({
+                let app = app_handle.clone();
+                move |receipt| { let _ = app.emit("file-transfer-started", receipt); }
+            })),
             agent_runs: Arc::new(Mutex::new(HashMap::new())),
             agent_checkpoints: Arc::new(Mutex::new(HashMap::new())),
             command_whitelist: Arc::new(Mutex::new(HashMap::new())),
@@ -664,6 +672,8 @@ pub struct ConnectionHandle {
     pub config: ConnectionConfig,
     pub session: Option<Arc<Mutex<Handle<Client>>>>,
     pub sftp_session: Option<Arc<russh_sftp::client::SftpSession>>,
+    /// Opaque runtime binding, renewed whenever an SFTP channel is installed.
+    pub file_permission_session: String,
     pub sftp_identity_maps: Arc<tokio::sync::OnceCell<SftpIdentityMaps>>,
     pub detected_os: Option<String>,
     pub detected_shell: Option<String>,
@@ -708,6 +718,7 @@ async fn reconnect_connection(
         config: config.clone(),
         session: Some(Arc::new(Mutex::new(session))),
         sftp_session: None,
+        file_permission_session: uuid::Uuid::new_v4().to_string(),
         sftp_identity_maps: Arc::new(tokio::sync::OnceCell::new()),
         detected_os: None,
         detected_shell: None,
@@ -2852,37 +2863,97 @@ pub async fn terminal_create(
     }
 }
 
+/// A changed generation under the same owner means a serialized sibling already
+/// reconnected (including counter wrap). It is reusable only with a session;
+/// a replacement lock always belongs to a different connection context.
+fn reconnect_completed_by_sibling(
+    expected_lock: &Arc<Mutex<()>>,
+    expected_generation: u64,
+    current_lock: &Arc<Mutex<()>>,
+    current_generation: u64,
+    has_session: bool,
+) -> Result<bool, ()> {
+    if !Arc::ptr_eq(current_lock, expected_lock) {
+        return Err(());
+    }
+    if current_generation != expected_generation {
+        return if has_session { Ok(true) } else { Err(()) };
+    }
+    Ok(false)
+}
+
+#[cfg(test)]
+mod reconnect_waiter_tests {
+    use super::reconnect_completed_by_sibling;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    #[test]
+    fn sibling_waiter_reuses_only_a_completed_reconnect_with_the_same_owner() {
+        let owner = Arc::new(Mutex::new(()));
+        assert_eq!(
+            reconnect_completed_by_sibling(&owner, 7, &owner, 7, false),
+            Ok(false)
+        );
+        assert_eq!(
+            reconnect_completed_by_sibling(&owner, 7, &owner, 8, true),
+            Ok(true)
+        );
+        assert_eq!(
+            reconnect_completed_by_sibling(&owner, 7, &owner, 9, true),
+            Ok(true)
+        );
+        assert_eq!(
+            reconnect_completed_by_sibling(&owner, u64::MAX, &owner, 0, true),
+            Ok(true)
+        );
+        assert_eq!(
+            reconnect_completed_by_sibling(&owner, 7, &owner, 8, false),
+            Err(())
+        );
+    }
+
+    #[test]
+    fn replacement_owner_is_rejected_even_with_a_session_or_reused_generation() {
+        let owner = Arc::new(Mutex::new(()));
+        let replacement = Arc::new(Mutex::new(()));
+        for generation in [7, 8] {
+            for has_session in [false, true] {
+                assert_eq!(
+                    reconnect_completed_by_sibling(&owner, 7, &replacement, generation, has_session),
+                    Err(())
+                );
+            }
+        }
+    }
+}
+
 async fn reconnect_stored_connection(
     connection_id: &str,
-    original_config: ConnectionConfig,
+    reconnect_lock: Arc<Mutex<()>>,
+    expected_generation: u64,
     state: &AppState,
 ) -> Result<(), String> {
-    // Acquire per-connection reconnect lock *without* holding connections lock across await (avoids deadlock with concurrent ops needing connections).
-    let reconnect_lock = {
-        let connections = state.connections.lock().await;
-        connections
-            .get(connection_id)
-            .map(|h| h.reconnect_lock.clone())
-            .ok_or_else(|| {
-                format!("Connection {connection_id} was disconnected during reconnect")
-            })?
-    };
+    // Keep the originally captured owner across admission. Reacquiring an owner
+    // by ID could reconnect old account/configuration over a replacement host.
     let _reconnect_guard = reconnect_lock.clone().lock_owned().await;
 
-    let (expected_generation, previous_detected_os, previous_detected_shell) = {
+    let (original_config, previous_detected_os, previous_detected_shell) = {
         let connections = state.connections.lock().await;
-        connections
-            .get(connection_id)
-            .map(|handle| {
-                (
-                    handle.reconnect_generation,
-                    handle.detected_os.clone(),
-                    handle.detected_shell.clone(),
-                )
-            })
-            .ok_or_else(|| {
-                format!("Connection {connection_id} was disconnected during reconnect")
-            })?
+        let handle = connections.get(connection_id)
+            .ok_or_else(|| format!("Connection {connection_id} was disconnected during reconnect"))?;
+        if reconnect_completed_by_sibling(
+            &reconnect_lock,
+            expected_generation,
+            &handle.reconnect_lock,
+            handle.reconnect_generation,
+            handle.session.is_some(),
+        )
+        .map_err(|()| format!("Connection {connection_id} changed before reconnect"))?
+        {
+            return Ok(());
+        }
+        (handle.config.clone(), handle.detected_os.clone(), handle.detected_shell.clone())
     };
 
     let uses_vault_auth = config_uses_vault_auth(&original_config);
@@ -2924,7 +2995,8 @@ async fn reconnect_stored_connection(
     new_handle.detected_shell = previous_detected_shell;
     let mut connections = state.connections.lock().await;
     match connections.get(connection_id) {
-        Some(existing) if existing.reconnect_generation == expected_generation => {
+        Some(existing) if existing.reconnect_generation == expected_generation
+            && Arc::ptr_eq(&existing.reconnect_lock, &reconnect_lock) => {
             new_handle.reconnect_generation = expected_generation.wrapping_add(1);
             // Preserve the *same* reconnect_lock Arc so any concurrent waiters on the old handle continue to serialize against this instance.
             new_handle.reconnect_lock = reconnect_lock.clone();
@@ -2949,25 +3021,17 @@ async fn get_live_ssh_session(
     connection_id: &str,
     state: &State<'_, AppState>,
 ) -> Result<Arc<Mutex<russh::client::Handle<crate::ssh::Client>>>, String> {
-    let existing = {
+    let (existing, reconnect_lock, generation) = {
         let connections = state.connections.lock().await;
-        connections
-            .get(connection_id)
-            .and_then(|c| c.session.clone())
+        let conn = connections.get(connection_id)
+            .ok_or_else(|| connection_not_ready_error(connection_id))?;
+        (conn.session.clone(), conn.reconnect_lock.clone(), conn.reconnect_generation)
     };
     if let Some(session) = existing {
         return Ok(session);
     }
 
-    let config = {
-        let connections = state.connections.lock().await;
-        connections
-            .get(connection_id)
-            .map(|c| c.config.clone())
-            .ok_or_else(|| connection_not_ready_error(connection_id))?
-    };
-
-    reconnect_stored_connection(connection_id, config, state).await?;
+    reconnect_stored_connection(connection_id, reconnect_lock, generation, state).await?;
     let session = {
         let connections = state.connections.lock().await;
         connections
@@ -3348,9 +3412,9 @@ mod sftp_open_error_tests {
     }
 }
 
-async fn open_sftp_session(
+async fn open_sftp_stream(
     session: &Arc<Mutex<russh::client::Handle<crate::ssh::Client>>>,
-) -> Result<Arc<russh_sftp::client::SftpSession>, OpenSftpError> {
+) -> Result<russh::ChannelStream<russh::client::Msg>, OpenSftpError> {
     let channel = {
         let guard = session.lock().await;
         guard
@@ -3364,7 +3428,13 @@ async fn open_sftp_session(
         .map_err(|error| {
             OpenSftpError::Subsystem(format!("Failed to request SFTP subsystem: {error}"))
         })?;
-    let sftp = russh_sftp::client::SftpSession::new(channel.into_stream())
+    Ok(channel.into_stream())
+}
+
+async fn open_sftp_session(
+    session: &Arc<Mutex<russh::client::Handle<crate::ssh::Client>>>,
+) -> Result<Arc<russh_sftp::client::SftpSession>, OpenSftpError> {
+    let sftp = russh_sftp::client::SftpSession::new(open_sftp_stream(session).await?)
         .await
         .map_err(|error| {
             OpenSftpError::Initialize(format!("Failed to initialize SFTP: {error}"))
@@ -3378,7 +3448,7 @@ async fn get_sftp_or_reconnect(
     state: &AppState,
     id: &str,
 ) -> Result<Arc<russh_sftp::client::SftpSession>, String> {
-    let (config, existing_session, reconnect_generation) = {
+    let (reconnect_lock, existing_session, reconnect_generation) = {
         let connections = state.connections.lock().await;
         let conn = connections
             .get(id)
@@ -3388,7 +3458,7 @@ async fn get_sftp_or_reconnect(
             return Ok(sftp.clone());
         }
         (
-            conn.config.clone(),
+            conn.reconnect_lock.clone(),
             conn.session.clone(),
             conn.reconnect_generation,
         )
@@ -3402,13 +3472,18 @@ async fn get_sftp_or_reconnect(
                     let conn = connections
                         .get_mut(id)
                         .ok_or_else(|| "Connection was removed while SFTP started".to_string())?;
-                    if conn.reconnect_generation != reconnect_generation {
+                    if conn.reconnect_generation != reconnect_generation
+                        || !crate::sftp_read::is_current_session(&conn.session, &session)
+                    {
                         return conn
                             .sftp_session
                             .clone()
                             .ok_or_else(|| "Connection changed while SFTP started".to_string());
                     }
                     let opened_first_sftp = conn.sftp_session.is_none();
+                    if opened_first_sftp {
+                        conn.file_permission_session = uuid::Uuid::new_v4().to_string();
+                    }
                     let sftp = conn
                         .sftp_session
                         .get_or_insert_with(|| opened.clone())
@@ -3422,11 +3497,13 @@ async fn get_sftp_or_reconnect(
             }
             Err(OpenSftpError::Transport(_)) => {
                 let mut connections = state.connections.lock().await;
-                if let Some(conn) = connections.get_mut(id) {
-                    if conn.reconnect_generation == reconnect_generation {
-                        conn.session = None;
-                    }
+                let conn = connections.get_mut(id).ok_or("Connection was removed while SFTP started")?;
+                if conn.reconnect_generation != reconnect_generation
+                    || !crate::sftp_read::is_current_session(&conn.session, &session)
+                {
+                    return Err("Connection changed while SFTP started".into());
                 }
+                crate::sftp_read::invalidate_if_current(&mut conn.session, &session);
             }
             Err(
                 error @ (OpenSftpError::ChannelRejected(_)
@@ -3443,7 +3520,7 @@ async fn get_sftp_or_reconnect(
     let timeout_duration = std::time::Duration::from_secs(12);
     match tokio::time::timeout(
         timeout_duration,
-        reconnect_stored_connection(id, config, state),
+        reconnect_stored_connection(id, reconnect_lock, reconnect_generation, state),
     )
     .await
     {
@@ -3471,19 +3548,21 @@ async fn get_sftp_or_reconnect(
     let sftp = open_sftp_session(&session)
         .await
         .map_err(|error| error.to_string())?;
-    let opened_first_sftp = {
+    let (sftp, opened_first_sftp) = {
         let mut connections = state.connections.lock().await;
-        if let Some(conn) = connections.get_mut(id) {
-            if conn.reconnect_generation == reconnect_generation {
-                let opened_first_sftp = conn.sftp_session.is_none();
-                conn.sftp_session = Some(sftp.clone());
-                opened_first_sftp
-            } else {
-                false
-            }
-        } else {
-            false
+        let conn = connections.get_mut(id)
+            .ok_or("Connection was removed while SFTP started")?;
+        if conn.reconnect_generation != reconnect_generation
+            || !crate::sftp_read::is_current_session(&conn.session, &session)
+        {
+            return Err("Connection changed while SFTP started".into());
         }
+        let opened_first_sftp = conn.sftp_session.is_none();
+        if opened_first_sftp {
+            conn.file_permission_session = uuid::Uuid::new_v4().to_string();
+        }
+        let installed = conn.sftp_session.get_or_insert_with(|| sftp.clone()).clone();
+        (installed, opened_first_sftp)
     };
     if opened_first_sftp {
         probe_remote_metadata_after_sftp(id.to_string(), state.app_handle.clone());
@@ -3589,30 +3668,7 @@ pub async fn fs_list(
 
 /// True when an SFTP read error indicates the shared session is dead (not a slow read).
 pub(crate) fn sftp_error_is_dead_session(err: &anyhow::Error) -> bool {
-    let mut current: &dyn std::error::Error = err.as_ref();
-    loop {
-        if let Some(io_err) = current.downcast_ref::<std::io::Error>() {
-            return matches!(
-                io_err.kind(),
-                ErrorKind::BrokenPipe
-                    | ErrorKind::ConnectionReset
-                    | ErrorKind::UnexpectedEof
-                    | ErrorKind::NotConnected
-            );
-        }
-        let lower = current.to_string().to_ascii_lowercase();
-        if lower.contains("session closed")
-            || lower.contains("connection is closed")
-            || lower.contains("channel is eof")
-        {
-            return true;
-        }
-        current = match current.source() {
-            Some(source) => source,
-            None => break,
-        };
-    }
-    false
+    crate::sftp_read::is_dead_session(err)
 }
 
 pub(crate) async fn read_remote_connection_file(
@@ -4425,27 +4481,13 @@ pub async fn fs_rename(
         {
             Ok(Ok(_)) => Ok(()),
             Ok(Err(e)) if e.to_string().to_lowercase().contains("session closed") => {
-                println!("[FS] SFTP session closed during rename, retrying...");
                 {
                     let mut connections = state.connections.lock().await;
                     if let Some(c) = connections.get_mut(&connection_id) {
                         c.sftp_session = None;
                     }
                 }
-                let sftp = get_sftp_or_reconnect(&state, &connection_id).await?;
-                match tokio::time::timeout(
-                    timeout_duration,
-                    state.file_system.rename_remote(&sftp, &old_path, &new_path),
-                )
-                .await
-                {
-                    Ok(Ok(_)) => Ok(()),
-                    Ok(Err(e)) => Err(e.to_string()),
-                    Err(_) => Err(format!(
-                        "DISCONNECTED: SFTP rename timed out after {}s",
-                        timeout_duration.as_secs()
-                    )),
-                }
+                Err(format!("DISCONNECTED: Rename outcome is unconfirmed; check source and destination before retrying: {}", e))
             }
             Ok(Err(e)) => Err(e.to_string()),
             Err(_) => {
@@ -4456,12 +4498,38 @@ pub async fn fs_rename(
                     }
                 }
                 Err(format!(
-                    "DISCONNECTED: SFTP rename timed out after {}s",
+                    "DISCONNECTED: SFTP rename timed out after {}s; outcome is unconfirmed, check source and destination before retrying",
                     timeout_duration.as_secs()
                 ))
             }
         }
     }
+}
+
+/// Returns false only when the server-side mutation definitely did not start.
+async fn try_remote_files_mutation(
+    session: &Arc<Mutex<Handle<Client>>>,
+    command: String,
+    label: &str,
+) -> Result<bool, String> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let channel = match tokio::time::timeout_at(deadline, async {
+        session.lock().await.channel_open_session().await
+    }).await {
+        Ok(Ok(channel)) => channel,
+        _ => return Ok(false), // No exec was submitted; fallback is safe.
+    };
+    tokio::time::timeout_at(deadline, channel.exec(true, command)).await
+        .map_err(|_| format!("{label} submission outcome is unconfirmed; check destination before retrying"))?
+        .map_err(|error| format!(
+            "{label} submission outcome is unconfirmed; check destination before retrying: {error}"
+        ))?;
+    let messages = futures_util::stream::unfold(channel, |mut channel| async move {
+        channel.wait().await.map(|message| (message, channel))
+    });
+    // A cancellation request is honored by the transfer owner after exec/CLOSE
+    // confirms completion; dropping an accepted exec cannot prove it stopped.
+    crate::transfers::remote_mutation_outcome(messages, deadline, label).await
 }
 
 #[tauri::command]
@@ -4471,122 +4539,50 @@ pub async fn fs_delete(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     if connection_id == "local" {
-        state
-            .file_system
-            .delete(&connection_id, &path)
-            .await
-            .map_err(|e| e.to_string())
-    } else {
-        // Optimization: Try server-side delete first (rm -rf) to avoid recursive SFTP calls
-        let (session_opt, should_optimize) = {
-            let connections = state.connections.lock().await;
-            let conn = connections.get(&connection_id);
-            (
-                conn.and_then(|c| c.session.clone()),
-                conn.map(|c| c.detected_os.is_some()).unwrap_or(false),
-            )
-        };
-
-        if should_optimize {
-            if let Some(session) = session_opt {
-                let cmd = format!("rm -rf {}", shell_quote(&path));
-                println!("[FS] Attempting server-side delete: {}", cmd);
-
-                let timeout_duration = std::time::Duration::from_secs(10);
-                let optimize_fut = async {
-                    match session.lock().await.channel_open_session().await {
-                        Ok(mut channel) => {
-                            if channel.exec(true, cmd).await.is_ok() {
-                                let mut success = false;
-                                let mut output_log = String::new();
-                                while let Some(msg) = channel.wait().await {
-                                    match msg {
-                                        russh::ChannelMsg::Data { data } => {
-                                            output_log.push_str(&String::from_utf8_lossy(&data))
-                                        }
-                                        russh::ChannelMsg::ExtendedData { data, .. } => {
-                                            output_log.push_str(&String::from_utf8_lossy(&data))
-                                        }
-                                        russh::ChannelMsg::ExitStatus { exit_status } => {
-                                            if exit_status == 0 {
-                                                success = true;
-                                            }
-                                            break;
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                                success
-                            } else {
-                                false
-                            }
-                        }
-                        Err(_) => false,
-                    }
-                };
-
-                match tokio::time::timeout(timeout_duration, optimize_fut).await {
-                    Ok(true) => {
-                        println!("[FS] Server-side delete successful.");
-                        return Ok(());
-                    }
-                    _ => println!(
-                        "[FS] Server-side delete failed or timed out. Checking SFTP fallback..."
-                    ),
-                }
-            }
-        }
-
-        // Fallback to SFTP (recursive delete implemented there)
-        println!("[FS] Falling back to SFTP delete...");
-        let sftp = get_sftp_or_reconnect(&state, &connection_id).await?;
-        let timeout_duration = std::time::Duration::from_secs(10);
-
-        match tokio::time::timeout(
-            timeout_duration,
-            state.file_system.delete_remote(&sftp, &path),
-        )
-        .await
-        {
-            Ok(Ok(_)) => Ok(()),
-            Ok(Err(e)) if e.to_string().to_lowercase().contains("session closed") => {
-                println!("[FS] SFTP session closed during delete, retrying...");
-                {
-                    let mut connections = state.connections.lock().await;
-                    if let Some(c) = connections.get_mut(&connection_id) {
-                        c.sftp_session = None;
-                    }
-                }
-                let sftp = get_sftp_or_reconnect(&state, &connection_id).await?;
-                match tokio::time::timeout(
-                    timeout_duration,
-                    state.file_system.delete_remote(&sftp, &path),
-                )
-                .await
-                {
-                    Ok(Ok(_)) => Ok(()),
-                    Ok(Err(e)) => Err(e.to_string()),
-                    Err(_) => Err(format!(
-                        "DISCONNECTED: SFTP delete timed out after {}s",
-                        timeout_duration.as_secs()
-                    )),
-                }
-            }
-            Ok(Err(e)) => Err(e.to_string()),
-            Err(_) => {
-                {
-                    let mut connections = state.connections.lock().await;
-                    if let Some(c) = connections.get_mut(&connection_id) {
-                        c.sftp_session = None;
-                    }
-                }
-                Err(format!(
-                    "DISCONNECTED: SFTP delete timed out after {}s",
-                    timeout_duration.as_secs()
-                ))
-            }
-        }
+        return state.file_system.delete(&connection_id, &path).await
+            .map_err(|error| error.to_string());
     }
+    let (session, should_optimize) = {
+        let connections = state.connections.lock().await;
+        let connection = connections.get(&connection_id);
+        (
+            connection.and_then(|connection| connection.session.clone()),
+            connection.and_then(|connection| connection.detected_os.as_deref())
+                .is_some_and(|os| !os.eq_ignore_ascii_case("windows")),
+        )
+    };
+    let server_attempt = async {
+        if should_optimize {
+            if let Some(session) = session {
+                if let Some(command) = remote_remove_command_for_exec(&[path.clone()]) {
+                    return try_remote_files_mutation(&session, command, "Delete").await;
+                }
+            }
+        }
+        Ok(false)
+    };
+    crate::transfers::mutation_with_safe_fallback(server_attempt, async {
+        let sftp = get_sftp_or_reconnect(&state, &connection_id).await?;
+        match tokio::time::timeout(Duration::from_secs(10), state.file_system.delete_remote(&sftp, &path)).await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) => {
+                if error.to_string().to_lowercase().contains("session closed") {
+                    let mut connections = state.connections.lock().await;
+                    if let Some(connection) = connections.get_mut(&connection_id) {
+                        connection.sftp_session = None;
+                    }
+                }
+                Err(format!("Delete failed; its outcome may be partial. Check destination before retrying: {error}"))
+            }
+            Err(_) => {
+                let mut connections = state.connections.lock().await;
+                if let Some(connection) = connections.get_mut(&connection_id) {
+                    connection.sftp_session = None;
+                }
+                Err("DISCONNECTED: Delete timed out; outcome is unconfirmed. Check destination before retrying".to_string())
+            }
+        }
+    }).await
 }
 
 #[derive(Debug, Serialize)]
@@ -4617,73 +4613,31 @@ pub async fn fs_delete_batch(
         }
         Ok(())
     } else {
-        // Optimization: Single SSH channel for combined rm -rf calls
+        // Share the single-delete no-replay policy: only definite pre-execution
+        // refusal permits SFTP fallback, never a partial or unknown outcome.
         let (session_opt, should_optimize) = {
             let connections = state.connections.lock().await;
             let conn = connections.get(&connection_id);
             (
                 conn.and_then(|c| c.session.clone()),
-                conn.map(|c| c.detected_os.is_some()).unwrap_or(false),
+                conn.and_then(|c| c.detected_os.as_deref())
+                    .is_some_and(|os| !os.eq_ignore_ascii_case("windows")),
             )
         };
 
-        if should_optimize {
-            if let Some(session) = session_opt {
-                let timeout_duration = std::time::Duration::from_secs(15);
-
-                let ssh_optimize_fut = async {
-                    let mut channel = session
-                        .lock()
-                        .await
-                        .channel_open_session()
-                        .await
-                        .map_err(|e| format!("Failed to open channel: {}", e))?;
-
-                    let paths_str = paths
-                        .iter()
-                        .map(|p| shell_quote(p))
-                        .collect::<Vec<_>>()
-                        .join(" ");
-
-                    let cmd = format!("rm -rf {}", paths_str);
-                    println!("[FS] Attempting batch server-side delete: {}", cmd);
-
-                    channel
-                        .exec(true, cmd)
-                        .await
-                        .map_err(|e| format!("Exec failed: {}", e))?;
-
-                    let mut success = false;
-                    while let Some(msg) = channel.wait().await {
-                        if let russh::ChannelMsg::ExitStatus { exit_status } = msg {
-                            if exit_status == 0 {
-                                success = true;
-                            }
-                            break;
-                        }
+        let server_attempt = async {
+            if should_optimize {
+                if let Some(session) = session_opt {
+                    if let Some(command) = remote_remove_command_for_exec(&paths) {
+                        return try_remote_files_mutation(&session, command, "Delete").await;
                     }
-                    Ok::<bool, String>(success)
-                };
-
-                match tokio::time::timeout(timeout_duration, ssh_optimize_fut).await {
-                    Ok(Ok(true)) => {
-                        println!("[FS] Batch server-side delete successful.");
-                        return Ok(());
-                    }
-                    Ok(Err(e)) => println!(
-                        "[FS] Batch SSH delete error: {}. Falling back to SFTP...",
-                        e
-                    ),
-                    Err(_) => println!(
-                        "[FS] Batch SSH delete timed out after {}s. Falling back to SFTP...",
-                        timeout_duration.as_secs()
-                    ),
-                    _ => println!("[FS] Batch SSH delete failed, falling back to SFTP..."),
                 }
             }
-        }
+            Ok(false)
+        };
 
-        // Fallback: Individual SFTP deletes with retry logic
+        // Each requested path is submitted at most once; even a failed response
+        // can describe a deletion that already happened on the server.
         async fn perform_sftp_batch_delete(
             sftp: &Arc<russh_sftp::client::SftpSession>,
             paths: &[String],
@@ -4699,46 +4653,20 @@ pub async fn fs_delete_batch(
             failed
         }
 
-        let sftp = match get_sftp_or_reconnect(&state, &connection_id).await {
-            Ok(s) => s,
-            Err(e) => {
-                return Err(BatchDeleteError {
-                    message: e,
-                    failed_paths: paths,
-                })
+        // An SSH failure cannot identify a confirmed subset. SFTP can report
+        // precisely which responses failed, without retrying those paths.
+        let mut failed_paths = paths.clone();
+        crate::transfers::mutation_with_safe_fallback(server_attempt, async {
+            let sftp = get_sftp_or_reconnect(&state, &connection_id).await?;
+            failed_paths = perform_sftp_batch_delete(&sftp, &paths, &state.file_system).await;
+            if failed_paths.is_empty() {
+                Ok(())
+            } else {
+                Err("Some remote deletions failed or have an unconfirmed outcome. Check the folder before retrying".to_string())
             }
-        };
-
-        let mut failed_paths = perform_sftp_batch_delete(&sftp, &paths, &state.file_system).await;
-
-        // If some failed, maybe it was a session disconnect? Try reconnecting ONCE for the failures
-        if !failed_paths.is_empty() {
-            println!(
-                "[FS] Some batch deletes failed, attempting one-time reconnect for {} items...",
-                failed_paths.len()
-            );
-            {
-                let mut connections = state.connections.lock().await;
-                if let Some(c) = connections.get_mut(&connection_id) {
-                    c.sftp_session = None;
-                }
-            }
-            if let Ok(retry_sftp) = get_sftp_or_reconnect(&state, &connection_id).await {
-                // Only retry the previously failed paths
-                let still_failed =
-                    perform_sftp_batch_delete(&retry_sftp, &failed_paths, &state.file_system).await;
-                failed_paths = still_failed;
-            }
-        }
-
-        if !failed_paths.is_empty() {
-            return Err(BatchDeleteError {
-                message: "Some remote files could not be deleted".to_string(),
-                failed_paths,
-            });
-        }
-
-        Ok(())
+        })
+        .await
+        .map_err(|message| BatchDeleteError { message, failed_paths })
     }
 }
 
@@ -4749,127 +4677,7 @@ pub async fn fs_copy(
     to: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    if connection_id == "local" {
-        state
-            .file_system
-            .copy(&connection_id, &from, &to)
-            .await
-            .map_err(|e| e.to_string())
-    } else {
-        // Optimization: Try server-side copy first (cp -r) to avoid download/upload
-        let (session_opt, should_optimize) = {
-            let connections = state.connections.lock().await;
-            let conn = connections.get(&connection_id);
-            (
-                conn.and_then(|c| c.session.clone()),
-                conn.map(|c| c.detected_os.is_some()).unwrap_or(false),
-            )
-        };
-
-        if should_optimize {
-            if let Some(session) = session_opt {
-                // Simple quoting for paths (Linux/Unix assumptions for now, robust enough for typical usage)
-                // We use standard "cp -r" which works on most Unix-likes.
-                // If it fails (e.g. Windows), we fall back to SFTP.
-                let cmd = format!("cp -r {} {}", shell_quote(&from), shell_quote(&to));
-                println!("[FS] Attempting server-side copy: {}", cmd);
-                let timeout_duration = std::time::Duration::from_secs(10);
-                let optimize_fut = async {
-                    match session.lock().await.channel_open_session().await {
-                        Ok(mut channel) => {
-                            if channel.exec(true, cmd).await.is_ok() {
-                                // Wait for exit status
-                                let mut success = false;
-                                while let Some(msg) = channel.wait().await {
-                                    if let russh::ChannelMsg::ExitStatus { exit_status } = msg {
-                                        if exit_status == 0 {
-                                            success = true;
-                                        }
-                                        break;
-                                    }
-                                }
-                                Ok::<bool, String>(success)
-                            } else {
-                                Ok::<bool, String>(false)
-                            }
-                        }
-                        Err(e) => {
-                            println!("[FS] Failed to open channel for copy optimization: {}", e);
-                            Ok::<bool, String>(false)
-                        }
-                    }
-                };
-
-                match tokio::time::timeout(timeout_duration, optimize_fut).await {
-                    Ok(Ok(true)) => {
-                        println!("[FS] Server-side copy successful");
-                        return Ok(());
-                    }
-                    Ok(Ok(false)) => {
-                        println!("[FS] Server-side copy failed (non-zero exit), checking SFTP fallback...");
-                    }
-                    Ok(Err(e)) => {
-                        println!(
-                            "[FS] Server-side copy failed (error), checking SFTP fallback: {}",
-                            e
-                        );
-                    }
-                    Err(_) => {
-                        println!("[FS] Server-side copy optimization timed out, checking SFTP fallback...");
-                    }
-                }
-            }
-        }
-
-        // Fallback to SFTP
-        let sftp = get_sftp_or_reconnect(&state, &connection_id).await?;
-        let timeout_duration = std::time::Duration::from_secs(10);
-
-        match tokio::time::timeout(
-            timeout_duration,
-            state.file_system.copy_remote(&sftp, &from, &to),
-        )
-        .await
-        {
-            Ok(Ok(_)) => Ok(()),
-            Ok(Err(e)) if e.to_string().to_lowercase().contains("session closed") => {
-                println!("[FS] SFTP session closed during copy, retrying...");
-                {
-                    let mut connections = state.connections.lock().await;
-                    if let Some(c) = connections.get_mut(&connection_id) {
-                        c.sftp_session = None;
-                    }
-                }
-                let sftp = get_sftp_or_reconnect(&state, &connection_id).await?;
-                match tokio::time::timeout(
-                    timeout_duration,
-                    state.file_system.copy_remote(&sftp, &from, &to),
-                )
-                .await
-                {
-                    Ok(Ok(_)) => Ok(()),
-                    Ok(Err(e)) => Err(e.to_string()),
-                    Err(_) => Err(format!(
-                        "DISCONNECTED: SFTP copy timed out after {}s",
-                        timeout_duration.as_secs()
-                    )),
-                }
-            }
-            Ok(Err(e)) => Err(e.to_string()),
-            Err(_) => {
-                {
-                    let mut connections = state.connections.lock().await;
-                    if let Some(c) = connections.get_mut(&connection_id) {
-                        c.sftp_session = None;
-                    }
-                }
-                Err(format!(
-                    "DISCONNECTED: SFTP copy timed out after {}s",
-                    timeout_duration.as_secs()
-                ))
-            }
-        }
-    }
+    fs_copy_batch(connection_id, vec![CopyOperation { from, to }], state).await
 }
 
 #[tauri::command]
@@ -4878,136 +4686,85 @@ pub async fn fs_copy_batch(
     operations: Vec<CopyOperation>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    if operations.is_empty() {
+        return Ok(());
+    }
+    // Files and whole-folder copies share the native staging owner. Only
+    // top-level links retain their legacy policy; folders never bypass staging.
+    let mut legacy_links = Vec::new();
+    for operation in operations {
+        let result = fs_transfer_file(state.app_handle.clone(), connection_id.clone(), operation.from.clone(),
+            connection_id.clone(), operation.to.clone(), uuid::Uuid::new_v4().to_string(), Some(false), None, state.clone()).await
+            .map_err(|error| match error.strip_prefix("TRANSFER_NOT_STARTED:") {
+                // Earlier files in this batch may have succeeded. Never attach
+                // a whole-batch unchanged-destination claim to one file's failure.
+                Some(detail) => format!("Copy preparation failed for {}: {detail}", operation.from),
+                None => error,
+            })?;
+        match result {
+            None => legacy_links.push(operation),
+            Some(receipt) if receipt.phase == crate::file_transfers::Phase::Completed => {}
+            Some(receipt) => return Err(receipt.error.or(receipt.warning).unwrap_or_else(|| "File transfer requires recovery inspection".into())),
+        }
+    }
+    let operations = legacy_links;
+    if operations.is_empty() { return Ok(()); }
     if connection_id == "local" {
         for op in operations {
             state
                 .file_system
                 .copy(&connection_id, &op.from, &op.to)
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(|error| error.to_string())?;
         }
-        Ok(())
-    } else {
-        // Optimization: Try single SSH channel for all cp commands if OS detected
-        let (session_opt, should_optimize) = {
-            let connections = state.connections.lock().await;
-            let conn = connections.get(&connection_id);
-            (
-                conn.and_then(|c| c.session.clone()),
-                conn.map(|c| c.detected_os.is_some()).unwrap_or(false),
-            )
-        };
+        return Ok(());
+    }
 
-        if should_optimize && session_opt.is_some() {
-            if let Some(session) = session_opt {
-                // Build a multi-command string: cp -r 'a' 'b' && cp -r 'c' 'd' ...
-                let cmd = operations
+    let (session, should_optimize) = {
+        let connections = state.connections.lock().await;
+        let connection = connections.get(&connection_id);
+        (
+            connection.and_then(|connection| connection.session.clone()),
+            connection
+                .and_then(|connection| connection.detected_os.as_deref())
+                .is_some_and(|os| !os.eq_ignore_ascii_case("windows")),
+        )
+    };
+
+    let server_attempt = async {
+        if should_optimize {
+            if let Some(session) = session {
+                let command = operations
                     .iter()
-                    .map(|op| format!("cp -r {} {}", shell_quote(&op.from), shell_quote(&op.to)))
+                    .map(|op| remote_copy_command(&op.from, &op.to))
                     .collect::<Vec<_>>()
                     .join(" && ");
-
-                println!("[FS] Attempting batch server-side copy: {}", cmd);
-                let timeout_duration = std::time::Duration::from_secs(10);
-                let optimize_fut = async {
-                    let mut channel = session
-                        .lock()
-                        .await
-                        .channel_open_session()
-                        .await
-                        .map_err(|e| format!("Failed to open channel: {}", e))?;
-                    channel
-                        .exec(true, cmd)
-                        .await
-                        .map_err(|e| format!("Exec failed: {}", e))?;
-
-                    let mut exit_code = None;
-                    while let Some(msg) = channel.wait().await {
-                        if let russh::ChannelMsg::ExitStatus { exit_status } = msg {
-                            exit_code = Some(exit_status);
-                            break;
-                        }
-                    }
-                    Ok::<Option<u32>, String>(exit_code)
-                };
-
-                match tokio::time::timeout(timeout_duration, optimize_fut).await {
-                    Ok(Ok(Some(0))) => {
-                        println!("[FS] Batch server-side copy successful");
-                        return Ok(());
-                    }
-                    Ok(Ok(exit_code)) => {
-                        println!("[FS] Batch server-side copy failed with exit code {:?}, falling back to SFTP...", exit_code);
-                    }
-                    Ok(Err(e)) => {
-                        println!("[FS] Batch server-side copy optimization failed: {}. Falling back to SFTP...", e);
-                    }
-                    Err(_) => {
-                        println!("[FS] Batch server-side copy optimization timed out. Falling back to SFTP...");
-                    }
-                }
+                return try_remote_files_mutation(&session, command, "Copy").await;
             }
         }
+        Ok(false)
+    };
 
-        // Final fallback: Sequential SFTP if no session or optimization fails
-        let mut current_sftp = get_sftp_or_reconnect(&state, &connection_id).await?;
-        let timeout_duration = std::time::Duration::from_secs(10);
-
-        let mut idx = 0;
-        let mut sftp_retry = 0u8;
-        while idx < operations.len() {
-            let op = &operations[idx];
-            match tokio::time::timeout(
-                timeout_duration,
-                state
-                    .file_system
-                    .copy_remote(&current_sftp, &op.from, &op.to),
-            )
-            .await
-            {
-                Ok(Ok(_)) => {
-                    sftp_retry = 0;
-                    idx += 1;
-                }
-                Ok(Err(e)) if e.to_string().to_lowercase().contains("session closed") => {
-                    sftp_retry = sftp_retry.saturating_add(1);
-                    println!(
-                        "[FS] SFTP session closed during batch item {}, retrying...",
-                        idx
-                    );
-                    {
+    crate::transfers::mutation_with_safe_fallback(server_attempt, async {
+        let sftp = get_sftp_or_reconnect(&state, &connection_id).await?;
+        for (index, operation) in operations.iter().enumerate() {
+            // SFTP bounds individual requests itself. Do not time out an entire
+            // recursive/streaming copy merely because it takes over ten seconds.
+            match state.file_system.copy_remote(&sftp, &operation.from, &operation.to).await {
+                Ok(()) => {}
+                Err(error) => {
+                    if error.to_string().to_lowercase().contains("session closed") {
                         let mut connections = state.connections.lock().await;
-                        if let Some(c) = connections.get_mut(&connection_id) {
-                            c.sftp_session = None;
+                        if let Some(connection) = connections.get_mut(&connection_id) {
+                            connection.sftp_session = None;
                         }
                     }
-                    current_sftp = get_sftp_or_reconnect(&state, &connection_id).await?;
-                    if sftp_retry > MAX_SFTP_RETRIES {
-                        return Err(format!(
-                            "DISCONNECTED: SFTP batch copy failed at item {} after {} reconnect retries",
-                            idx, MAX_SFTP_RETRIES
-                        ));
-                    }
-                    // Don't increment idx, retry the same operation with new SFTP
-                }
-                Ok(Err(e)) => return Err(e.to_string()),
-                Err(_) => {
-                    {
-                        let mut connections = state.connections.lock().await;
-                        if let Some(c) = connections.get_mut(&connection_id) {
-                            c.sftp_session = None;
-                        }
-                    }
-                    return Err(format!(
-                        "DISCONNECTED: SFTP batch copy timed out at item {} after {}s",
-                        idx,
-                        timeout_duration.as_secs()
-                    ));
+                    return Err(format!("SFTP copy failed at item {index}; destination may be partial. Check it before retrying: {error}"));
                 }
             }
         }
         Ok(())
-    }
+    }).await
 }
 
 #[tauri::command]
@@ -5157,6 +4914,359 @@ pub async fn fs_exists(
             Err(e) => Err(e),
         }
     }
+}
+
+/// No-follow metadata for conflict choices. Reuse read-only session preparation;
+/// the eventual transfer still repeats native path/type checks before mutation.
+#[tauri::command]
+pub async fn fs_entry_kind(
+    connection_id: String,
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<Option<crate::file_transfers::endpoint::EntryKind>, String> {
+    let (_, _, metadata) = prepare_file_transfer_endpoint(&state, &connection_id, &path, "entry").await?;
+    Ok(metadata.map(|entry| entry.kind))
+}
+
+/// Capture a metadata editor's exact live endpoint without creating a second
+/// connection owner. Mutation callers never reconnect or replay a closed channel.
+async fn file_permission_endpoint(
+    state: &AppState,
+    id: &str,
+    allow_connect: bool,
+) -> Result<
+    (Arc<crate::file_transfers::endpoint::Endpoint>, crate::file_permissions::Binding),
+    String,
+> {
+    use crate::file_permissions::{Binding, Model};
+    use crate::file_transfers::endpoint::Endpoint;
+    let (endpoint, identity) = file_transfer_endpoint(state, id, allow_connect).await?;
+    let binding = match endpoint.as_ref() {
+        Endpoint::Local => Binding {
+            identity,
+            session: "local".into(),
+            model: if cfg!(unix) { Model::Posix } else { Model::Windows },
+        },
+        Endpoint::Remote(sftp) => {
+            let connections = state.connections.lock().await;
+            let conn = connections.get(id).ok_or("Connection is no longer available")?;
+            if !conn.sftp_session.as_ref().is_some_and(|current| Arc::ptr_eq(current, sftp)) {
+                return Err("Connection changed. Refresh permissions.".into());
+            }
+            Binding {
+                identity,
+                session: conn.file_permission_session.clone(),
+                model: crate::file_permissions::remote_model(conn.detected_os.as_deref()),
+            }
+        }
+    };
+    Ok((endpoint, binding))
+}
+
+/// Read-only local action hints, bounded to one directory and immediate child.
+/// SFTP v3 has no equivalent effective-access query; never guess from mode/UID.
+#[tauri::command]
+pub async fn fs_permissions_access(
+    connection_id: String,
+    directory: String,
+    target: Option<String>,
+) -> Result<crate::file_permissions::access::Evidence, String> {
+    if connection_id != "local" {
+        return Err("Effective access inspection is unavailable over SFTP".into());
+    }
+    tokio::task::spawn_blocking(move || crate::file_permissions::access::inspect(directory, target))
+        .await.map_err(|_| "Local access inspection was interrupted".to_string())?
+}
+
+/// Explicit Copy preflight only, not browsing-time permission inference. A short-
+/// lived channel permits OPENDIR/CLOSE without the library's full directory scan.
+/// Drop closes only the probe channel on failure/timeout; shared SFTP transfers
+/// are untouched. No reconnect, shell, recursive walk or file data is requested.
+#[tauri::command]
+pub async fn fs_copy_access(
+    connection_id: String,
+    paths: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    if connection_id == "local" || paths.is_empty() || paths.len() > 64 {
+        return Err("Copy access checks require 1–64 SSH source paths".into());
+    }
+    for path in &paths {
+        crate::file_permissions::validate_path(path)?;
+    }
+    let session = {
+        let connections = state.connections.lock().await;
+        connections
+            .get(&connection_id)
+            .and_then(|connection| connection.session.clone())
+            .ok_or("Connection is not available. Reconnect before copying.")?
+    };
+    tokio::time::timeout(copy_access_timeout(paths.len() as u32), async {
+        let raw = russh_sftp::client::RawSftpSession::new(
+            open_sftp_stream(&session).await.map_err(|error| error.to_string())?,
+        );
+        raw.init().await.map_err(|error| error.to_string())?;
+        for path in &paths {
+            crate::file_permissions::access::check_remote_copy(&raw, path).await?;
+        }
+        let connections = state.connections.lock().await;
+        if !connections
+            .get(&connection_id)
+            .and_then(|connection| connection.session.as_ref())
+            .is_some_and(|current| Arc::ptr_eq(current, &session))
+        {
+            return Err("Connection changed while checking Copy access. Try again.".into());
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|_| "Copy access check timed out. Try again.".to_string())?
+}
+
+/// Register before starting so renderer cancellation cannot race registration.
+#[tauri::command]
+pub fn fs_folder_size_begin(id: String, connection_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    state.folder_sizes.begin(id, connection_id)
+}
+
+#[tauri::command]
+pub fn fs_folder_size_cancel(id: String, state: State<'_, AppState>) {
+    state.folder_sizes.cancel(&id);
+}
+
+/// Metadata only, with bounded global/per-endpoint admission. A disposable raw
+/// SFTP channel allows incremental READDIR without blocking shared browse or
+/// transfer handles. It never reconnects, executes commands or reads contents.
+#[tauri::command]
+pub async fn fs_folder_size_calculate(
+    id: String, connection_id: String, path: String, state: State<'_, AppState>,
+) -> Result<crate::folder_sizes::Report, String> {
+    crate::file_permissions::validate_path(&path)?;
+    let lease = state.folder_sizes.claim(&id, &connection_id)?;
+    lease.run(async {
+        // Setup/admission and traversal have separate, non-overlapping budgets.
+        // Keep permits until the owned channel and actual scan future have stopped.
+        let setup = async {
+            let session = if connection_id == "local" { None } else {
+                Some(state.connections.lock().await.get(&connection_id).and_then(|c| c.session.clone())
+                    .ok_or("Connection is unavailable. Reconnect before calculating sizes.")?)
+            };
+            let permits = lease.permits().await?;
+            let endpoint = if let Some(session) = &session {
+                let stream = open_sftp_stream(session).await.map_err(|e| e.to_string())?;
+                let raw = russh_sftp::client::RawSftpSession::new(crate::folder_sizes::PacketLimited::new(stream));
+                raw.set_timeout(5).await;
+                raw.init().await.map_err(|e| e.to_string())?;
+                crate::folder_sizes::Endpoint::Remote(raw)
+            } else { crate::folder_sizes::Endpoint::Local };
+            Ok::<_, String>((permits, endpoint, session))
+        };
+        let (_permits, endpoint, session) = tokio::time::timeout(Duration::from_secs(15), setup)
+            .await.map_err(|_| "Folder-size scan timed out during admission or setup. Try again.")??;
+        let report = crate::folder_sizes::calculate(&endpoint, &path).await;
+        if let Some(session) = session {
+            if !state.connections.lock().await.get(&connection_id).and_then(|c| c.session.as_ref())
+                .is_some_and(|current| Arc::ptr_eq(current, &session)) {
+                return Err("Connection changed during the folder-size scan. Calculate again.".to_string());
+            }
+        }
+        Ok(report)
+    }).await
+}
+
+/// Preserve setup/connection allowance while budgeting the sequential source
+/// checks. The command validates the count (1–64) before calculating this bound.
+fn copy_access_timeout(path_count: u32) -> Duration {
+    Duration::from_secs(30 + 3 * u64::from(path_count))
+}
+
+/// Read one selected item; listing display strings never authorize mode edits.
+#[tauri::command]
+pub async fn fs_permissions_read(
+    connection_id: String,
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<crate::file_permissions::Metadata, String> {
+    crate::file_permissions::validate_path(&path)?;
+    let initial = file_permission_endpoint(&state, &connection_id, true).await?;
+    let (binding, metadata) = if connection_id == "local" {
+        let metadata = crate::file_permissions::inspect(initial.0.as_ref(), initial.1.clone(), &path).await?;
+        (initial.1, metadata)
+    } else {
+        let ((_, binding), metadata) = crate::sftp_read::read_with_recovery(
+            initial,
+            |(endpoint, binding)| {
+                let path = &path;
+                async move { crate::file_permissions::inspect(endpoint.as_ref(), binding, path).await }
+            },
+            |(failed, previous)| {
+                let state = &state;
+                let id = connection_id.as_str();
+                async move {
+                if let crate::file_transfers::endpoint::Endpoint::Remote(failed) = failed.as_ref() {
+                    let mut connections = state.connections.lock().await;
+                    let conn = connections.get_mut(id).ok_or("Connection was disconnected while reading permissions")?;
+                    crate::sftp_read::invalidate_if_current(&mut conn.sftp_session, failed);
+                }
+                let fresh = file_permission_endpoint(state, id, true).await?;
+                if fresh.1.identity != previous.identity {
+                    return Err("Connection identity changed while reading permissions".into());
+                }
+                Ok(fresh)
+                }
+            },
+        ).await?;
+        (binding, metadata)
+    };
+    let (_, current) = file_permission_endpoint(&state, &connection_id, false).await?;
+    if current != binding {
+        return Err("Connection changed. Refresh permissions.".into());
+    }
+    Ok(metadata)
+}
+
+/// Explicit Windows-owned UI; never return a chmod/ACL mutation acknowledgement.
+/// The main window owns native UI and Windows owns its authorization decisions.
+#[tauri::command]
+pub async fn fs_permissions_open_system_editor(
+    window: tauri::WebviewWindow,
+    connection_id: String,
+    expected: crate::file_permissions::Metadata,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    if window.label() != "main" || connection_id != "local" {
+        return Err("Windows permissions are only available from the local host window".into());
+    }
+    crate::file_permissions::validate_path(&expected.path)?;
+    #[cfg(not(windows))]
+    { let _ = (expected, state); Err("The Windows permission editor is not available on this platform".into()) }
+    #[cfg(windows)]
+    {
+        let path = expected.path.clone();
+        if !tokio::task::spawn_blocking(move || crate::file_permissions::system_editor::supported(&path))
+            .await.map_err(|_| "Windows target inspection was interrupted".to_string())? {
+            return Err("Windows permissions require a supported local file or folder".into());
+        }
+        let (endpoint, binding) = file_permission_endpoint(&state, &connection_id, false).await?;
+        let lease = state.file_transfers.reserve_metadata_change(endpoint.as_ref(), &binding.identity, &expected.path).await?;
+        crate::file_permissions::system_editor::prepare(endpoint.as_ref(), binding, &expected).await?;
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let owner = window.clone();
+        window.run_on_main_thread(move || {
+            let _lease = lease;
+            let result = owner.hwnd().map_err(|error| error.to_string())
+                .and_then(|hwnd| crate::file_permissions::system_editor::open(&expected.path, hwnd.0));
+            let _ = sender.send(result);
+        }).map_err(|error| error.to_string())?;
+        receiver.await.map_err(|_| "Windows permission editor invocation was interrupted".to_string())?
+    }
+}
+
+/// Apply one ordinary-mode change under existing native mutation admission.
+/// Neither session loss nor an uncertain SETSTAT acknowledgement triggers replay.
+#[tauri::command]
+pub async fn fs_permissions_apply(
+    connection_id: String,
+    expected: crate::file_permissions::Metadata,
+    set_bits: u32,
+    clear_bits: u32,
+    state: State<'_, AppState>,
+) -> Result<crate::file_permissions::Outcome, String> {
+    crate::file_permissions::changed_mode(0, set_bits, clear_bits)?;
+    crate::file_permissions::validate_path(&expected.path)?;
+    let (endpoint, binding) = file_permission_endpoint(&state, &connection_id, false).await?;
+    if binding != expected.binding {
+        return Err("Connection changed. Refresh permissions before editing.".into());
+    }
+    let _lease = state.file_transfers
+        .reserve_metadata_change(endpoint.as_ref(), &binding.identity, &expected.path).await?;
+    let captured = binding.clone();
+    crate::file_permissions::apply(
+        endpoint.as_ref(), binding, &expected, set_bits, clear_bits,
+        || async {
+            let (_, current) = file_permission_endpoint(&state, &connection_id, false).await?;
+            if current != captured {
+                return Err("Connection changed. Refresh permissions before editing.".into());
+            }
+            Ok(())
+        },
+    ).await
+}
+
+/// Explicit no-helper administrator review. Capture the existing verified SSH
+/// transport, SFTP identity and generation; this path never connects/reconnects.
+#[tauri::command]
+pub async fn fs_permissions_admin_start(
+    window: tauri::WebviewWindow,
+    connection_id: String,
+    expected: crate::file_permissions::Metadata,
+    state: State<'_, AppState>,
+) -> Result<crate::file_permissions::elevation::Reply, String> {
+    use crate::file_permissions::{elevation::Guard, Model};
+    if window.label() != "main" || connection_id == "local" || expected.binding.model != Model::Posix {
+        return Err("Administrator review requires the main window and a live POSIX SSH connection".into());
+    }
+    crate::file_permissions::validate_path(&expected.path)?;
+    if !expected.path.starts_with('/') { return Err("Administrator review requires an absolute SSH host path".into()); }
+    let (endpoint, binding) = file_permission_endpoint(&state, &connection_id, false).await?;
+    if binding != expected.binding { return Err("Connection changed. Refresh permissions before administrator review.".into()); }
+    let (session, generation) = {
+        let connections = state.connections.lock().await;
+        let connection = connections.get(&connection_id).ok_or("Connection is no longer available")?;
+        (connection.session.clone().ok_or("SSH session is closed")?, connection.reconnect_generation)
+    };
+    let captured = binding.clone();
+    let context = state.inner().clone();
+    let id = connection_id.clone();
+    let transport = session.clone();
+    let guard: Guard = Arc::new(move || {
+        let (context, id, captured, transport) = (context.clone(), id.clone(), captured.clone(), transport.clone());
+        Box::pin(async move {
+            let (_, current) = file_permission_endpoint(&context, &id, false).await?;
+            let connections = context.connections.lock().await;
+            let connection = connections.get(&id).ok_or("Connection was disconnected")?;
+            if current != captured || connection.reconnect_generation != generation
+                || !connection.session.as_ref().is_some_and(|session| Arc::ptr_eq(session, &transport)) {
+                return Err("Connection changed. Administrator review was not reused. Refresh permissions.".into());
+            }
+            Ok(())
+        })
+    });
+    guard().await?;
+    let lease = state.file_transfers.reserve_metadata_change(endpoint.as_ref(), &binding.identity, &expected.path).await?;
+    state.permission_elevation.start(connection_id, binding, expected.path, session, guard, lease).await
+}
+
+/// Password input is transient, main-window-only and never sent to generic exec,
+/// credential storage, events or logs. Sudo, not Zync, decides authorization.
+#[tauri::command]
+pub async fn fs_permissions_admin_authenticate(
+    window: tauri::WebviewWindow,
+    challenge_id: String,
+    password: String,
+    state: State<'_, AppState>,
+) -> Result<crate::file_permissions::elevation::Reply, String> {
+    let password = zeroize::Zeroizing::new(password);
+    if window.label() != "main" { return Err("Administrator review is only available in the main window".into()); }
+    state.permission_elevation.authenticate(&challenge_id, password).await
+}
+
+#[tauri::command]
+pub async fn fs_permissions_admin_apply(
+    window: tauri::WebviewWindow, challenge_id: String, review_token: String, set_bits: u32, clear_bits: u32,
+    state: State<'_, AppState>,
+) -> Result<crate::file_permissions::elevation::Reply, String> {
+    if window.label() != "main" { return Err("Administrator review is only available in the main window".into()); }
+    state.permission_elevation.apply(&challenge_id, review_token, set_bits, clear_bits).await
+}
+
+#[tauri::command]
+pub async fn fs_permissions_admin_cancel(
+    window: tauri::WebviewWindow, challenge_id: String, state: State<'_, AppState>,
+) -> Result<(), String> {
+    if window.label() != "main" { return Err("Administrator review is only available in the main window".into()); }
+    state.permission_elevation.cancel(&challenge_id);
+    Ok(())
 }
 
 #[tauri::command]
@@ -5859,13 +5969,41 @@ struct TransferError {
     error: String,
 }
 
+fn emit_transfer_outcome(
+    app: &AppHandle,
+    id: &str,
+    destination_connection_id: &str,
+    result: &Result<(), String>,
+) {
+    match result {
+        Ok(()) => {
+            let _ = app.emit(
+                "transfer-success",
+                TransferSuccess {
+                    id: id.to_string(),
+                    destination_connection_id: destination_connection_id.to_string(),
+                },
+            );
+        }
+        Err(error) => {
+            let _ = app.emit(
+                "transfer-error",
+                TransferError {
+                    id: id.to_string(),
+                    error: error.clone(),
+                },
+            );
+        }
+    }
+}
+
+
 // Helper for recursive upload
 // Now takes AppHandle and transfer_id for emitting events
 fn upload_recursive<'a>(
     sftp: &'a russh_sftp::client::SftpSession,
     local_path: &'a std::path::Path,
     remote_path: &'a str,
-    file_system: &'a FileSystem,
     app: &'a AppHandle,
     transfer_id: &'a str,
     total_size: &'a mut u64,
@@ -5873,9 +6011,9 @@ fn upload_recursive<'a>(
     cancel_token: &'a std::sync::atomic::AtomicBool,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
     Box::pin(async move {
+        crate::transfers::check_cancelled(cancel_token)?;
         if local_path.is_dir() {
-            // Create remote directory
-            let _ = file_system.create_dir_remote(sftp, remote_path).await;
+            crate::fs::ensure_remote_transfer_directory(sftp, remote_path).await?;
 
             for entry in std::fs::read_dir(local_path).map_err(|e| e.to_string())? {
                 let entry = entry.map_err(|e| e.to_string())?;
@@ -5891,7 +6029,6 @@ fn upload_recursive<'a>(
                     sftp,
                     &path,
                     &new_remote,
-                    file_system,
                     app,
                     transfer_id,
                     total_size,
@@ -5919,7 +6056,7 @@ fn upload_recursive<'a>(
             let local_path_buf = local_path.to_path_buf();
 
             // Spawn Disk Reader Task
-            tokio::spawn(async move {
+            let reader = tokio::spawn(async move {
                 use tokio::io::AsyncReadExt;
                 let mut file = match tokio::fs::File::open(local_path_buf).await {
                     Ok(f) => f,
@@ -5948,33 +6085,39 @@ fn upload_recursive<'a>(
 
             let mut last_emit = std::time::Instant::now();
 
-            // Main loop: Receive from reader and Write to Server concurrently
-            while let Some(chunk_res) = rx.recv().await {
-                let chunk = chunk_res?;
-                if cancel_token.load(std::sync::atomic::Ordering::Relaxed) {
-                    return Err("Cancelled".to_string());
+            // Finish the in-flight write before cancellation; never abort/replay writes.
+            let copy_result = async {
+                while let Some(chunk_res) = rx.recv().await {
+                    let chunk = chunk_res?;
+                    if cancel_token.load(std::sync::atomic::Ordering::Relaxed) {
+                        return Err("Cancelled".to_string());
+                    }
+
+                    remote_file
+                        .write_all(&chunk)
+                        .await
+                        .map_err(|e| format!("SFTP write failed: {}", e))?;
+
+                    let n = chunk.len();
+                    *transferred += n as u64;
+
+                    if last_emit.elapsed().as_millis() >= 100 {
+                        let _ = app.emit(
+                            "transfer-progress",
+                            TransferProgress {
+                                id: transfer_id.to_string(),
+                                transferred: *transferred,
+                                total: *total_size,
+                            },
+                        );
+                        last_emit = std::time::Instant::now();
+                    }
                 }
-
-                remote_file
-                    .write_all(&chunk)
-                    .await
-                    .map_err(|e| format!("SFTP write failed: {}", e))?;
-
-                let n = chunk.len();
-                *transferred += n as u64;
-
-                if last_emit.elapsed().as_millis() >= 100 {
-                    let _ = app.emit(
-                        "transfer-progress",
-                        TransferProgress {
-                            id: transfer_id.to_string(),
-                            transferred: *transferred,
-                            total: *total_size,
-                        },
-                    );
-                    last_emit = std::time::Instant::now();
-                }
+                Ok(())
             }
+            .await;
+            rx.close();
+            crate::transfers::finish_pipeline(&mut remote_file, reader, copy_result).await?;
         }
         Ok(())
     })
@@ -5996,35 +6139,219 @@ fn get_local_size(path: &std::path::Path) -> u64 {
 }
 
 #[tauri::command]
+pub async fn fs_transfer_file(
+    app: AppHandle,
+    source_connection_id: String,
+    source_path: String,
+    destination_connection_id: String,
+    destination_path: String,
+    transfer_id: String,
+    overwrite: Option<bool>,
+    folder_mode: Option<crate::file_transfers::FolderCopyMode>,
+    state: State<'_, AppState>,
+) -> Result<Option<crate::file_transfers::Receipt>, String> {
+    use crate::file_transfers::{endpoint::EntryKind, Request};
+    // This entire preparation block is read-only. Its tagged errors must not be
+    // presented as a partially written destination or a saved recovery record.
+    let prepared = async {
+        let (source, source_identity, metadata) = prepare_file_transfer_endpoint(
+            &state, &source_connection_id, &source_path, "source",
+        ).await?;
+        let Some(metadata) = metadata else { return Err("Source no longer exists".into()); };
+        // Only top-level links retain the explicit legacy policy. Nested links
+        // are preserved as links by staged folder copies, never followed.
+        if metadata.kind == EntryKind::Symlink {
+            if folder_mode == Some(crate::file_transfers::FolderCopyMode::Combine) {
+                return Err("Combine folders does not follow a symbolic-link root".into());
+            }
+            return Ok(None);
+        }
+        if !matches!(metadata.kind, EntryKind::File | EntryKind::Directory) {
+            return Err("Special files require a separate copy policy".into());
+        }
+        let (destination, destination_identity, _) = prepare_file_transfer_endpoint(
+            &state, &destination_connection_id, &destination_path, "destination",
+        ).await?;
+        let stage_copy: Option<Arc<dyn crate::file_transfers::StageCopy>> =
+            if source_connection_id == destination_connection_id && source_connection_id != "local" {
+                let connections = state.connections.lock().await;
+                let pinned = match (source.as_ref(), destination.as_ref()) {
+                    (crate::file_transfers::endpoint::Endpoint::Remote(source_session),
+                     crate::file_transfers::endpoint::Endpoint::Remote(destination_session))
+                        if Arc::ptr_eq(source_session, destination_session) => source_session,
+                    _ => return Err("Connection changed while preparing same-server copy".into()),
+                };
+                if !connections.get(&source_connection_id)
+                    .and_then(|connection| connection.sftp_session.as_ref())
+                    .is_some_and(|session| Arc::ptr_eq(session, pinned)) {
+                    return Err("Connection changed while preparing same-server copy".into());
+                }
+                connections.get(&source_connection_id)
+                    .filter(|connection| connection.detected_os.as_deref()
+                        .is_some_and(|os| !os.eq_ignore_ascii_case("windows")))
+                    .and_then(|connection| connection.session.clone())
+                    .map(|session| Arc::new(SshStageCopy { session }) as Arc<dyn crate::file_transfers::StageCopy>)
+            } else { None };
+        Ok(Some((source, destination, source_identity, destination_identity, stage_copy)))
+    }.await.map_err(transfer_not_started_error)?;
+    let Some((source, destination, source_identity, destination_identity, stage_copy)) = prepared else { return Ok(None); };
+    let service = state.file_transfers.clone();
+    let request = Request { id: transfer_id.clone(), source_connection_id, source_path, source_identity,
+        destination_connection_id, destination_path, destination_identity, overwrite: overwrite.unwrap_or(false),
+        folder_mode: folder_mode.unwrap_or_default(), stage_copy };
+    crate::transfers::run_owned_transfer(state.transfers.clone(), transfer_id.clone(), move |token| async move {
+        let progress_app = app.clone(); let progress_id = transfer_id.clone();
+        let receipt = service.execute(request, source, destination, token, move |transferred, total| {
+            let _ = progress_app.emit("transfer-progress", TransferProgress { id: progress_id.clone(), transferred, total });
+        }).await.map_err(transfer_not_started_error)?;
+        let _ = app.emit("file-transfer-outcome", &receipt);
+        Ok(Some(receipt))
+    }).await
+}
+
+struct SshStageCopy { session: Arc<Mutex<Handle<Client>>> }
+
+/// Service admission errors precede filesystem writes; preserve queued cancellation.
+fn transfer_not_started_error(error: String) -> String {
+    if error == "Cancelled" {
+        error
+    } else {
+        format!("TRANSFER_NOT_STARTED:{error}")
+    }
+}
+
+/// Probe the actual source/target, not a second health-check path. Only this
+/// read-only preparation may reopen SFTP once; an active transfer stays pinned.
+async fn prepare_file_transfer_endpoint(
+    state: &AppState, id: &str, path: &str, role: &str,
+) -> Result<(Arc<crate::file_transfers::endpoint::Endpoint>, String, Option<crate::file_transfers::endpoint::Snapshot>), String> {
+    use crate::file_transfers::endpoint::{Endpoint, FileEndpoint};
+    let prepare = async {
+        let initial = file_transfer_endpoint(state, id, true).await?;
+        let ((endpoint, identity), metadata) = if id == "local" {
+            let metadata = initial.0.stat(path).await?;
+            (initial, metadata)
+        } else {
+            crate::sftp_read::read_with_recovery(initial,
+                |(endpoint, _)| async move { endpoint.stat(path).await },
+                |(failed, identity)| async move {
+                    eprintln!("[SFTP] Closed {role} session during copy preparation for {id}; reopening once");
+                    if let Endpoint::Remote(failed) = failed.as_ref() {
+                        let mut connections = state.connections.lock().await;
+                        let connection = connections.get_mut(id).ok_or("Connection was disconnected while preparing the copy")?;
+                        crate::sftp_read::invalidate_if_current(&mut connection.sftp_session, failed);
+                    }
+                    let fresh = file_transfer_endpoint(state, id, true).await?;
+                    if fresh.1 != identity {
+                        return Err("Connection identity changed while preparing the copy".into());
+                    }
+                    Ok(fresh)
+                }).await?
+        };
+        Ok((endpoint, identity, metadata))
+    };
+    prepare.await.map_err(|error: String| format!("Could not prepare {role} connection {id}: {error}"))
+}
+
+#[async_trait::async_trait]
+impl crate::file_transfers::StageCopy for SshStageCopy {
+    async fn copy(&self, source: &str, stage: &str) -> Result<bool, String> {
+        // The stage already exists exclusively with restrictive permissions.
+        // Never copy directly over the user's destination or replay unknown exec.
+        let command = format!("cp -- {} {}", shell_quote(source), shell_quote(stage));
+        try_remote_files_mutation(&self.session, command, "Copy into staging").await
+    }
+}
+
+/// Only connected, authenticated sessions are captured here. Recovery listing
+/// never opens network connections; explicit inspection verifies identity first.
+async fn file_transfer_endpoint(state: &AppState, id: &str, allow_connect: bool) -> Result<(Arc<crate::file_transfers::endpoint::Endpoint>, String), String> {
+    if id == "local" { return Ok((Arc::new(crate::file_transfers::endpoint::Endpoint::Local), "local".into())); }
+    let connected = if allow_connect { Some(get_sftp_or_reconnect(state, id).await?) } else { None };
+    let connections = state.connections.lock().await;
+    let connection = connections.get(id).ok_or("Connection is not available")?;
+    let sftp = connection.sftp_session.clone().ok_or("Open the SSH connection before transferring or inspecting recovery files")?;
+    if connected.as_ref().is_some_and(|session| !Arc::ptr_eq(session, &sftp)) {
+        return Err("Connection changed while preparing the transfer".into());
+    }
+    // Hash only endpoint identity, excluding all auth fields, labels and secrets.
+    fn identity(config: &ConnectionConfig) -> serde_json::Value {
+        serde_json::json!({ "host": config.host, "port": config.port, "user": config.username,
+            "jump": config.jump_host.as_ref().map(|jump| identity(jump)) })
+    }
+    use sha2::{Digest, Sha256};
+    let key: String = Sha256::digest(identity(&connection.config).to_string().as_bytes()).iter().map(|byte| format!("{byte:02x}")).collect();
+    Ok((Arc::new(crate::file_transfers::endpoint::Endpoint::Remote(sftp)), key))
+}
+
+#[tauri::command]
+pub async fn fs_transfer_history(state: State<'_, AppState>) -> Result<Vec<crate::file_transfers::Receipt>, String> {
+    let history = state.file_transfers.history().await?;
+    let active = state.transfers.lock().await;
+    Ok(history.into_iter().filter_map(|receipt| {
+        let running = active.contains_key(&receipt.id);
+        receipt.for_restore(running)
+    }).collect())
+}
+
+/// Recovery never reconnects implicitly or borrows the currently selected host.
+async fn recovery_file_endpoint(state: &AppState, transfer_id: &str) -> Result<Arc<crate::file_transfers::endpoint::Endpoint>, String> {
+    if state.transfers.lock().await.contains_key(transfer_id) { return Err("Wait for the active transfer to finish before accessing recovery".into()); }
+    let receipt = state.file_transfers.history().await?.into_iter().find(|r| r.id == transfer_id).ok_or("Recovery record not found")?;
+    let (endpoint, identity) = file_transfer_endpoint(state, &receipt.destination_connection_id, false).await?;
+    if identity != receipt.destination_identity { return Err("Connection identity changed; recovery access was refused".into()); }
+    Ok(endpoint)
+}
+
+#[tauri::command]
+pub async fn fs_transfer_inspect(state: State<'_, AppState>, transfer_id: String) -> Result<crate::file_transfers::Inspection, String> {
+    let endpoint = recovery_file_endpoint(&state, &transfer_id).await?;
+    state.file_transfers.inspect_recovery(&transfer_id, endpoint.as_ref()).await
+}
+
+#[tauri::command]
+pub async fn fs_transfer_cleanup(state: State<'_, AppState>, transfer_id: String) -> Result<(), String> {
+    let endpoint = recovery_file_endpoint(&state, &transfer_id).await?;
+    state.file_transfers.cleanup_recovery(&transfer_id, endpoint.as_ref()).await
+}
+
+#[tauri::command]
+pub async fn fs_transfer_dismiss(state: State<'_, AppState>, transfer_id: String) -> Result<(), String> {
+    if state.transfers.lock().await.contains_key(&transfer_id) { return Err("Transfer is still active".into()); }
+    state.file_transfers.dismiss(transfer_id).await
+}
+
+#[tauri::command]
+pub async fn fs_transfer_resolve(state: State<'_, AppState>, transfer_id: String) -> Result<(), String> {
+    let endpoint = recovery_file_endpoint(&state, &transfer_id).await?;
+    state.file_transfers.resolve_after_artifacts_removed(transfer_id, endpoint.as_ref()).await
+}
+
+#[tauri::command]
 pub async fn sftp_put(
     app: AppHandle,
     id: String,
     local_path: String,
     remote_path: String,
     transfer_id: String,
+    wait_for_completion: Option<bool>,
     _state: State<'_, AppState>,
 ) -> Result<(), String> {
-    // Spawn background task
     let app_handle = app.clone();
+    let outcome_app = app.clone();
     let connection_id = id.clone();
+    let outcome_connection_id = id;
     let local = local_path.clone();
     let remote = remote_path.clone();
     let tid = transfer_id.clone();
 
-    // Create cancellation token
-    let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
-
-    // Register token
-    {
-        let mut transfers = _state.transfers.lock().await;
-        transfers.insert(tid.clone(), cancel_token.clone());
-    }
-
-    tauri::async_runtime::spawn(async move {
-        // Retrieve state inside task
-        let state = app_handle.state::<AppState>();
-
-        let result = async {
+    crate::transfers::start_transfer(
+        _state.transfers.clone(),
+        transfer_id.clone(),
+        wait_for_completion.unwrap_or(false),
+        move |cancel_token| async move {
+            let state = app_handle.state::<AppState>();
+            crate::transfers::check_cancelled(&cancel_token)?;
             if connection_id == "local" {
                 // Local copy
                 let path = std::path::Path::new(&local);
@@ -6032,7 +6359,10 @@ pub async fn sftp_put(
                     // Todo recursive local
                     return Err("Local directory copy not yet implemented".to_string());
                 }
-                std::fs::copy(&local, &remote).map_err(|e| e.to_string())?;
+                let transferred = std::fs::copy(&local, &remote).map_err(|e| e.to_string())?;
+                let _ = app_handle.emit("transfer-progress", TransferProgress {
+                    id: tid.clone(), transferred, total: transferred,
+                });
             } else {
                 let sftp = get_sftp_or_reconnect(&state, &connection_id).await?;
                 let path = std::path::Path::new(&local);
@@ -6042,6 +6372,7 @@ pub async fn sftp_put(
                 if total_size == 0 {
                     total_size = 1;
                 } // Avoid division by zero
+                crate::transfers::check_cancelled(&cancel_token)?;
                 let mut transferred = 0;
 
                 // Emit initial start event to switch UI to "transferring" immediately
@@ -6058,7 +6389,6 @@ pub async fn sftp_put(
                     &sftp,
                     path,
                     &remote,
-                    &state.file_system,
                     &app_handle,
                     &tid,
                     &mut total_size,
@@ -6066,43 +6396,17 @@ pub async fn sftp_put(
                     &cancel_token,
                 )
                 .await?;
+                let _ = app_handle.emit("transfer-progress", TransferProgress {
+                    id: tid.clone(), transferred, total: total_size,
+                });
             }
             Ok(())
-        }
-        .await;
-        // Cleanup
-        {
-            let mut transfers = state.transfers.lock().await;
-            transfers.remove(&tid);
-        }
-
-        match result {
-            Ok(_) => {
-                let _ = app_handle.emit(
-                    "transfer-success",
-                    TransferSuccess {
-                        id: tid,
-                        destination_connection_id: connection_id,
-                    },
-                );
-            }
-            Err(e) => {
-                if e == "Cancelled" {
-                    let _ = app_handle.emit(
-                        "transfer-error",
-                        TransferError {
-                            id: tid,
-                            error: "Cancelled".to_string(),
-                        },
-                    );
-                } else {
-                    let _ = app_handle.emit("transfer-error", TransferError { id: tid, error: e });
-                }
-            }
-        }
-    });
-
-    Ok(())
+        },
+        move |result| {
+            emit_transfer_outcome(&outcome_app, &transfer_id, &outcome_connection_id, result)
+        },
+    )
+    .await
 }
 
 #[tauri::command]
@@ -6110,10 +6414,8 @@ pub async fn sftp_cancel_transfer(
     state: State<'_, AppState>,
     transfer_id: String,
 ) -> Result<(), String> {
-    let transfers = state.transfers.lock().await;
-    if let Some(token) = transfers.get(&transfer_id) {
-        token.store(true, std::sync::atomic::Ordering::Relaxed);
-    }
+    crate::transfers::request_cancel(&state.transfers, &transfer_id).await?;
+    state.file_transfers.wake_cancelled(&transfer_id);
     Ok(())
 }
 
@@ -6126,27 +6428,26 @@ pub async fn sftp_copy_to_server(
     destination_path: String,
     transfer_id: String,
     mode: Option<String>, // "standard" or "turbo" (Ignored, always standard now)
-    _state: State<'_, AppState>, // kept for signature compatibility if needed, but we use app_handle.state()
+    wait_for_completion: Option<bool>,
+    _state: State<'_, AppState>,
 ) -> Result<(), String> {
     let app_handle = app.clone();
+    let outcome_app = app.clone();
     let src_id = source_connection_id.clone();
     let src_path = source_path.clone();
     let dst_id = destination_connection_id.clone();
+    let outcome_destination_id = destination_connection_id;
     let dst_path = destination_path.clone();
     let tid = transfer_id.clone();
     let _mode = mode.unwrap_or_else(|| "standard".to_string());
 
-    tauri::async_runtime::spawn(async move {
-        let state = app_handle.state::<AppState>();
-
-        // Create cancellation token
-        let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        {
-            let mut transfers = state.transfers.lock().await;
-            transfers.insert(tid.clone(), cancel_token.clone());
-        }
-
-        let result: Result<(u64, u64), String> = async {
+    crate::transfers::start_transfer(
+        _state.transfers.clone(),
+        transfer_id.clone(),
+        wait_for_completion.unwrap_or(false),
+        move |cancel_token| async move {
+            let state = app_handle.state::<AppState>();
+            crate::transfers::check_cancelled(&cancel_token)?;
             // Shared SFTP session for size calculation
             let src_sftp = get_sftp_or_reconnect(&state, &src_id).await?;
             // Calculate size upfront for accurate progress
@@ -6186,67 +6487,21 @@ pub async fn sftp_copy_to_server(
             )
             .await?;
 
-            Ok((transferred, total_size))
-        }
-        .await;
-
-        // Cleanup cancellation token
-        {
-            let mut transfers = state.transfers.lock().await;
-            transfers.remove(&tid);
-        }
-
-        match result {
-            Ok((transferred, total)) => {
-                let _ = app_handle.emit(
-                    "transfer-progress",
-                    TransferProgress {
-                        id: tid.clone(),
-                        transferred,
-                        total,
-                    },
-                );
-
-                let _ = app_handle.emit(
-                    "transfer-success",
-                    TransferSuccess {
-                        id: tid,
-                        destination_connection_id: dst_id,
-                    },
-                );
-            }
-            Err(e) => {
-                let status = if e == "Cancelled" {
-                    "cancelled"
-                } else {
-                    "failed"
-                };
-                if status == "cancelled" {
-                    let _ = app_handle.emit(
-                        "transfer-cancelled",
-                        TransferSuccess {
-                            // reusing struct or just ID? Frontend expects error or distinct event?
-                            id: tid.clone(),
-                            destination_connection_id: dst_id, // Payload matches success for ID extraction
-                        },
-                    );
-                    // Or separate event? Frontend listens for 'transfer-error' usually.
-                    // CopyToServerModal handles error. TransferManager handles 'cancelled' status if we update store.
-                    // Let's emit error with "Cancelled" message, easiest.
-                    let _ = app_handle.emit(
-                        "transfer-error",
-                        TransferError {
-                            id: tid,
-                            error: "Cancelled".into(),
-                        },
-                    );
-                } else {
-                    let _ = app_handle.emit("transfer-error", TransferError { id: tid, error: e });
-                }
-            }
-        }
-    });
-    Ok(())
+            let _ = app_handle.emit(
+                "transfer-progress",
+                TransferProgress {
+                    id: tid.clone(),
+                    transferred,
+                    total: total_size,
+                },
+            );
+            Ok(())
+        },
+        move |result| {
+            emit_transfer_outcome(&outcome_app, &transfer_id, &outcome_destination_id, result)
+        },
+    )
+    .await
 }
 
 // Optimized recursive copy with cancellation and larger buffer
@@ -6273,9 +6528,8 @@ async fn copy_recursive_optimized(
         .await
         .map_err(|e| format!("Failed to stat source: {}", e))?;
 
-    if metadata.is_dir() {
-        // Create remote dir (ignore error if exists)
-        let _ = dst_sftp.create_dir(dst_path).await;
+    if metadata.file_type().is_dir() {
+        crate::fs::ensure_remote_transfer_directory(dst_sftp, dst_path).await?;
 
         let entries = src_sftp
             .read_dir(src_path)
@@ -6330,7 +6584,7 @@ async fn copy_recursive_optimized(
         let (tx, mut rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, String>>(4);
 
         // Spawn Source Reader Task
-        tokio::spawn(async move {
+        let reader = tokio::spawn(async move {
             use tokio::io::AsyncReadExt;
             loop {
                 let mut buffer = vec![0u8; 4194304]; // 4MB Chunk
@@ -6354,33 +6608,39 @@ async fn copy_recursive_optimized(
 
         let mut last_emit = std::time::Instant::now();
 
-        // Main loop: Receive from source and Write to destination concurrently
-        while let Some(chunk_res) = rx.recv().await {
-            let chunk = chunk_res?;
-            if cancel_token.load(std::sync::atomic::Ordering::Relaxed) {
-                return Err("Cancelled".to_string());
+        let copy_result = async {
+            while let Some(chunk_res) = rx.recv().await {
+                let chunk = chunk_res?;
+                if cancel_token.load(std::sync::atomic::Ordering::Relaxed) {
+                    return Err("Cancelled".to_string());
+                }
+
+                dst_file
+                    .write_all(&chunk)
+                    .await
+                    .map_err(|e| format!("SFTP destination write failed: {}", e))?;
+
+                let n = chunk.len();
+                *transferred += n as u64;
+
+                if last_emit.elapsed().as_millis() >= 200 {
+                    let _ = app.emit(
+                        "transfer-progress",
+                        TransferProgress {
+                            id: transfer_id.to_string(),
+                            transferred: *transferred,
+                            total: total_size,
+                        },
+                    );
+                    last_emit = std::time::Instant::now();
+                }
             }
 
-            dst_file
-                .write_all(&chunk)
-                .await
-                .map_err(|e| format!("SFTP destination write failed: {}", e))?;
-
-            let n = chunk.len();
-            *transferred += n as u64;
-
-            if last_emit.elapsed().as_millis() >= 200 {
-                let _ = app.emit(
-                    "transfer-progress",
-                    TransferProgress {
-                        id: transfer_id.to_string(),
-                        transferred: *transferred,
-                        total: total_size,
-                    },
-                );
-                last_emit = std::time::Instant::now();
-            }
+            Ok(())
         }
+        .await;
+        rx.close();
+        crate::transfers::finish_pipeline(&mut dst_file, reader, copy_result).await?;
 
         // Final emit for file
         let _ = app.emit(
@@ -6408,13 +6668,14 @@ fn download_recursive<'a>(
     cancel_token: &'a std::sync::atomic::AtomicBool,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
     Box::pin(async move {
+        crate::transfers::check_cancelled(cancel_token)?;
         // Check if remote is dir or file
         let metadata = sftp
             .metadata(remote_path)
             .await
             .map_err(|e| format!("Failed to stat remote path '{}': {}", remote_path, e))?;
 
-        if metadata.is_dir() {
+        if metadata.file_type().is_dir() {
             // Create local directory
             std::fs::create_dir_all(local_path)
                 .map_err(|e| format!("Failed to create local dir: {}", e))?;
@@ -6470,7 +6731,7 @@ fn download_recursive<'a>(
                 .map_err(|e| format!("Failed to open remote file '{}': {}", remote_path, e))?;
 
             // Spawn Remote Reader Task
-            tokio::spawn(async move {
+            let reader = tokio::spawn(async move {
                 use tokio::io::AsyncReadExt;
                 loop {
                     let mut buffer = vec![0u8; 4 * 1024 * 1024];
@@ -6492,34 +6753,39 @@ fn download_recursive<'a>(
 
             let mut last_emit = std::time::Instant::now();
 
-            // Main loop: Receive from remote reader and Write to Local Disk concurrently
-            while let Some(chunk_res) = rx.recv().await {
-                let chunk = chunk_res?;
-                if cancel_token.load(std::sync::atomic::Ordering::Relaxed) {
-                    return Err("Cancelled".to_string());
+            let copy_result = async {
+                while let Some(chunk_res) = rx.recv().await {
+                    let chunk = chunk_res?;
+                    if cancel_token.load(std::sync::atomic::Ordering::Relaxed) {
+                        return Err("Cancelled".to_string());
+                    }
+
+                    use tokio::io::AsyncWriteExt;
+                    local_file
+                        .write_all(&chunk)
+                        .await
+                        .map_err(|e| format!("Local write failed: {}", e))?;
+
+                    let n = chunk.len();
+                    *transferred += n as u64;
+
+                    if last_emit.elapsed().as_millis() >= 100 {
+                        let _ = app.emit(
+                            "transfer-progress",
+                            TransferProgress {
+                                id: transfer_id.to_string(),
+                                transferred: *transferred,
+                                total: *total_size,
+                            },
+                        );
+                        last_emit = std::time::Instant::now();
+                    }
                 }
-
-                use tokio::io::AsyncWriteExt;
-                local_file
-                    .write_all(&chunk)
-                    .await
-                    .map_err(|e| format!("Local write failed: {}", e))?;
-
-                let n = chunk.len();
-                *transferred += n as u64;
-
-                if last_emit.elapsed().as_millis() >= 100 {
-                    let _ = app.emit(
-                        "transfer-progress",
-                        TransferProgress {
-                            id: transfer_id.to_string(),
-                            transferred: *transferred,
-                            total: *total_size,
-                        },
-                    );
-                    last_emit = std::time::Instant::now();
-                }
+                Ok(())
             }
+            .await;
+            rx.close();
+            crate::transfers::finish_pipeline(&mut local_file, reader, copy_result).await?;
         }
         Ok(())
     })
@@ -6533,7 +6799,7 @@ async fn get_remote_size(sftp: &russh_sftp::client::SftpSession, path: &str) -> 
 
     // Initial check for file vs dir
     if let Ok(metadata) = sftp.metadata(path).await {
-        if !metadata.is_dir() {
+        if !metadata.file_type().is_dir() {
             return metadata.len();
         }
     } else {
@@ -6557,7 +6823,7 @@ async fn get_remote_size(sftp: &russh_sftp::client::SftpSession, path: &str) -> 
 
                 // Stat the entry to get attributes
                 if let Ok(attrs) = sftp.metadata(&next_path).await {
-                    if attrs.is_dir() {
+                    if attrs.file_type().is_dir() {
                         queue.push(next_path);
                     } else {
                         // It's a file (or symlink pointing to file? treated as file size)
@@ -6577,18 +6843,23 @@ pub async fn sftp_get(
     remote_path: String,
     local_path: String,
     transfer_id: String,
+    wait_for_completion: Option<bool>,
     _state: State<'_, AppState>,
 ) -> Result<(), String> {
     let app_handle = app.clone();
+    let outcome_app = app.clone();
     let connection_id = id.clone();
     let remote = remote_path.clone();
     let local = local_path.clone();
     let tid = transfer_id.clone();
 
-    tauri::async_runtime::spawn(async move {
-        let state = app_handle.state::<AppState>();
-
-        let result = async {
+    crate::transfers::start_transfer(
+        _state.transfers.clone(),
+        transfer_id.clone(),
+        wait_for_completion.unwrap_or(false),
+        move |cancel_token| async move {
+            let state = app_handle.state::<AppState>();
+            crate::transfers::check_cancelled(&cancel_token)?;
             // Retrieve session
             let sftp = get_sftp_or_reconnect(&state, &connection_id).await?;
             let local_p = std::path::Path::new(&local);
@@ -6598,16 +6869,8 @@ pub async fn sftp_get(
             if total_size == 0 {
                 total_size = 1;
             }
+            crate::transfers::check_cancelled(&cancel_token)?;
             let mut transferred = 0;
-
-            let tid_clone = tid.clone();
-            let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
-
-            // Register token
-            {
-                let mut transfers = state.transfers.lock().await;
-                transfers.insert(tid_clone.clone(), cancel_token.clone());
-            }
 
             // Emit start
             let _ = app_handle.emit(
@@ -6619,7 +6882,7 @@ pub async fn sftp_get(
                 },
             );
 
-            let res = download_recursive(
+            download_recursive(
                 &sftp,
                 &remote,
                 local_p,
@@ -6629,45 +6892,15 @@ pub async fn sftp_get(
                 &mut transferred,
                 &cancel_token,
             )
-            .await;
-
-            // Cleanup
-            {
-                let mut transfers = state.transfers.lock().await;
-                transfers.remove(&tid_clone);
-            }
-
-            res
-        }
-        .await;
-
-        match result {
-            Ok(_) => {
-                let _ = app_handle.emit(
-                    "transfer-success",
-                    TransferSuccess {
-                        id: tid,
-                        destination_connection_id: "local".to_string(),
-                    },
-                );
-            }
-            Err(e) => {
-                if e == "Cancelled" {
-                    let _ = app_handle.emit(
-                        "transfer-error",
-                        TransferError {
-                            id: tid,
-                            error: "Cancelled".to_string(),
-                        },
-                    );
-                } else {
-                    let _ = app_handle.emit("transfer-error", TransferError { id: tid, error: e });
-                }
-            }
-        }
-    });
-
-    Ok(())
+            .await?;
+            let _ = app_handle.emit("transfer-progress", TransferProgress {
+                id: tid.clone(), transferred, total: total_size,
+            });
+            Ok(())
+        },
+        move |result| emit_transfer_outcome(&outcome_app, &transfer_id, "local", result),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -8078,6 +8311,167 @@ fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
+fn remote_copy_command(from: &str, to: &str) -> String {
+    format!("cp -r -- {} {}", shell_quote(from), shell_quote(to))
+}
+
+fn remote_remove_command(paths: &[String]) -> String {
+    format!("rm -rf -- {}", paths.iter().map(|path| shell_quote(path)).collect::<Vec<_>>().join(" "))
+}
+
+const MAX_REMOTE_REMOVE_COMMAND_BYTES: usize = 32 * 1024;
+
+/// Budget the final UTF-8 shell argument, including quoting expansion. Oversize
+/// requests skip exec before any mutation, retaining the existing SFTP fallback.
+fn remote_remove_command_for_exec(paths: &[String]) -> Option<String> {
+    let command = remote_remove_command(paths);
+    (command.len() <= MAX_REMOTE_REMOVE_COMMAND_BYTES).then_some(command)
+}
+
+/// Each tar member is an explicit relative operand, never a command-line option.
+fn remote_archive_command(paths: &[String]) -> Result<String, String> {
+    let mut args = String::new();
+    for path in paths {
+        let trimmed = path.trim_end_matches('/');
+        if trimmed.is_empty() { continue; }
+        let (parent, name) = match trimmed.rsplit_once('/') {
+            Some((parent, name)) => (if parent.is_empty() { "/" } else { parent }, name),
+            None => (".", trimmed),
+        };
+        args.push_str(&format!(" -C {} {}", shell_quote(parent), shell_quote(&format!("./{name}"))));
+    }
+    if args.is_empty() { return Err("No valid paths to archive".into()); }
+    Ok(format!("tar -czf -{args}"))
+}
+
+#[cfg(test)]
+mod remote_mutation_command_tests {
+    use super::{copy_access_timeout, remote_copy_command, remote_remove_command, remote_remove_command_for_exec,
+        remote_archive_command, transfer_not_started_error, MAX_REMOTE_REMOVE_COMMAND_BYTES};
+
+    #[test]
+    fn copy_access_timeout_scales_with_the_validated_source_count() {
+        assert_eq!(copy_access_timeout(1).as_secs(), 33);
+        assert_eq!(copy_access_timeout(16).as_secs(), 78);
+        assert_eq!(copy_access_timeout(64).as_secs(), 222);
+        assert!(copy_access_timeout(64) > copy_access_timeout(1));
+    }
+
+    #[test]
+    fn delete_exec_budget_measures_final_utf8_and_shell_quoting_bytes() {
+        let overhead = remote_remove_command(&[String::new()]).len();
+        let boundary = "a".repeat(MAX_REMOTE_REMOVE_COMMAND_BYTES - overhead);
+        let command = remote_remove_command_for_exec(&[boundary.clone()]).unwrap();
+        assert_eq!(command.len(), MAX_REMOTE_REMOVE_COMMAND_BYTES);
+        assert!(remote_remove_command_for_exec(&[format!("{boundary}a")]).is_none());
+        assert!(remote_remove_command_for_exec(&["'".repeat(MAX_REMOTE_REMOVE_COMMAND_BYTES / 2)]).is_none());
+        assert!(remote_remove_command_for_exec(&["文".repeat(MAX_REMOTE_REMOVE_COMMAND_BYTES / 2)]).is_none());
+        let paths = vec!["/folder/name".repeat(500); 10];
+        assert!(remote_remove_command_for_exec(&paths).is_none());
+        let small = vec!["-backup".into(), "quote'file".into()];
+        assert_eq!(remote_remove_command_for_exec(&small), Some(remote_remove_command(&small)));
+    }
+
+    #[tokio::test]
+    async fn oversized_delete_exec_uses_the_existing_pre_execution_fallback() {
+        let command = remote_remove_command_for_exec(&["x".repeat(MAX_REMOTE_REMOVE_COMMAND_BYTES)]);
+        let mut fallback_calls = 0;
+        crate::transfers::mutation_with_safe_fallback(async {
+            assert!(command.is_none(), "Oversized commands cannot enter the SSH attempt");
+            Ok(false)
+        }, async {
+            fallback_calls += 1;
+            Ok(())
+        }).await.unwrap();
+        assert_eq!(fallback_calls, 1);
+    }
+
+    #[test]
+    fn archive_members_cannot_be_interpreted_as_tar_options() {
+        assert_eq!(remote_archive_command(&["/tmp/-Tsecret".into(), "/home/quote'file".into()]).unwrap(),
+            "tar -czf - -C '/tmp' './-Tsecret' -C '/home' './quote'\\''file'");
+        assert_eq!(remote_archive_command(&["relative".into()]).unwrap(), "tar -czf - -C '.' './relative'");
+        assert!(remote_archive_command(&["/".into(), "".into()]).is_err());
+    }
+
+    #[test]
+    fn admission_errors_are_unchanged_destinations_without_reclassifying_cancellation() {
+        assert_eq!(transfer_not_started_error("Queue full".into()), "TRANSFER_NOT_STARTED:Queue full");
+        assert_eq!(transfer_not_started_error("Cancelled".into()), "Cancelled");
+    }
+
+    #[test]
+    fn option_terminator_precedes_quoted_file_operands() {
+        assert_eq!(remote_copy_command("-source", "-target"), "cp -r -- '-source' '-target'");
+        assert_eq!(remote_remove_command(&["-backup".into(), "quote'file".into()]), "rm -rf -- '-backup' 'quote'\\''file'");
+    }
+}
+
+fn archive_exit_result(exit_status: Option<u32>, stderr: &[u8]) -> Result<(), String> {
+    match exit_status {
+        Some(0) => Ok(()),
+        Some(status) => Err(format!(
+            "tar failed (exit {}): {}",
+            status,
+            String::from_utf8_lossy(stderr).trim()
+        )),
+        None => Err("Archive command closed without an exit status".to_string()),
+    }
+}
+
+/// Remote diagnostics must not grow without bound while an archive is streaming.
+fn append_archive_stderr(buffer: &mut Vec<u8>, data: &[u8]) {
+    const MAX_BYTES: usize = 16 * 1024;
+    let count = data.len().min(MAX_BYTES.saturating_sub(buffer.len()));
+    buffer.extend_from_slice(&data[..count]);
+}
+
+fn archive_output_result(result: Result<(), String>, output_path: &str) -> Result<(), String> {
+    result.map_err(|error| {
+        // Only a confirmed close preserves exact cancellation. The transfer row
+        // already names its destination and warns that incomplete output may remain.
+        if error == "Cancelled" { return error; }
+        format!("{}; Archive output may be incomplete at '{}'; check it before retrying", error, output_path)
+    })
+}
+
+#[cfg(test)]
+mod archive_result_tests {
+    use super::{archive_exit_result, archive_output_result, append_archive_stderr};
+
+    #[test]
+    fn archive_diagnostics_are_bounded_and_keep_the_first_error() {
+        let mut buffer = Vec::new();
+        append_archive_stderr(&mut buffer, b"Permission denied\n");
+        for _ in 0..10 { append_archive_stderr(&mut buffer, &[b'x'; 8192]); }
+        assert_eq!(buffer.len(), 16 * 1024);
+        assert!(buffer.starts_with(b"Permission denied\n"));
+    }
+
+    #[test]
+    fn only_a_confirmed_zero_exit_status_is_success() {
+        assert!(archive_exit_result(Some(0), b"").is_ok());
+        assert_eq!(
+            archive_exit_result(Some(2), b" permission denied\n"),
+            Err("tar failed (exit 2): permission denied".to_string())
+        );
+        assert!(archive_exit_result(None, b"").is_err());
+    }
+
+    #[test]
+    fn unsuccessful_created_output_is_retained_with_its_location_and_original_error() {
+        assert!(archive_output_result(Ok(()), "/downloads/archive.tar.gz").is_ok());
+        assert_eq!(archive_output_result(Err("Cancelled".into()), "/downloads/archive.tar.gz"), Err("Cancelled".into()));
+        for error in ["Write failed", "Destination close failed", "Cancelled; Destination close failed"] {
+            let result = archive_output_result(Err(error.into()), "/downloads/archive.tar.gz").unwrap_err();
+            assert!(result.starts_with(error));
+            assert!(result.contains("/downloads/archive.tar.gz"));
+            assert!(result.contains("may be incomplete"));
+            assert_ne!(result, "Cancelled");
+        }
+    }
+}
+
 /// Download selected remote files/directories as a .tar.gz archive.
 ///
 /// Uses SSH exec to run `tar -czf - -C <parent> <name> ...` on the server and
@@ -8090,6 +8484,7 @@ pub async fn sftp_download_as_zip(
     remote_paths: Vec<String>,
     local_path: String,
     transfer_id: String,
+    wait_for_completion: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     if remote_paths.is_empty() {
@@ -8097,33 +8492,26 @@ pub async fn sftp_download_as_zip(
     }
 
     let app_handle = app.clone();
+    let outcome_app = app.clone();
     let connection_id = id.clone();
     let tid = transfer_id.clone();
 
-    let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    {
-        let mut transfers = state.transfers.lock().await;
-        transfers.insert(tid.clone(), cancel_token.clone());
-    }
-
-    // Estimate total size using SFTP (already connected) for progress reporting.
-    let total_size = {
-        let sftp = get_sftp_or_reconnect(&state, &connection_id).await?;
-        let mut sz: u64 = 0;
-        for rp in &remote_paths {
-            sz += get_remote_size(&sftp, rp).await;
-        }
-        if sz == 0 {
-            1
-        } else {
-            sz
-        }
-    };
-
-    tauri::async_runtime::spawn(async move {
-        let state_ref = app_handle.state::<AppState>();
-
-        let result: Result<(), String> = async {
+    crate::transfers::start_transfer(
+        state.transfers.clone(),
+        transfer_id.clone(),
+        wait_for_completion.unwrap_or(false),
+        move |cancel_token| async move {
+            let state_ref = app_handle.state::<AppState>();
+            crate::transfers::check_cancelled(&cancel_token)?;
+            // Estimate total size after registration, so setup failures are terminal too.
+            let sftp = get_sftp_or_reconnect(&state_ref, &connection_id).await?;
+            let mut total_size = 0;
+            for path in &remote_paths {
+                crate::transfers::check_cancelled(&cancel_token)?;
+                total_size += get_remote_size(&sftp, path).await;
+            }
+            let total_size = total_size.max(1);
+            crate::transfers::check_cancelled(&cancel_token)?;
             // Get the SSH session handle (not SFTP).
             let session = {
                 let conns = state_ref.connections.lock().await;
@@ -8135,38 +8523,7 @@ pub async fn sftp_download_as_zip(
                     .ok_or_else(|| "SSH session not initialised".to_string())?
             };
 
-            // Build: tar -czf - -C <parent_dir> <entry_name> ...
-            // Each item gets its own -C <parent_dir> <entry_name> so entries appear at
-            // the archive root regardless of where they live on the server.
-            let mut tar_args = String::new();
-            for rp in &remote_paths {
-                let trimmed = rp.trim_end_matches('/');
-                // Guard: skip empty paths (e.g. if caller passes "/" which trims to "")
-                if trimmed.is_empty() {
-                    continue;
-                }
-                let (entry_name, parent_dir) = match trimmed.rfind('/') {
-                    Some(idx) => {
-                        let p = if idx == 0 { "/" } else { &trimmed[..idx] };
-                        (&trimmed[idx + 1..], p)
-                    }
-                    // No slash at all â€” treat as relative name in current directory
-                    None => (trimmed, "."),
-                };
-                // Guard: entry_name should never be empty after a valid split
-                if entry_name.is_empty() {
-                    continue;
-                }
-                tar_args.push_str(&format!(
-                    " -C {} {}",
-                    shell_quote(parent_dir),
-                    shell_quote(entry_name)
-                ));
-            }
-            if tar_args.is_empty() {
-                return Err("No valid paths to archive".to_string());
-            }
-            let tar_cmd = format!("tar -czf -{}", tar_args);
+            let tar_cmd = remote_archive_command(&remote_paths)?;
 
             // Open SSH exec channel.
             let mut channel = session
@@ -8202,91 +8559,68 @@ pub async fn sftp_download_as_zip(
             );
 
             let mut bytes_written: u64 = 0;
-            let mut exit_status: u32 = 0;
+            let mut exit_status = None;
             let mut last_emit = std::time::Instant::now();
             let mut stderr_buf: Vec<u8> = Vec::new();
 
-            // Stream tar output to local file.
-            while let Some(msg) = channel.wait().await {
-                if cancel_token.load(std::sync::atomic::Ordering::Relaxed) {
-                    return Err("Cancelled".to_string());
-                }
-                match msg {
-                    russh::ChannelMsg::Data { ref data } => {
-                        use tokio::io::AsyncWriteExt;
-                        out_file
-                            .write_all(data)
-                            .await
-                            .map_err(|e| format!("Write failed: {}", e))?;
-                        bytes_written += data.len() as u64;
-                        if last_emit.elapsed().as_millis() >= 150 {
-                            let _ = app_handle.emit(
-                                "transfer-progress",
-                                TransferProgress {
-                                    id: tid.clone(),
-                                    transferred: bytes_written.min(total_size),
-                                    total: total_size,
-                                },
-                            );
-                            last_emit = std::time::Instant::now();
+            let archive_result = async {
+                // Stream tar output to local file.
+                while let Some(msg) = channel.wait().await {
+                    if cancel_token.load(std::sync::atomic::Ordering::Relaxed) {
+                        return Err("Cancelled".to_string());
+                    }
+                    match msg {
+                        russh::ChannelMsg::Data { ref data } => {
+                            use tokio::io::AsyncWriteExt;
+                            out_file
+                                .write_all(data)
+                                .await
+                                .map_err(|e| format!("Write failed: {}", e))?;
+                            bytes_written += data.len() as u64;
+                            if last_emit.elapsed().as_millis() >= 150 {
+                                let _ = app_handle.emit(
+                                    "transfer-progress",
+                                    TransferProgress {
+                                        id: tid.clone(),
+                                        transferred: bytes_written.min(total_size),
+                                        total: total_size,
+                                    },
+                                );
+                                last_emit = std::time::Instant::now();
+                            }
                         }
+                        russh::ChannelMsg::ExtendedData { ref data, .. } => {
+                            append_archive_stderr(&mut stderr_buf, data);
+                        }
+                        russh::ChannelMsg::ExitStatus { exit_status: code } => {
+                            exit_status = Some(code);
+                        }
+                        _ => {}
                     }
-                    russh::ChannelMsg::ExtendedData { ref data, .. } => {
-                        stderr_buf.extend_from_slice(data);
-                    }
-                    russh::ChannelMsg::ExitStatus { exit_status: code } => {
-                        exit_status = code;
-                    }
-                    _ => {}
                 }
-            }
 
-            if exit_status != 0 {
-                let stderr = String::from_utf8_lossy(&stderr_buf);
-                return Err(format!(
-                    "tar failed (exit {}): {}",
-                    exit_status,
-                    stderr.trim()
-                ));
+                archive_exit_result(exit_status, &stderr_buf)?;
+                Ok(())
             }
+            .await;
+            let result = crate::transfers::finish_destination(&mut out_file, archive_result).await;
+            archive_output_result(result, &local_path)?;
 
-            // Emit 100% progress.
+            // Preserve actual archive bytes; total_size is only the source-size estimate.
             let _ = app_handle.emit(
                 "transfer-progress",
                 TransferProgress {
                     id: tid.clone(),
-                    transferred: total_size,
+                    transferred: bytes_written,
                     total: total_size,
                 },
             );
 
             Ok(())
-        }
-        .await;
-
-        {
-            let mut transfers = state_ref.transfers.lock().await;
-            transfers.remove(&tid);
-        }
-
-        match result {
-            Ok(_) => {
-                let _ = app_handle.emit(
-                    "transfer-success",
-                    TransferSuccess {
-                        id: tid,
-                        destination_connection_id: "local".to_string(),
-                    },
-                );
-            }
-            Err(e) => {
-                let _ = std::fs::remove_file(&local_path);
-                let _ = app_handle.emit("transfer-error", TransferError { id: tid, error: e });
-            }
-        }
-    });
-
-    Ok(())
+        },
+        move |result| emit_transfer_outcome(&outcome_app, &transfer_id, "local", result),
+    )
+    .await
 }
 
 #[tauri::command]

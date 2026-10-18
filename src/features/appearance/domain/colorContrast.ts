@@ -31,3 +31,10 @@ export function colorContrast(foreground: string | null, background: string | nu
     const a = luminance(fg); const b = luminance(bg);
     return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 }
+
+/** Choose the more legible sRGB endpoint; unsupported/translucent colors retain the caller's fallback. */
+export function contrastingForeground(background: string): '#000000' | '#ffffff' | null {
+    const black = colorContrast('#000000', background);
+    const white = colorContrast('#ffffff', background);
+    return black === null || white === null ? null : black >= white ? '#000000' : '#ffffff';
+}

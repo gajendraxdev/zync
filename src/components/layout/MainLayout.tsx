@@ -55,6 +55,7 @@ import { SetupWizard } from '../onboarding/SetupWizard';
 import { useFileSystemEvents } from '../../hooks/useFileSystemEvents';
 import { AiSidebar } from '../ai/AiSidebar';
 import { ModalRoot } from '../ui/ModalRoot';
+import { LayoutMotionScope } from '../ui/LayoutMotion';
 import {
     cancelAllIdlePtySuspends,
     cancelIdlePtySuspend,
@@ -1495,7 +1496,7 @@ export function MainLayout({ children }: { children: ReactNode }) {
             {/* Top Unified Header (TabBar) */}
             <TabBar />
 
-            <WorkspaceNavigationFrame>
+            <LayoutMotionScope><WorkspaceNavigationFrame>
                 {/* Sidebar Overlay for Mobile */}
                 {
                     isSmallScreen && !sidebarCollapsed && (
@@ -1538,7 +1539,7 @@ export function MainLayout({ children }: { children: ReactNode }) {
                     }
                     onRunCommand={handleAiRunCommand}
                 />
-            </WorkspaceNavigationFrame>
+            </WorkspaceNavigationFrame></LayoutMotionScope>
 
             {/* Bottom Unified Status Bar (Full Width) */}
             <StatusBar />

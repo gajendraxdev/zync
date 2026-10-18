@@ -11,6 +11,7 @@ import { Server, File, Folder, Terminal, Settings, Lock, FileCode, Archive, Data
 import { cn } from '../../lib/utils';
 import { useAppStore } from '../../store/useAppStore';
 import { usePlugins } from '../../context/PluginContext';
+import { findIconTheme, iconThemeRevision } from '../../lib/icons/iconTheme';
 
 interface DynamicIconProps {
     type: string;
@@ -49,28 +50,29 @@ export const DynamicIcon = memo(function DynamicIcon({
     const { plugins } = usePlugins();
 
     const activePlugin = useMemo(() => {
-        if (iconTheme === 'vscode-icons' || iconTheme === 'lucide') return null;
-        return plugins.find((p) => p.manifest.id === iconTheme && p.manifest.type === 'icon-theme');
+        return findIconTheme(plugins, iconTheme);
     }, [iconTheme, plugins]);
 
-    const iconID = fileTypeIconID(type, isFolder, iconTheme);
+    const definition = activePlugin?.manifest.iconTheme;
+    const revision = useMemo(() => activePlugin ? iconThemeRevision(activePlugin) : '', [activePlugin]);
+    const iconID = fileTypeIconID(type, isFolder, iconTheme, definition);
     const pluginId = activePlugin?.manifest.id ?? '';
     const pluginPath = activePlugin?.path ?? '';
     const pluginIconsPath = activePlugin?.manifest?.iconsPath
         ?? (activePlugin?.manifest as { icons_path?: string } | undefined)?.icons_path
         ?? '';
-    const key = themedIconKey(iconTheme, iconID, pluginId, pluginPath, pluginIconsPath);
+    const key = themedIconKey(iconTheme, iconID, pluginId, pluginPath, pluginIconsPath, revision);
 
     const [, setEpoch] = useState(0);
-    const cached = iconTheme === 'lucide' ? { status: 'missing' as const } : getThemedIconEntry(key);
+    const cached = !activePlugin || iconTheme === 'lucide' ? { status: 'missing' as const } : getThemedIconEntry(key);
 
     useEffect(() => {
-        if (iconTheme === 'lucide') return;
+        if (!activePlugin || iconTheme === 'lucide') return;
         const unsub = subscribeThemedIcon(key, () => setEpoch((n) => n + 1));
         setEpoch((n) => n + 1);
-        ensureThemedIcon(key, iconID, iconTheme, pluginPath || undefined, pluginIconsPath || undefined);
+        ensureThemedIcon(key, iconID, iconTheme, pluginPath || undefined, pluginIconsPath || undefined, definition, revision);
         return unsub;
-    }, [iconID, iconTheme, key, pluginIconsPath, pluginPath]);
+    }, [activePlugin, definition, iconID, iconTheme, key, pluginIconsPath, pluginPath, revision]);
 
     const src = cached?.status === 'ready' ? cached.src : null;
     const showFallback = iconTheme === 'lucide' || cached?.status !== 'ready';
@@ -96,6 +98,8 @@ export const DynamicIcon = memo(function DynamicIcon({
                       iconTheme,
                       pluginPath || undefined,
                       pluginIconsPath || undefined,
+                      definition,
+                      revision,
                     )}
                 />
             )}

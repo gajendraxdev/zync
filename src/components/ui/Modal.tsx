@@ -49,6 +49,8 @@ interface ModalProps {
   closeOnEsc?: boolean;
   closeOnOverlayClick?: boolean;
   showCloseButton?: boolean;
+  /** Suppress opener restoration when the owning surface has become inactive. */
+  restoreFocus?: boolean;
   /** When true, only in-content actions dismiss the modal (no Escape, overlay, or header X). */
   explicitDismissOnly?: boolean;
   /** Optional custom z-index class for the modal wrapper and overlay (defaults to 'z-[9999]') */
@@ -71,6 +73,7 @@ interface ModalProps {
  * @param closeOnEsc - Whether pressing Escape closes the modal (default true).
  * @param closeOnOverlayClick - Whether clicking the overlay closes the modal (default true).
  * @param showCloseButton - Whether to render the close button in the header (default true).
+ * @param restoreFocus - Whether dismissal may restore the opener (default true).
  * @param explicitDismissOnly - When true, only in-content actions dismiss the modal (Escape, overlay, and header X are disabled).
  * @returns The modal element mounted into the ZPortal target when `isOpen` is true, otherwise null.
  */
@@ -90,6 +93,7 @@ export function Modal({
   closeOnEsc = true,
   closeOnOverlayClick = true,
   showCloseButton = true,
+  restoreFocus = true,
   explicitDismissOnly = false,
   zIndexClassName,
 }: ModalProps) {
@@ -98,6 +102,8 @@ export function Modal({
   const reduceMotion = useReducedMotion();
   const [dialogElement, setDialogElement] = useState<HTMLDivElement | null>(null);
   const openerRef = useRef<HTMLElement | null>(null);
+  const restoreFocusRef = useRef(restoreFocus);
+  restoreFocusRef.current = restoreFocus;
   const dragConstraintsRef = useRef<HTMLDivElement>(null);
   const dragControls = useDragControls();
   const x = useMotionValue(0);
@@ -167,7 +173,7 @@ export function Modal({
     return () => {
       window.cancelAnimationFrame(frame);
       // Restore after the closing commit, not during layout-effect teardown.
-      if (previouslyFocused?.isConnected) previouslyFocused.focus();
+      if (restoreFocusRef.current && previouslyFocused?.isConnected) previouslyFocused.focus();
     };
   }, [isOpen, dialogElement]);
 

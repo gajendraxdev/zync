@@ -22,7 +22,11 @@ sshCommandManifest.engines.pluginApi = '^2.1.0';
 assert.equal(validateManifest(sshCommandManifest, { pluginApiVersion: '2.0.0' }).valid, false);
 assert.equal(validateManifest(sshCommandManifest).valid, true);
 const nativeManifestSource = fs.readFileSync(path.join(root, 'src-tauri', 'src', 'plugins', 'manifest', 'mod.rs'), 'utf8');
-assert.match(nativeManifestSource, new RegExp(`PLUGIN_API_VERSION: &str = "${pluginApiVersion.replaceAll('.', '\\.')}"`));
+const hostApiVersion = /PLUGIN_API_VERSION: &str = "([\d.]+)"/.exec(nativeManifestSource)?.[1];
+assert.ok(hostApiVersion, 'native host must declare its API version');
+// The published SDK may lag additive host releases, but must remain compatible.
+assert.equal(hostApiVersion.split('.')[0], pluginApiVersion.split('.')[0]);
+assert.ok(Number(hostApiVersion.split('.')[1]) >= Number(pluginApiVersion.split('.')[1]));
 for (const [target, expectedPath] of [
   [{ zyncVersion: '2.31.9' }, 'engines.zync'],
   [{ zyncVersion: 'not-a-version' }, 'engines.zync'],

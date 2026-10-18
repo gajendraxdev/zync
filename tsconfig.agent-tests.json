@@ -21,6 +21,14 @@
         "sourceMap": false
     },
     "include": [
+        "tests/folderSizes.test.ts",
+        "tests/filePermissions.test.ts",
+        "tests/editorSaveAccess.test.ts",
+        "tests/transferState.test.ts",
+        "tests/fileDestinationReservations.test.ts",
+        "tests/transferOperations.test.ts",
+        "tests/fileSystemRefresh.test.ts",
+        "tests/filesProduction.browser.tsx",
         "tests/paneTabRelease.browser.tsx",
         "tests/themeFiles.browser.tsx",
         "tests/chromeActions.browser.tsx",
@@ -190,6 +198,7 @@
         "src/components/file-manager/fileGridLayout.ts",
         "src/components/file-manager/fileMarquee.ts",
         "src/components/file-manager/filePathNav.ts",
+        "src/components/file-manager/fileBreadcrumbLayout.ts",
         "src/components/file-manager/fileVolumes.ts",
         "src/lib/icons/themedIconSrc.ts",
         "src/lib/icons/icon-map.ts",

@@ -110,6 +110,7 @@ pub fn rollback(app: &AppHandle, plugin_id: &str) -> Result<PluginRollbackResult
         .validate()
         .context("Retained plugin manifest is invalid")?;
     retained_manifest.validate_host_compatibility()?;
+    retained_manifest.validate_package_assets(&retained_package)?;
 
     let target = installed_path(app, plugin_id)?;
     let active_manifest: Manifest =

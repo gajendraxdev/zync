@@ -186,6 +186,7 @@ impl PluginScanner {
             .validate()
             .context("Plugin manifest validation failed")?;
         manifest.validate_host_compatibility()?;
+        manifest.validate_package_assets(&staging_dir)?;
         let actual_digest = digest_directory(&staging_dir)?;
         if actual_digest != expected_digest {
             let _ = fs::remove_dir_all(&staging_dir);
@@ -357,6 +358,7 @@ fn inspect_staged_package(
         .validate()
         .context("Plugin manifest validation failed")?;
     manifest.validate_host_compatibility()?;
+    manifest.validate_package_assets(staging_dir)?;
     let signature_status = verify_package_signature(staging_dir, &manifest)?;
     Ok(PluginInstallInspection {
         inspection_id,
@@ -393,6 +395,7 @@ fn inspect_marketplace_staged_package(
         .validate()
         .context("Plugin manifest validation failed")?;
     manifest.validate_host_compatibility()?;
+    manifest.validate_package_assets(staging_dir)?;
     if manifest.manifest_version() < 2 {
         return Err(anyhow!("Marketplace plugins must use Manifest v2"));
     }

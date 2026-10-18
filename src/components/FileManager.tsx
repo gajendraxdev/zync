@@ -21,45 +21,63 @@ import { ConfirmModal } from './ui/ConfirmModal';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef } from 'react';
 import { useAppStore, Connection } from '../store/useAppStore';
 
-import { cn } from '../lib/utils';
 import { FileEditor } from './FileEditor';
 import { CopyToServerModal } from './file-manager/CopyToServerModal';
 import { FileGrid } from './file-manager/FileGrid';
 import { FILE_LIST_SORT_INITIAL, sortFileEntries, type FileSortColumn, type FileSortDirection } from './file-manager/fileGridLayout';
 import { getCurrentDragSource } from '../lib/dragDrop';
-import { FileToolbar, FileBottomActionBar } from './file-manager/FileToolbar';
-import { FileHistoryControls } from './file-manager/FileHistoryControls';
-import { FileViewControls } from './file-manager/FileViewControls';
+import { FileToolbar } from './file-manager/FileToolbar';
+import { FileContentsHeader } from './file-manager/FileContentsHeader';
+import type { FileDetailColumn } from './file-manager/fileListPresentation';
+import { useFileInspectorFocus } from './file-manager/useFileInspectorFocus';
+import { useFileActivationFocus } from './file-manager/useFileActivationFocus';
+import { useFileSelectionColors } from './file-manager/useFileSelectionColors';
+import { useFilePanelLayout } from './file-manager/useFilePanelLayout';
 import { FilePlacesSidebar } from './file-manager/FilePlacesSidebar';
 import { loadLocalFileVolumes, type FileVolume } from './file-manager/fileVolumes';
 import { FileSideDrawer } from './file-manager/FileSideDrawer';
-import { FileFloatingBar } from './file-manager/FileFloatingBar';
-import { FILE_CHROME_NARROW_MAX, FILE_GRID_ZOOM, FILE_LIST_ZOOM, FILE_PLACES_WIDTH_PX, FILE_PROPERTIES_WIDTH_PX, clampFileGridZoom, clampFileListZoom, clampFileRecentLimit } from './file-manager/fileChrome';
-import { filePathLeafLabel, inferHomePath, isFilePathEqual, normalizeFilePath } from './file-manager/filePathNav';
+import { FileLayoutSurface } from './file-manager/FileLayoutSurface';
+import { FILE_GRID_ZOOM, FILE_LIST_ZOOM, FILE_PLACES_WIDTH_PX, FILE_PROPERTIES_WIDTH_PX, clampFileGridZoom, clampFileListZoom, clampFileRecentLimit } from './file-manager/fileChrome';
+import { filePathLeafLabel, inferHomePath, isFilePathEqual, normalizeFilePath, parentFilePath } from './file-manager/filePathNav';
 import { fileMatchesQuery, fileMatchesSearchType } from './file-manager/fileSearchFilter';
 import type { FileSearchTypeFilter } from './file-manager/FileQueryEditor';
 import type { FileEntry } from './file-manager/types';
 import { EDITOR_READ_LIMIT_MESSAGE, exceedsEditorReadLimit, isEditorReadLimitError, MAX_EDITOR_FILE_BYTES } from './file-manager/editorReadPolicy';
 import { PropertiesPanel } from './file-manager/PropertiesPanel';
+import { useFilePermissionEditor } from '../features/files/application/useFilePermissionEditor';
+import { useFileActionAccess } from '../features/files/application/useFileActionAccess';
+import { useFolderSizes } from '../features/files/application/useFolderSizes';
+import { FolderSizeDetails } from './file-manager/FolderSizeValue';
+import { folderSizePaths } from '../features/files/domain/folderSizes';
 import { useFileClipboard } from './file-manager/useFileClipboard';
 import { isFileManagerPanelShown, useFileKeyboard } from './file-manager/useFileKeyboard';
 import { useFileSelection } from './file-manager/useFileSelection';
+import { fileSelectionSummary } from './file-manager/fileSelectionSummary';
+import { fileFolderOptions } from './file-manager/fileFolderOptions';
 import { useFileUploads } from './file-manager/useFileUploads';
 import { ConflictModal, type ConflictAction } from './file-manager/ConflictModal';
+import { useFileConflictQueue } from './file-manager/useFileConflictQueue';
 import { Button } from './ui/Button';
 import { ContextMenu, type ContextMenuItem } from './ui/ContextMenu';
 import { Input } from './ui/Input';
 import { Modal } from './ui/Modal';
+import { StateMessage } from './ui/StateMessage';
+import './file-manager/files.css';
 
 import { usePlugins } from '../context/PluginContext';
 import { buildEditorProviderOptions, CODEMIRROR_EDITOR_ID } from './editor/providers';
 import { clearEditorOverlayOpen, markEditorOverlayOpen } from './editor/overlayState';
 import { TerminalDisconnectedView } from './terminal/TerminalDisconnectedView';
 import { collectLeaves, isFeatureContent, layoutForCanvas, layoutForFeatureInstance } from '../lib/paneLayout';
-import { filesStoreKey } from '../store/fileSystemSlice';
+import { acknowledgeMovedClipboard, filesStoreKey, splitFileName } from '../store/fileSystemSlice';
 import { paneCloseScope, registerPaneCloseBlocker } from '../lib/paneCloseBlockers';
 import { isCurrentEditorRead, type EditorFileTarget } from './file-manager/editorReadIdentity';
+import { executeFileTransfer, tryStagedFileTransfer, isTransferCancellation, transferErrorMessage, fileTransferFailureMessage, isFileTransferNotStarted, type FileTransferRequest } from '../features/files/application/executeFileTransfer';
+import { createFileTransferExecution } from '../features/files/application/transferEventProjection';
+import { acquireFileDestination, type FileDestinationReservation } from '../features/files/application/fileDestinationReservations';
+import { replaceFileWithBackup, replacementPreconditionError } from '../features/files/application/replaceFileWithBackup';
 import type { AppStore } from '../store/useAppStore';
+import { runFileTransferBatch, fileTransferBatchFailure, recordFileTransferFailure, type FileTransferBatchResult } from '../features/files/application/runFileTransferBatch';
 import { canSplitBesideFiles, isUnconfirmedHomeToken, isUnresolvedFilesPath, openHerePlacementItems, openTerminalHere, pickFilesHomePath } from './layout/tabDock';
 
 export type FileManagerSurface = 'overlay' | 'pane';
@@ -96,6 +114,9 @@ export interface Conflict {
   name: string;
   op: 'move' | 'copy';
   sourceConnectionId: string;
+  destinationConnectionId?: string;
+  sourceKind?: string;
+  canCombine?: boolean;
 }
 
 function terminalHereMenuItems(
@@ -144,6 +165,12 @@ export const FileManager = memo(function FileManager({
   active?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const listingFocusRef = useRef<HTMLDivElement>(null);
+  const [focusRevealRequest, setFocusRevealRequest] = useState(0);
+  const requestFocusReveal = useCallback(() => setFocusRevealRequest(value => value + 1), []);
+  const activationFocus = useFileActivationFocus(containerRef, listingFocusRef);
+  const selectionColors = useFileSelectionColors(containerRef);
+  const { focusOnActivation } = activationFocus;
   const globalActiveId = useAppStore(state => state.activeConnectionId);
   const activeTabId = useAppStore(state => state.activeTabId);
   const connections = useAppStore(state => state.connections);
@@ -185,6 +212,11 @@ export const FileManager = memo(function FileManager({
   const currentError = useAppStore(state => (
     storeKey ? (state.error[storeKey] ?? null) : null
   ));
+  const readDeniedPath = useAppStore(state => {
+    const denial = state.listingReadDenial[storeKey];
+    return state.error[storeKey] && denial && denial.connection === state.connections.find(item => item.id === activeConnectionId)
+      ? denial.path : undefined;
+  });
   const loadFilesStore = useAppStore(state => state.loadFiles);
   const loadFiles = useCallback((cid: string, path?: string, skipHistory?: boolean, silent?: boolean) => (
     loadFilesStore(cid, path, skipHistory, silent, instanceId)
@@ -208,7 +240,6 @@ export const FileManager = memo(function FileManager({
     pasteEntriesStore(cid, sources, op, dest, instanceId)
   ), [pasteEntriesStore, instanceId]);
   const clipboard = useAppStore(state => state.clipboard);
-  const clearClipboard = useAppStore(state => state.clearClipboard);
   const updateSettings = useAppStore(state => state.updateSettings);
   const updateFileManagerSettings = useAppStore(state => state.updateFileManagerSettings);
   const clearRecentPaths = useAppStore(state => state.clearRecentPaths);
@@ -240,7 +271,8 @@ export const FileManager = memo(function FileManager({
     void updateFileManagerSettings({ defaultView: mode });
   }, [updateFileManagerSettings, viewMode]);
   const [typeFilter, setTypeFilter] = useState<FileSearchTypeFilter>('all');
-  const placesCollapsed = settings.fileManager.placesCollapsed ?? surface === 'pane';
+  // Wide Places is visible only by default; explicit saved visibility remains authoritative.
+  const placesCollapsed = settings.fileManager.placesCollapsed ?? false;
   const [volumes, setVolumes] = useState<FileVolume[]>([]);
   const {
     selectedFiles,
@@ -251,20 +283,21 @@ export const FileManager = memo(function FileManager({
     handleSelectAll,
     handleSelectMany,
     selectContextFile,
-  } = useFileSelection(currentPath, activeConnectionId ?? undefined);
-  const { handleCopy } = useFileClipboard({
-    connectionId: activeConnectionId ?? undefined,
-    currentPath,
-    files,
-    selectedFiles,
-    instanceId,
-  });
+  } = useFileSelection(currentPath, activeConnectionId ?? undefined, files);
   const [sortColumn, setSortColumn] = useState<FileSortColumn>('name');
   const [sortDirection, setSortDirection] = useState<FileSortDirection>('asc');
+  const [detailColumns, setDetailColumns] = useState<FileDetailColumn[]>([]);
   const [gridColumnCount, setGridColumnCount] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isEditingPath, setIsEditingPath] = useState(false);
+
+  // A quick filter belongs to one listing, never a different host or directory.
+  useEffect(() => {
+    setSearchTerm('');
+    setTypeFilter('all');
+    setIsSearchOpen(false);
+  }, [currentPath, activeConnectionId]);
 
   // Editor State
   const [editingFile, setEditingFile] = useState<FileEntry | null>(null);
@@ -318,6 +351,7 @@ export const FileManager = memo(function FileManager({
     x: number;
     y: number;
     file: FileEntry | null;
+    keyboard?: boolean;
   } | null>(null);
 
   // Drag Drop State
@@ -326,8 +360,8 @@ export const FileManager = memo(function FileManager({
   const [dragSourceConnectionId, setDragSourceConnectionId] = useState<string | null>(null);
 
   // Conflict Resolution State
-  const [pendingConflicts, setPendingConflicts] = useState<Conflict[]>([]);
-  const [currentConflict, setCurrentConflict] = useState<Conflict | null>(null);
+  const { conflicts: pendingConflicts, current: currentConflict, replace: replaceConflicts,
+    clear: clearConflicts, take: takeConflicts } = useFileConflictQueue<Conflict>();
 
   // Copy to Server State
   const [isCopyModalOpen, setIsCopyModalOpen] = useState(false);
@@ -340,22 +374,30 @@ export const FileManager = memo(function FileManager({
   const [initialDestPath, setInitialDestPath] = useState<string | undefined>();
 
   const [isProcessing, setIsProcessing] = useState(false);
+  const operationGeneration = useRef(0);
   const [isZipping, setIsZipping] = useState(false);
-  const [isNarrow, setIsNarrow] = useState(() => window.innerWidth < FILE_CHROME_NARROW_MAX);
+  const { placesInline, propertiesInline } = useFilePanelLayout(containerRef);
+  const isNarrow = !placesInline;
+  const [placesOverlayOpen, setPlacesOverlayOpen] = useState(false);
+  const showPlaces = isNarrow ? placesOverlayOpen : !placesCollapsed;
+  useFileInspectorFocus(isPropertiesOpen, propertiesInline, containerRef, listingFocusRef, isFilesSurfaceActive);
   const editorProviderOptions = useMemo(() => buildEditorProviderOptions(editorProviders), [editorProviders]);
 
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const apply = () => {
-      const next = el.clientWidth < FILE_CHROME_NARROW_MAX;
-      setIsNarrow((prev) => (prev === next ? prev : next));
-    };
-    apply();
-    const observer = new ResizeObserver(apply);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
+  useLayoutEffect(() => {
+    operationGeneration.current += 1;
+    clearConflicts();
+    setIsProcessing(false);
+    return () => { operationGeneration.current += 1; };
+  }, [activeConnectionId, instanceId, clearConflicts]);
+
+  useEffect(() => { if (!isNarrow) setPlacesOverlayOpen(false); }, [isNarrow]);
+
+  useLayoutEffect(() => {
+    if (isFilesSurfaceActive) return;
+    setPlacesOverlayOpen(false);
+    // Inline details are retained with their pane; transient dialogs are dismissed.
+    if (!propertiesInline) setIsPropertiesOpen(false);
+  }, [isFilesSurfaceActive, propertiesInline]);
 
   // Sync terminal to FM navigation if a synced terminal is active
   useEffect(() => {
@@ -369,6 +411,16 @@ export const FileManager = memo(function FileManager({
   // Combine store loading and local processing
   const isLoading = loading || isProcessing;
   const isReconnectPending = !isLocal && connection?.status === 'connecting';
+  const actionTargetName = selectedFiles.length === 1 ? selectedFiles[0] : selectedFiles.length === 0 ? focusedFile : null;
+  const actionAccess = useFileActionAccess(activeConnectionId ?? undefined, currentPath,
+    actionTargetName ? files.find(file => file.name === actionTargetName)?.path ?? null : null,
+    isFilesSurfaceActive && isConnected && !loading, files, readDeniedPath);
+  const actionBlocked = actionAccess.blocked;
+  const { handleCopy, copyUnavailable, cutUnavailable } = useFileClipboard({
+    connectionId: activeConnectionId ?? undefined, currentPath, files, selectedFiles, instanceId,
+    isBlocked: actionBlocked,
+    active: isFilesSurfaceActive && isConnected,
+  });
   const canGoBack = Boolean(activeConnectionId) && activeHistoryIndex > 0;
   const canGoForward = Boolean(activeConnectionId) && activeHistoryIndex < activeHistoryLength - 1;
 
@@ -377,13 +429,6 @@ export const FileManager = memo(function FileManager({
     setDragType(null);
     setDragSourceConnectionId(null);
   }, []);
-  const { handleUpload, handleUploadFolder, isTauriDraggingOver } = useFileUploads({
-    connectionId: activeConnectionId ?? undefined,
-    isConnected,
-    onDragVisualClear: clearDragVisual,
-    instanceId,
-  });
-
   const handleConnectionError = useCallback((connectionId: string, err: any, preserveEditor = false) => {
     const msg = err.message || String(err);
     if (msg.includes('DISCONNECTED:')) {
@@ -409,31 +454,65 @@ export const FileManager = memo(function FileManager({
     return false;
   }, [instanceId]);
 
+  const transferFile = useCallback(async (request: Omit<FileTransferRequest, 'transferId'>,
+    options?: { recoveryBackupPath?: string; reservation?: FileDestinationReservation }) => {
+    const transferId = addTransfer({ ...request, recoveryBackupPath: options?.recoveryBackupPath });
+    const execution = createFileTransferExecution((command, args) => window.ipcRenderer.invoke(command, args), useAppStore.getState);
+    await executeFileTransfer({ ...request, transferId }, execution, options?.reservation);
+    return transferId;
+  }, [addTransfer]);
+
+  /** Native file/folder replacement; only an explicit unhandled kind permits the legacy policy. */
+  const tryStagedReplacement = useCallback(async (request: Omit<FileTransferRequest, 'transferId'>) => {
+    // Reject a busy replacement before creating another receipt for the same decision.
+    const reservation = acquireFileDestination(request.destinationConnectionId, request.destinationPath);
+    try {
+      const store = useAppStore.getState();
+      const transferId = store.addTransfer(request);
+      const handled = await tryStagedFileTransfer({ ...request, transferId, overwrite: true },
+        createFileTransferExecution((command, args) => window.ipcRenderer.invoke(command, args), useAppStore.getState), reservation);
+      if (!handled) store.removeTransfer(transferId);
+      return handled;
+    } finally { reservation.release(); }
+  }, []);
+
   const executeFileOperations = useCallback(async (ops: {
     source: string;
     target: string;
     name: string;
     op: 'move' | 'copy';
     sourceConnectionId: string
-  }[], targetDirectory?: string) => {
-    if (!activeConnectionId || ops.length === 0) return;
+  }[], targetDirectory?: string, targetConnectionId?: string) => {
+    const destinationConnectionId = targetConnectionId ?? activeConnectionId;
+    if (!destinationConnectionId || ops.length === 0) return;
+    if (destinationConnectionId === activeConnectionId
+      && isFilePathEqual(targetDirectory ?? currentPath, currentPath) && actionBlocked('receive')) return;
 
+    const generation = operationGeneration.current;
     setIsProcessing(true);
     const conflicts: typeof pendingConflicts = [];
     const executionList: typeof ops = [];
+    let refreshAfterMutation = false;
+    let immediateFailed = false;
 
     try {
+      const destination = useAppStore.getState().connections.find(item => item.id === destinationConnectionId);
+      if (destinationConnectionId !== 'local' && destination && destination.status !== 'connected') {
+        await useAppStore.getState().connect(destinationConnectionId);
+        if (generation !== operationGeneration.current) return;
+      }
       // Pass 1: Check for existence (Parallelized)
       const existenceResults = await Promise.all(ops.map(op =>
         window.ipcRenderer.invoke('fs_exists', {
-          connectionId: activeConnectionId,
+          connectionId: destinationConnectionId,
           path: op.target,
         })
       ));
+      if (generation !== operationGeneration.current) return;
 
       existenceResults.forEach((exists, i) => {
         if (exists) {
-          conflicts.push(ops[i]);
+          conflicts.push({ ...ops[i], destinationConnectionId });
         } else {
           executionList.push(ops[i]);
         }
@@ -441,9 +520,15 @@ export const FileManager = memo(function FileManager({
 
       // Pass 2: Execute immediate actions
       if (executionList.length > 0) {
-        const sameConnection = executionList.every(item => item.sourceConnectionId === activeConnectionId);
+        for (const item of executionList) {
+          const precondition = replacementPreconditionError({ sourceConnectionId: item.sourceConnectionId,
+            sourcePath: item.source, destinationConnectionId, destinationPath: item.target });
+          if (precondition) throw new Error(precondition);
+        }
+        const sameConnection = executionList.every(item => item.sourceConnectionId === destinationConnectionId);
 
         if (sameConnection) {
+          refreshAfterMutation = true;
           // Group by operation type (move/copy) to ensure correct store action
           const groups = executionList.reduce((acc, item) => {
             if (!acc[item.op]) acc[item.op] = [];
@@ -452,78 +537,87 @@ export const FileManager = memo(function FileManager({
           }, {} as Record<string, string[]>);
 
           for (const [opType, sources] of Object.entries(groups)) {
-            await pasteEntries(activeConnectionId, sources, opType === 'move' ? 'cut' : 'copy', targetDirectory);
+            if (!await pasteEntries(destinationConnectionId, sources, opType === 'move' ? 'cut' : 'copy', targetDirectory ?? currentPath)) {
+              void useAppStore.getState().refreshConnectionFiles(destinationConnectionId);
+              refreshAfterMutation = false;
+              immediateFailed = true;
+              break;
+            }
           }
         } else {
-          // Cross connection: Loop through and start transfers
-          for (const item of executionList) {
-            const transferId = addTransfer({
+          // The background promise owns admission until native completion without blocking browsing.
+          void runFileTransferBatch(executionList, item => transferFile({
               sourceConnectionId: item.sourceConnectionId,
               sourcePath: item.source,
-              destinationConnectionId: activeConnectionId,
+              destinationConnectionId,
               destinationPath: item.target,
+            })).then(result => {
+              const failure = fileTransferBatchFailure(result);
+              if (failure) showToast('error', `Copy failed: ${failure}`);
             });
-
-            let command = "sftp:copyToServer";
-            const args: any = { sourcePath: item.source, destinationPath: item.target, transferId };
-
-            if (item.sourceConnectionId === "local") {
-              command = "sftp:put";
-              args.id = activeConnectionId;
-              args.localPath = item.source;
-              args.remotePath = item.target;
-            } else if (activeConnectionId === "local") {
-              command = "sftp:get";
-              args.id = item.sourceConnectionId;
-              args.remotePath = item.source;
-              args.localPath = item.target;
-            } else {
-              args.sourceConnectionId = item.sourceConnectionId;
-              args.destinationConnectionId = activeConnectionId;
-            }
-
-            window.ipcRenderer.invoke(command, args).catch(err => {
-              failTransfer(transferId, err.message || String(err));
-            });
-          }
-          showToast('info', `Started background transfer of ${executionList.length} item(s)`);
+          const preservesSource = executionList.some(item => item.op === 'move');
+          if (preservesSource) showToast('info', 'Cross-connection moves copy files; source files are kept.');
         }
       }
 
       // Pass 3: Handle Conflicts
+      if (generation !== operationGeneration.current) return;
       if (conflicts.length > 0) {
-        setPendingConflicts(conflicts);
-        setCurrentConflict(conflicts[0]);
-      } else {
-        // Only clear clipboard if it was a successful 'cut' (move)
-        const isCut = ops.some(o => o.op === 'move' && clipboard?.op === 'cut');
-        if (isCut) clearClipboard();
+        // Optional choice metadata uses the existing bounded batch runner. A
+        // failed read hides Combine; it never authorizes a write or a fallback.
+        await runFileTransferBatch(conflicts, async conflict => {
+          try {
+            const [sourceKind, destinationKind] = await Promise.all([
+              window.ipcRenderer.invoke('fs_entry_kind', { connectionId: conflict.sourceConnectionId, path: conflict.source }),
+              window.ipcRenderer.invoke('fs_entry_kind', { connectionId: destinationConnectionId, path: conflict.target }),
+            ]);
+            conflict.sourceKind = sourceKind;
+            conflict.canCombine = sourceKind === 'Directory' && destinationKind === 'Directory'
+              && (conflict.op === 'copy' || conflict.sourceConnectionId !== destinationConnectionId);
+          } catch { /* Preserve the existing choices if optional metadata is unavailable. */ }
+        });
+        if (generation !== operationGeneration.current) return;
+        replaceConflicts(conflicts);
+      } else if (!immediateFailed) {
+        // The Files slice acknowledges only confirmed same-endpoint moves.
         setSelectedFiles([]);
       }
 
-      if (executionList.length > 0) {
-        loadFiles(activeConnectionId, currentPath);
+      if (refreshAfterMutation) {
+        void useAppStore.getState().refreshConnectionFiles(destinationConnectionId);
       }
 
     } catch (e: any) {
-      if (handleConnectionError(activeConnectionId, e)) return;
-      showToast('error', `Operation failed: ${e.message || String(e)}`);
-      loadFiles(activeConnectionId, currentPath);
+      if (generation !== operationGeneration.current) return;
+      if (destinationConnectionId === activeConnectionId && handleConnectionError(destinationConnectionId, e)) return;
+      showToast('error', `Operation failed: ${fileTransferFailureMessage(e)}`);
+      if (refreshAfterMutation) void useAppStore.getState().refreshConnectionFiles(destinationConnectionId);
     } finally {
-      setIsProcessing(false);
+      if (generation === operationGeneration.current) setIsProcessing(false);
     }
   }, [
     activeConnectionId,
-    addTransfer,
-    clearClipboard,
-    clipboard?.op,
     currentPath,
-    failTransfer,
     handleConnectionError,
-    loadFiles,
     pasteEntries,
+    replaceConflicts,
     showToast,
+    transferFile,
+    actionBlocked,
   ]);
+
+  const uploadPaths = useCallback(async (paths: string[]) => {
+    await executeFileOperations(paths.map(source => {
+      const name = filePathLeafLabel(source);
+      return { source, name, sourceConnectionId: 'local', op: 'copy',
+        target: currentPath === '/' ? `/${name}` : `${currentPath}/${name}` };
+    }));
+  }, [executeFileOperations, currentPath]);
+  const { handleUpload, handleUploadFolder, isTauriDraggingOver } = useFileUploads({
+    connectionId: activeConnectionId ?? undefined, isConnected, onDragVisualClear: clearDragVisual, instanceId,
+    onUploadPaths: uploadPaths,
+    isBlocked: actionBlocked,
+  });
 
   const handlePaste = useCallback(async () => {
     if (!clipboard || !activeConnectionId) return;
@@ -558,11 +652,23 @@ export const FileManager = memo(function FileManager({
   }, [activeConnectionId, executeFileOperations]);
 
   const resolveConflict = async (action: ConflictAction, applyToAll = false) => {
-    if (!currentConflict || !activeConnectionId || isProcessing) return;
+    const destinationConnectionId = currentConflict?.destinationConnectionId ?? activeConnectionId;
+    if (!currentConflict || !destinationConnectionId || isProcessing) return;
 
-    setIsProcessing(true);
-    const toProcess = applyToAll ? [...pendingConflicts] : [currentConflict];
+    const toProcess = takeConflicts(currentConflict, applyToAll, action === 'combine'
+      ? item => item.canCombine === true
+      : item => !currentConflict.sourceKind || item.sourceKind === currentConflict.sourceKind);
+    if (toProcess.length === 0) return;
+    if (applyToAll || pendingConflicts.length === 1) setSelectedFiles([]);
     let successCount = 0;
+    const copiesOnly = toProcess.some(item => item.op === 'move' && item.sourceConnectionId !== destinationConnectionId);
+    const clipboardAtStart = clipboard;
+    const movedSources: string[] = [];
+    const sourceReservations: FileDestinationReservation[] = [];
+    let refreshAfterMutation = false;
+    const failures: FileTransferBatchResult = { failed: 0, cancelled: 0 };
+    let firstWarning: string | undefined;
+    let warningCount = 0;
 
     try {
       for (const conflict of toProcess) {
@@ -577,15 +683,15 @@ export const FileManager = memo(function FileManager({
           let finalTarget = target;
           if (action === 'rename') {
             let counter = 1;
-            const pathParts = target.match(/^(.*?)(\.[^.]*)?$/);
-            const base = pathParts ? pathParts[1] : target;
-            const ext = pathParts && pathParts[2] ? pathParts[2] : '';
+            const name = filePathLeafLabel(target);
+            const parent = target.slice(0, -name.length);
+            const { base, ext } = splitFileName(name, conflict.sourceKind === 'Directory');
 
             let exists = true;
             while (exists) {
-              const candidate = `${base} (${counter})${ext}`;
+              const candidate = `${parent}${base} (${counter})${ext}`;
               exists = await window.ipcRenderer.invoke('fs_exists', {
-                connectionId: activeConnectionId,
+                connectionId: destinationConnectionId,
                 path: candidate,
               });
               if (!exists) {
@@ -594,7 +700,7 @@ export const FileManager = memo(function FileManager({
               }
               counter++;
               if (counter > 100) {
-                showToast('error', `Could not find a unique name for "${conflict.name}" after 100 attempts. Skipping.`);
+                recordFileTransferFailure(failures, `Could not find a unique name for "${conflict.name}" after 100 attempts. Skipping.`);
                 finalTarget = ''; // Flag as failed
                 break;
               }
@@ -606,172 +712,155 @@ export const FileManager = memo(function FileManager({
             continue;
           }
 
-          if (action === 'overwrite') {
-            // Safe Overwrite: Rename existing to backup first
-            const backupPath = `${target}.bak-${Date.now()}`;
-            try {
-              await window.ipcRenderer.invoke('fs_rename', {
-                connectionId: activeConnectionId,
-                oldPath: target,
-                newPath: backupPath,
-                autoRename: false
-              });
+          const preconditionError = replacementPreconditionError({ sourceConnectionId, sourcePath: source,
+            destinationConnectionId: destinationConnectionId, destinationPath: finalTarget });
+          if (preconditionError) {
+            recordFileTransferFailure(failures, preconditionError);
+            continue;
+          }
 
-              // Now perform the move/copy
-              let opSuccess = false;
+          if (action === 'overwrite' || action === 'combine') {
+            if (op === 'copy' || sourceConnectionId !== destinationConnectionId) {
               try {
-                if (sourceConnectionId === activeConnectionId) {
+                if (await tryStagedReplacement({ sourceConnectionId, sourcePath: source,
+                  destinationConnectionId: destinationConnectionId, destinationPath: finalTarget,
+                  ...(action === 'combine' ? { folderMode: 'combine' as const } : {}) })) {
+                  successCount++;
+                  continue;
+                }
+              } catch (error) {
+                if (!isTransferCancellation(error)) recordFileTransferFailure(failures,
+                  `Cannot ${action === 'combine' ? 'combine' : 'replace'} "${conflict.name}": ${fileTransferFailureMessage(error)}${isFileTransferNotStarted(error) ? '' : '. Check Transfers for details.'}`);
+                continue;
+              }
+            }
+            if (op === 'move' && sourceConnectionId === destinationConnectionId) {
+              try {
+                sourceReservations.push(acquireFileDestination(sourceConnectionId, source));
+              } catch (error) {
+                recordFileTransferFailure(failures, `Cannot move "${conflict.name}": ${transferErrorMessage(error)}`);
+                continue;
+              }
+            }
+            let replacementTransferId: string | undefined;
+            refreshAfterMutation = true;
+            const result = await replaceFileWithBackup(target, {
+              destinationConnectionId: destinationConnectionId,
+              createBackupId: () => crypto.randomUUID(),
+              rename: async (from, to) => {
+                await window.ipcRenderer.invoke('fs_rename', {
+                  connectionId: destinationConnectionId, oldPath: from, newPath: to, autoRename: false,
+                });
+              },
+              write: async (backupPath, reservation) => {
+                if (sourceConnectionId === destinationConnectionId) {
                   if (op === 'move') {
                     await window.ipcRenderer.invoke('fs_rename', {
-                      connectionId: activeConnectionId,
-                      oldPath: source,
-                      newPath: finalTarget,
-                      autoRename: false
+                      connectionId: destinationConnectionId, oldPath: source, newPath: finalTarget, autoRename: false,
                     });
                   } else {
                     await window.ipcRenderer.invoke('fs_copy_batch', {
-                      connectionId: activeConnectionId,
+                      connectionId: destinationConnectionId,
                       operations: [{ from: source, to: finalTarget }]
                     });
                   }
                 } else {
-                  // Cross connection
-                  const transferId = addTransfer({
+                  replacementTransferId = await transferFile({
                     sourceConnectionId,
                     sourcePath: source,
-                    destinationConnectionId: activeConnectionId,
+                    destinationConnectionId: destinationConnectionId,
                     destinationPath: finalTarget,
-                  });
-
-                  const args: any = { sourcePath: source, destinationPath: finalTarget, transferId };
-                  let command = "sftp:copyToServer";
-
-                  if (sourceConnectionId === "local") {
-                    command = "sftp:put";
-                    args.id = activeConnectionId;
-                    args.localPath = source;
-                    args.remotePath = finalTarget;
-                  } else if (activeConnectionId === "local") {
-                    command = "sftp:get";
-                    args.id = sourceConnectionId;
-                    args.remotePath = source;
-                    args.localPath = finalTarget;
-                  } else {
-                    args.sourceConnectionId = sourceConnectionId;
-                    args.destinationConnectionId = activeConnectionId;
-                  }
-
-                  await window.ipcRenderer.invoke(command, args);
+                  }, { recoveryBackupPath: backupPath, reservation });
                 }
-                opSuccess = true;
-              } finally {
-                if (opSuccess) {
-                  // Success: Delete the backup
-                  await window.ipcRenderer.invoke('fs_delete', {
-                    connectionId: activeConnectionId,
-                    path: backupPath,
-                  }).catch(() => { }); // If delete fails, it's just a stray file
-                } else {
-                  // Failure: Restore the backup
-                  await window.ipcRenderer.invoke('fs_rename', {
-                    connectionId: activeConnectionId,
-                    oldPath: backupPath,
-                    newPath: target,
-                    autoRename: false
-                  }).catch(() => { });
-                }
-              }
-              successCount++;
-              continue; // Handled specially
-            } catch (err) {
-              showToast('error', `Failed to prepare overwrite for "${conflict.name}"`);
+              },
+              remove: async (path) => {
+                await window.ipcRenderer.invoke('fs_delete', { connectionId: destinationConnectionId, path });
+              },
+            });
+            if (result.outcome === 'blocked') {
+              recordFileTransferFailure(failures, result.error);
               continue;
             }
+            if (result.outcome === 'unconfirmed') {
+              if (!isTransferCancellation(result.error)) recordFileTransferFailure(failures,
+                `Replacement not confirmed for "${conflict.name}": ${transferErrorMessage(result.error)}. Check the destination and possible recovery backup at "${result.backupPath}" before retrying.`);
+              continue;
+            }
+            if (replacementTransferId) {
+              useAppStore.getState().setTransferRecovery(replacementTransferId,
+                result.outcome === 'replaced-backup-retained'
+                  ? { backupPath: result.backupPath, warning: `Could not remove the original backup: ${transferErrorMessage(result.error)}` }
+                  : null);
+            }
+            if (result.outcome === 'replaced-backup-retained') {
+              firstWarning ??= `Replaced "${conflict.name}", but could not remove its backup at "${result.backupPath}": ${transferErrorMessage(result.error)}`;
+              warningCount++;
+            }
+            if (op === 'move' && sourceConnectionId === destinationConnectionId) movedSources.push(source);
+            successCount++;
+            continue;
           }
 
-          if (sourceConnectionId === activeConnectionId) {
-            // Same connection
-            if (op === 'move') {
-              await window.ipcRenderer.invoke('fs_rename', {
-                connectionId: activeConnectionId,
-                oldPath: source,
-                newPath: finalTarget,
-                autoRename: false, // We already handled it explicitly
-              });
-            } else {
-              // Same-connection copy: use fs_copy_batch with single operation for consistency
-              await window.ipcRenderer.invoke('fs_copy_batch', {
-                connectionId: activeConnectionId,
-                operations: [{ from: source, to: finalTarget }]
-              });
+          let reservation: FileDestinationReservation;
+          try {
+            reservation = acquireFileDestination(destinationConnectionId, finalTarget);
+          } catch (error) {
+            recordFileTransferFailure(failures, `Cannot create "${conflict.name}": ${transferErrorMessage(error)}`);
+            continue;
+          }
+          try {
+            if (sourceConnectionId === destinationConnectionId) {
+              // Same connection
+              refreshAfterMutation = true;
+              if (op === 'move') {
+                const sourceReservation = acquireFileDestination(sourceConnectionId, source);
+                try {
+                  await window.ipcRenderer.invoke('fs_rename', {
+                    connectionId: destinationConnectionId, oldPath: source, newPath: finalTarget,
+                    autoRename: false, // We already handled it explicitly.
+                  });
+                } finally {
+                  sourceReservation.release();
+                }
+              } else {
+                // Same-connection copy: use fs_copy_batch with single operation for consistency
+                await window.ipcRenderer.invoke('fs_copy_batch', {
+                  connectionId: destinationConnectionId,
+                  operations: [{ from: source, to: finalTarget }]
+                });
+              }
+            } else if (sourceConnectionId) {
+              await transferFile({ sourceConnectionId, sourcePath: source, destinationConnectionId: destinationConnectionId, destinationPath: finalTarget }, { reservation });
             }
-          } else if (sourceConnectionId) {
-            // Cross connection
-            const transferId = addTransfer({
-              sourceConnectionId,
-              sourcePath: source,
-              destinationConnectionId: activeConnectionId,
-              destinationPath: finalTarget,
-            });
-
-            const args: any = { sourcePath: source, destinationPath: finalTarget, transferId };
-            let command = "sftp:copyToServer";
-
-            if (sourceConnectionId === "local") {
-              command = "sftp:put";
-              args.id = activeConnectionId;
-              args.localPath = source;
-              args.remotePath = finalTarget;
-            } else if (activeConnectionId === "local") {
-              command = "sftp:get";
-              args.id = sourceConnectionId;
-              args.remotePath = source;
-              args.localPath = finalTarget;
-            } else {
-              args.sourceConnectionId = sourceConnectionId;
-              args.destinationConnectionId = activeConnectionId;
-            }
-
-            try {
-              await window.ipcRenderer.invoke(command, args);
-            } catch (err: any) {
-              failTransfer(transferId, err.message || String(err));
-              continue; // Don't increment successCount if it failed to start
-            }
+            if (op === 'move' && sourceConnectionId === destinationConnectionId) movedSources.push(source);
+          } catch (error) {
+            recordFileTransferFailure(failures, transferErrorMessage(error));
+            continue;
+          } finally {
+            reservation.release();
           }
         }
         successCount++;
       }
 
-      const displayAction = action === 'overwrite' ? 'Overwritten' : (action === 'rename' ? 'Renamed' : 'Skipped');
-      showToast('success', `${displayAction} ${successCount} item(s)`);
-
-      // Refresh and move to next conflict or close
-      loadFiles(activeConnectionId, currentPath);
-
-      if (applyToAll) {
-        setPendingConflicts([]);
-        setCurrentConflict(null);
-        setSelectedFiles([]);
-        if (clipboard && clipboard.op === 'cut') clearClipboard();
-      } else {
-        const remaining = pendingConflicts.slice(1);
-        setPendingConflicts(remaining);
-        if (remaining.length > 0) {
-          setCurrentConflict(remaining[0]);
-        } else {
-          setCurrentConflict(null);
-          setSelectedFiles([]);
-          if (clipboard && clipboard.op === 'cut') clearClipboard();
-        }
-      }
+      const displayAction = action === 'combine' ? 'Combined' : action === 'overwrite' ? 'Overwritten' : (action === 'rename' ? 'Renamed' : 'Skipped');
+      if (successCount > 0) useAppStore.getState().setLastAction(`${displayAction} ${successCount} item(s)${copiesOnly ? '; source files are kept' : ''}`, 'info');
 
     } catch (e: any) {
-      showToast('error', `Failed to resolve conflict: ${e.message || String(e)}`);
-      setCurrentConflict(null);
-      setPendingConflicts([]);
+      recordFileTransferFailure(failures, e);
     } finally {
-      setIsProcessing(false);
+      const failure = fileTransferBatchFailure(failures);
+      if (failure) showToast('error', firstWarning ? `${failure} ${firstWarning}` : failure);
+      else if (firstWarning) showToast('warning', `${firstWarning}${warningCount > 1 ? ` (${warningCount} backups need attention.)` : ''}`);
+      sourceReservations.forEach(reservation => reservation.release());
+      if (movedSources.length > 0) {
+        useAppStore.setState(state => {
+          const next = acknowledgeMovedClipboard(state.clipboard, clipboardAtStart, destinationConnectionId, movedSources);
+          return next === state.clipboard ? state : { clipboard: next };
+        });
+      }
+      // Refresh each instance's live location, never navigate back to a captured path.
+      if (refreshAfterMutation) void useAppStore.getState().refreshConnectionFiles(destinationConnectionId);
     }
   };
 
@@ -857,6 +946,7 @@ export const FileManager = memo(function FileManager({
 
   const handleOpenFile = useCallback(async (file: FileEntry, providerOverride?: string) => {
     if (!activeConnectionId) return false;
+    if (actionBlocked('read', file.path)) return false;
     if (exceedsEditorReadLimit(file.size)) {
       showToast('error', EDITOR_READ_LIMIT_MESSAGE);
       return false;
@@ -890,7 +980,7 @@ export const FileManager = memo(function FileManager({
     } finally {
       if (requestId === editorReadRequestRef.current) setIsFileLoading(false);
     }
-  }, [activeConnectionId, currentPath, handleConnectionError, showToast]);
+  }, [activeConnectionId, currentPath, handleConnectionError, showToast, actionBlocked]);
 
   const handleOpenFileWithProvider = useCallback(async (file: FileEntry, providerId: string) => {
     if (!await handleOpenFile(file, providerId)) return;
@@ -942,7 +1032,9 @@ export const FileManager = memo(function FileManager({
     if (!editingFile || !target || editorTargetRef.current !== target) {
       throw new Error('The file or its connection is no longer available');
     }
+    let reservation: FileDestinationReservation | undefined;
     try {
+      reservation = acquireFileDestination(target.connectionId, target.path);
       await window.ipcRenderer.invoke('fs_write_file', {
         connectionId: target.connectionId,
         path: target.path,
@@ -952,12 +1044,13 @@ export const FileManager = memo(function FileManager({
         setEditorContent(content);
       }
     } catch (error: any) {
-      if (editorTargetRef.current === target && !handleConnectionError(target.connectionId, error, true)) {
-        showToast('error', `Failed to save file: ${error.message || String(error)}`);
-      }
+      // The editor owns save feedback; Files only updates connection state.
+      if (editorTargetRef.current === target) handleConnectionError(target.connectionId, error, true);
       throw error;
+    } finally {
+      reservation?.release();
     }
-  }, [editingFile, editingFileTarget, handleConnectionError, showToast]);
+  }, [editingFile, editingFileTarget, handleConnectionError]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent, file?: FileEntry) => {
     e.preventDefault();
@@ -965,21 +1058,41 @@ export const FileManager = memo(function FileManager({
     setContextMenu({ x: e.clientX, y: e.clientY, file: file || null });
     selectContextFile(file);
   }, [selectContextFile]);
+  const handleKeyboardContextMenu = useCallback((position: { x: number; y: number }, file?: FileEntry) => {
+    setContextMenu({ ...position, file: file ?? null, keyboard: true });
+    selectContextFile(file);
+  }, [selectContextFile]);
 
   const showHiddenFiles = settings.fileManager.showHiddenFiles;
+  const loadBreadcrumbFolders = useCallback(async (path: string) => {
+    if (!activeConnectionId || !isConnected) throw new Error('Files connection unavailable');
+    const entries: FileEntry[] = await window.ipcRenderer.invoke('fs_list', { connectionId: activeConnectionId, path });
+    return fileFolderOptions(entries, path, showHiddenFiles);
+  }, [activeConnectionId, isConnected, showHiddenFiles]);
+  const folderFiles = useMemo(() => showHiddenFiles ? files : files.filter(file => !file.name.startsWith('.')), [files, showHiddenFiles]);
   const filteredFiles = useMemo(
-    () => files.filter((f) => {
-      if (!showHiddenFiles && f.name.startsWith('.')) return false;
+    () => folderFiles.filter((f) => {
       if (!fileMatchesQuery(f, searchTerm)) return false;
       if (!fileMatchesSearchType(f, typeFilter)) return false;
       return true;
     }),
-    [files, showHiddenFiles, searchTerm, typeFilter],
+    [folderFiles, searchTerm, typeFilter],
   );
   const paintedFiles = useMemo(
     () => sortFileEntries(filteredFiles, sortColumn, sortDirection, settings.fileManager.sortFoldersFirst !== false),
     [filteredFiles, sortColumn, sortDirection, settings.fileManager.sortFoldersFirst],
   );
+  const foldersToCalculate = useMemo(() => folderSizePaths(paintedFiles), [paintedFiles]);
+  const showFolderSizes = settings.fileManager.showFolderSizes !== false;
+  const folderSizes = useFolderSizes(activeConnectionId ?? undefined, currentPath, files, connection,
+    isFilesSurfaceActive && isConnected && !loading, showFolderSizes, foldersToCalculate);
+  const selectionSummary = useMemo(() => fileSelectionSummary(files, selectedFiles, folderSizes.states),
+    [files, selectedFiles, folderSizes.states]);
+  const toggleFolderSizes = useCallback(() => {
+    if (useAppStore.getState().settings.fileManager.showFolderSizes !== false) folderSizes.cancel();
+    void updateFileManagerSettings({ showFolderSizes: useAppStore.getState().settings.fileManager.showFolderSizes === false })
+      .catch(() => showToast('error', 'Could not save the folder-size preference.'));
+  }, [folderSizes.cancel, updateFileManagerSettings, showToast]);
   const handleSort = useCallback((column: FileSortColumn) => {
     if (column === sortColumn) {
       setSortDirection((dir) => (dir === 'asc' ? 'desc' : 'asc'));
@@ -998,6 +1111,7 @@ export const FileManager = memo(function FileManager({
   const handleCreateFolder = async () => {
     const trimmedName = newFolderName.trim();
     if (!trimmedName || !activeConnectionId) return;
+    if (actionBlocked('createFolder')) return;
     if (trimmedName.includes('/') || trimmedName.includes('\\') || trimmedName === '.' || trimmedName === '..') {
       showToast('error', 'Invalid folder name: Contains invalid characters');
       return;
@@ -1015,6 +1129,7 @@ export const FileManager = memo(function FileManager({
   const handleCreateFile = async () => {
     const trimmedName = newFileName.trim();
     if (!trimmedName || !activeConnectionId) return;
+    if (actionBlocked('createFile')) return;
     if (trimmedName.includes('/') || trimmedName.includes('\\') || trimmedName === '.' || trimmedName === '..') {
       showToast('error', 'Invalid file name: Contains invalid characters');
       return;
@@ -1024,8 +1139,10 @@ export const FileManager = memo(function FileManager({
       showToast('error', `A file or folder named "${trimmedName}" already exists.`);
       return;
     }
+    let reservation: FileDestinationReservation | undefined;
     try {
       const fullPath = currentPath === '/' ? `/${trimmedName}` : `${currentPath}/${trimmedName}`;
+      reservation = acquireFileDestination(activeConnectionId, fullPath);
       await window.ipcRenderer.invoke('fs_touch', { connectionId: activeConnectionId, path: fullPath });
       refreshFiles(activeConnectionId);
       setIsNewFileModalOpen(false);
@@ -1033,6 +1150,8 @@ export const FileManager = memo(function FileManager({
     } catch (error: any) {
       if (handleConnectionError(activeConnectionId, error)) return;
       showToast('error', `Failed to create file: ${error.message || String(error)}`);
+    } finally {
+      reservation?.release();
     }
   };
 
@@ -1040,6 +1159,7 @@ export const FileManager = memo(function FileManager({
   const handleRename = async () => {
     const trimmedName = renameNewName.trim();
     if (!trimmedName || !activeConnectionId) return;
+    if (actionBlocked('rename', files.find(file => file.name === renameOldName)?.path)) return;
     if (trimmedName.includes('/') || trimmedName.includes('\\') || trimmedName === '.' || trimmedName === '..') {
       showToast('error', 'Invalid name: Contains invalid characters');
       return;
@@ -1057,11 +1177,13 @@ export const FileManager = memo(function FileManager({
     setRenameNewName('');
   };
 
-  const openRenameModal = (filename: string) => {
+  const openRenameModal = useCallback((filename: string) => {
+    const file = files.find(file => file.name === filename);
+    if (!file || actionBlocked('rename', file.path)) return;
     setRenameOldName(filename);
     setRenameNewName(filename);
     setIsRenameModalOpen(true);
-  };
+  }, [files, actionBlocked]);
 
   // Move performUpload up to be stable and reusable
   // (Done above)
@@ -1190,23 +1312,29 @@ export const FileManager = memo(function FileManager({
 
   const handleRefresh = useCallback(() => {
     if (!activeConnectionId) return;
+    actionAccess.refresh();
     void refreshFiles(activeConnectionId);
-  }, [activeConnectionId, refreshFiles]);
+  }, [activeConnectionId, refreshFiles, actionAccess.refresh]);
 
   const handleToggleSearch = useCallback((open: boolean) => {
+    if (!open) {
+      setSearchTerm('');
+      setTypeFilter('all');
+    }
     setIsSearchOpen(open);
   }, []);
 
   const handleTogglePlaces = useCallback(() => {
+    if (isNarrow) { setPlacesOverlayOpen(open => !open); return; }
     void updateFileManagerSettings({ placesCollapsed: !placesCollapsed });
-  }, [placesCollapsed, updateFileManagerSettings]);
+  }, [isNarrow, placesCollapsed, updateFileManagerSettings]);
 
   useEffect(() => {
     if (!isLocal) {
       setVolumes([]);
       return;
     }
-    if (placesCollapsed) return;
+    if (!showPlaces) return;
     let cancelled = false;
     void loadLocalFileVolumes().then((rows) => {
       if (!cancelled) setVolumes(rows);
@@ -1214,7 +1342,7 @@ export const FileManager = memo(function FileManager({
     return () => {
       cancelled = true;
     };
-  }, [isLocal, placesCollapsed]);
+  }, [isLocal, showPlaces]);
 
   const handleBack = useCallback(() => {
     if (activeConnectionId) navigateBack(activeConnectionId);
@@ -1259,8 +1387,8 @@ export const FileManager = memo(function FileManager({
     void openTerminalHere(activeConnectionId, currentPath);
   }, [activeConnectionId, currentPath]);
 
-  const handleNewFolder = useCallback(() => setIsNewFolderModalOpen(true), []);
-  const handleNewFile = useCallback(() => setIsNewFileModalOpen(true), []);
+  const handleNewFolder = useCallback(() => { if (!actionBlocked('createFolder')) setIsNewFolderModalOpen(true); }, [actionBlocked]);
+  const handleNewFile = useCallback(() => { if (!actionBlocked('createFile')) setIsNewFileModalOpen(true); }, [actionBlocked]);
 
   const handleRemoveBookmark = useCallback((path: string) => {
     if (!activeConnectionId) return;
@@ -1276,6 +1404,7 @@ export const FileManager = memo(function FileManager({
 
   const handleDownload = async () => {
     if (selectedFiles.length === 0 || !activeConnectionId) return;
+    if (actionBlocked('read')) return;
     try {
       const preferredDownloadDir = settings.fileManager.defaultDownloadPath?.trim();
       const { filePaths, canceled } = await window.ipcRenderer.invoke('dialog:openDirectory', {
@@ -1296,29 +1425,20 @@ export const FileManager = memo(function FileManager({
       // We process download locally in component for now as it involves local FS dialog
       setIsProcessing(true);
 
-      for (const fileName of selectedFiles) {
+      void runFileTransferBatch([...selectedFiles], fileName => {
         const remotePath = currentPath === '/' ? `/${fileName}` : `${currentPath}/${fileName}`;
         const localPath = targetDir.includes('\\') ? `${targetDir}\\${fileName}` : `${targetDir}/${fileName}`;
 
-        // Add transfer to store for progress tracking
-        const transferId = addTransfer({
+        return transferFile({
           sourceConnectionId: activeConnectionId,
           sourcePath: remotePath,
           destinationConnectionId: 'local',
           destinationPath: localPath,
         });
-
-        // Fire and forget - tracking happens via events
-        window.ipcRenderer.invoke('sftp:get', {
-          id: activeConnectionId,
-          remotePath,
-          localPath,
-          transferId,
-        }).catch(err => {
-          console.error('Download failed', err);
-          failTransfer(transferId, err.message || String(err));
-        });
-      }
+      }).then(result => {
+        const failure = fileTransferBatchFailure(result);
+        if (failure) showToast('error', `Download failed: ${failure}`);
+      });
       setIsProcessing(false);
     } catch (error: any) {
       setIsProcessing(false);
@@ -1329,6 +1449,7 @@ export const FileManager = memo(function FileManager({
 
   const handleDownloadAsZip = async () => {
     if (selectedFiles.length === 0 || !activeConnectionId) return;
+    if (actionBlocked('read')) return;
     if (isZipping) return; // Prevent double-click opening two dialogs
     if (activeConnectionId === 'local') {
       showToast('error', 'Download as Archive is only available for remote server connections');
@@ -1378,17 +1499,28 @@ export const FileManager = memo(function FileManager({
         destinationPath: filePath,
         label: 'Compressing',
       });
+      let reservation: FileDestinationReservation;
+      try {
+        reservation = acquireFileDestination('local', filePath);
+      } catch (error) {
+        failTransfer(transferId, transferErrorMessage(error));
+        throw error;
+      }
 
-      // Fire-and-forget: completion/failure reported via transfer-success/transfer-error events
-      window.ipcRenderer.invoke('sftp:downloadAsZip', {
-        id: activeConnectionId,
-        remotePaths,
-        localPath: filePath,
-        transferId,
-      }).catch((err: any) => {
-        // Catches invoke-level errors (e.g. command not found) — backend errors come via transfer-error
-        failTransfer(transferId, err.message || String(err));
-      });
+      // The detached promise holds its destination through native finalization.
+      void (async () => {
+        try {
+          await window.ipcRenderer.invoke('sftp:downloadAsZip', {
+            id: activeConnectionId, remotePaths, localPath: filePath, transferId, waitForCompletion: true,
+          });
+          useAppStore.getState().completeTransfer(transferId);
+        } catch (error: unknown) {
+          if (isTransferCancellation(error)) useAppStore.getState().cancelTransfer(transferId);
+          else failTransfer(transferId, transferErrorMessage(error));
+        } finally {
+          reservation.release();
+        }
+      })();
     } catch (error: any) {
       if (handleConnectionError(activeConnectionId, error)) return;
       showToast('error', `Archive download failed: ${error.message || String(error)}`);
@@ -1399,8 +1531,12 @@ export const FileManager = memo(function FileManager({
 
   const executeDelete = useCallback(async () => {
     if (selectedFiles.length === 0 || !activeConnectionId) return;
+    if (actionBlocked('delete')) return;
 
-    const paths = selectedFiles.map(name => currentPath === '/' ? `/${name}` : `${currentPath}/${name}`);
+    // Native listing paths are identities; rebuilding them mixes Windows separators.
+    const selectedNames = new Set(selectedFiles);
+    const paths = files.filter(file => selectedNames.has(file.name)).map(file => file.path);
+    if (paths.length === 0) return;
 
     setIsDeleting(true);
     try {
@@ -1413,17 +1549,18 @@ export const FileManager = memo(function FileManager({
     } finally {
       setIsDeleting(false);
     }
-  }, [activeConnectionId, currentPath, deleteEntries, handleConnectionError, selectedFiles, showToast]);
+  }, [activeConnectionId, files, deleteEntries, handleConnectionError, selectedFiles, showToast, actionBlocked]);
 
   const handleDelete = useCallback(() => {
     if (selectedFiles.length === 0 || !activeConnectionId) return;
+    if (actionBlocked('delete')) return;
 
     if (settings.fileManager.confirmDelete) {
       setIsDeleteModalOpen(true);
     } else {
       void executeDelete();
     }
-  }, [activeConnectionId, executeDelete, selectedFiles, settings.fileManager.confirmDelete]);
+  }, [activeConnectionId, executeDelete, selectedFiles, settings.fileManager.confirmDelete, actionBlocked]);
 
   // Drag and Drop
   const handleDragOver = (e: React.DragEvent) => {
@@ -1538,10 +1675,12 @@ export const FileManager = memo(function FileManager({
           label: 'Download',
           icon: <Download size={14} />,
           action: handleDownload,
+          disabled: actionBlocked('read'),
         },
         ...(contextMenu.file.type === '-' ? [{
           label: 'Open With…',
           icon: <FilePlus size={14} />,
+          disabled: actionBlocked('read', contextMenu.file.path),
           children: editorProviderOptions.map((option) => ({
             label: `${option.value === (settings.editor?.defaultProvider ?? 'com.zync.editor.codemirror') ? '✓ ' : ''}${option.label}`,
             action: () => {
@@ -1561,23 +1700,30 @@ export const FileManager = memo(function FileManager({
           label: 'Download as Archive (.tar.gz)',
           icon: <FileArchive size={14} />,
           action: handleDownloadAsZip,
+          disabled: actionBlocked('read'),
         },
         { separator: true },
         {
           label: 'Copy',
           icon: <Copy size={14} />,
           action: () => handleCopy(false),
+          disabled: Boolean(copyUnavailable),
+          disabledReason: copyUnavailable,
         },
         {
           label: 'Cut',
           icon: <Scissors size={14} />,
           action: () => handleCopy(true),
+          disabled: Boolean(cutUnavailable),
+          disabledReason: cutUnavailable,
         },
         {
           label: 'Copy to Server...',
           icon: <Server size={14} />,
+          disabled: actionBlocked('read'),
           action: () => {
             if (!contextMenu?.file || !activeConnectionId) return;
+            if (actionBlocked('read')) return;
 
             // If the right-clicked file is part of a selection, copy all selected
             const targetFiles = selectedFiles.includes(contextMenu.file.name)
@@ -1622,12 +1768,14 @@ export const FileManager = memo(function FileManager({
           label: 'Rename',
           icon: <FolderInput size={14} />,
           action: () => openRenameModal(contextMenu.file?.name as string),
+          disabled: actionBlocked('rename', contextMenu.file.path),
         },
         {
           label: 'Delete',
           icon: <Trash2 size={14} />,
           variant: 'danger',
           action: handleDelete,
+          disabled: actionBlocked('delete'),
         },
         {
           label: 'Properties',
@@ -1650,7 +1798,7 @@ export const FileManager = memo(function FileManager({
         label: clipboard ? `Paste ${clipboard.files.length > 1 ? `(${clipboard.files.length})` : ''}` : 'Paste',
         icon: <Clipboard size={14} />,
         action: handlePaste,
-        disabled: !clipboard,
+        disabled: !clipboard || actionBlocked('receive'),
       });
 
       contextMenuItems.push(
@@ -1658,6 +1806,7 @@ export const FileManager = memo(function FileManager({
           label: 'Upload Files',
           icon: <Upload size={14} />,
           action: handleUpload,
+          disabled: actionBlocked('createFile'),
         },
         { separator: true },
         ...(activeConnectionId
@@ -1677,19 +1826,21 @@ export const FileManager = memo(function FileManager({
             {
               label: 'New File',
               icon: <FilePlus size={14} />,
-              action: () => setIsNewFileModalOpen(true),
+              action: handleNewFile,
+              disabled: actionBlocked('createFile'),
             },
             {
               label: 'New Folder',
               icon: <FolderInput size={14} />,
-              action: () => setIsNewFolderModalOpen(true),
+              action: handleNewFolder,
+              disabled: actionBlocked('createFolder'),
             },
           ]
         },
         {
           label: 'Refresh',
           icon: <RotateCw size={14} />,
-          action: () => activeConnectionId && loadFiles(activeConnectionId, currentPath),
+          action: handleRefresh,
         },
       );
     }
@@ -1698,7 +1849,9 @@ export const FileManager = memo(function FileManager({
 
 
   useFileKeyboard({
+    requestFocusReveal,
     containerRef,
+    listingFocusRef,
     isConnected,
     isFilesSurfaceActive,
     settings,
@@ -1711,7 +1864,7 @@ export const FileManager = memo(function FileManager({
     gridColumnCount,
     isSearchOpen,
     searchTerm,
-    setIsSearchOpen,
+    setIsSearchOpen: handleToggleSearch,
     setSearchTerm,
     isPropertiesOpen,
     setIsPropertiesOpen,
@@ -1726,15 +1879,13 @@ export const FileManager = memo(function FileManager({
     handlePaste,
     handleDelete,
     toggleBookmark,
-    refreshFiles,
+    handleRefresh,
     navigateBack,
     navigateForward,
     setViewMode,
     updateFileManagerSettings,
     setIsEditingPath,
-    setRenameOldName,
-    setRenameNewName,
-    setIsRenameModalOpen,
+    openRenameModal,
   });
 
 
@@ -1743,17 +1894,17 @@ export const FileManager = memo(function FileManager({
     const handlePanelShow = () => {
       if (!isFilesSurfaceActive) return;
       if (isFileManagerPanelShown(containerRef.current)) {
-        containerRef.current?.focus();
+        focusOnActivation();
       }
     };
     window.addEventListener('zync:files-panel-show', handlePanelShow);
     return () => window.removeEventListener('zync:files-panel-show', handlePanelShow);
-  }, [isFilesSurfaceActive]);
+  }, [isFilesSurfaceActive, focusOnActivation]);
 
   useEffect(() => {
     if (surface !== 'pane' || !isFilesSurfaceActive) return;
-    containerRef.current?.focus();
-  }, [surface, isFilesSurfaceActive]);
+    focusOnActivation();
+  }, [surface, isFilesSurfaceActive, focusOnActivation]);
 
   useEffect(() => {
     if (!editingFile) return;
@@ -1775,21 +1926,36 @@ export const FileManager = memo(function FileManager({
     setHeldPropertiesFiles(propertiesEntries);
   }, [isPropertiesOpen, propertiesEntries]);
   const inspectorFiles = isPropertiesOpen ? propertiesEntries : heldPropertiesFiles;
+  const permissionTarget = activeConnectionId && propertiesEntries.length === 1
+    ? { connectionId: activeConnectionId, path: propertiesEntries[0].path } : null;
+  const permissionEditor = useFilePermissionEditor(permissionTarget,
+    isPropertiesOpen && isFilesSurfaceActive && isConnected,
+    useAppStore.getState().refreshConnectionFiles);
+  const placesContent = <FilePlacesSidebar
+    homePath={homePath} currentPath={currentPath} recents={recentPaths} bookmarks={bookmarks}
+    volumes={isLocal ? volumes : []} platform={typeof window !== 'undefined' ? window.electronUtils?.platform : undefined}
+    recentEnabled={settings.fileManager.placesRecentEnabled !== false} recentLimit={clampFileRecentLimit(settings.fileManager.placesRecentLimit)}
+    onNavigate={path => { setPlacesOverlayOpen(false); navigateToPath(path); }}
+    onAddBookmark={toggleBookmark} onRemoveBookmark={handleRemoveBookmark} onPinPaths={pinDroppedFolders}
+    onRecentEnabledChange={enabled => { void updateFileManagerSettings({ placesRecentEnabled: enabled }); }}
+    onRecentLimitChange={limit => { void updateFileManagerSettings({ placesRecentLimit: clampFileRecentLimit(limit) }); }}
+    onClearRecent={() => { if (activeConnectionId) clearRecentPaths(activeConnectionId); }}
+    showHeader={!isNarrow}
+  />;
 
   return (
     <div
       ref={containerRef}
-      tabIndex={0}
-      className={`flex-1 min-w-0 flex flex-col h-full bg-app-bg relative outline-none focus-within:ring-0 ${isTauriDraggingOver ? 'ring-2 ring-app-accent ring-inset' : ''}`}
+      tabIndex={-1}
+      className={`files-manager flex-1 min-h-0 min-w-0 flex flex-col h-full bg-app-bg relative outline-none focus-within:ring-0 ${isTauriDraggingOver ? 'ring-2 ring-app-accent ring-inset' : ''}`}
+      data-files-quiet-focus={activationFocus.quiet || undefined}
+      style={selectionColors}
+      onFocusCapture={activationFocus.onFocusCapture}
+      onKeyDownCapture={activationFocus.onKeyDownCapture}
+      onPointerDownCapture={activationFocus.onPointerDownCapture}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      onClick={(e) => {
-        // Only focus if clicking the container or its non-input children
-        if (!(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) {
-          containerRef.current?.focus();
-        }
-      }}
       onMouseDown={(e) => {
         if (e.button === 3) {
           e.preventDefault();
@@ -1813,25 +1979,21 @@ export const FileManager = memo(function FileManager({
       )}
 
       <FileToolbar
+        loadFolders={loadBreadcrumbFolders}
         currentPath={currentPath}
         homePath={homePath}
         osName={osName}
         onNavigate={navigateToPath}
-        onRefresh={handleRefresh}
         onUpload={handleUpload}
         onUploadFolder={handleUploadFolder}
         onNewFolder={handleNewFolder}
         onNewFile={handleNewFile}
-        viewMode={viewMode}
-        onToggleView={setViewMode}
-        searchTerm={searchTerm}
-        onSearch={setSearchTerm}
-        isSearchOpen={isSearchOpen}
-        onToggleSearch={handleToggleSearch}
+        createFileDisabled={actionBlocked('createFile')}
+        createFolderDisabled={actionBlocked('createFolder')}
         isEditingPath={isEditingPath}
         onTogglePathEdit={setIsEditingPath}
-        isNarrow={isNarrow}
-        placesCollapsed={placesCollapsed}
+        disabled={!isConnected || isLoading || !currentPath}
+        placesCollapsed={!showPlaces}
         onTogglePlaces={handleTogglePlaces}
         onBack={handleBack}
         onForward={handleForward}
@@ -1840,72 +2002,55 @@ export const FileManager = memo(function FileManager({
         backEntries={backEntries}
         forwardEntries={forwardEntries}
         onHistoryJump={handleHistoryJump}
-        showHidden={showHiddenFiles}
-        onToggleHidden={handleToggleHidden}
-        onZoomIn={handleZoomIn}
-        onZoomOut={handleZoomOut}
-        canZoomIn={canZoomIn}
-        canZoomOut={canZoomOut}
-        sortColumn={sortColumn}
-        sortDirection={sortDirection}
-        onSort={applySort}
-        onCopyLocation={handleCopyLocation}
-        onBookmark={toggleBookmark}
-        isBookmarked={isBookmarked}
-        onPaste={handlePaste}
-        canPaste={Boolean(clipboard)}
-        onSelectAll={handleSelectAllFiles}
-        onProperties={handleOpenProperties}
-        onOpenTerminal={activeConnectionId ? handleOpenTerminalChrome : undefined}
-        typeFilter={typeFilter}
-        onTypeFilter={setTypeFilter}
         connectionId={activeConnectionId}
       />
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="relative flex min-h-0 min-w-0 flex-1">
-        {isNarrow && (
-          <button
-            type="button"
-            className={cn(
-              'absolute inset-0 z-20 bg-black/35 transition-opacity duration-200 ease-out motion-reduce:transition-none',
-              placesCollapsed && !isPropertiesOpen ? 'pointer-events-none opacity-0' : 'opacity-100',
-            )}
-            aria-label={isPropertiesOpen && placesCollapsed ? 'Close properties' : 'Close places'}
-            tabIndex={placesCollapsed && !isPropertiesOpen ? -1 : 0}
-            onClick={() => {
-              if (!placesCollapsed) void updateFileManagerSettings({ placesCollapsed: true });
-              if (isPropertiesOpen) setIsPropertiesOpen(false);
-            }}
-          />
-        )}
-        <FileSideDrawer open={!placesCollapsed} width={FILE_PLACES_WIDTH_PX} side="left" overlay={isNarrow}>
-          <FilePlacesSidebar
-            homePath={homePath}
-            currentPath={currentPath}
-            recents={recentPaths}
-            bookmarks={bookmarks}
-            volumes={isLocal ? volumes : []}
-            platform={typeof window !== 'undefined' ? window.electronUtils?.platform : undefined}
-            recentEnabled={settings.fileManager.placesRecentEnabled !== false}
-            recentLimit={clampFileRecentLimit(settings.fileManager.placesRecentLimit)}
-            onNavigate={navigateToPath}
-            onAddBookmark={toggleBookmark}
-            onRemoveBookmark={handleRemoveBookmark}
-            onPinPaths={pinDroppedFolders}
-            onRecentEnabledChange={(enabled) => {
-              void updateFileManagerSettings({ placesRecentEnabled: enabled });
-            }}
-            onRecentLimitChange={(limit) => {
-              void updateFileManagerSettings({ placesRecentLimit: clampFileRecentLimit(limit) });
-            }}
-            onClearRecent={() => {
-              if (activeConnectionId) clearRecentPaths(activeConnectionId);
-            }}
-          />
-        </FileSideDrawer>
+      <FileLayoutSurface>
+        {!isNarrow && <FileSideDrawer open={!placesCollapsed} width={FILE_PLACES_WIDTH_PX} side="left">{placesContent}</FileSideDrawer>}
       {/* biome-ignore lint/a11y/noStaticElementInteractions: interactive div */}
-      <div className="flex-1 min-h-0 min-w-0 overflow-hidden relative flex flex-col" onClick={() => setContextMenu(null)}>
+      <div className="files-content flex-1 min-h-0 min-w-0 overflow-hidden relative flex flex-col" onClick={() => setContextMenu(null)}>
+        <FileContentsHeader
+          folderName={filePathLeafLabel(currentPath, { homePath, osName })}
+          visibleCount={paintedFiles.length}
+          totalCount={folderFiles.length}
+          selection={selectionSummary}
+          loading={isLoading}
+          searchTerm={searchTerm}
+          onSearch={setSearchTerm}
+          isSearchOpen={isSearchOpen}
+          onToggleSearch={handleToggleSearch}
+          typeFilter={typeFilter}
+          onTypeFilter={setTypeFilter}
+          isPropertiesOpen={isPropertiesOpen}
+          onProperties={() => isPropertiesOpen ? setIsPropertiesOpen(false) : handleOpenProperties()}
+          onRefresh={handleRefresh}
+          folderSizes={{ active: folderSizes.active, limited: folderSizes.limited, cancel: folderSizes.cancel }}
+          onCopyLocation={handleCopyLocation}
+          onBookmark={toggleBookmark}
+          isBookmarked={isBookmarked}
+          onOpenTerminal={activeConnectionId ? handleOpenTerminalChrome : undefined}
+          onPaste={handlePaste}
+          canPaste={Boolean(clipboard) && !actionBlocked('receive')}
+          onSelectAll={handleSelectAllFiles}
+          onClearSelection={() => { setSelectedFiles([]); listingFocusRef.current?.focus({ preventScroll: true }); }}
+          disabled={!isConnected || isLoading || !currentPath}
+          view={{ viewMode, onToggleView: setViewMode, showHidden: showHiddenFiles,
+            showFolderSizes, onToggleFolderSizes: toggleFolderSizes,
+            onToggleHidden: handleToggleHidden, onZoomIn: handleZoomIn, onZoomOut: handleZoomOut,
+            canZoomIn, canZoomOut, sortColumn, sortDirection, onSort: applySort,
+            detailColumns, onToggleColumn: column => setDetailColumns(current => current.includes(column) ? current.filter(item => item !== column) : [...current, column]) }}
+        />
+        {actionAccess.unavailable && <div className="flex shrink-0 items-center gap-3 border-b border-app-border/30 px-3 py-2">
+          <p role="status" className="flex-1 text-xs text-app-muted">Unavailable for this account: {actionAccess.unavailable}. Check again if permissions have changed.</p>
+          <Button type="button" size="sm" variant="secondary" onClick={handleRefresh}>Check access again</Button>
+        </div>}
+        {isConnected && currentError && currentError !== 'DISCONNECTED' && !isLoading && (
+          <div className="flex shrink-0 items-center gap-3 border-b border-app-border/30 px-3 py-2">
+            <StateMessage variant="error" className="flex-1 text-xs">{currentError}</StateMessage>
+            <Button type="button" size="sm" variant="secondary" onClick={handleRefresh}>Retry</Button>
+          </div>
+        )}
         {(isReconnectPending || currentError === 'DISCONNECTED' || (!isConnected && !isLocal)) ? (
           <TerminalDisconnectedView
             connection={connection}
@@ -1932,7 +2077,13 @@ export const FileManager = memo(function FileManager({
           />
         ) : (
           <FileGrid
+            focusRevealRequest={focusRevealRequest}
+            focusRef={listingFocusRef} onFocusItem={setFocusedFile}
+            label={`Files in ${filePathLeafLabel(currentPath, { homePath, osName }) || 'current folder'}`}
+            detailColumns={detailColumns} onKeyboardContextMenu={handleKeyboardContextMenu}
             files={paintedFiles}
+            folderSizeStates={folderSizes.states}
+            onFolderSizeDetails={folderSizes.inspect}
             selectedFiles={selectedFiles}
             focusedFile={focusedFile || undefined}
             onSelect={handleSelect}
@@ -1952,61 +2103,55 @@ export const FileManager = memo(function FileManager({
             listZoom={listZoom}
             clickPolicy={settings.fileManager.clickPolicy || 'double'}
             dateTimeFormat={settings.fileManager.dateTimeFormat || 'simple'}
+            emptyState={currentError ? { title: 'Folder unavailable', description: 'Use Retry above to reload this folder.' }
+              : searchTerm || typeFilter !== 'all' ? { title: 'No matches in this folder', description: 'Try another name or clear the folder filter.',
+                onReset: () => { setSearchTerm(''); setTypeFilter('all'); } }
+              : files.length > 0 ? { title: 'No visible files', description: 'Hidden files are currently excluded. Use View to show them.' }
+              : undefined}
           />
         )}
-        <FileFloatingBar loading={isLoading} selectedCount={selectedFiles.length} totalCount={paintedFiles.length} />
       </div>
-        <FileSideDrawer open={isPropertiesOpen} width={FILE_PROPERTIES_WIDTH_PX} side="right" overlay>
+        {propertiesInline && <FileSideDrawer open={isPropertiesOpen} width={FILE_PROPERTIES_WIDTH_PX} side="right">
           <PropertiesPanel
             files={inspectorFiles}
+            permissionEditor={permissionEditor}
+            folderSizes={folderSizes}
             onClose={() => setIsPropertiesOpen(false)}
             dateTimeFormat={settings.fileManager.dateTimeFormat || 'simple'}
           />
-        </FileSideDrawer>
-      </div>
-      {isNarrow && (
-        <FileBottomActionBar>
-          <FileHistoryControls
-            canGoBack={canGoBack}
-            canGoForward={canGoForward}
-            onBack={handleBack}
-            onForward={handleForward}
-            backEntries={backEntries}
-            forwardEntries={forwardEntries}
-            onJump={handleHistoryJump}
-            menuSide="top"
-          />
-          <FileViewControls
-            viewMode={viewMode}
-            onToggleView={setViewMode}
-            showHidden={showHiddenFiles}
-            onToggleHidden={handleToggleHidden}
-            onZoomIn={handleZoomIn}
-            onZoomOut={handleZoomOut}
-            canZoomIn={canZoomIn}
-            canZoomOut={canZoomOut}
-            sortColumn={sortColumn}
-            sortDirection={sortDirection}
-            onSort={applySort}
-            menuSide="top"
-          />
-        </FileBottomActionBar>
-      )}
+        </FileSideDrawer>}
+      </FileLayoutSurface>
+
+      <Modal isOpen={isFilesSurfaceActive && isNarrow && placesOverlayOpen} restoreFocus={isFilesSurfaceActive} onClose={() => setPlacesOverlayOpen(false)} title="Places" width="max-w-sm" contentClassName="p-0">
+        <div className="h-[min(65vh,28rem)]">{placesContent}</div>
+      </Modal>
+      <Modal isOpen={isFilesSurfaceActive && !propertiesInline && isPropertiesOpen} restoreFocus={isFilesSurfaceActive} onClose={() => setIsPropertiesOpen(false)} title="Properties" width="max-w-sm" contentClassName="p-0">
+        <PropertiesPanel files={inspectorFiles} onClose={() => setIsPropertiesOpen(false)} showHeader={false}
+          folderSizes={folderSizes}
+          permissionEditor={permissionEditor}
+          dateTimeFormat={settings.fileManager.dateTimeFormat || 'simple'} />
+      </Modal>
       </div>
 
+      <FolderSizeDetails state={folderSizes.details} onClose={folderSizes.closeDetails} restoreFocus={isFilesSurfaceActive} />
       {/* Context Menu */}
       {contextMenu && (
         <ContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
           items={contextMenuItems}
-          onClose={() => setContextMenu(null)}
+          autoFocus={contextMenu.keyboard}
+          onClose={() => {
+            if (document.activeElement?.closest('[role="menu"]')) listingFocusRef.current?.focus({ preventScroll: true });
+            setContextMenu(null);
+          }}
         />
       )}
 
       {/* Modals */}
       <Modal isOpen={isNewFileModalOpen} onClose={() => setIsNewFileModalOpen(false)} title="New File">
         <div className="space-y-4">
+          {actionBlocked('createFile') && <StateMessage variant="status">Creating files is unavailable for this account. Close and check access again if permissions have changed.</StateMessage>}
           <Input
             label="File Name"
             placeholder="my-file.txt"
@@ -2019,7 +2164,7 @@ export const FileManager = memo(function FileManager({
             <Button variant="ghost" onClick={() => setIsNewFileModalOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleCreateFile}>Create</Button>
+            <Button onClick={handleCreateFile} disabled={actionBlocked('createFile')}>Create</Button>
           </div>
         </div>
       </Modal>
@@ -2027,6 +2172,7 @@ export const FileManager = memo(function FileManager({
 
       <Modal isOpen={isNewFolderModalOpen} onClose={() => setIsNewFolderModalOpen(false)} title="New Folder">
         <div className="space-y-4">
+          {actionBlocked('createFolder') && <StateMessage variant="status">Creating folders is unavailable for this account. Close and check access again if permissions have changed.</StateMessage>}
           <Input
             label="Folder Name"
             placeholder="my-folder"
@@ -2039,13 +2185,14 @@ export const FileManager = memo(function FileManager({
             <Button variant="ghost" onClick={() => setIsNewFolderModalOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleCreateFolder}>Create</Button>
+            <Button onClick={handleCreateFolder} disabled={actionBlocked('createFolder')}>Create</Button>
           </div>
         </div>
       </Modal>
 
       <Modal isOpen={isRenameModalOpen} onClose={() => setIsRenameModalOpen(false)} title="Rename">
         <div className="space-y-4">
+          {actionBlocked('rename', files.find(file => file.name === renameOldName)?.path) && <StateMessage variant="status">Rename is unavailable for this account. Close and check access again if permissions have changed.</StateMessage>}
           <Input
             label="New Name"
             value={renameNewName}
@@ -2057,13 +2204,17 @@ export const FileManager = memo(function FileManager({
             <Button variant="ghost" onClick={() => setIsRenameModalOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleRename}>Rename</Button>
+            <Button onClick={handleRename} disabled={actionBlocked('rename', files.find(file => file.name === renameOldName)?.path)}>Rename</Button>
           </div>
         </div>
       </Modal>
 
       {/* Copy to Server Modal */}
       <CopyToServerModal
+        onCopy={(requests, directory) => executeFileOperations(requests.map(request => ({
+          source: request.sourcePath, target: request.destinationPath, name: filePathLeafLabel(request.destinationPath),
+          sourceConnectionId: request.sourceConnectionId, op: 'copy' as const,
+        })), directory, requests[0]?.destinationConnectionId)}
         isOpen={isCopyModalOpen}
         onClose={() => {
           setIsCopyModalOpen(false);
@@ -2079,7 +2230,9 @@ export const FileManager = memo(function FileManager({
       {/* File Editor Overlay */}
       {editingFile && editingFileTarget && (
         <FileEditor
+          key={`${editingFileTarget.connectionId}:${editingFileTarget.path}`}
           documentId={`${editingFileTarget.connectionId}:${editingFileTarget.path}`}
+          permissionTarget={editingFileTarget}
           filename={editingFile.name}
           initialContent={editorContent}
           preferredProviderId={editorProviderOverride ?? undefined}
@@ -2109,25 +2262,26 @@ export const FileManager = memo(function FileManager({
         onClose={() => setIsDeleteModalOpen(false)}
         onConfirm={executeDelete}
         title="Delete Confirmation"
-        message={`Are you sure you want to delete ${selectedFiles.length} item(s)? This action cannot be undone.`}
+        message={actionBlocked('delete') ? 'Delete is unavailable for this account. Close and check access again if permissions have changed.'
+          : `Are you sure you want to delete ${selectedFiles.length} item(s)? This action cannot be undone.`}
         confirmLabel="Delete"
         variant="danger"
         isLoading={isDeleting}
+        confirmDisabled={actionBlocked('delete')}
       />
 
       {/* Conflict Resolution Modal */}
       <ConflictModal
         isOpen={!!currentConflict}
         onClose={() => {
-          if (isProcessing) return;
-          setCurrentConflict(null);
-          setPendingConflicts([]);
+          clearConflicts();
         }}
         onResolve={resolveConflict}
         fileName={currentConflict?.name || ''}
-        destinationPath={currentPath}
+        destinationPath={currentConflict ? parentFilePath(currentConflict.target) ?? currentConflict.target : currentPath}
         isBatch={pendingConflicts.length > 1}
-        isResolving={isProcessing}
+        isFolder={currentConflict?.sourceKind === 'Directory'}
+        canCombine={currentConflict?.canCombine === true}
       />
     </div>
   );

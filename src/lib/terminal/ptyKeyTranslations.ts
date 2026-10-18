@@ -1,6 +1,6 @@
 /**
  * VT sequences xterm.js does not emit. Not Zync app shortcuts — they belong
- * on the PTY whenever the terminal is focused. See docs/SHORTCUTS.md §7.
+ * on the PTY whenever the terminal is focused.
  */
 
 const US = '\x1f';

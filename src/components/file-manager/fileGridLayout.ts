@@ -1,5 +1,6 @@
 import type { FileEntry } from './types';
-import { FILE_GRID_ZOOM, clampFileGridZoom } from './fileChrome.js';
+import { FILE_GRID_ZOOM, FILE_LIST_ZOOM, clampFileGridZoom } from './fileChrome.js';
+import { FILE_BASE_COLUMNS, fileListTracks } from './fileListPresentation';
 
 export type FileSortColumn = 'name' | 'modified' | 'type' | 'size' | 'owner';
 export type FileSortDirection = 'asc' | 'desc';
@@ -64,11 +65,11 @@ export function fileListSortTooltip(
   return `Sort by ${label}, ${fileListSortSense(column, initial)}`;
 }
 
-/** List-row height from FileListItem (`py-2` + 20px icon + border). Compact does not change list rows. */
-export const FILE_LIST_ROW_HEIGHT = 40;
+/** Default list row metrics are shared with zoom, selection and virtualization. */
+export const FILE_LIST_ROW_HEIGHT = FILE_LIST_ZOOM[0].rowHeight;
 
-/** Name is readable; leftover width is the last 1fr track after Owner:Group. */
-export const FILE_LIST_COLUMNS = 'minmax(12rem, 20rem) 11.25rem 8rem 5.5rem minmax(8.5rem, 12rem) minmax(0, 1fr)';
+/** Default tracks; explicit optional columns and narrow variants use the same presentation owner. */
+export const FILE_LIST_COLUMNS = fileListTracks(FILE_BASE_COLUMNS);
 
 /** Explorer-style type: `File folder`, `PNG File`. Long fake extensions become `File`. */
 export function formatFileListType(file: FileEntry): string {
@@ -155,7 +156,7 @@ export function formatFileExplorerDate(timestamp: number): string {
 
 export interface FileGridMetrics {
   columnCount: number;
-  /** Minimum tile track (zoom). CSS icon view uses this with `1fr` leftover. */
+  /** Preferred tile track at this zoom; only panes narrower than one tile shrink it. */
   minTrack: number;
   /** react-window cell width when the viewport has not been measured yet (`minTrack + gap`). */
   columnWidth: number;
@@ -163,10 +164,15 @@ export interface FileGridMetrics {
   gap: number;
 }
 
-/** Icon view: tiles grow with leftover space; a column is added only when `minTrack` fits. */
-export function fileIconGridTemplateColumns(minTrack: number): string {
+/** Keep tile positions stable as a pane changes width; spare space remains after the last track. */
+export function fileIconGridTemplateColumns(minTrack: number, columnCount?: number): string {
   const track = Math.max(1, minTrack);
-  return `repeat(auto-fill, minmax(min(100%, ${track}px), 1fr))`;
+  return `repeat(${columnCount === undefined ? 'auto-fill' : Math.max(1, columnCount)}, min(100%, ${track}px))`;
+}
+
+/** Match CSS track sizing, including the minimum while a resize measurement is pending. */
+export function fileGridColumnPitch(width: number, minTrack: number, gap: number): number {
+  return Math.min(Math.max(0, width), Math.max(1, minTrack)) + gap;
 }
 
 export function sortFileEntries(

@@ -200,6 +200,8 @@ export const CATEGORY_FALLBACK_MAP: Record<string, string> = {
 };
 
 import { convertFileSrc } from '@tauri-apps/api/core';
+import { MATERIAL_ICON_ASSETS } from './materialIconAssets';
+import type { IconThemeDefinition } from './iconTheme';
 
 /** Strip traversal and normalize plugin-relative icon directory segments */
 function sanitizeIconsPathSegment(path: string): string {
@@ -267,9 +269,23 @@ export function resolveIconResource(
     iconID: string, 
     themeId: string, 
     pluginPath?: string, 
-    iconsPath?: string
+    iconsPath?: string,
+    definition?: IconThemeDefinition,
 ): { local?: string; remote?: string } {
     if (themeId === 'lucide') return {};
+
+    if (definition) {
+        const asset = Object.prototype.hasOwnProperty.call(definition.iconDefinitions, iconID) ? definition.iconDefinitions[iconID].iconPath : undefined;
+        if (!asset || !pluginPath) return {};
+        if (pluginPath === 'builtin://icon-themes/material') {
+            const id = asset.match(/^icons\/([a-z-]+)\.svg$/)?.[1];
+            return id && Object.prototype.hasOwnProperty.call(MATERIAL_ICON_ASSETS, id)
+                ? { local: MATERIAL_ICON_ASSETS[id as keyof typeof MATERIAL_ICON_ASSETS] } : {};
+        }
+        if (pluginPath.startsWith('builtin://') || asset.split('/').some(part => !part || part === '.' || part === '..')
+            || /[\\:%?#]/.test(asset) || !asset.endsWith('.svg')) return {};
+        return { local: convertFileSrc(`${pluginPath}/${asset}`.replace(/\\/g, '/')) };
+    }
 
     const filename = toSafeIconFilename(iconID);
 

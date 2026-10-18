@@ -13,6 +13,8 @@ import { markPlainDocumentSaved, reconcilePlainDocument } from './editor/plainDo
 import { plainCursorPosition } from './editor/editorStatusReport';
 import { formatCodeMirrorStatus } from './editor/codemirror/status';
 import { isXtermKeyboardTarget } from '../lib/shortcuts';
+import { EditorSaveBlockedError, editorSaveBlocked, editorSaveErrorMessage, type EditorSaveAccess } from '../features/files/domain/editorSaveAccess';
+import { EditorSaveAccessStatus } from './editor/EditorSaveAccessStatus';
 
 interface PlainFileEditorProps {
   documentId?: string;
@@ -29,6 +31,7 @@ interface PlainFileEditorProps {
    * should provide equivalent visible controls for discoverability/accessibility.
    */
   hideToolbar?: boolean;
+  saveAccess?: EditorSaveAccess;
 }
 
 export function PlainFileEditor({
@@ -39,6 +42,7 @@ export function PlainFileEditor({
   onClose,
   onDirtyChange,
   hideToolbar = false,
+  saveAccess,
 }: PlainFileEditorProps) {
   const documentKey = documentId ?? filename;
   const [documentState, setDocumentState] = useState(() => ({
@@ -50,6 +54,8 @@ export function PlainFileEditor({
   const [searchText, setSearchText] = useState('');
   const [matchIndex, setMatchIndex] = useState(-1);
   const [isSaving, setIsSaving] = useState(false);
+  const pendingSave = useRef(false);
+  const saveBlocked = editorSaveBlocked(saveAccess);
   const [showSearch, setShowSearch] = useState(false);
   const [selectionStart, setSelectionStart] = useState(0);
 
@@ -117,18 +123,19 @@ export function PlainFileEditor({
   }, [activeMatch, matchIndex]);
 
   const handleSave = useCallback(async () => {
-    if (isSaving) return;
+    if (pendingSave.current || saveBlocked) return;
+    pendingSave.current = true;
     setIsSaving(true);
     try {
       await onSave(content);
       setDocumentState((current) => markPlainDocumentSaved(current, documentKey, content));
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to save file';
-      showToast('error', message);
+      if (!(error instanceof EditorSaveBlockedError)) showToast('error', editorSaveErrorMessage(error));
     } finally {
       setIsSaving(false);
+      pendingSave.current = false;
     }
-  }, [content, documentKey, isSaving, onSave, showToast]);
+  }, [content, documentKey, onSave, saveBlocked, showToast]);
 
   const handleClose = useCallback(async () => {
     if (!isDirty) {
@@ -211,11 +218,14 @@ export function PlainFileEditor({
   return (
       <div className="absolute inset-0 z-[70] flex min-h-0 flex-col bg-app-panel">
         {!hideToolbar && (
-          <div className="flex h-9 items-center justify-between border-b border-app-border px-3">
-            <div className="min-w-0 truncate text-sm font-semibold text-app-text">{filename}</div>
-            <div className="flex items-center gap-2">
-              <span className="rounded border border-app-border bg-app-surface/40 px-2 py-0.5 text-[10px] font-medium text-app-muted">Ctrl/Cmd+S</span>
-              <span className="rounded border border-app-border bg-app-surface/40 px-2 py-0.5 text-[10px] font-medium text-app-muted">Ctrl/Cmd+F</span>
+          <div className="@container flex min-h-10 flex-wrap items-center justify-between gap-x-2 gap-y-1 border-b border-app-border px-3 py-1">
+            <div className="flex min-w-0 flex-1 basis-48 items-center gap-3">
+              <div className="truncate text-sm font-semibold text-app-text">{filename}</div>
+              <EditorSaveAccessStatus access={saveAccess} />
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <span className="hidden rounded border border-app-border bg-app-surface/40 px-2 py-0.5 text-[10px] font-medium text-app-muted @min-[760px]:inline">Ctrl/Cmd+S</span>
+              <span className="hidden rounded border border-app-border bg-app-surface/40 px-2 py-0.5 text-[10px] font-medium text-app-muted @min-[760px]:inline">Ctrl/Cmd+F</span>
               <Button variant="ghost" size="sm" onClick={() => {
                 setShowSearch((current) => {
                   const next = !current;
@@ -229,7 +239,7 @@ export function PlainFileEditor({
               <Button variant="secondary" size="sm" onClick={() => { void handleClose(); }}>
                 Close
               </Button>
-              <Button variant="primary" size="sm" isLoading={isSaving} onClick={() => { void handleSave(); }}>
+              <Button variant={saveBlocked ? 'ghost' : 'primary'} size="sm" disabled={saveBlocked} isLoading={isSaving} onClick={() => { void handleSave(); }}>
                 <Save className="mr-1 h-3.5 w-3.5" />
                 Save
               </Button>
@@ -237,6 +247,7 @@ export function PlainFileEditor({
           </div>
         )}
         <div className="flex min-h-0 flex-1 flex-col">
+        {hideToolbar && saveBlocked && <div className="border-b border-app-border px-3 py-1"><EditorSaveAccessStatus access={saveAccess} /></div>}
 
         {showSearch && (
           <div className="flex items-center gap-2 border-b border-app-border bg-app-surface/30 px-3 py-2">
@@ -267,6 +278,7 @@ export function PlainFileEditor({
         <textarea
           ref={textareaRef}
           value={content}
+          readOnly={saveBlocked}
           onChange={(event) => {
             const nextContent = event.target.value;
             setDocumentState((current) => ({ ...current, content: nextContent }));

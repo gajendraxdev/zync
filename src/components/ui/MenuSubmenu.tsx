@@ -22,7 +22,7 @@ export function isInsideMenu(root: HTMLElement | null, target: EventTarget | nul
 }
 
 /** Shared context-menu flyout: viewport placement, hover delay, focus, and keyboard navigation. */
-export function MenuSubmenu({ label, icon, children, disabled = false, triggerClassName, descriptionId, localKeyboard = false }: {
+export function MenuSubmenu({ label, icon, children, disabled = false, triggerClassName, descriptionId, localKeyboard = false, role }: {
     label: string;
     icon?: ReactNode;
     children: ReactNode;
@@ -30,6 +30,8 @@ export function MenuSubmenu({ label, icon, children, disabled = false, triggerCl
     triggerClassName?: string;
     descriptionId?: string;
     localKeyboard?: boolean;
+    /** Context-menu callers opt in; other popup surfaces retain native button semantics. */
+    role?: 'menuitem';
 }) {
     const id = useId();
     const root = useRef<HTMLDivElement>(null);
@@ -93,7 +95,7 @@ export function MenuSubmenu({ label, icon, children, disabled = false, triggerCl
             }
         }}
     >
-        <button id={id} ref={trigger} type="button" disabled={disabled} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? `${id}-panel` : undefined}
+        <button id={id} ref={trigger} type="button" role={role} disabled={disabled} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? `${id}-panel` : undefined}
             onClick={() => show(true)}
             onKeyDown={event => {
                 if (event.key === 'ArrowRight' || event.key === 'ArrowDown') { event.preventDefault(); show(true); }

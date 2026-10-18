@@ -11,6 +11,7 @@ import * as jsx from 'react/jsx-runtime';
 import * as React from 'react';
 import { Check } from 'lucide-react';
 import { moveMenuFocus } from '../.tmp-agent-tests/src/components/ui/menuFocus.js';
+import { Tooltip } from '../.tmp-agent-tests/src/components/ui/Tooltip.js';
 
 const render = (component, props) => renderToStaticMarkup(createElement(component, props));
 const options = [{ value: 'sh', label: 'Shell' }, { value: 'bash', label: 'Bash' }];
@@ -70,6 +71,9 @@ test('submenu and other popups share visual tokens without merging placement own
   assert.match(html, /aria-expanded="false"/);
   assert.match(html, /disabled=""/);
   assert.doesNotMatch(html, />Child</);
+  assert.doesNotMatch(html, /role="menuitem"/, 'ordinary popup callers retain native buttons');
+  const menuHtml = render(MenuSubmenu, { label: 'Sort by', role: 'menuitem', children: 'Name' });
+  assert.match(menuHtml, /role="menuitem"/, 'context menus expose submenu triggers as menu items');
 });
 
 test('context-menu initial focus is opt-in and cannot scroll its containing page', () => {
@@ -83,7 +87,7 @@ test('context-menu initial focus is opt-in and cannot scroll its containing page
       '../../lib/utils.js': { cn: (...values) => values.filter(Boolean).join(' ') },
       './MenuSubmenu': { isInsideMenu: () => false, MENU_PANEL_CLASS: '', MenuSubmenu: () => null },
       './surfaceStyles': { MENU_ITEM_CLASSES: '' },
-      'lucide-react': { Check }, './menuFocus': { moveMenuFocus },
+      'lucide-react': { Check }, './menuFocus': { moveMenuFocus }, './Tooltip': { Tooltip },
     }, { document: { body: {} }, window: { innerHeight: 800, innerWidth: 1280 } });
     ContextMenu({ x: 1, y: 1, items: [], onClose: () => {}, autoFocus });
     effects[0]();
@@ -91,11 +95,49 @@ test('context-menu initial focus is opt-in and cannot scroll its containing page
   }
 });
 
+test('context-menu outside dismissal excludes only its own optional trigger and menu layers', () => {
+  class Node {
+    constructor(parent = null) { this.parent = parent; }
+    contains(target) {
+      for (let node = target; node; node = node.parent) if (node === this) return true;
+      return false;
+    }
+  }
+  for (const withTrigger of [false, true]) {
+    const effects = [], listeners = new Map();
+    const menu = new Node(), trigger = new Node(), triggerIcon = new Node(trigger);
+    const flyout = new Node(), outside = new Node();
+    let closes = 0;
+    const { ContextMenu } = loadSource('components/ui/ContextMenu.tsx', {
+      react: { useEffect: effect => effects.push(effect), useLayoutEffect: () => {}, useRef: () => ({ current: menu }), useState: initial => [initial, () => {}] },
+      'react/jsx-runtime': jsx, 'react-dom': { createPortal: content => content },
+      '../../lib/utils.js': { cn: (...values) => values.filter(Boolean).join(' ') },
+      './MenuSubmenu': { isInsideMenu: (root, target) => root.contains(target) || target === flyout, MENU_PANEL_CLASS: '', MenuSubmenu: () => null },
+      './surfaceStyles': { MENU_ITEM_CLASSES: '' },
+      'lucide-react': { Check }, './menuFocus': { moveMenuFocus }, './Tooltip': { Tooltip },
+    }, {
+      Node, document: { body: {}, addEventListener: (type, handler) => listeners.set(type, handler),
+        removeEventListener: (type, handler) => { assert.equal(listeners.get(type), handler); listeners.delete(type); } },
+      window: { innerHeight: 800, innerWidth: 1280 },
+    });
+    ContextMenu({ x: 1, y: 1, items: [], onClose: () => closes++, triggerRef: withTrigger ? { current: trigger } : undefined });
+    const cleanup = effects[1]();
+    for (const target of [menu, new Node(menu), flyout]) listeners.get('mousedown')({ target });
+    assert.equal(closes, 0, 'menu rows and portaled flyouts remain inside');
+    for (const target of [trigger, triggerIcon]) listeners.get('mousedown')({ target });
+    assert.equal(closes, withTrigger ? 0 : 2, 'only the registered trigger owns its click-to-toggle');
+    listeners.get('mousedown')({ target: outside });
+    assert.equal(closes, withTrigger ? 1 : 3, 'unrelated controls still dismiss the menu');
+    cleanup();
+    assert.equal(listeners.size, 0, 'unmount releases every dismissal listener');
+  }
+});
+
 test('checked context-menu rows announce visibility/position and expose display-only shortcuts', () => {
   let actions = 0;
   const { ContextMenu } = loadSource('components/ui/ContextMenu.tsx', {
     react: React, 'react/jsx-runtime': jsx, 'react-dom': { createPortal: content => content },
-    'lucide-react': { Check }, './menuFocus': { moveMenuFocus },
+    'lucide-react': { Check }, './menuFocus': { moveMenuFocus }, './Tooltip': { Tooltip },
     '../../lib/utils.js': { cn: (...values) => values.filter(Boolean).join(' ') },
     './MenuSubmenu': { isInsideMenu: () => false, MENU_PANEL_CLASS: '', MenuSubmenu: () => null },
     './surfaceStyles': { MENU_ITEM_CLASSES: '' },

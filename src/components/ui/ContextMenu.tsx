@@ -1,10 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { Check } from 'lucide-react';
 import { cn } from '../../lib/utils.js';
 import { isInsideMenu, MENU_PANEL_CLASS, MenuSubmenu } from './MenuSubmenu';
 import { MENU_ITEM_CLASSES } from './surfaceStyles';
 import { moveMenuFocus } from './menuFocus';
+import { Tooltip } from './Tooltip';
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -16,6 +17,8 @@ export type ContextMenuItem =
     children?: never;
     variant?: 'default' | 'danger';
     disabled?: boolean;
+    /** Explain a disabled action with the shared tooltip and accessible description. */
+    disabledReason?: string;
     /** Explicit checked state supplies both the visual mark and native ARIA menu semantics. */
     checked?: boolean;
     checkType?: 'checkbox' | 'radio';
@@ -43,6 +46,8 @@ interface ContextMenuProps {
   onClose: () => void;
   /** Opt in for keyboard-opened contextual chrome; caller owns return focus. */
   autoFocus?: boolean;
+  /** Keep trigger clicks inside the dismissal boundary; the caller owns toggling. */
+  triggerRef?: RefObject<HTMLElement | null>;
   className?: string;
   ariaLabel?: string;
 }
@@ -128,7 +133,7 @@ function eventInsideSubmenu(target: EventTarget | null): boolean {
   ));
 }
 
-export function ContextMenu({ x, y, items, onClose, autoFocus = false, className, ariaLabel }: ContextMenuProps) {
+export function ContextMenu({ x, y, items, onClose, autoFocus = false, triggerRef, className, ariaLabel }: ContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
   const [pos, setPos] = useState<MenuPosition>({ top: 0, left: 0 });
@@ -140,6 +145,7 @@ export function ContextMenu({ x, y, items, onClose, autoFocus = false, className
     const isInsideAnyMenuLayer = (target: EventTarget | null) => isInsideMenu(ref.current, target);
 
     const handleClickOutside = (e: MouseEvent) => {
+      if (e.target instanceof Node && triggerRef?.current?.contains(e.target)) return;
       if (!isInsideAnyMenuLayer(e.target)) {
         onClose();
       }
@@ -166,7 +172,7 @@ export function ContextMenu({ x, y, items, onClose, autoFocus = false, className
       document.removeEventListener('scroll', handleScroll, true);
       document.removeEventListener('keydown', handleKeyDown, true);
     };
-  }, [onClose]);
+  }, [onClose, triggerRef]);
 
   // Measure while invisible, compute position, then reveal — all before paint
   useLayoutEffect(() => {
@@ -209,15 +215,16 @@ function MenuItem({ item, onClose }: { item: ContextMenuItem; onClose: () => voi
       : item.variant === 'danger' ? 'text-app-danger hover:bg-app-danger/10' : 'text-app-text hover:bg-app-surface',
   );
   if (item.children?.length) {
-    return <MenuSubmenu label={item.label} icon={item.icon} disabled={item.disabled} triggerClassName={itemClass}>
+    return <MenuSubmenu role="menuitem" label={item.label} icon={item.icon} disabled={item.disabled} triggerClassName={itemClass}>
       {renderMenuItems(item.children, onClose)}
     </MenuSubmenu>;
   }
   const checked = 'checked' in item ? item.checked : undefined;
   const shortcut = 'shortcut' in item ? item.shortcut : undefined;
   const checkType = 'checkType' in item ? item.checkType : undefined;
-  return <button type="button" role={checked === undefined ? 'menuitem' : checkType === 'radio' ? 'menuitemradio' : 'menuitemcheckbox'}
-    aria-checked={checked} disabled={item.disabled} className={itemClass}
+  const disabledReason = item.disabled && 'disabledReason' in item ? item.disabledReason : undefined;
+  const button = <button type="button" role={checked === undefined ? 'menuitem' : checkType === 'radio' ? 'menuitemradio' : 'menuitemcheckbox'}
+    aria-checked={checked} aria-description={disabledReason} disabled={item.disabled} className={itemClass}
     onClick={() => { item.action?.(); onClose(); }}>
     {checked !== undefined && <span className="inline-flex w-3.5 shrink-0 justify-center" aria-hidden="true">
       {checked && <Check size={14} />}
@@ -226,4 +233,9 @@ function MenuItem({ item, onClose }: { item: ContextMenuItem; onClose: () => voi
     <span className="min-w-0">{item.label}</span>
     {shortcut && <span className="ml-auto shrink-0 pl-3 text-xs text-app-muted">{shortcut}</span>}
   </button>;
+  // A disabled native button cannot own hover/focus; its non-focusable wrapper
+  // lets the existing tooltip explain why without enabling the action.
+  return disabledReason ? <Tooltip content={disabledReason} contentClassName="max-w-xs whitespace-normal">
+    <span className="flex">{button}</span>
+  </Tooltip> : button;
 }

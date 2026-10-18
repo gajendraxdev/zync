@@ -1,60 +1,66 @@
-import { ArrowRight, CheckCircle, Loader2, X, XCircle } from 'lucide-react';
-import { useEffect, useRef, RefObject, useState } from 'react';
+import { AlertTriangle, ArrowRight, CheckCircle, Loader2, X, XCircle } from 'lucide-react';
+import { useCallback, useEffect, useRef, RefObject, useState } from 'react';
 import { ZPortal } from '../ui/ZPortal';
+import { ConfirmModal } from '../ui/ConfirmModal';
+import { formatBytes } from '../../lib/utils';
 import { useAppStore, Transfer, Connection } from '../../store/useAppStore';
+import { isActiveTransferStatus, isExpiringTransferReceipt } from '../../store/transferSlice';
+import { isBenignTransferCancelError } from './transferCancellation';
+import { transferErrorMessage, fileTransferFailureMessage, isFileTransferNotStarted } from '../../features/files/application/executeFileTransfer';
+import { TransferRecoveryDetails } from './TransferRecoveryDetails';
+import { transferRecoveryCopy } from './transferRecoveryCopy';
+import { dismissTransferReceipt } from '../../features/files/application/transferEventProjection';
 
 interface TransferPanelProps {
   onClose: () => void;
   indicatorRef: RefObject<HTMLButtonElement | null>;
 }
 
-const isBenignTransferCancelError = (error: unknown): boolean => {
-  const message = String((error as { message?: string })?.message ?? error ?? '').toLowerCase();
-  return (
-    message === 'not found'
-    || message.includes('transfer not found')
-    || message.includes('already cancelled')
-    || message.includes('already canceled')
-    || message.includes('transfer already cancelled')
-    || message.includes('transfer already canceled')
-  );
-};
-
 export function TransferPanel({ onClose, indicatorRef }: TransferPanelProps) {
   const transfers = useAppStore(state => state.transfers);
-  const removeTransfer = useAppStore(state => state.removeTransfer);
-  const cancelTransfer = useAppStore(state => state.cancelTransfer);
+  const requestTransferCancellation = useAppStore(state => state.requestTransferCancellation);
   const connections = useAppStore(state => state.connections);
+  const confirmDelete = useAppStore(state => state.settings.fileManager.confirmDelete);
 
   const panelRef = useRef<HTMLDivElement>(null);
   const [cancellingIds, setCancellingIds] = useState<Set<string>>(new Set());
+  const [cleanupConfirmation, setCleanupConfirmation] = useState<{ transfer: Transfer; onConfirm: () => void }>();
 
-  // Auto-remove timers for completed/failed/cancelled transfers
+  const dismiss = useCallback(async (id: string) => {
+    try {
+      await dismissTransferReceipt(id, (command, args) => window.ipcRenderer.invoke(command, args), useAppStore.getState);
+    } catch {
+      useAppStore.getState().setLastAction('Could not dismiss the saved transfer receipt', 'error');
+    }
+  }, []);
+
+  // Only clean success receipts expire; unresolved recovery stays discoverable.
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   useEffect(() => {
-    transfers.forEach((transfer: Transfer) => {
-      if (
-        (transfer.status === 'completed' || transfer.status === 'failed' || transfer.status === 'cancelled') &&
-        !timersRef.current.has(transfer.id)
-      ) {
-        const timer = setTimeout(() => {
-          removeTransfer(transfer.id);
-          timersRef.current.delete(transfer.id);
-        }, 5000);
-        timersRef.current.set(transfer.id, timer);
-      }
-    });
-
-    const activeIds = new Set(transfers.map((t: Transfer) => t.id));
+    const expiringIds = new Set(transfers.filter(isExpiringTransferReceipt).map(transfer => transfer.id));
     timersRef.current.forEach((timer, id) => {
-      if (!activeIds.has(id)) {
+      if (!expiringIds.has(id)) {
         clearTimeout(timer);
         timersRef.current.delete(id);
       }
     });
 
-  }, [transfers, removeTransfer]);
+    transfers.forEach((transfer: Transfer) => {
+      if (
+        isExpiringTransferReceipt(transfer) &&
+        !timersRef.current.has(transfer.id)
+      ) {
+        const timer = setTimeout(() => {
+          const latest = useAppStore.getState().transfers.find(item => item.id === transfer.id);
+          if (latest && isExpiringTransferReceipt(latest)) void dismiss(transfer.id);
+          // Retain the timer key on failure: do not retry on every progress render.
+        }, 5000);
+        timersRef.current.set(transfer.id, timer);
+      }
+    });
+
+  }, [transfers, dismiss]);
 
   useEffect(() => {
     return () => {
@@ -65,6 +71,7 @@ export function TransferPanel({ onClose, indicatorRef }: TransferPanelProps) {
 
   // Click-outside dismiss
   useEffect(() => {
+    if (cleanupConfirmation) return;
     const handler = (e: MouseEvent) => {
       const target = e.target as Node;
       const insidePanel = panelRef.current?.contains(target);
@@ -75,32 +82,24 @@ export function TransferPanel({ onClose, indicatorRef }: TransferPanelProps) {
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [onClose, indicatorRef]);
+  }, [onClose, indicatorRef, cleanupConfirmation]);
 
   // Escape key dismiss
   useEffect(() => {
+    if (cleanupConfirmation) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && !e.defaultPrevented) onClose();
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [onClose]);
+  }, [onClose, cleanupConfirmation]);
 
   const activeTransfers = transfers.filter(
-    (t: Transfer) => t.status !== 'completed' && t.status !== 'failed' && t.status !== 'cancelled',
+    (t: Transfer) => isActiveTransferStatus(t.status),
   );
 
   const recentTransfers = transfers
-    .filter((t: Transfer) => t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled')
-    .slice(-3);
-
-  const formatBytes = (bytes: number): string => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return `${(bytes / k ** i).toFixed(2)} ${sizes[i]}`;
-  };
+    .filter((t: Transfer) => !isActiveTransferStatus(t.status));
 
   const getConnectionName = (id: string) => {
     if (id === 'local') return 'Local';
@@ -131,7 +130,7 @@ export function TransferPanel({ onClose, indicatorRef }: TransferPanelProps) {
       />
       <div
         ref={panelRef}
-        className="absolute z-50 bg-app-panel/95 backdrop-blur-xl border border-app-border rounded-xl shadow-2xl animate-in slide-in-from-top-4 fade-in duration-200"
+        className="absolute z-50 w-80 max-w-[calc(100vw-2rem)] bg-app-panel/95 backdrop-blur-xl border border-app-border rounded-xl shadow-2xl animate-in slide-in-from-top-4 fade-in duration-200"
         style={panelStyle}
       >
         {/* Header */}
@@ -169,15 +168,17 @@ export function TransferPanel({ onClose, indicatorRef }: TransferPanelProps) {
                     </div>
                     <button
                       onClick={async () => {
-                        if (cancellingIds.has(transfer.id)) return;
+                        if (transfer.status === 'cancelling' || cancellingIds.has(transfer.id)) return;
                         setCancellingIds(prev => new Set(prev).add(transfer.id));
                         try {
                           await window.ipcRenderer.invoke('sftp:cancelTransfer', {
                             transferId: transfer.id,
                           });
-                          cancelTransfer(transfer.id);
-                        } catch (err: any) {
-                          const msg = `Failed to cancel transfer: ${err?.message || String(err)}`;
+                          requestTransferCancellation(transfer.id);
+                        } catch (err: unknown) {
+                          const latest = useAppStore.getState().transfers.find(item => item.id === transfer.id);
+                          if (!latest || !isActiveTransferStatus(latest.status)) return;
+                          const msg = `Failed to cancel transfer: ${transferErrorMessage(err)}`;
                           useAppStore.getState().setLastAction(
                             msg,
                             isBenignTransferCancelError(err) ? 'info' : 'error',
@@ -190,12 +191,12 @@ export function TransferPanel({ onClose, indicatorRef }: TransferPanelProps) {
                           });
                         }
                       }}
-                      title="Cancel Transfer"
-                      disabled={cancellingIds.has(transfer.id)}
+                      title={transfer.status === 'cancelling' ? 'Waiting for cancellation confirmation' : 'Cancel Transfer'}
+                      disabled={transfer.status === 'cancelling' || cancellingIds.has(transfer.id)}
                       className="px-1.5 py-0.5 rounded text-rose-500 hover:bg-rose-500/10 transition-colors ml-2 flex items-center text-[9px] font-bold uppercase tracking-wide disabled:opacity-50 disabled:cursor-not-allowed"
                       type="button"
                     >
-                      Cancel
+                      {transfer.status === 'cancelling' ? 'Cancelling…' : 'Cancel'}
                     </button>
                   </div>
 
@@ -250,14 +251,25 @@ export function TransferPanel({ onClose, indicatorRef }: TransferPanelProps) {
                       </div>
                     </div>
                   )}
+
+                  {transfer.status === 'cancelling' && (
+                    <div className="flex items-center text-[10px] text-app-muted gap-1.5" role="status">
+                      <Loader2 size={10} className="animate-spin" />
+                      <span>Waiting for transfer to stop…</span>
+                    </div>
+                  )}
                 </div>
               ))}
 
               {/* Recent Completed/Failed */}
-              {recentTransfers.map((transfer: Transfer) => (
+              {recentTransfers.map((transfer: Transfer) => {
+                const recovery = transferRecoveryCopy(transfer);
+                return (
                 <div key={transfer.id} className="px-3 py-2 flex items-center justify-between">
                   <div className="flex items-center gap-2 flex-1 min-w-0">
-                    {transfer.status === 'completed' ? (
+                    {transfer.recoveryWarning ? (
+                      <AlertTriangle size={13} className="text-app-warning shrink-0" />
+                    ) : transfer.status === 'completed' ? (
                       <CheckCircle size={13} className="text-app-success shrink-0" />
                     ) : transfer.status === 'cancelled' ? (
                       <XCircle size={13} className="text-app-muted shrink-0" />
@@ -266,29 +278,67 @@ export function TransferPanel({ onClose, indicatorRef }: TransferPanelProps) {
                     )}
                     <div className="flex-1 min-w-0">
                       <div className="text-[11px] text-app-text truncate">{getDisplayName(transfer)}</div>
-                      <div className="text-[10px] text-app-muted">
+                      <div className="text-[10px] text-app-muted break-words">
                         {transfer.status === 'completed'
-                          ? 'Transfer complete'
+                          ? transfer.recoveryWarning ? 'Transfer complete; cleanup needs attention'
+                            : transfer.recoveryBackupPath ? 'Transfer complete; cleanup pending' : transfer.combine ? 'Folders combined' : 'Transfer complete'
                           : transfer.status === 'cancelled'
-                            ? 'Cancelled'
-                            : transfer.error}
+                            ? transfer.nativeRecovery ? 'Copy cancelled' : 'Cancelled'
+                            : fileTransferFailureMessage(transfer.error)}
                       </div>
+                      {(transfer.status !== 'completed' || transfer.recoveryBackupPath || transfer.recoveryWarning) && (
+                        <div className="mt-1 space-y-1 text-[10px] text-app-muted">
+                          {!isFileTransferNotStarted(transfer.error) && recovery.detail && <p>{recovery.detail}</p>}
+                          {transfer.stageCleaned && <p>No temporary copy remains.</p>}
+                          {recovery.warning && <p className="text-app-warning break-words">{recovery.warning}</p>}
+                          <p className="break-all select-text">Destination: {transfer.destinationPath}</p>
+                          {transfer.recoveryDestinationPath && transfer.recoveryDestinationPath !== transfer.destinationPath
+                            && <p className="break-all select-text">Current item: {transfer.recoveryDestinationPath}</p>}
+                          {transfer.recoveryStagePath && <p className="break-all select-text">Temporary copy: {transfer.recoveryStagePath}</p>}
+                          {transfer.recoveryBackupPath && (
+                            <p className="break-all select-text">{transfer.nativeRecovery ? 'Possible original backup' : 'Original recovery backup'}: {transfer.recoveryBackupPath}</p>
+                          )}
+                          {transfer.nativeRecovery && (transfer.recoveryStagePath || transfer.recoveryBackupPath || transfer.recoveryWarning)
+                            && (!transfer.combine?.currentDone || transfer.recoveryStagePath || transfer.recoveryBackupPath)
+                            && <TransferRecoveryDetails transfer={transfer} onRequestCleanup={(transfer, onConfirm) => {
+                              if (confirmDelete) setCleanupConfirmation({ transfer, onConfirm });
+                              else onConfirm();
+                            }} />}
+                        </div>
+                      )}
                     </div>
                   </div>
                   <button
-                    onClick={() => removeTransfer(transfer.id)}
+                    onClick={() => void dismiss(transfer.id)}
                     className="text-app-muted hover:text-app-text transition-colors ml-2 shrink-0"
                     aria-label="Remove"
+                    title="Clear from history (does not delete files)"
                     type="button"
                   >
                     <X size={12} />
                   </button>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
       </div>
+      <ConfirmModal
+        isOpen={Boolean(cleanupConfirmation)}
+        onClose={() => setCleanupConfirmation(undefined)}
+        onConfirm={() => {
+          const confirm = cleanupConfirmation?.onConfirm;
+          setCleanupConfirmation(undefined);
+          confirm?.();
+        }}
+        title="Delete Confirmation"
+        message={<>Delete this temporary copy? The destination will not be changed. This action cannot be undone.
+          <span className="mt-2 block break-all select-text">{cleanupConfirmation?.transfer.recoveryStagePath}</span>
+        </>}
+        confirmLabel="Delete"
+        variant="danger"
+      />
     </ZPortal>
   );
 }

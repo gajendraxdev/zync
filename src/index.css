@@ -2,6 +2,12 @@
 @import "./theme/controls.css";
 @import "./theme/colorPicker.css";
 
+/* Radix positions a wrapper around content. Noninteractive tips must not intercept
+   controls underneath that wrapper, even though the inner content ignores input. */
+[data-radix-popper-content-wrapper]:has(> [data-zync-tooltip]) {
+  pointer-events: none;
+}
+
 /* Host navigation changes its axis, never the retained content hosts underneath it. */
 .host-tabs-vertical [data-tab-drag-visual] > * {
     width: 100%;

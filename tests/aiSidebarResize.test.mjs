@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import * as React from 'react';
 import * as jsxRuntime from 'react/jsx-runtime';
 import { renderToStaticMarkup } from 'react-dom/server';
+const sidebarStyles = loadSource('components/ui/sidebarStyles.ts');
 
 function runTest(name, fn) {
   try {
@@ -123,6 +124,8 @@ runTest('shared content owns its pixel width and retains it while the shell coll
     react: React, 'react/jsx-runtime': jsxRuntime,
     '../../../lib/utils': { cn: (...values) => values.filter(Boolean).join(' ') },
     '../../ui/controlStyles': { CONTROL_INSET_FOCUS_CLASSES: 'focus-inset' },
+    '../../ui/sidebarStyles': sidebarStyles,
+    '../../ui/LayoutMotion': { useLayoutWidthTransition() {} },
     './useSidebarResize': { ...sharedResize, useSidebarResize: () => ({ width: 300, isResizing: false,
       sidebarRef: { current: null }, contentRef: { current: null }, handlers: {} }) },
   });
@@ -135,8 +138,26 @@ runTest('shared content owns its pixel width and retains it while the shell coll
     assert.doesNotMatch(html, /--sidebar-width/);
     assert.equal(html.includes('role="separator"'), !collapsed);
     assert.equal(html.includes('inert=""'), collapsed);
+    assert.ok(html.includes(sidebarStyles.SIDEBAR_WIDTH_TRANSITION_CLASSES));
   }
   assert.throws(() => renderToStaticMarkup(React.createElement(SidebarContent, {}, 'orphan')), /must be inside SidebarChrome/);
+});
+
+runTest('Files drawers retain fixed content width, zero collapsed width and shared motion on both sides', () => {
+  const { FileSideDrawer } = loadSource('components/file-manager/FileSideDrawer.tsx', {
+    react: React, 'react/jsx-runtime': jsxRuntime,
+    '../../lib/utils': { cn: (...values) => values.filter(Boolean).join(' ') },
+    '../ui/sidebarStyles': sidebarStyles,
+    '../ui/LayoutMotion': { useLayoutWidthTransition() {} },
+  });
+  for (const side of ['left', 'right']) for (const open of [false, true]) {
+    const html = renderToStaticMarkup(React.createElement(FileSideDrawer, { side, open, width: 184 }, 'Places'));
+    assert.match(html, /data-file-drawer-content=""[^>]*style="width:184px;min-width:184px"/);
+    assert.match(html, new RegExp(`style="width:${open ? 184 : 0}(?:px)?"`));
+    assert.ok(html.includes(sidebarStyles.SIDEBAR_WIDTH_TRANSITION_CLASSES));
+    assert.equal(html.includes('inert=""'), !open);
+    assert.doesNotMatch(html, /opacity-0/);
+  }
 });
 
 runTest('AI persistence retains its key, bounds and storage-failure fallback', () => {

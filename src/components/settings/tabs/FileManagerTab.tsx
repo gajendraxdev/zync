@@ -45,6 +45,10 @@ export function FileManagerTab({
                         disabled={isUpdating}
                         onChange={(v) => { void runUpdate(() => updateFileManagerSettings({ showHiddenFiles: v })); }}
                     />
+                    <Toggle label="Show Folder Sizes" checked={settings.fileManager.showFolderSizes !== false}
+                        disabled={isUpdating}
+                        description="Calculate logical file bytes in the background within safety limits, not allocated disk space. SSH scans use server metadata."
+                        onChange={value => { void runUpdate(() => updateFileManagerSettings({ showFolderSizes: value })); }} />
                     <Toggle
                         label="Confirm Deletion"
                         description="Ask for confirmation before deleting files"

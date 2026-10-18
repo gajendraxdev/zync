@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zync.thesudoer.in/schemas/icon-theme-v1.json",
+  "title": "Zync declarative icon theme v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "iconDefinitions",
+    "file",
+    "folder"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "iconDefinitions": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 512,
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^(?!.*\\.\\.)(?!.*\\.$)[A-Za-z0-9_-][A-Za-z0-9_.-]*$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "iconPath"
+        ],
+        "properties": {
+          "iconPath": {
+            "type": "string",
+            "maxLength": 260,
+            "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//)[^\\\\:%?#\\u0000-\\u001f\\u007f-\\u009f]+\\.svg$"
+          }
+        }
+      }
+    },
+    "file": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^(?!.*\\.\\.)(?!.*\\.$)[A-Za-z0-9_-][A-Za-z0-9_.-]*$"
+    },
+    "folder": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^(?!.*\\.\\.)(?!.*\\.$)[A-Za-z0-9_-][A-Za-z0-9_.-]*$"
+    },
+    "fileNames": {
+      "type": "object",
+      "maxProperties": 2048,
+      "propertyNames": {
+        "minLength": 1,
+        "maxLength": 255,
+        "pattern": "^[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^(?!.*\\.\\.)(?!.*\\.$)[A-Za-z0-9_-][A-Za-z0-9_.-]*$"
+      }
+    },
+    "fileExtensions": {
+      "type": "object",
+      "maxProperties": 2048,
+      "propertyNames": {
+        "minLength": 1,
+        "maxLength": 255,
+        "pattern": "^[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^(?!.*\\.\\.)(?!.*\\.$)[A-Za-z0-9_-][A-Za-z0-9_.-]*$"
+      }
+    },
+    "folderNames": {
+      "type": "object",
+      "maxProperties": 2048,
+      "propertyNames": {
+        "minLength": 1,
+        "maxLength": 255,
+        "pattern": "^[^/\\\\\\u0000-\\u001f\\u007f-\\u009f]+$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^(?!.*\\.\\.)(?!.*\\.$)[A-Za-z0-9_-][A-Za-z0-9_.-]*$"
+      }
+    }
+  }
+}

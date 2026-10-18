@@ -1,6 +1,16 @@
-import { StateCreator } from 'zustand';
+import type { StateCreator } from 'zustand';
 import { track } from '../features/usage';
-import type { AppStore } from './useAppStore';
+import { isNativeTransferActive, isNativeTransferResolved, nativeTransferDisplay, type NativeFileTransferReceipt, type NativeFolderCombineProgress } from '../features/files/application/nativeFileTransfer';
+
+export type TransferStatus = 'pending' | 'transferring' | 'cancelling' | 'completed' | 'failed' | 'cancelled';
+
+// In-memory history only; unsuccessful outcomes and recovery warnings require dismissal.
+const MAX_COMPLETED_TRANSFERS = 20;
+
+/** A cancellation request remains active until the native operation reports its outcome. */
+export function isActiveTransferStatus(status: TransferStatus): boolean {
+    return status === 'pending' || status === 'transferring' || status === 'cancelling';
+}
 
 export interface Transfer {
     id: string;
@@ -8,18 +18,33 @@ export interface Transfer {
     sourcePath: string;
     destinationConnectionId: string;
     destinationPath: string;
-    status: 'pending' | 'transferring' | 'completed' | 'failed' | 'cancelled';
+    status: TransferStatus;
     progress: {
         transferred: number;
         total: number;
         percentage: number;
     };
     error?: string;
+    /** Possible retained original for an overwrite; never automatically remove it after failure. */
+    recoveryBackupPath?: string;
+    /** A confirmed write may still require recovery-backup cleanup. */
+    recoveryWarning?: string;
+    recoveryStagePath?: string;
+    nativeRecovery?: boolean;
+    destinationUnchanged?: boolean;
+    stageCleaned?: boolean;
+    combine?: NativeFolderCombineProgress;
+    recoveryDestinationPath?: string;
     startTime: number;
     lastUpdated: number;
     speed: number; // bytes per second
     speedBaseline: number; // transferred value at the start of the current speed window
     label?: string; // optional custom phase label (e.g. 'Compressing')
+}
+
+/** Only clean successful receipts may expire or count toward the bounded history. */
+export function isExpiringTransferReceipt(transfer: Transfer): boolean {
+    return transfer.status === 'completed' && !transfer.recoveryBackupPath && !transfer.recoveryWarning;
 }
 
 export interface TransferSlice {
@@ -28,100 +53,184 @@ export interface TransferSlice {
     updateTransferProgress: (id: string, progress: Transfer['progress']) => void;
     completeTransfer: (id: string) => void;
     failTransfer: (id: string, error: string) => void;
+    requestTransferCancellation: (id: string) => void;
     cancelTransfer: (id: string) => void;
+    setTransferRecovery: (id: string, recovery: { backupPath: string; warning: string } | null) => void;
     removeTransfer: (id: string) => void;
+    receiveNativeTransfer: (receipt: NativeFileTransferReceipt) => void;
 }
 
-export const createTransferSlice: StateCreator<AppStore, [], [], TransferSlice> = (set) => ({
-    transfers: [],
+/** Ignore unknown IDs and terminal records, including late or duplicate native messages. */
+function updateActiveTransfer(
+    state: TransferSlice,
+    id: string,
+    update: (transfer: Transfer) => Transfer,
+): TransferSlice | Pick<TransferSlice, 'transfers'> {
+    const index = state.transfers.findIndex(transfer => transfer.id === id);
+    const transfer = state.transfers[index];
+    if (!transfer || !isActiveTransferStatus(transfer.status)) return state;
+    const next = update(transfer);
+    if (next === transfer) return state;
+    const transfers = [...state.transfers];
+    transfers[index] = next;
+    return { transfers };
+}
 
-    addTransfer: (transfer: Omit<Transfer, 'id' | 'status' | 'progress' | 'startTime' | 'lastUpdated' | 'speed' | 'speedBaseline'>) => {
-        const id = Math.random().toString(36).substring(2, 11);
-        const newTransfer: Transfer = {
-            ...transfer,
-            id,
-            status: 'pending',
-            progress: { transferred: 0, total: 0, percentage: 0 },
-            startTime: Date.now(),
-            lastUpdated: Date.now(),
-            speed: 0,
-            speedBaseline: 0,
-        };
-        set((state: AppStore) => ({ transfers: [...state.transfers, newTransfer] }));
-        return id;
-    },
+function retainCompletedTransfers(transfers: Transfer[], completedId: string, onDiscard: (id: string) => void): Transfer[] {
+    let excess = transfers.filter(isExpiringTransferReceipt).length - MAX_COMPLETED_TRANSFERS;
+    if (excess <= 0) return transfers;
+    return transfers.filter(transfer => {
+        if (excess <= 0 || transfer.id === completedId || !isExpiringTransferReceipt(transfer)) return true;
+        excess -= 1;
+        onDiscard(transfer.id);
+        return false;
+    });
+}
 
-    updateTransferProgress: (id: string, progress: Transfer['progress']) => {
-        const now = Date.now();
-        set((state: AppStore) => ({
-            transfers: state.transfers.map((t: Transfer) => {
-                if (t.id !== id) return t;
+export const createTransferSlice: StateCreator<TransferSlice> = (set) => {
+    // Match the visible-history bound. Late IPC/history snapshots must
+    // not recreate rows removed after verified cleanup or acknowledgement.
+    const dismissed = new Set<string>();
+    const rememberDismissed = (id: string) => {
+        dismissed.add(id);
+        if (dismissed.size > 256) dismissed.delete(dismissed.values().next().value!);
+    };
+    return {
+        transfers: [],
 
-                // Calculate Speed
-                const timeDiff = (now - t.lastUpdated) / 1000; // seconds
+        receiveNativeTransfer: receipt => {
+            let completed = false;
+            set(state => {
+                const previous = state.transfers.find(transfer => transfer.id === receipt.id);
+                if (dismissed.has(receipt.id) || !previous && isNativeTransferResolved(receipt)) return state;
+                const active = isNativeTransferActive(receipt);
+                const status: TransferStatus = active ? previous?.status === 'cancelling' ? 'cancelling' : 'transferring' : receipt.phase === 'completed' ? 'completed'
+                    : receipt.phase === 'cancelled' ? 'cancelled' : 'failed';
+                // An old history snapshot must not resurrect a terminal live receipt.
+                if (previous && !isActiveTransferStatus(previous.status) && active) return state;
+                if (previous?.nativeRecovery && !isActiveTransferStatus(previous.status) && previous.status !== status) return state;
+                if (previous?.stageCleaned && !receipt.stageCleaned) return state;
+                completed = Boolean(previous && isActiveTransferStatus(previous.status) && status === 'completed');
+                const display = nativeTransferDisplay(receipt);
+                const transferred = active ? Math.max(previous?.progress.transferred ?? 0, display.transferred) : display.transferred;
+                const total = active ? Math.max(previous?.progress.total ?? 0, display.total) : display.total;
+                const cleanCombineCursor = receipt.combine?.currentDone && !receipt.warning;
+                const transfer: Transfer = {
+                    ...previous, id: receipt.id, sourceConnectionId: receipt.sourceConnectionId, sourcePath: display.sourcePath,
+                    destinationConnectionId: receipt.destinationConnectionId, destinationPath: display.destinationPath,
+                    status, progress: { transferred, total,
+                        percentage: status === 'completed' ? 100 : total > 0 ? Math.min(100, transferred / total * 100) : 0 },
+                    error: receipt.error ?? undefined, recoveryWarning: receipt.warning ?? undefined,
+                    recoveryStagePath: receipt.combine?.currentDone || receipt.stageCleaned || status === 'completed' && !receipt.warning ? undefined : receipt.stagePath,
+                    recoveryBackupPath: !cleanCombineCursor && receipt.backupExpected && !receipt.destinationUnchanged && (status !== 'completed' || receipt.warning) ? receipt.backupPath : undefined,
+                    combine: receipt.combine ? { ...receipt.combine } : undefined,
+                    recoveryDestinationPath: receipt.combine ? receipt.destinationPath : undefined,
+                    destinationUnchanged: receipt.destinationUnchanged, stageCleaned: receipt.stageCleaned ?? false, nativeRecovery: true,
+                    startTime: previous?.startTime ?? receipt.createdAt, lastUpdated: Date.now(), speed: previous?.speed ?? 0,
+                    speedBaseline: previous?.speedBaseline ?? 0,
+                };
+                const transfers = previous ? state.transfers.map(item => item.id === receipt.id ? transfer : item) : [...state.transfers, transfer];
+                return { transfers: retainCompletedTransfers(transfers, receipt.id, rememberDismissed) };
+            });
+            if (completed) track('file_transfer');
+        },
+
+        addTransfer: (transfer: Omit<Transfer, 'id' | 'status' | 'progress' | 'startTime' | 'lastUpdated' | 'speed' | 'speedBaseline'>) => {
+            const id = crypto.randomUUID();
+            const now = Date.now();
+            const newTransfer: Transfer = {
+                ...transfer,
+                id,
+                status: 'pending',
+                progress: { transferred: 0, total: 0, percentage: 0 },
+                startTime: now,
+                lastUpdated: now,
+                speed: 0,
+                speedBaseline: 0,
+            };
+            set(state => ({ transfers: [...state.transfers, newTransfer] }));
+            return id;
+        },
+
+        updateTransferProgress: (id: string, progress: Transfer['progress']) => {
+            const now = Date.now();
+            set(state => updateActiveTransfer(state, id, t => {
+                const status = t.status === 'cancelling' ? 'cancelling' : 'transferring';
+
+                const timeDiff = (now - t.lastUpdated) / 1000;
                 let newSpeed = t.speed;
 
-                if (timeDiff >= 0.5) { // Update speed every 0.5s to avoid jitter
-                    // Use speedBaseline (transferred at window start), NOT t.progress.transferred
-                    // because t.progress gets updated every event while speedBaseline only resets here
+                if (timeDiff >= 0.5) {
+                    // Progress updates every event; the byte/time speed baseline advances together.
                     const bytesDiff = progress.transferred - t.speedBaseline;
                     const currentSpeed = bytesDiff / timeDiff;
 
-                    // Weighted Average (Erasure factor 0.3 -> 30% new, 70% old) for smoothness
                     if (t.speed === 0) {
                         newSpeed = currentSpeed;
                     } else {
                         newSpeed = (t.speed * 0.7) + (currentSpeed * 0.3);
                     }
 
-                    // Advance window: reset both time and byte baseline
-                    return { ...t, status: 'transferring', progress, speed: newSpeed, lastUpdated: now, speedBaseline: progress.transferred };
+                    return { ...t, status, progress, speed: newSpeed, lastUpdated: now, speedBaseline: progress.transferred };
                 }
 
-                // Progress bar updates every event; speed window hasn't elapsed yet
-                return { ...t, status: 'transferring', progress };
-            })
-        }));
-    },
-
-    completeTransfer: (id: string) => {
-        // Step 1: Snap progress to 100% while still 'transferring' so the bar fills visually
-        set((state: AppStore) => ({
-            transfers: state.transfers.map((t: Transfer) => {
-                if (t.id !== id) return t;
-                const total = t.progress.total || 1;
-                return { ...t, progress: { transferred: total, total, percentage: 100 } };
-            })
-        }));
-        // Step 2: After the CSS transition (duration-300) plays, switch to 'completed' card
-        setTimeout(() => {
-            let completed = false;
-            set((state: AppStore) => ({
-                transfers: state.transfers.map((t: Transfer) => {
-                    if (t.id !== id || t.status !== 'transferring') return t;
-                    completed = true;
-                    return { ...t, status: 'completed' };
-                })
+                return { ...t, status, progress };
             }));
+        },
+
+        completeTransfer: (id: string) => {
+            let completed = false;
+            set(state => {
+                const next = updateActiveTransfer(state, id, transfer => {
+                    completed = true;
+                    return {
+                        ...transfer,
+                        status: 'completed',
+                        progress: {
+                            ...transfer.progress,
+                            percentage: 100,
+                        },
+                    };
+                });
+                return next === state ? state : { transfers: retainCompletedTransfers(next.transfers, id, rememberDismissed) };
+            });
             if (completed) track('file_transfer');
-        }, 400);
-    },
+        },
 
-    failTransfer: (id: string, error: string) => {
-        set((state: AppStore) => ({
-            transfers: state.transfers.map((t: Transfer) => t.id === id ? { ...t, status: 'failed', error } : t)
-        }));
-    },
+        failTransfer: (id: string, error: string) => {
+            set(state => updateActiveTransfer(state, id, transfer => ({ ...transfer, status: 'failed', error })));
+        },
 
-    cancelTransfer: (id: string) => {
-        set((state: AppStore) => ({
-            transfers: state.transfers.map((t: Transfer) => t.id === id ? { ...t, status: 'cancelled' } : t)
-        }));
-    },
+        requestTransferCancellation: (id: string) => {
+            set(state => updateActiveTransfer(state, id, transfer => (
+                transfer.status === 'cancelling' ? transfer : { ...transfer, status: 'cancelling' }
+            )));
+        },
 
-    removeTransfer: (id: string) => {
-        set((state: AppStore) => ({
-            transfers: state.transfers.filter((t: Transfer) => t.id !== id)
-        }));
-    }
-});
+        cancelTransfer: (id: string) => {
+            set(state => updateActiveTransfer(state, id, transfer => ({ ...transfer, status: 'cancelled' })));
+        },
+
+        setTransferRecovery: (id, recovery) => {
+            set(state => {
+                const index = state.transfers.findIndex(transfer => transfer.id === id);
+                const transfer = state.transfers[index];
+                if (!transfer) return state;
+                const recoveryBackupPath = recovery?.backupPath;
+                const recoveryWarning = recovery?.warning;
+                if (transfer.recoveryBackupPath === recoveryBackupPath && transfer.recoveryWarning === recoveryWarning) return state;
+                const transfers = [...state.transfers];
+                transfers[index] = { ...transfer, recoveryBackupPath, recoveryWarning };
+                // Cleanup changes receipt metadata, never the native transfer outcome.
+                return { transfers: retainCompletedTransfers(transfers, id, rememberDismissed) };
+            });
+        },
+
+        removeTransfer: (id: string) => {
+            rememberDismissed(id);
+            set(state => ({
+                transfers: state.transfers.filter((t: Transfer) => t.id !== id)
+            }));
+        }
+    };
+};
