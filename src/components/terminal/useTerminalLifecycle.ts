@@ -589,7 +589,7 @@ export function useTerminalLifecycle({
       term.parser.registerOscHandler(7, (data) => {
         const owner = terminalCache.get(sessionId);
         // Explicit shell CWD reports do not depend on suggestion tracking being active.
-        if (!owner || !canTrackTerminalShell(term)) return true;
+        if (!owner || owner.term !== term || !canTrackTerminalShell(term)) return true;
         try {
           let path = data;
           if (path.startsWith('file://')) {
@@ -600,7 +600,9 @@ export function useTerminalLifecycle({
             path = path.slice(1);
           }
           if (path) {
-            useAppStore.getState().setTerminalCwd(terminalKey, sessionId, path);
+            // Parsing may finish after reconnect/command submission. The output
+            // callback, not the permanent parser, owns provenance validation.
+            owner.pendingOsc7Cwd = path;
           }
         } catch { /* ignore malformed OSC 7 */ }
         return true;

@@ -25,6 +25,12 @@ function normalizePromptPath(raw: string): string {
   return path;
 }
 
+/** Only the current output line can be a prompt awaiting input. */
+function currentPromptLine(text: string): string {
+  const clean = stripAnsi(text);
+  return clean.slice(Math.max(clean.lastIndexOf('\r'), clean.lastIndexOf('\n')) + 1);
+}
+
 /**
  * Extract cwd from the latest PowerShell prompt (`PS E:\work>` / `PS E:\work›`).
  */
@@ -32,42 +38,40 @@ const POWERSHELL_PROMPT_PATH =
   /(?:[A-Za-z]:[\\/]|\\\\|~[/\\]?|\/)[^\r\n\x1b›>\u203a]*/;
 
 export function extractPowerShellCwd(text: string): string | null {
-  const clean = stripAnsi(text);
+  const clean = currentPromptLine(text);
   const re = new RegExp(
-    `PS\\s+(${POWERSHELL_PROMPT_PATH.source})\\s*[›>\\u203a]`,
-    'g',
+    `^(?:\\([^\\r\\n)]*\\)\\s+)?PS\\s+(${POWERSHELL_PROMPT_PATH.source})\\s*[›>\\u203a]\\s*$`,
   );
-  let last: string | null = null;
-  for (const match of clean.matchAll(re)) {
-    const candidate = normalizePromptPath(match[1] ?? '');
-    if (candidate) last = candidate;
-  }
-  return last;
+  const match = re.exec(clean);
+  return match ? normalizePromptPath(match[1] ?? '') : null;
+}
+
+/** CMD's default prompt reports an absolute drive or UNC directory. */
+export function extractCmdCwd(text: string): string | null {
+  const match = /^((?:[A-Za-z]:[\\/]|\\\\)[^\r\n>]+|[A-Za-z]:[\\/])>\s*$/.exec(currentPromptLine(text));
+  return match ? normalizePromptPath(match[1]) : null;
 }
 
 /**
  * Extract cwd from common Unix prompts (`user@host:~/path$`, `host:~ $`, `/path#`, etc.).
  */
 export function extractUnixPromptCwd(text: string): string | null {
-  const clean = stripAnsi(text);
+  const clean = currentPromptLine(text);
   const patterns = [
     // user@host:~/path$ or bare /path#
-    /(?:^|\n)(?:[^\r\n@]*@[^\r\n:]*:)?([/~][^\r\n$#%›>]+)[$#%›>]\s*(?:\r?\n|$)/g,
+    /^(?:[^\r\n@]*@[^\r\n:]*:)?([/~][^\r\n$#%›>]*)[$#%›>]\s*$/,
     // host:~/path$ / host:~ $ (no @ — common in WSL zsh themes)
-    /(?:^|\n)(?:[^\r\n$#%›>\s]+):([/~][^\r\n$#%›>]*)\s*[$#%›>]/g,
+    /^(?:[^\r\n$#%›>\s]+):([/~][^\r\n$#%›>]*)\s*[$#%›>]\s*$/,
   ];
-  let last: string | null = null;
   for (const re of patterns) {
-    for (const match of clean.matchAll(re)) {
-      const candidate = normalizePromptPath(match[1] ?? '');
-      if (candidate) last = candidate;
-    }
+    const match = re.exec(clean);
+    if (match) return normalizePromptPath(match[1] ?? '');
   }
-  return last;
+  return null;
 }
 
 export function extractCwdFromPromptOutput(text: string): string | null {
-  return extractPowerShellCwd(text) ?? extractUnixPromptCwd(text);
+  return extractPowerShellCwd(text) ?? extractCmdCwd(text) ?? extractUnixPromptCwd(text);
 }
 
 const sniffBuffers = new Map<string, string>();
@@ -100,6 +104,9 @@ export function feedPromptCwdSniffer(
 
   const cwd = extractCwdFromPromptOutput(merged);
   if (cwd) {
+    // Consume a matched prompt. Rechecking it on later echo/password output
+    // would reset live input and could incorrectly leave secret-input mode.
+    sniffBuffers.delete(termId);
     ghostDebug('cwd-sniff', { termId, cwd });
     onCwd(cwd);
   }

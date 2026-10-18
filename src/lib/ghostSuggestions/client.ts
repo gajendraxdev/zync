@@ -1,5 +1,4 @@
 import { ghostDebug, isGhostDebugEnabled } from './ghostDebug.js';
-import { shellIdIndicatesWsl } from './wslShell.js';
 import type {
   GhostCommitRequest,
   GhostSeedRemoteHistoryRequest,
@@ -80,19 +79,6 @@ export async function resolveInlineSuggestion({
 
   // Backend owns spacing/ranking (mid-token vs new-word). Do not rewrite suffixes here.
   return response.suffix;
-}
-
-/** Warm Rust path cache after WSL terminal-ready (wsl.exe cold start). */
-export function prefetchWslHomeListing(shellId: string, cwd?: string): void {
-  if (!shellIdIndicatesWsl(shellId)) return;
-  void fetchGhostSuggestionV2({
-    prefix: 'cd',
-    scope: 'local',
-    cwd,
-    shellId,
-    fsConnectionId: 'local',
-    providers: { history: false, filesystem: true },
-  }).catch(() => {});
 }
 
 export { shouldPreferPathSuggestion } from './commandTokens.js';

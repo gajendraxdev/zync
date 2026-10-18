@@ -7,7 +7,6 @@ import {
   commitGhostCommand,
   resolveInlineSuggestion,
 } from '../../lib/ghostSuggestions/client';
-import { resolveCdTargetPath } from '../../lib/ghostSuggestions/cwdTracking';
 import { bindGhostTrackerRuntime, handleGhostInputEvent } from '../../lib/ghostSuggestions/runtime';
 import { shouldSuppressGhostForNativeShell } from '../../lib/ghostSuggestions/shellSuppression';
 import {
@@ -33,6 +32,8 @@ import {
   terminalCache,
 } from '../../lib/terminal';
 import { queueTerminalInput } from '../../lib/terminal/inputPipeline';
+import { getTerminalGhostCwd, invalidateTerminalGhostCwd } from '../../lib/terminal/terminalCache';
+import { isWin32Platform } from '../../lib/terminal/spawnContext';
 import type { TerminalMountContext } from './useTerminalLifecycle';
 import { canTrackTerminalShell, observeTerminalShellContext } from '../../lib/terminal/terminalShellContext';
 import { clearPromptCwdSniffer } from '../../lib/ghostSuggestions/promptCwdSniffer';
@@ -123,6 +124,8 @@ export function useTerminalGhost({
     const cached = terminalCache.get(sessionId);
     if (!cached || !cached.spawned || !isVisibleRef.current || !ghostSettingsRef.current.inlineEnabled
       || !canTrackTerminalShell(cached.term, cached.ghostPaused)
+      || shouldSuppressGhostForNativeShell(ghostSettingsRef.current.nativeShellPolicy,
+        cached.spawnShell, getZshAutosuggestEnabled(sessionId))
       || cached.ghostTracker?.isDesynced() || cached.ghostTracker?.isSecretInputMode()
       || cached.ghostTracker?.getSuggestion() !== suffix) return;
     cached?.ghostTracker?.appendToLineBuffer(suffix);
@@ -171,6 +174,7 @@ export function useTerminalGhost({
       generation: () => mountEntry?.generation ?? 0,
       invalidate: () => {
         if (mountEntry) mountEntry.ghostContextEpoch = (mountEntry.ghostContextEpoch ?? 0) + 1;
+        invalidateTerminalGhostCwd(mountSessionId);
         clearPromptCwdSniffer(mountSessionId);
         clearSecretInputSniffer(mountSessionId);
         cachedGhostTracker?.suspend();
@@ -186,12 +190,20 @@ export function useTerminalGhost({
     );
     scheduleZshAutosuggestProbe(mountSessionId, terminalKey, shellIdOnBind);
 
+    const nativeShellSuppressed = () => shouldSuppressGhostForNativeShell(
+      ghostSettingsRef.current.nativeShellPolicy,
+      mountEntry?.spawnShell ?? shellIdOnBind,
+      getZshAutosuggestEnabled(mountSessionId),
+    );
+    const canTrackGhostInput = () => safeContext() && isVisibleRef.current
+      && ghostSettingsRef.current.inlineEnabled && !nativeShellSuppressed();
+
     const unbindGhostTracker = cachedGhostTracker
       ? bindGhostTrackerRuntime({
         tracker: cachedGhostTracker,
         debounceMs: 30,
-        isEnabled: () => safeContext() && isVisibleRef.current && ghostSettingsRef.current.inlineEnabled,
-        getContextVersion: () => `${mountEntry?.generation}:${mountEntry?.ghostContextEpoch ?? 0}`,
+        isEnabled: canTrackGhostInput,
+        getContextVersion: () => `${mountEntry?.generation}:${mountEntry?.ghostContextEpoch ?? 0}:${mountEntry?.ghostCwdRevision ?? 0}`,
         resolveInlineSuggestion: async (line) => {
           if (!ghostSettingsRef.current.inlineEnabled) return '';
           if (!isVisibleRef.current) return '';
@@ -203,14 +215,10 @@ export function useTerminalGhost({
             termState?.shellOverride,
             store.settings.localTerm?.windowsShell,
           );
-          const suppressed = shouldSuppressGhostForNativeShell(
-            ghostSettingsRef.current.nativeShellPolicy,
-            shellId,
-            getZshAutosuggestEnabled(mountSessionId),
-          );
-          const rawCwd = termState?.lastKnownCwd ?? termState?.initialPath;
+          const suppressed = nativeShellSuppressed();
+          const rawCwd = getTerminalGhostCwd(mountSessionId);
           const wslShellId = terminalKey === 'local'
-            ? resolveWslShellIdForPathCompletion(shellId, rawCwd)
+            ? resolveWslShellIdForPathCompletion(mountEntry?.spawnShell, isWin32Platform())
             : undefined;
           const cwd = wslShellId ? cwdForWslPathCompletion(rawCwd) : rawCwd;
           ghostDebug('terminal', {
@@ -245,7 +253,7 @@ export function useTerminalGhost({
         },
         onSuggestion: (suffix, line) => {
           syncGhostLayout(cachedGhostTracker, term);
-          if (ghostSettingsRef.current.inlineEnabled && isVisibleRef.current && safeContext()) {
+          if (canTrackGhostInput()) {
             setGhostSuggestion(suffix);
           } else {
             setGhostSuggestion('');
@@ -258,20 +266,14 @@ export function useTerminalGhost({
           });
         },
         onAccept: (suffix, lineAfterAccept) => {
-          if (!safeContext() || !isVisibleRef.current || !ghostSettingsRef.current.inlineEnabled) return;
+          if (!canTrackGhostInput()) return;
           queueTerminalInput(mountSessionId, suffix);
           acceptGhostCommand(lineAfterAccept, ghostScope).catch(() => {});
           syncGhostLayout(cachedGhostTracker, term);
         },
         onHistoryCommit: (cmd) => {
-          if (!safeContext() || !isVisibleRef.current) return;
+          if (!canTrackGhostInput()) return;
           commitGhostCommand(cmd, ghostScope).catch(() => {});
-          const termState = useAppStore.getState().terminals[terminalKey]?.find((t) => t.id === mountSessionId);
-          const cwd = termState?.lastKnownCwd ?? termState?.initialPath;
-          const nextCwd = resolveCdTargetPath(cmd, cwd);
-          if (nextCwd) {
-            useAppStore.getState().setTerminalCwd(terminalKey, mountSessionId, nextCwd);
-          }
         },
         onClearUI: () => {
           setGhostSuggestion('');
@@ -293,7 +295,7 @@ export function useTerminalGhost({
         context.sync();
         const inputGeneration = mountEntry?.generation;
         const inputContext = mountEntry?.ghostContextEpoch;
-        const shellAtInput = safeContext();
+        const shellAtInput = canTrackGhostInput();
         enqueueTerminalInputTask(mountSessionId, async () => {
           const cached = terminalCache.get(mountSessionId);
           if (cached !== mountEntry || cached?.generation !== inputGeneration) return;
@@ -328,8 +330,6 @@ export function useTerminalGhost({
               remoteReady: true,
             });
             cached.ghostTracker?.reset();
-            cached.zshAutosuggestEnabled = undefined;
-            cached.zshAutosuggestProbe = undefined;
             const storeAfterSpawn = useAppStore.getState();
             const termAfterSpawn = storeAfterSpawn.terminals[terminalKey]?.find((t) => t.id === mountSessionId);
             const shellAfterSpawn = getEffectiveShellId(
@@ -344,7 +344,7 @@ export function useTerminalGhost({
             return;
           }
 
-          if (isVisibleRef.current && shellAtInput && safeContext() && cached?.ghostContextEpoch === inputContext) {
+          if (shellAtInput && canTrackGhostInput() && cached?.ghostContextEpoch === inputContext) {
             // Capture line origin *before* feed when the buffer is empty so we
             // pin to the prompt caret even if local echo is extremely fast.
             const tracker = cached?.ghostTracker;

@@ -126,16 +126,18 @@ export function scheduleZshAutosuggestProbe(
   if (cached.zshAutosuggestProbe) return;
 
   cached.zshAutosuggestEnabled = undefined;
-  cached.zshAutosuggestProbe = probeZshAutosuggestions(connectionId, shellId)
+  const generation = cached.generation;
+  const ownsProbe = () => terminalCache.get(termId) === cached
+    && cached.generation === generation && cached.zshAutosuggestProbe === probe;
+  const probe: Promise<boolean> = probeZshAutosuggestions(connectionId, shellId)
     .then((enabled) => {
-      const current = terminalCache.get(termId);
-      if (current) current.zshAutosuggestEnabled = enabled;
+      if (ownsProbe()) cached.zshAutosuggestEnabled = enabled;
       return enabled;
     })
     .finally(() => {
-      const current = terminalCache.get(termId);
-      if (current) current.zshAutosuggestProbe = undefined;
+      if (ownsProbe()) cached.zshAutosuggestProbe = undefined;
     });
+  cached.zshAutosuggestProbe = probe;
 }
 
 export function getZshAutosuggestEnabled(termId: string): boolean | undefined {

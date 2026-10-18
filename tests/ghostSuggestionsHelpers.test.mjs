@@ -36,9 +36,6 @@ import {
   extractPowerShellCwd,
 } from '../.tmp-agent-tests/src/lib/ghostSuggestions/promptCwdSniffer.js';
 import {
-  resolveCdTargetPath,
-} from '../.tmp-agent-tests/src/lib/ghostSuggestions/cwdTracking.js';
-import {
   classifyInputEscape,
 } from '../.tmp-agent-tests/src/lib/ghostSuggestions/escapeInput.js';
 import {
@@ -50,7 +47,6 @@ import {
 } from '../.tmp-agent-tests/src/lib/ghostSuggestions/zshAutosuggestDetect.js';
 import {
   cwdForWslPathCompletion,
-  linuxPathLooksLikeWsl,
   resolveWslShellIdForPathCompletion,
   shellIdIndicatesWsl,
 } from '../.tmp-agent-tests/src/lib/ghostSuggestions/wslShell.js';
@@ -88,8 +84,8 @@ async function withMockWindow(mockWindow, fn) {
   }
 }
 
-await runTest('extractPowerShellCwd reads PS path prompts with angle bracket', () => {
-  const cwd = extractPowerShellCwd('Directory: E:\\work\r\nPS E:\\work\u203A cd ');
+await runTest('extractPowerShellCwd reads a current PS path prompt with angle bracket', () => {
+  const cwd = extractPowerShellCwd('Directory: E:\\work\r\nPS E:\\work\u203A ');
   assert.equal(cwd, 'E:\\work');
 });
 
@@ -208,23 +204,6 @@ await runTest('InputTracker resumes ghost tracking after Ctrl+C clears desync', 
 
   assert.equal(tracker.isDesynced(), false);
   assert.deepEqual(changed, ['g', 'gi', 'git', 'git ', 'l']);
-});
-
-await runTest('resolveCdTargetPath resolves relative multi-segment cd targets', () => {
-  assert.equal(resolveCdTargetPath('cd foo/bar', 'E:\\work'), 'E:\\work\\foo\\bar');
-  assert.equal(resolveCdTargetPath('cd ./src/lib', '/home/me'), '/home/me/src/lib');
-});
-
-await runTest('resolveCdTargetPath parentDirectory handles tilde cwd', () => {
-  assert.equal(resolveCdTargetPath('cd ..', '~/foo/bar'), '~/foo');
-  assert.equal(resolveCdTargetPath('cd ..', '~/only'), '~');
-  assert.equal(resolveCdTargetPath('cd ..', '~'), null);
-});
-
-await runTest('resolveCdTargetPath parentDirectory preserves Windows drive root', () => {
-  assert.equal(resolveCdTargetPath('cd ..', 'C:\\'), 'C:\\');
-  assert.equal(resolveCdTargetPath('cd ..', 'C:'), 'C:\\');
-  assert.equal(resolveCdTargetPath('cd ..', 'E:\\work'), 'E:\\');
 });
 
 await runTest('isBareDirectoryListingLine matches bare cd token', () => {
@@ -347,11 +326,6 @@ await runTest('shouldPreferPathSuggestion uses active segment command', () => {
   assert.equal(shouldPreferPathSuggestion('echo hi && git status'), false);
 });
 
-await runTest('resolveCdTargetPath uses active segment for pipelines', () => {
-  assert.equal(resolveCdTargetPath('echo hi && cd foo/bar', '/home/me'), '/home/me/foo/bar');
-  assert.equal(resolveCdTargetPath('ls | cd ..', '/home/me/projects'), '/home/me');
-});
-
 await runTest('handleGhostInputEvent feeds tracker for printable input', () => {
   let feedCalls = 0;
   const tracker = {
@@ -470,12 +444,11 @@ await runTest('expandTildePathForRemote maps tilde paths for SFTP', () => {
   assert.equal(expandTildePathForRemote('/var/log', '/home/gajen'), '/var/log');
 });
 
-await runTest('resolveWslShellIdForPathCompletion infers WSL from Linux cwd', () => {
-  assert.equal(resolveWslShellIdForPathCompletion('default', '~'), 'wsl');
-  assert.equal(resolveWslShellIdForPathCompletion('powershell', '/home/gajendra'), 'wsl');
-  assert.equal(resolveWslShellIdForPathCompletion('wsl:Ubuntu', '~'), 'wsl:Ubuntu');
-  assert.equal(resolveWslShellIdForPathCompletion('powershell', 'E:\\\\work'), undefined);
-  assert.equal(linuxPathLooksLikeWsl('~/data'), true);
+await runTest('resolveWslShellIdForPathCompletion requires an explicit Windows WSL spawn', () => {
+  assert.equal(resolveWslShellIdForPathCompletion('default', true), undefined);
+  assert.equal(resolveWslShellIdForPathCompletion('powershell', true), undefined);
+  assert.equal(resolveWslShellIdForPathCompletion('wsl:Ubuntu', true), 'wsl:Ubuntu');
+  assert.equal(resolveWslShellIdForPathCompletion('wsl:Ubuntu', false), undefined);
 });
 
 await runTest('extractRecentCommands keeps command lines and strips prompts', () => {
@@ -602,5 +575,7 @@ await runTest('InputTracker suppresses ghost and history commit during secret in
   assert.equal(lineChanges, 0);
   tracker.feed('\r');
   assert.equal(commits, 0);
+  assert.equal(tracker.isSecretInputMode(), true, 'Enter is not proof authentication has ended');
+  tracker.exitSecretInputMode();
   assert.equal(tracker.isSecretInputMode(), false);
 });

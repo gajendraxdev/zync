@@ -21,6 +21,8 @@
         "sourceMap": false
     },
     "include": [
+        "tests/ghostCwdSafety.test.ts",
+        "tests/ghostPromptSafety.test.ts",
         "tests/folderSizes.test.ts",
         "tests/filePermissions.test.ts",
         "tests/editorSaveAccess.test.ts",
@@ -168,7 +170,6 @@
         "src/lib/ghostSuggestions/suggestionSuffix.ts",
         "src/lib/ghostSuggestions/cursorPosition.ts",
         "src/lib/ghostSuggestions/displayWidth.ts",
-        "src/lib/ghostSuggestions/cwdTracking.ts",
         "src/lib/ghostSuggestions/ghostDebug.ts",
         "src/lib/ghostSuggestions/types.ts",
         "src/lib/ghostSuggestions/escapeInput.ts",

@@ -1,5 +1,6 @@
 import { ghostDebug } from './ghostDebug.js';
-import { stripAnsi } from './promptCwdSniffer.js';
+import { clearPromptCwdSniffer, feedPromptCwdSniffer, stripAnsi } from './promptCwdSniffer.js';
+import type { InputTracker } from './inputTracker.js';
 
 const MAX_BUFFER_CHARS = 4096;
 
@@ -74,4 +75,26 @@ export function feedSecretInputSniffer(
 export function clearSecretInputSniffer(termId: string): void {
   sniffBuffers.delete(termId);
   sniffDecoders.delete(termId);
+}
+
+/** Keep password detection and fresh shell-prompt recovery in one ordered path. */
+export function feedTerminalPromptSniffers(
+  termId: string,
+  data: Uint8Array,
+  tracker: Pick<InputTracker, 'enterSecretInputMode' | 'exitSecretInputMode'> | undefined,
+  onCwd: (path: string) => void,
+  options?: SnifferFeedOptions & { allowPromptRecovery?: boolean },
+): void {
+  feedSecretInputSniffer(termId, data, () => {
+    clearPromptCwdSniffer(termId);
+    tracker?.enterSecretInputMode();
+  }, options);
+  // A queued password prompt is still positive evidence of hidden input even
+  // after another command was sent. Its older shell prompt must not unlock it.
+  if (options?.allowPromptRecovery === false) return;
+  feedPromptCwdSniffer(termId, data, (path) => {
+    clearSecretInputSniffer(termId);
+    tracker?.exitSecretInputMode();
+    onCwd(path);
+  }, options);
 }

@@ -1,7 +1,7 @@
 import type { Terminal as XTerm } from '@xterm/xterm';
 import { isConnectionBackendLive } from './connectionBackend.js';
 import { clearTerminalInputQueue } from './inputQueue.js';
-import { clearTerminalPendingInput, terminalCache } from './terminalCache.js';
+import { clearTerminalPendingInput, invalidateTerminalGhostCwd, terminalCache } from './terminalCache.js';
 import {
   formatTerminalSpawnError,
   isTerminalSpawnConnectionNotReadyError,
@@ -40,8 +40,11 @@ export function spawnTerminalSession(options: SpawnTerminalSessionOptions): bool
   const generation = cached.generation + 1;
   cached.generation = generation;
   cached.connectionId = connectionId;
-  cached.pendingSpawnCwd = cwd;
   cached.pendingSpawnShell = shell;
+  cached.spawnShell = shell;
+  cached.zshAutosuggestEnabled = undefined;
+  cached.zshAutosuggestProbe = undefined;
+  invalidateTerminalGhostCwd(termId);
   cached.spawned = true;
   cached.starting = true;
   cached.suspendedByPanel = false;

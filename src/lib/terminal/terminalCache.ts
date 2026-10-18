@@ -39,6 +39,14 @@ export interface TerminalCache {
   ghostContextEpoch?: number;
   /** False while no mounted input/context observer owns this cache entry. */
   ghostContextActive?: boolean;
+  /** Observed PTY CWD only; saved tab paths are not evidence of this shell's CWD. */
+  ghostCwd?: { path: string; generation: number };
+  /** Invalidates asynchronous suggestions when the observed CWD changes or becomes unknown. */
+  ghostCwdRevision?: number;
+  /** Parsed by xterm; promoted only by that output frame's generation-checked callback. */
+  pendingOsc7Cwd?: string;
+  /** Reject output queued before a newer command was actually sent to the PTY. */
+  ghostCommandEpoch?: number;
   onDataDisposable?: { dispose: () => void };
   ligaturesAddon?: { dispose: () => void };
   ligaturesEnabled: boolean;
@@ -46,10 +54,10 @@ export interface TerminalCache {
   ligaturesLoadPromise?: Promise<void> | null;
   /** Set after terminal:create fails for a dead SSH backend; cleared on reconnect/ready. */
   spawnBlocked?: boolean;
-  /** CWD used for the in-flight PTY spawn — seeded on terminal-ready. */
-  pendingSpawnCwd?: string;
   /** Shell id/path used for the in-flight PTY spawn — persisted on terminal-ready. */
   pendingSpawnShell?: string;
+  /** Shell actually requested for this PTY generation, independent of later settings changes. */
+  spawnShell?: string;
   /** Probed from zsh init files when shell is zsh (undefined = not yet known). */
   zshAutosuggestEnabled?: boolean;
   zshAutosuggestProbe?: Promise<boolean>;
@@ -60,6 +68,34 @@ export interface TerminalCache {
 }
 
 export const terminalCache = new Map<string, TerminalCache>();
+
+/** Record fresh prompt/OSC 7 evidence without promoting saved or speculative paths. */
+export function confirmTerminalGhostCwd(termId: string, path: string, generation: number): boolean {
+  const cached = terminalCache.get(termId);
+  if (!cached?.spawned || cached.generation !== generation || !path) return false;
+  if (cached.ghostCwd?.generation !== generation || cached.ghostCwd.path !== path) {
+    cached.ghostCwdRevision = (cached.ghostCwdRevision ?? 0) + 1;
+    cached.ghostCwd = { path, generation };
+    cached.ghostTracker?.dismissSuggestion();
+  }
+  return true;
+}
+
+/** Relative path completion requires evidence from the current, live PTY. */
+export function getTerminalGhostCwd(termId: string): string | undefined {
+  const cached = terminalCache.get(termId);
+  return cached?.spawned && cached.ghostCwd?.generation === cached.generation
+    ? cached.ghostCwd.path : undefined;
+}
+
+/** Executing input or leaving shell context makes the previous prompt's CWD uncertain. */
+export function invalidateTerminalGhostCwd(termId: string): void {
+  const cached = terminalCache.get(termId);
+  if (!cached) return;
+  cached.ghostCwd = undefined;
+  cached.ghostCwdRevision = (cached.ghostCwdRevision ?? 0) + 1;
+  cached.ghostTracker?.dismissSuggestion();
+}
 
 export function clearTerminalPendingInput(termId: string | null | undefined): void {
   if (!termId) return;

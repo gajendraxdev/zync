@@ -61,26 +61,25 @@ function collectOscHandlers(node) {
 }
 collectOscHandlers(lifecycleSource);
 assert.equal(oscHandlers.length, 1, 'exercise exactly the production OSC 7 handler');
-const cwdUpdates = [];
 const sessionId = 'cwd-session';
-const terminalKey = 'local';
 const terminalCache = new Map();
-const useAppStore = { getState: () => ({ setTerminalCwd: (...args) => cwdUpdates.push(args) }) };
-const onOsc7 = new Function('terminalCache', 'sessionId', 'term', 'canTrackTerminalShell', 'useAppStore', 'terminalKey', `return (${oscHandlers[0]});`)(terminalCache, sessionId, term, canTrackTerminalShell, useAppStore, terminalKey);
+const onOsc7 = new Function('terminalCache', 'sessionId', 'term', 'canTrackTerminalShell', `return (${oscHandlers[0]});`)(terminalCache, sessionId, term, canTrackTerminalShell);
 for (const owner of [{}, { ghostContextActive: false }, { ghostContextActive: true, ghostPaused: true }]) {
+  owner.term = term;
   terminalCache.set(sessionId, owner);
   assert.equal(onOsc7('file://host/home/test%20user'), true);
-  assert.deepEqual(cwdUpdates.at(-1), [terminalKey, sessionId, '/home/test user']);
+  assert.equal(owner.pendingOsc7Cwd, '/home/test user');
 }
-assert.equal(cwdUpdates.length, 3, 'explicit CWD works before observer binding and while suggestions are paused');
 onOsc7('file://host/C:/Users/test');
-assert.equal(cwdUpdates.at(-1)[2], 'C:/Users/test', 'Windows path normalization is preserved');
-const acceptedUpdates = cwdUpdates.length;
+const owner = terminalCache.get(sessionId);
+assert.equal(owner.pendingOsc7Cwd, 'C:/Users/test', 'Windows path normalization is preserved');
 term.buffer.active.type = 'alternate'; onOsc7('file://host/untrusted');
 term.buffer.active.type = 'normal'; term.modes.mouseTrackingMode = 'drag'; onOsc7('file://host/untrusted');
 term.modes.mouseTrackingMode = 'none'; onOsc7('file://host/%broken');
+assert.equal(owner.pendingOsc7Cwd, 'C:/Users/test', 'unsafe context and malformed reports cannot replace parsed CWD');
+terminalCache.set(sessionId, { term: {} }); onOsc7('file://host/replaced');
+assert.equal(terminalCache.get(sessionId).pendingOsc7Cwd, undefined, 'a replaced xterm cannot report CWD for a new owner');
 terminalCache.delete(sessionId); onOsc7('file://host/stale');
-assert.equal(cwdUpdates.length, acceptedUpdates, 'unsafe context, malformed reports and missing owners cannot update CWD');
 
 const commits = [];
 const tracker = new InputTracker({ onLineChange: () => {}, onAccept: () => {}, onDismiss: () => {}, onHistoryCommit: text => commits.push(text) });
