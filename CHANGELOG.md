@@ -6,6 +6,11 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Fixed
 
+- **Local terminal responsiveness:** Move blocking PTY writes, resize and
+  teardown off async workers without holding the shared session lock during
+  slow platform calls. Preserve input ordering after cancellation and prevent
+  old natural-exit cleanup from removing a replacement session. ([5a0ce24])
+
 - **Terminal tab switching:** Cancel obsolete deferred renderer work when tab
   visibility or terminal ownership changes, preventing an older background task
   from releasing the active tab's GPU renderer. Ignore stale setup completions.
@@ -2889,4 +2894,5 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [2b1d77d]: https://github.com/zync-sh/zync/commit/2b1d77d18192d5b76e9b494d5cebbfb1c925cf92
 [f7bb076]: https://github.com/zync-sh/zync/commit/f7bb076e86979523d28fa970ddc6752d8836c8df
 [2b54a0d]: https://github.com/zync-sh/zync/commit/2b54a0de6b83c65df5bc8a463fc27e7d5a27d871
+[5a0ce24]: https://github.com/zync-sh/zync/commit/5a0ce24d82003801aaa07ad86bfbd0a8fb4769c0
 [43d59da]: https://github.com/zync-sh/zync/commit/43d59da1cdf91177c8c01683cbc0294f4da156f3
