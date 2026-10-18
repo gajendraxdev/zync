@@ -7,20 +7,20 @@ import { FileSelectionMark } from '../.tmp-agent-tests/src/components/file-manag
 
 const file = (name, size, type = '-') => ({ name, size, type });
 
-test('selection summary totals only loaded regular files, not folders or link targets', () => {
+test('selection summary never mistakes directory metadata for recursive size or follows links', () => {
   const entries = [file('a.txt', 1024), file('empty', 0), file('folder', 4096, 'd'), file('link', 8192, 'l')];
   assert.deepEqual(fileSelectionSummary(entries, entries.map(entry => entry.name)), {
-    count: 4, files: 2, folders: 1, links: 1, bytes: 1024, unknownSizes: 0,
+    count: 4, files: 2, folders: 1, links: 1, bytes: 1024, unknownSizes: 1, partialSizes: 0, pendingSizes: 0,
   });
   assert.deepEqual(fileSelectionSummary(entries, ['folder']), {
-    count: 1, files: 0, folders: 1, links: 0, bytes: 0, unknownSizes: 0,
+    count: 1, files: 0, folders: 1, links: 0, bytes: 0, unknownSizes: 1, partialSizes: 0, pendingSizes: 0,
   });
 });
 
 test('selection summary retains hidden selections, ignores vanished/duplicate names and never mutates its inputs', () => {
   const entries = Object.freeze([Object.freeze(file('.hidden', 256)), Object.freeze(file('a.txt', 1024))]);
   const names = Object.freeze(['.hidden', '.hidden', 'gone']);
-  assert.deepEqual(fileSelectionSummary(entries, names), { count: 1, files: 1, folders: 0, links: 0, bytes: 256, unknownSizes: 0 });
+  assert.deepEqual(fileSelectionSummary(entries, names), { count: 1, files: 1, folders: 0, links: 0, bytes: 256, unknownSizes: 0, partialSizes: 0, pendingSizes: 0 });
   assert.equal(fileSelectionSummary(entries, []).count, 0);
   assert.equal(names.length, 3);
 });

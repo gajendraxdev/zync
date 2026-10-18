@@ -46,6 +46,9 @@ import { EDITOR_READ_LIMIT_MESSAGE, exceedsEditorReadLimit, isEditorReadLimitErr
 import { PropertiesPanel } from './file-manager/PropertiesPanel';
 import { useFilePermissionEditor } from '../features/files/application/useFilePermissionEditor';
 import { useFileActionAccess } from '../features/files/application/useFileActionAccess';
+import { useFolderSizes } from '../features/files/application/useFolderSizes';
+import { FolderSizeDetails } from './file-manager/FolderSizeValue';
+import { folderSizePaths } from '../features/files/domain/folderSizes';
 import { useFileClipboard } from './file-manager/useFileClipboard';
 import { isFileManagerPanelShown, useFileKeyboard } from './file-manager/useFileKeyboard';
 import { useFileSelection } from './file-manager/useFileSelection';
@@ -1067,7 +1070,6 @@ export const FileManager = memo(function FileManager({
     return fileFolderOptions(entries, path, showHiddenFiles);
   }, [activeConnectionId, isConnected, showHiddenFiles]);
   const folderFiles = useMemo(() => showHiddenFiles ? files : files.filter(file => !file.name.startsWith('.')), [files, showHiddenFiles]);
-  const selectionSummary = useMemo(() => fileSelectionSummary(files, selectedFiles), [files, selectedFiles]);
   const filteredFiles = useMemo(
     () => folderFiles.filter((f) => {
       if (!fileMatchesQuery(f, searchTerm)) return false;
@@ -1080,6 +1082,17 @@ export const FileManager = memo(function FileManager({
     () => sortFileEntries(filteredFiles, sortColumn, sortDirection, settings.fileManager.sortFoldersFirst !== false),
     [filteredFiles, sortColumn, sortDirection, settings.fileManager.sortFoldersFirst],
   );
+  const foldersToCalculate = useMemo(() => folderSizePaths(paintedFiles), [paintedFiles]);
+  const showFolderSizes = settings.fileManager.showFolderSizes !== false;
+  const folderSizes = useFolderSizes(activeConnectionId ?? undefined, currentPath, files, connection,
+    isFilesSurfaceActive && isConnected && !loading, showFolderSizes, foldersToCalculate);
+  const selectionSummary = useMemo(() => fileSelectionSummary(files, selectedFiles, folderSizes.states),
+    [files, selectedFiles, folderSizes.states]);
+  const toggleFolderSizes = useCallback(() => {
+    if (useAppStore.getState().settings.fileManager.showFolderSizes !== false) folderSizes.cancel();
+    void updateFileManagerSettings({ showFolderSizes: useAppStore.getState().settings.fileManager.showFolderSizes === false })
+      .catch(() => showToast('error', 'Could not save the folder-size preference.'));
+  }, [folderSizes.cancel, updateFileManagerSettings, showToast]);
   const handleSort = useCallback((column: FileSortColumn) => {
     if (column === sortColumn) {
       setSortDirection((dir) => (dir === 'asc' ? 'desc' : 'asc'));
@@ -2012,6 +2025,7 @@ export const FileManager = memo(function FileManager({
           isPropertiesOpen={isPropertiesOpen}
           onProperties={() => isPropertiesOpen ? setIsPropertiesOpen(false) : handleOpenProperties()}
           onRefresh={handleRefresh}
+          folderSizes={{ active: folderSizes.active, limited: folderSizes.limited, cancel: folderSizes.cancel }}
           onCopyLocation={handleCopyLocation}
           onBookmark={toggleBookmark}
           isBookmarked={isBookmarked}
@@ -2022,6 +2036,7 @@ export const FileManager = memo(function FileManager({
           onClearSelection={() => { setSelectedFiles([]); listingFocusRef.current?.focus({ preventScroll: true }); }}
           disabled={!isConnected || isLoading || !currentPath}
           view={{ viewMode, onToggleView: setViewMode, showHidden: showHiddenFiles,
+            showFolderSizes, onToggleFolderSizes: toggleFolderSizes,
             onToggleHidden: handleToggleHidden, onZoomIn: handleZoomIn, onZoomOut: handleZoomOut,
             canZoomIn, canZoomOut, sortColumn, sortDirection, onSort: applySort,
             detailColumns, onToggleColumn: column => setDetailColumns(current => current.includes(column) ? current.filter(item => item !== column) : [...current, column]) }}
@@ -2067,6 +2082,8 @@ export const FileManager = memo(function FileManager({
             label={`Files in ${filePathLeafLabel(currentPath, { homePath, osName }) || 'current folder'}`}
             detailColumns={detailColumns} onKeyboardContextMenu={handleKeyboardContextMenu}
             files={paintedFiles}
+            folderSizeStates={folderSizes.states}
+            onFolderSizeDetails={folderSizes.inspect}
             selectedFiles={selectedFiles}
             focusedFile={focusedFile || undefined}
             onSelect={handleSelect}
@@ -2098,6 +2115,7 @@ export const FileManager = memo(function FileManager({
           <PropertiesPanel
             files={inspectorFiles}
             permissionEditor={permissionEditor}
+            folderSizes={folderSizes}
             onClose={() => setIsPropertiesOpen(false)}
             dateTimeFormat={settings.fileManager.dateTimeFormat || 'simple'}
           />
@@ -2109,11 +2127,13 @@ export const FileManager = memo(function FileManager({
       </Modal>
       <Modal isOpen={isFilesSurfaceActive && !propertiesInline && isPropertiesOpen} restoreFocus={isFilesSurfaceActive} onClose={() => setIsPropertiesOpen(false)} title="Properties" width="max-w-sm" contentClassName="p-0">
         <PropertiesPanel files={inspectorFiles} onClose={() => setIsPropertiesOpen(false)} showHeader={false}
+          folderSizes={folderSizes}
           permissionEditor={permissionEditor}
           dateTimeFormat={settings.fileManager.dateTimeFormat || 'simple'} />
       </Modal>
       </div>
 
+      <FolderSizeDetails state={folderSizes.details} onClose={folderSizes.closeDetails} restoreFocus={isFilesSurfaceActive} />
       {/* Context Menu */}
       {contextMenu && (
         <ContextMenu

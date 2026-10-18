@@ -207,6 +207,8 @@ export interface AppSettings {
     };
     fileManager: {
         showHiddenFiles: boolean;
+        /** Bounded background folder-size scans. Missing older values default on. */
+        showFolderSizes?: boolean;
         confirmDelete: boolean;
         defaultDownloadPath: string;
         bookmarksByConnection: Record<string, string[]>;
@@ -389,6 +391,7 @@ export const defaultSettings: AppSettings = {
     },
     fileManager: {
         showHiddenFiles: true,
+        showFolderSizes: true,
         confirmDelete: true,
         defaultDownloadPath: '',
         bookmarksByConnection: {},

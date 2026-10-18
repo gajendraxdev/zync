@@ -21,6 +21,7 @@
         "sourceMap": false
     },
     "include": [
+        "tests/folderSizes.test.ts",
         "tests/filePermissions.test.ts",
         "tests/editorSaveAccess.test.ts",
         "tests/transferState.test.ts",

@@ -92,6 +92,8 @@ test('inline Properties owns Escape even after tooltip dismissal, while modal de
     './FileEntryIcon': { FileEntryIcon: stub }, '../../lib/keyboard': { isMatch },
     '../../features/files/domain/filePermissions': { unixModeString: stub },
     './FilePermissionsSection': { FilePermissionsSection: stub },
+    './FolderSizeValue': { FolderSizeValue: stub }, '../ui/Button': { Button: stub },
+    './fileSelectionSummary': { fileSelectionSummary: () => ({}), fileSelectionSizeLabel: () => '' },
     '../../lib/utils': { cn: (...values) => values.filter(Boolean).join(' '), formatBytes: String },
     './fileGridLayout': { formatFileListDate: String, formatFileListType: String },
     '../ui/IconButton': { IconButton: stub }, '../ui/Tooltip': { Tooltip: stub },

@@ -10,6 +10,10 @@ import type { FileEntry } from './types';
 import { unixModeString } from '../../features/files/domain/filePermissions';
 import type { FilePermissionEditor } from '../../features/files/application/useFilePermissionEditor';
 import { FilePermissionsSection } from './FilePermissionsSection';
+import type { FolderSizes } from '../../features/files/application/useFolderSizes';
+import { FolderSizeValue } from './FolderSizeValue';
+import { Button } from '../ui/Button';
+import { fileSelectionSizeLabel, fileSelectionSummary } from './fileSelectionSummary';
 
 interface PropertiesPanelProps {
   files: FileEntry[];
@@ -17,6 +21,7 @@ interface PropertiesPanelProps {
   dateTimeFormat?: 'simple' | 'detailed';
   showHeader?: boolean;
   permissionEditor?: FilePermissionEditor;
+  folderSizes?: FolderSizes;
 }
 
 function fileKindLabel(file: FileEntry): string {
@@ -24,7 +29,7 @@ function fileKindLabel(file: FileEntry): string {
   return formatFileListType(file);
 }
 
-function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+function Row({ label, value, mono }: { label: string; value: ReactNode; mono?: boolean }) {
   return (
     <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-start gap-3 py-1 text-xs">
       <dt className="text-app-muted">
@@ -44,11 +49,12 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   </section>;
 }
 
-export function PropertiesPanel({ files, onClose, dateTimeFormat = 'simple', showHeader = true, permissionEditor }: PropertiesPanelProps) {
+export function PropertiesPanel({ files, onClose, dateTimeFormat = 'simple', showHeader = true, permissionEditor, folderSizes }: PropertiesPanelProps) {
   const single = files.length === 1 ? files[0] : null;
+  const sizeState = single?.type === 'd' ? folderSizes?.states[single.path] : undefined;
   const folderCount = files.filter((file) => file.type === 'd').length;
   const otherCount = files.length - folderCount;
-  const totalSize = files.reduce((sum, file) => sum + (file.type === 'd' ? 0 : file.size), 0);
+  const summary = fileSelectionSummary(files, files.map(file => file.name), folderSizes?.states);
 
   return (
     <aside aria-label="File properties" className={cn('flex h-full w-full min-w-0 flex-col bg-app-panel/70', !showHeader && 'max-h-[70vh]')}
@@ -102,7 +108,10 @@ export function PropertiesPanel({ files, onClose, dateTimeFormat = 'simple', sho
                   <dd className="py-1.5 text-xs text-app-text select-text [overflow-wrap:anywhere]">{single.path || '—'}</dd>
                 </Section>
                 <Section title="Information">
-                  <Row label="Size" value={single.type === 'd' ? '—' : formatBytes(single.size)} />
+                  <Row label="Size" value={single.type === 'd' ? <FolderSizeValue state={sizeState}
+                    onDetails={() => folderSizes?.inspect(single.path)} /> : formatBytes(single.size)} />
+                  {single.type === 'd' && folderSizes?.enabled && (!sizeState || sizeState.status === 'cancelled' || sizeState.status === 'unavailable') && <Row label="Contents" value={<Button type="button" variant="ghost" size="sm" disabled={folderSizes.active}
+                    onClick={() => folderSizes.start([single.path])}>{sizeState ? 'Retry calculation' : 'Calculate size'}</Button>} />}
                   <Row label="Type" value={fileKindLabel(single)} />
                   <Row label="Modified" value={formatFileListDate(single.lastModified, Date.now(), dateTimeFormat) || '—'} />
                 </Section>
@@ -117,7 +126,7 @@ export function PropertiesPanel({ files, onClose, dateTimeFormat = 'simple', sho
             ) : (
               <Section title="Selection">
                 <Row label="Items" value={String(files.length)} />
-                <Row label="Size" value={formatBytes(totalSize)} />
+                <Row label="Size" value={fileSelectionSizeLabel(summary) || '—'} />
                 <Row label="Folders" value={String(folderCount)} />
                 <Row label="Files" value={String(otherCount)} />
               </Section>

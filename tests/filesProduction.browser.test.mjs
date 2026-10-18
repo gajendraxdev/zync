@@ -18,6 +18,7 @@ const windowsEditorOnly = process.argv.includes('--windows-editor-only');
 const accessOnly = process.argv.includes('--access-only');
 const listingAccessOnly = process.argv.includes('--listing-access-only');
 const editorOnly = process.argv.includes('--editor-only');
+const folderSizesOnly = process.argv.includes('--folder-sizes-only');
 
 const { chromium } = await import(process.env.ZYNC_PLAYWRIGHT_MODULE || 'playwright');
 const server = await createServer({
@@ -51,7 +52,7 @@ try {
     return route.abort();
   });
   const address = server.httpServer.address();
-  await page.goto(`http://127.0.0.1:${address.port}/tests/filesProduction.browser.html${administratorOnly ? '?permissions=1&admin=1' : windowsEditorOnly ? '?permissions=1&windows=1&editor=1' : windowsPermissionsOnly ? '?permissions=1&windows=1' : accessOnly ? '?access=1' : permissionsOnly ? '?permissions=1' : editorOnly ? '?editor=1' : ''}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.goto(`http://127.0.0.1:${address.port}/tests/filesProduction.browser.html${folderSizesOnly ? '?folderSizes=1' : administratorOnly ? '?permissions=1&admin=1' : windowsEditorOnly ? '?permissions=1&windows=1&editor=1' : windowsPermissionsOnly ? '?permissions=1&windows=1' : accessOnly ? '?access=1' : permissionsOnly ? '?permissions=1' : editorOnly ? '?editor=1' : ''}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
   const item = name => page.locator(`[data-file-name=${JSON.stringify(name)}]`);
   const summary = page.locator('.files-summary-count');
   const listing = page.getByRole('listbox');
@@ -61,7 +62,16 @@ try {
     await mkdir(process.env.ZYNC_FILES_SCREENSHOTS, { recursive: true });
     await page.screenshot({ path: `${process.env.ZYNC_FILES_SCREENSHOTS}/${name}.png` });
   };
-  if (listingAccessOnly) {
+  if (folderSizesOnly) {
+    for (const reducedMotion of ['reduce', 'no-preference']) {
+      await page.emulateMedia({ reducedMotion });
+      if (reducedMotion === 'no-preference') await page.reload({ waitUntil: 'domcontentloaded' });
+      await listing.waitFor();
+      for (const label of await page.evaluate(() => window.runFolderSizeBrowserChecks())) check(reducedMotion + ': ' + label, true);
+    }
+    assert.deepEqual(errors, []); assert.deepEqual(requests, []);
+    console.log(`Production Files folder-size checks passed (${checks}).`);
+  } else if (listingAccessOnly) {
     await listing.waitFor();
     for (const label of await page.evaluate(() => window.runFileListingAccessBrowserChecks())) check(label, true);
     assert.deepEqual(errors, []); assert.deepEqual(requests, []);
@@ -385,9 +395,9 @@ try {
   await item('README.md').click({modifiers:['Control']});
   check('multiple selection updates existing chrome without moving file rows', await page.getByRole('option',{selected:true}).count()===2 && (await item('assets').boundingBox()).y===listOrigin && (await summary.textContent()).includes('2 selected'));
   check('selection summary shows combined regular-file sizes from existing metadata', (await summary.textContent()).includes('5.1 KB')
-    && (await summary.locator('.sr-only').textContent()).includes('Folder contents and link targets are not counted'));
+    && (await summary.locator('.sr-only').textContent()).includes('link targets are not counted'));
   await item('assets').locator('[data-file-select]').click();
-  check('mixed selection counts folders without pretending their metadata is recursive size', (await summary.textContent()).includes('3 selected · 5.1 KB')
+  check('mixed selection counts folders without pretending their metadata is recursive size', (await summary.textContent()).includes('3 selected · Partial · 5.1 KB')
     && (await summary.locator('.sr-only').textContent()).includes('1 folder'));
   await item('assets').locator('[data-file-select]').click();
   await page.getByRole('button',{name:'Clear selection',exact:true}).click();
@@ -1042,6 +1052,13 @@ try {
   if (focusOnly || (!transferSafetyOnly && !process.argv.includes('--drawers-only') && !process.argv.includes('--workspace-motion-only'))) await runFilesFocusChecks({ page, check });
   if (!focusOnly && !transferSafetyOnly && !process.argv.includes('--workspace-motion-only')) await runFilesDrawerChecks({ page, check, screenshot });
   if (!focusOnly && !transferSafetyOnly && !process.argv.includes('--drawers-only')) await runFilesWorkspaceMotionChecks({ page, check, screenshot });
+  if (process.argv.length === 2) {
+    await page.setViewportSize({ width: 1200, height: 800 });
+    await page.goto(`http://127.0.0.1:${address.port}/tests/filesProduction.browser.html?folderSizes=1`, { waitUntil: 'domcontentloaded' });
+    await page.getByRole('listbox').waitFor();
+    for (const label of await page.evaluate(() => window.runFolderSizeBrowserChecks())) check(label, true);
+    await screenshot('files-folder-sizes');
+  }
   assert.deepEqual(errors, []);
   assert.deepEqual(requests, []);
   console.log(`Production Files browser checks passed (${checks}).`);

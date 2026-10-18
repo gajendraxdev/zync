@@ -11,6 +11,7 @@ export const FileViewControls = memo(function FileViewControls({
   viewMode, onToggleView, showHidden, onToggleHidden, onZoomIn, onZoomOut,
   canZoomIn, canZoomOut, sortColumn, sortDirection, onSort,
   detailColumns, onToggleColumn,
+  showFolderSizes, onToggleFolderSizes,
 }: {
   viewMode: 'grid' | 'list';
   onToggleView: (mode: 'grid' | 'list') => void;
@@ -25,6 +26,8 @@ export const FileViewControls = memo(function FileViewControls({
   onSort: (column: FileSortColumn, direction: FileSortDirection) => void;
   detailColumns: readonly FileDetailColumn[];
   onToggleColumn: (column: FileDetailColumn) => void;
+  showFolderSizes?: boolean;
+  onToggleFolderSizes?: () => void;
 }) {
   const reversed = sortDirection !== FILE_LIST_SORT_INITIAL[sortColumn];
   return <div className="flex shrink-0 items-center gap-0.5" role="group" aria-label="File view">
@@ -54,6 +57,7 @@ export const FileViewControls = memo(function FileViewControls({
     { label: 'Smaller icons', icon: <Minus size={13} />, disabled: !canZoomOut, action: onZoomOut },
     { separator: true },
     { label: 'Show hidden files', icon: <Eye size={13} />, checked: showHidden, action: onToggleHidden },
+    ...(onToggleFolderSizes ? [{ label: 'Show folder sizes', checked: showFolderSizes !== false, action: onToggleFolderSizes }] : []),
   ]} />
   </div>;
 });
