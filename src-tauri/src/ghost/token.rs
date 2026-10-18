@@ -220,18 +220,50 @@ pub fn is_directory_command(command: &str) -> bool {
     DIRECTORY_ONLY_COMMANDS.contains(&command)
 }
 
+pub fn is_directory_command_for_backend(command: &str, windows: bool) -> bool {
+    is_directory_command(command) || (windows && command == "set-location")
+}
+
 pub fn is_file_aware_command(command: &str) -> bool {
     FILE_AWARE_COMMANDS.contains(&command)
 }
 
-pub fn should_prefer_path_suggestion(line: &str) -> bool {
+pub fn is_file_aware_command_for_backend(command: &str, windows: bool) -> bool {
+    is_file_aware_command(command)
+        || (windows && matches!(command, "dir" | "type" | "get-content" | "get-childitem"))
+}
+
+pub fn should_prefer_path_suggestion(line: &str, windows: bool) -> bool {
     let parse_line = line_for_suggestion_parsing(line);
     let command = get_command_name(&parse_line);
-    if is_directory_command(&command) || is_file_aware_command(&command) {
+    if is_directory_command_for_backend(&command, windows)
+        || is_file_aware_command_for_backend(&command, windows)
+    {
         return true;
     }
     let last_arg = get_last_arg(&parse_line);
     has_path_separator(&last_arg)
+}
+
+/// An active path argument needs filesystem evidence, unlike command/flag history.
+pub fn has_active_path_argument(line: &str, windows: bool) -> bool {
+    let parse_line = line_for_suggestion_parsing(line);
+    let last_arg = get_last_arg(&parse_line);
+    if has_path_separator(&last_arg) {
+        return true;
+    }
+    if last_arg.is_empty() || last_arg.starts_with('-') {
+        return false;
+    }
+    // A bare command is not a path argument even when a file-aware command can
+    // also complete its name from history (for example `ls` -> `lsblk`).
+    let before_arg = &parse_line[..parse_line.len() - last_arg.len()];
+    if get_command_name(before_arg).is_empty() {
+        return false;
+    }
+    let command = get_command_name(&parse_line);
+    is_directory_command_for_backend(&command, windows)
+        || is_file_aware_command_for_backend(&command, windows)
 }
 
 const LEAKED_SECRET_SYMBOLS: &str = "!#$%^&*()+{}[]|\\`";
@@ -309,6 +341,31 @@ mod tests {
         assert!(is_bare_directory_listing_line("cd"));
         assert!(is_bare_directory_listing_line("echo hi && cd"));
         assert!(!is_bare_directory_listing_line("cd Doc"));
+    }
+
+    #[test]
+    fn native_windows_path_commands_are_backend_scoped() {
+        for line in [
+            "dir Doc",
+            "type read",
+            "Get-Content read",
+            "Set-Location Doc",
+        ] {
+            assert!(should_prefer_path_suggestion(line, true));
+            assert!(has_active_path_argument(line, true));
+            assert!(!should_prefer_path_suggestion(line, false));
+            assert!(!has_active_path_argument(line, false));
+        }
+    }
+
+    #[test]
+    fn path_arguments_do_not_include_bare_commands_or_flags() {
+        for line in ["ls", "ls ", "ls -l", "git che", "cat --help", "sudo cat"] {
+            assert!(!has_active_path_argument(line, false), "{line}");
+        }
+        for line in ["cd old", "cat missing", "ls ./old", "echo ./old", "ls ls"] {
+            assert!(has_active_path_argument(line, false), "{line}");
+        }
     }
 
     #[test]
