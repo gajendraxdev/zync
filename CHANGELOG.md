@@ -6,6 +6,11 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Fixed
 
+- **Terminal tab switching:** Cancel obsolete deferred renderer work when tab
+  visibility or terminal ownership changes, preventing an older background task
+  from releasing the active tab's GPU renderer. Ignore stale setup completions.
+  ([2b54a0d])
+
 - **Terminal path suggestions:** Distinguish existing matches, confirmed misses
   and unavailable directory checks without reviving expired filename listings.
   Preserve POSIX casing, isolate native Windows/WSL/SSH lookup behavior and keep
@@ -2883,4 +2888,5 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [99856dd]: https://github.com/zync-sh/zync/commit/99856dd1217ef016a311ace4f8314b0e78f02152
 [2b1d77d]: https://github.com/zync-sh/zync/commit/2b1d77d18192d5b76e9b494d5cebbfb1c925cf92
 [f7bb076]: https://github.com/zync-sh/zync/commit/f7bb076e86979523d28fa970ddc6752d8836c8df
+[2b54a0d]: https://github.com/zync-sh/zync/commit/2b54a0de6b83c65df5bc8a463fc27e7d5a27d871
 [43d59da]: https://github.com/zync-sh/zync/commit/43d59da1cdf91177c8c01683cbc0294f4da156f3
