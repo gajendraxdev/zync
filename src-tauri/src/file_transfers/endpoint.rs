@@ -12,6 +12,19 @@ use tokio::io::{AsyncRead, AsyncWriteExt};
 
 pub type Reader = Box<dyn AsyncRead + Unpin + Send>;
 
+fn validate_leaf(leaf: &str) -> Result<(), String> {
+    if leaf.is_empty() || leaf == "." || leaf == ".." || leaf.contains('/') || leaf.contains('\0') {
+        return Err("Invalid folder entry name".into());
+    }
+    Ok(())
+}
+
+/// Join a remote POSIX leaf without interpreting it as a Windows path.
+pub(crate) fn posix_child(parent: &str, leaf: &str) -> Result<String, String> {
+    validate_leaf(leaf)?;
+    Ok(format!("{}/{leaf}", parent.trim_end_matches('/')))
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
@@ -81,15 +94,7 @@ pub trait FileEndpoint: Send + Sync {
     }
     /// Validate one leaf without interpreting remote POSIX names as local paths.
     fn child(&self, parent: &str, leaf: &str) -> Result<String, String> {
-        if leaf.is_empty()
-            || leaf == "."
-            || leaf == ".."
-            || leaf.contains('/')
-            || leaf.contains('\0')
-        {
-            return Err("Invalid folder entry name".into());
-        }
-        Ok(format!("{}/{leaf}", parent.trim_end_matches('/')))
+        posix_child(parent, leaf)
     }
     fn requires_backup(&self) -> bool;
     fn sibling(&self, target: &str, name: &str) -> Result<String, String>;
@@ -444,16 +449,9 @@ impl FileEndpoint for Endpoint {
     }
 
     fn child(&self, parent: &str, leaf: &str) -> Result<String, String> {
-        if leaf.is_empty()
-            || leaf == "."
-            || leaf == ".."
-            || leaf.contains('/')
-            || leaf.contains('\0')
-        {
-            return Err("Invalid folder entry name".into());
-        }
         match self {
             Self::Local => {
+                validate_leaf(leaf)?;
                 // Windows names must not become drive paths, alternate streams,
                 // device aliases or separator traversal when importing from SSH.
                 #[cfg(windows)]
@@ -502,7 +500,7 @@ impl FileEndpoint for Endpoint {
                 }
                 Ok(Path::new(parent).join(leaf).to_string_lossy().into_owned())
             }
-            Self::Remote(_) => Ok(format!("{}/{leaf}", parent.trim_end_matches('/'))),
+            Self::Remote(_) => posix_child(parent, leaf),
         }
     }
 

@@ -5,6 +5,7 @@ mod connection_latency;
 mod feedback_inbox;
 mod fs;
 mod file_permissions;
+mod folder_sizes;
 mod fs_volumes;
 mod ghost;
 mod identity_migration;
@@ -220,6 +221,9 @@ pub fn run() {
             commands::fs_permissions_read,
             commands::fs_permissions_access,
             commands::fs_copy_access,
+            commands::fs_folder_size_begin,
+            commands::fs_folder_size_calculate,
+            commands::fs_folder_size_cancel,
             commands::fs_permissions_open_system_editor,
             commands::fs_permissions_apply,
             commands::fs_permissions_admin_start,

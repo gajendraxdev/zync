@@ -623,6 +623,7 @@ pub struct AppState {
     pub transfers: crate::transfers::TransferRegistry,
     pub file_transfers: Arc<crate::file_transfers::Service>,
     pub permission_elevation: Arc<crate::file_permissions::elevation::Service>,
+    pub folder_sizes: Arc<crate::folder_sizes::Service>,
     // Agent v2: active run cancellation tokens
     pub agent_runs: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     // Agent v2: pending checkpoint responders (ask_user tool)
@@ -651,6 +652,7 @@ impl AppState {
             connect_tasks: Arc::new(Mutex::new(HashMap::new())),
             transfers: Arc::new(Mutex::new(HashMap::new())),
             permission_elevation: Arc::default(),
+            folder_sizes: Default::default(),
             file_transfers: Arc::new(crate::file_transfers::Service::new(data_dir.clone()).with_started_callback({
                 let app = app_handle.clone();
                 move |receipt| { let _ = app.emit("file-transfer-started", receipt); }
@@ -5019,6 +5021,57 @@ pub async fn fs_copy_access(
     })
     .await
     .map_err(|_| "Copy access check timed out. Try again.".to_string())?
+}
+
+/// Register before starting so renderer cancellation cannot race registration.
+#[tauri::command]
+pub fn fs_folder_size_begin(id: String, connection_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    state.folder_sizes.begin(id, connection_id)
+}
+
+#[tauri::command]
+pub fn fs_folder_size_cancel(id: String, state: State<'_, AppState>) {
+    state.folder_sizes.cancel(&id);
+}
+
+/// Metadata only, with bounded global/per-endpoint admission. A disposable raw
+/// SFTP channel allows incremental READDIR without blocking shared browse or
+/// transfer handles. It never reconnects, executes commands or reads contents.
+#[tauri::command]
+pub async fn fs_folder_size_calculate(
+    id: String, connection_id: String, path: String, state: State<'_, AppState>,
+) -> Result<crate::folder_sizes::Report, String> {
+    crate::file_permissions::validate_path(&path)?;
+    let lease = state.folder_sizes.claim(&id, &connection_id)?;
+    lease.run(async {
+        // Setup/admission and traversal have separate, non-overlapping budgets.
+        // Keep permits until the owned channel and actual scan future have stopped.
+        let setup = async {
+            let session = if connection_id == "local" { None } else {
+                Some(state.connections.lock().await.get(&connection_id).and_then(|c| c.session.clone())
+                    .ok_or("Connection is unavailable. Reconnect before calculating sizes.")?)
+            };
+            let permits = lease.permits().await?;
+            let endpoint = if let Some(session) = &session {
+                let stream = open_sftp_stream(session).await.map_err(|e| e.to_string())?;
+                let raw = russh_sftp::client::RawSftpSession::new(crate::folder_sizes::PacketLimited::new(stream));
+                raw.set_timeout(5).await;
+                raw.init().await.map_err(|e| e.to_string())?;
+                crate::folder_sizes::Endpoint::Remote(raw)
+            } else { crate::folder_sizes::Endpoint::Local };
+            Ok::<_, String>((permits, endpoint, session))
+        };
+        let (_permits, endpoint, session) = tokio::time::timeout(Duration::from_secs(15), setup)
+            .await.map_err(|_| "Folder-size scan timed out during admission or setup. Try again.")??;
+        let report = crate::folder_sizes::calculate(&endpoint, &path).await;
+        if let Some(session) = session {
+            if !state.connections.lock().await.get(&connection_id).and_then(|c| c.session.as_ref())
+                .is_some_and(|current| Arc::ptr_eq(current, &session)) {
+                return Err("Connection changed during the folder-size scan. Calculate again.".to_string());
+            }
+        }
+        Ok(report)
+    }).await
 }
 
 /// Preserve setup/connection allowance while budgeting the sequential source
