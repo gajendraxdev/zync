@@ -6,6 +6,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Fixed
 
+- **Paste collisions:** Keep existing-item collision choices available after an
+  immediate same-connection paste fails. Refresh the destination listing without
+  clearing the failed selection. ([d98c359])
+
 - **File access and Copy:** Share known-access guards across menus, shortcuts,
   uploads and editors without guessing effective access from permission bits.
   Check explicitly selected SSH sources before updating the Copy clipboard;
@@ -92,6 +96,15 @@ All notable changes to Zync are documented in this file. The format is based on 
   restoration; existing callers retain the default behavior. ([c44431b])
 
 ### Added
+
+- **Folder sizes:** Calculate logical file bytes in the background for local and
+  SSH folders, with a saved **View → Show folder sizes** toggle enabled by default.
+  Bound work by concurrency, entry, depth, time and memory budgets; label incomplete
+  totals and explain limits through the info control. Include available folder
+  sizes in selection totals and Properties, keep waiting states unobtrusive, and
+  allow explicit retry of failed or cancelled scans. No file contents are read;
+  links are skipped and results are not allocated disk usage or a snapshot.
+  ([99856dd], [2b1d77d])
 
 - **Extended permission controls:** Edit ordinary modes for supported local Linux
   files and folders using qualified Linux 6.6+ filesystem support. On Windows,
@@ -2853,3 +2866,6 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [d652434]: https://github.com/zync-sh/zync/commit/d652434460ba7d175b0cd069037a98e36d46e5b9
 [e4febfe]: https://github.com/zync-sh/zync/commit/e4febfed671ce30c48a2b5825aaa0710b040fa40
 [70168e8]: https://github.com/zync-sh/zync/commit/70168e81ba307f82c9a527afb9422c7fed856fcd
+[d98c359]: https://github.com/zync-sh/zync/commit/d98c35951560eba18f012ac0e3abeb658c84c5b5
+[99856dd]: https://github.com/zync-sh/zync/commit/99856dd1217ef016a311ace4f8314b0e78f02152
+[2b1d77d]: https://github.com/zync-sh/zync/commit/2b1d77d18192d5b76e9b494d5cebbfb1c925cf92
