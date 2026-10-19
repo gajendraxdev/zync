@@ -16,11 +16,12 @@ function runTest(name, fn) {
   }
 }
 
-runTest('decodeTerminalOutputChannelFrame parses generation and PTY bytes', () => {
-  const payload = new Uint8Array([0x03, 0x00, 0x00, 0x00, 0x24, 0x50, 0x53]);
+runTest('decodeTerminalOutputChannelFrame parses generation, sequence and PTY bytes', () => {
+  const payload = new Uint8Array([0x03, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x24, 0x50, 0x53]);
   const buffer = payload.buffer.slice(payload.byteOffset, payload.byteOffset + payload.byteLength);
   const decoded = decodeTerminalOutputChannelFrame(buffer);
   assert.equal(decoded.generation, 3);
+  assert.equal(decoded.sequence, 2);
   assert.deepEqual(decoded.data, new Uint8Array([0x24, 0x50, 0x53]));
 });
 
@@ -34,7 +35,7 @@ runTest('decodeTerminalOutputChannelFrame rejects truncated header', () => {
 });
 
 runTest('decodeTerminalOutputChannelFrame handles empty PTY payload', () => {
-  const payload = new Uint8Array([0x01, 0x00, 0x00, 0x00]);
+  const payload = new Uint8Array([0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00]);
   const buffer = payload.buffer.slice(payload.byteOffset, payload.byteOffset + payload.byteLength);
   const decoded = decodeTerminalOutputChannelFrame(buffer);
   assert.equal(decoded.generation, 1);

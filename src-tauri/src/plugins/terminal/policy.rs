@@ -1,6 +1,5 @@
 //! Wire limits are enforced natively, independently of the host UI and SDK.
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 pub const MAX_TERMINALS: usize = 8;
@@ -65,56 +64,46 @@ impl Size {
     }
 }
 
-/// Cumulative acknowledgements release exact wire bytes. Slow renderers are
-/// disconnected: russh's receive queue is unbounded, so pausing reads is unsafe.
-#[derive(Default)]
-pub struct OutputWindow {
-    next: u32,
-    acknowledged: u32,
-    bytes: usize,
-    frames: VecDeque<(u32, usize, Instant)>,
+/// Cumulative acknowledgements release exact wire bytes. Plugin sessions retain
+/// their overload-close policy: pausing an ordinary SSH receive queue can block
+/// the shared connection actor. Ordinary shells use separate parser-credit waits.
+pub struct OutputWindow(crate::terminal_output::OutputWindow);
+
+impl Default for OutputWindow {
+    /// Retain plugin wire budgets independently of ordinary-terminal policy.
+    fn default() -> Self {
+        Self(crate::terminal_output::OutputWindow::new(
+            OUTPUT_BYTES,
+            OUTPUT_FRAMES,
+            4,
+        ))
+    }
 }
 
 impl OutputWindow {
+    /// Whether final plugin output has been parsed before detach.
     pub fn is_empty(&self) -> bool {
-        self.frames.is_empty()
+        self.0.is_empty()
     }
 
+    /// Reserve shared accounting while retaining the plugin's sequence-only wire.
     pub fn frame(&mut self, data: &[u8], now: Instant) -> Result<Vec<u8>, String> {
-        let bytes = data.len().saturating_add(4);
-        if bytes > OUTPUT_BYTES.saturating_sub(self.bytes) || self.frames.len() >= OUTPUT_FRAMES {
-            return Err("Terminal output exceeded the renderer window".into());
-        }
-        self.next = self
-            .next
-            .checked_add(1)
-            .ok_or("Terminal output sequence exhausted")?;
-        self.frames.push_back((self.next, bytes, now));
-        self.bytes += bytes;
+        let sequence = self.0.reserve(data.len(), now)?;
+        let bytes = data.len() + 4;
         let mut frame = Vec::with_capacity(bytes);
-        frame.extend_from_slice(&self.next.to_le_bytes());
+        frame.extend_from_slice(&sequence.to_le_bytes());
         frame.extend_from_slice(data);
         Ok(frame)
     }
 
+    /// Apply cumulative parser credit without changing plugin authority checks.
     pub fn acknowledge(&mut self, sequence: u32) -> Result<(), String> {
-        if sequence == self.acknowledged {
-            return Ok(()); // A duplicate delivery is harmless, not new credit.
-        }
-        if sequence < self.acknowledged || sequence > self.next {
-            return Err("Invalid terminal output acknowledgement".into());
-        }
-        while self.frames.front().is_some_and(|frame| frame.0 <= sequence) {
-            self.bytes -= self.frames.pop_front().unwrap().1;
-        }
-        self.acknowledged = sequence;
-        Ok(())
+        self.0.acknowledge(sequence).map(|_| ())
     }
 
+    /// Plugins keep their explicit timeout; ordinary terminals do not inherit it.
     pub fn stalled(&self, now: Instant) -> bool {
-        self.frames
-            .front()
-            .is_some_and(|frame| now.duration_since(frame.2) >= ACK_TIMEOUT)
+        self.0.stalled(now, ACK_TIMEOUT)
     }
 }
 
@@ -195,7 +184,7 @@ mod tests {
         assert!(window.stalled(now + ACK_TIMEOUT));
         window.acknowledge(1).unwrap();
         window.acknowledge(1).unwrap();
-        assert_eq!(window.bytes, 0);
+        assert_eq!(window.0.pending_bytes(), 0);
         assert!(!window.stalled(now + ACK_TIMEOUT));
         window.frame(&vec![0; OUTPUT_BYTES - 4], now).unwrap();
         assert!(window.frame(b"x", now).is_err());
@@ -247,6 +236,6 @@ mod tests {
             .push(&vec![0; OUTPUT_BYTES * 2], &mut window, |_| Ok(()))
             .is_err());
         assert!(batch.0.len() <= OUTPUT_BATCH_BYTES);
-        assert!(window.bytes <= OUTPUT_BYTES);
+        assert!(window.0.pending_bytes() <= OUTPUT_BYTES);
     }
 }

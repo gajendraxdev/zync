@@ -12,6 +12,8 @@ mod identity_migration;
 pub mod plugins;
 mod pty;
 mod pty_output_flush;
+mod pty_output;
+mod terminal_output;
 mod pty_term_env;
 mod session;
 mod navigation_settings;
@@ -42,6 +44,7 @@ use commands::AppState;
 use tauri::{Emitter, Manager};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Build the desktop runtime and register native commands and managed services.
 pub fn run() {
     #[cfg(windows)]
     windows_conpty::preload_sideloaded_conpty();
@@ -193,6 +196,8 @@ pub fn run() {
             commands::ssh_transport_lost,
             commands::ssh_disconnect_vault_backed,
             commands::terminal_write,
+            commands::terminal_ack_output,
+            commands::terminal_output_failed,
             commands::terminal_navigate,
             commands::terminal_resize,
             commands::terminal_create,

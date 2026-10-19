@@ -2124,6 +2124,46 @@ pub async fn ssh_disconnect_vault_backed(
     }
 }
 
+/// Return cumulative output credit only for the matching native channel owner.
+#[tauri::command]
+pub async fn terminal_ack_output(
+    term_id: String,
+    generation: u32,
+    channel_id: u32,
+    sequence: u32,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .pty_manager
+        .acknowledge_output(&term_id, generation, channel_id, sequence)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// A parser/transport fault must not silently drop bytes or leave a live shell
+/// without a reader. Reuse existing tab cleanup after closing only this owner.
+#[tauri::command]
+pub async fn terminal_output_failed(
+    app: AppHandle,
+    term_id: String,
+    generation: u32,
+    channel_id: u32,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    if state
+        .pty_manager
+        .fail_output(&term_id, generation, channel_id)
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        let _ = app.emit(
+            &format!("terminal-exit-{}", term_id),
+            serde_json::json!({ "generation": generation, "channel_id": channel_id }),
+        );
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn terminal_write(
     term_id: String,
@@ -2740,6 +2780,7 @@ pub async fn connections_import_from_file(
 }
 
 #[tauri::command]
+/// Create a local or SSH terminal with generation- and channel-bound output ownership.
 pub async fn terminal_create(
     term_id: String,
     connection_id: String,
@@ -2752,6 +2793,12 @@ pub async fn terminal_create(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
+    let creation = state
+        .pty_manager
+        .begin_creation(&term_id, &connection_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    let channel_id = output_channel.id();
     let generation = match generation {
         Some(value) => value,
         None => {
@@ -2768,8 +2815,7 @@ pub async fn terminal_create(
         state
             .pty_manager
             .create_local_session(
-                term_id.clone(),
-                connection_id,
+                creation,
                 generation,
                 cols,
                 rows,
@@ -2817,8 +2863,7 @@ pub async fn terminal_create(
         let created = state
             .pty_manager
             .create_remote_session(
-                term_id.clone(),
-                connection_id.clone(),
+                creation,
                 generation,
                 channel,
                 cols,
@@ -2859,6 +2904,7 @@ pub async fn terminal_create(
                     &metadata_connection_id,
                     Some(&metadata_term_id),
                     Some(generation),
+                    Some(channel_id),
                     deferred_startup,
                     deferred_shell,
                     deferred_cwd,
@@ -3050,6 +3096,7 @@ async fn get_live_ssh_session(
     session.ok_or_else(|| "Reconnection did not produce a session".to_string())
 }
 
+/// Open a published russh session channel, retrying once through the shared reconnect path.
 async fn open_ssh_channel_with_single_reconnect(
     connection_id: &str,
     state: &State<'_, AppState>,
@@ -3169,10 +3216,13 @@ struct ConnectionMetadataPayload {
     detected_shell: Option<String>,
 }
 
+/// Probe connection metadata without letting an obsolete terminal startup
+/// apply shell commands to a replacement that reused its generation.
 async fn initialize_remote_metadata_after_terminal(
     connection_id: &str,
     term_id: Option<&str>,
     generation: Option<u32>,
+    channel_id: Option<u32>,
     finalize_startup: bool,
     pending_shell: Option<String>,
     pending_cwd: Option<String>,
@@ -3191,10 +3241,13 @@ async fn initialize_remote_metadata_after_terminal(
         )
     };
     if cached_os.is_some() && cached_shell.is_some() {
-        if let (true, Some(term_id), Some(generation)) = (finalize_startup, term_id, generation) {
+        if let (true, Some(term_id), Some(generation), Some(channel_id)) =
+            (finalize_startup, term_id, generation, channel_id)
+        {
             finalize_remote_terminal_startup(
                 term_id,
                 generation,
+                channel_id,
                 cached_os.as_deref(),
                 cached_shell.as_deref(),
                 pending_shell.as_deref(),
@@ -3287,10 +3340,13 @@ async fn initialize_remote_metadata_after_terminal(
             },
         );
 
-        if let (true, Some(term_id), Some(generation)) = (finalize_startup, term_id, generation) {
+        if let (true, Some(term_id), Some(generation), Some(channel_id)) =
+            (finalize_startup, term_id, generation, channel_id)
+        {
             finalize_remote_terminal_startup(
                 term_id,
                 generation,
+                channel_id,
                 current_os.as_deref(),
                 current_shell.as_deref(),
                 pending_shell.as_deref(),
@@ -3302,11 +3358,13 @@ async fn initialize_remote_metadata_after_terminal(
     }
 }
 
+/// Refresh shared host metadata after SFTP without claiming any terminal startup.
 fn probe_remote_metadata_after_sftp(connection_id: String, app_handle: AppHandle) {
     tokio::spawn(async move {
         if let Some(state) = app_handle.try_state::<AppState>() {
             initialize_remote_metadata_after_terminal(
                 &connection_id,
+                None,
                 None,
                 None,
                 false,
@@ -3319,9 +3377,11 @@ fn probe_remote_metadata_after_sftp(connection_id: String, app_handle: AppHandle
     });
 }
 
+/// Apply deferred input only to the channel that requested this metadata probe.
 async fn finalize_remote_terminal_startup(
     term_id: &str,
     generation: u32,
+    channel_id: u32,
     remote_os: Option<&str>,
     detected_shell: Option<&str>,
     pending_shell: Option<&str>,
@@ -3336,6 +3396,7 @@ async fn finalize_remote_terminal_startup(
         .finalize_remote_startup(
             term_id,
             generation,
+            channel_id,
             remote_os,
             detected_shell,
             pending_shell,
@@ -7048,6 +7109,7 @@ fn remote_windows_shell_entry(id: &str) -> Option<DetectedShell> {
     }
 }
 
+/// Discover Windows shell executables on the host through an ordinary SSH channel.
 async fn query_remote_windows_shells(
     connection_id: &str,
     state: &tauri::State<'_, AppState>,
@@ -7306,6 +7368,7 @@ pub async fn shell_get_available_shells() -> Result<Vec<DetectedShell>, String> 
 }
 
 #[tauri::command]
+/// List actual local/remote shells while preserving the connection's detected default.
 pub async fn shell_get_connection_shells(
     connection_id: String,
     state: tauri::State<'_, AppState>,

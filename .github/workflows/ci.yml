@@ -63,6 +63,7 @@ jobs:
 
       - name: Run focused Rust security tests
         working-directory: src-tauri
+        shell: bash
         env:
           # Required only because sync commands compile with env!("GOOGLE_CLIENT_ID").
           # The vault crypto known-answer tests do not use Google OAuth.
@@ -74,7 +75,10 @@ jobs:
           cargo test local_only
           cargo test commands::private_key_inspection_tests
           cargo test ssh::tests -- --test-threads=1
-          cargo test pty_output_flush
+          cargo test ssh::transport_tests
+          cargo test terminal_output
+          cargo test pty_output
+          cargo test plugins::terminal::policy
           cargo test pty::tests
           cargo test pty_term_env
 

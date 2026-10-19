@@ -21,6 +21,10 @@
         "sourceMap": false
     },
     "include": [
+        "tests/terminalOutputFlow.browser.ts",
+        "tests/terminalLifecycleOwnership.test.ts",
+        "tests/changedFunctionDocs.test.ts",
+        "tests/terminalOutputFlow.test.ts",
         "tests/terminalRendererLifecycle.test.ts",
         "tests/ghostCwdSafety.test.ts",
         "tests/ghostPromptSafety.test.ts",

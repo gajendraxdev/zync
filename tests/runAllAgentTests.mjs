@@ -37,6 +37,9 @@ function normalizeEmittedImports(directory) {
 normalizeEmittedImports(path.resolve('.tmp-agent-tests'));
 
 const tests = [
+  'tests/terminalLifecycleOwnership.test.mjs',
+  'tests/changedFunctionDocs.test.mjs',
+  'tests/terminalOutputFlow.test.mjs',
   'tests/terminalRendererLifecycle.test.mjs',
   'tests/ghostCwdSafety.test.mjs',
   'tests/ghostPromptSafety.test.mjs',

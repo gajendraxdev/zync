@@ -162,7 +162,7 @@ check('password editing, Tab and late suggestions never consume or infer input',
   const previousWindow = typeof window === 'undefined' ? undefined : window;
   globalThis.window = {
     ipcRenderer: { invoke: async () => undefined, send() {} },
-    __TAURI_INTERNALS__: { transformCallback: () => 1, unregisterCallback() {} },
+    __TAURI_INTERNALS__: { transformCallback: () => 1, unregisterCallback() {}, invoke: async () => undefined },
   } as unknown as Window & typeof globalThis;
   const { useAppStore } = await import('../src/store/useAppStore');
   const { attachTerminalOutputChannel } = await import('../src/lib/terminal/terminalOutputStream');
@@ -182,12 +182,20 @@ check('password editing, Tab and late suggestions never consume or infer input',
   } as TerminalCache;
   terminalCache.set(id, entry);
   try {
-    const channel = attachTerminalOutputChannel(id, term);
+    let channel = attachTerminalOutputChannel(id, term);
+    let channelGeneration = entry.generation;
+    let sequence = 0;
     const receive = (generation: number, text: string) => {
+      if (generation !== channelGeneration) {
+        channel = attachTerminalOutputChannel(id, term);
+        channelGeneration = generation;
+        sequence = 0;
+      }
       const bytes = encoder.encode(text);
-      const frame = new Uint8Array(4 + bytes.length);
+      const frame = new Uint8Array(8 + bytes.length);
       new DataView(frame.buffer).setUint32(0, generation, true);
-      frame.set(bytes, 4);
+      new DataView(frame.buffer).setUint32(4, ++sequence, true);
+      frame.set(bytes, 8);
       channel.onmessage(frame.buffer);
     };
     const parsed = (osc7Path?: string) => {

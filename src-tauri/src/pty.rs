@@ -6,21 +6,30 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc as std_mpsc;
-use std::sync::Arc;
-use tauri::ipc::{Channel as IpcChannel, InvokeResponseBody};
+use std::sync::{Arc, Mutex as StdMutex, MutexGuard};
+use tauri::ipc::Channel as IpcChannel;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc, Mutex};
 use tokio::time::Instant;
 
+use crate::pty_output::{OutputCursor, PtyOutput};
 use crate::pty_output_flush::{
-    encode_output_frame, record_flush_reason, FlushInstruction, FlushReason, OutputFlushPolicy,
+    record_flush_reason, FlushInstruction, FlushReason, OutputFlushPolicy,
 };
+use tokio::io::AsyncWriteExt;
 
 enum LocalReaderEvent {
     Data(Vec<u8>),
-    Finished { exit_code: Option<u32> },
+    /// Reader EOF is distinct from child exit: the pipe may still contain tail bytes.
+    Eof,
+    /// An OS read failure cannot be treated as a successfully drained stream.
+    Failed,
 }
+
+/// Shared local pipe writer, serialized across blocking operations.
+type LocalWriter = Arc<Mutex<Box<dyn Write + Send>>>;
+/// The control handle can close on child exit before the output pipe reaches EOF.
+type LocalMaster = Arc<Mutex<Option<Box<dyn MasterPty + Send>>>>;
 
 fn remote_shell_login_flag(shell_override: &str) -> Option<&'static str> {
     let token = shell_override
@@ -311,30 +320,13 @@ fn is_posix_interactive_shell(shell: &str) -> bool {
 #[derive(Clone, Serialize)]
 struct TerminalLifecycleEvent {
     generation: u32,
+    channel_id: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     exit_code: Option<u32>,
 }
 
-/// Flushes PTY bytes through the streaming IPC channel.
-///
-/// Frames are `generation` (u32 LE) + raw PTY bytes so the frontend can ignore
-/// stale chunks after suspend/restart races. Layout must not change.
-fn flush_output_frame(output_channel: &IpcChannel, generation: u32, bytes: Vec<u8>) {
-    if bytes.is_empty() {
-        return;
-    }
-
-    let frame = encode_output_frame(generation, &bytes);
-    if let Err(e) = output_channel.send(InvokeResponseBody::Raw(frame)) {
-        eprintln!("[PTY] Failed to send output on channel: {}", e);
-    }
-}
-
-fn apply_flush_instruction(
-    output_channel: &IpcChannel,
-    generation: u32,
-    instruction: FlushInstruction,
-) {
+/// Turn a batching decision into cancellation-safe pending delivery.
+fn apply_flush_instruction(instruction: FlushInstruction) -> OutputCursor {
     if let FlushInstruction::Flush {
         bytes,
         reason,
@@ -342,17 +334,20 @@ fn apply_flush_instruction(
     } = instruction
     {
         record_flush_reason(reason);
-        flush_output_frame(output_channel, generation, bytes);
+        OutputCursor::new(bytes)
+    } else {
+        OutputCursor::default()
     }
 }
 
-fn flush_policy_tail(output_channel: &IpcChannel, generation: u32, policy: &mut OutputFlushPolicy) {
+/// Drain batching state at EOF without confusing IPC dispatch with parser completion.
+fn flush_policy_tail(policy: &mut OutputFlushPolicy) -> OutputCursor {
     let tail = policy.take_tail_on_close();
     if tail.is_empty() {
-        return;
+        return OutputCursor::default();
     }
     record_flush_reason(FlushReason::Close);
-    flush_output_frame(output_channel, generation, tail);
+    OutputCursor::new(tail)
 }
 
 fn process_tree_has_children(root_pid: u32) -> bool {
@@ -366,16 +361,19 @@ fn process_tree_has_children(root_pid: u32) -> bool {
         .any(|process| process.parent() == Some(parent))
 }
 
+/// Publish completion for the exact channel, including fatal output shutdown.
 fn emit_terminal_exit(
     app_handle: &AppHandle,
     term_id: &str,
     generation: u32,
+    channel_id: u32,
     exit_code: Option<u32>,
 ) {
     if let Err(e) = app_handle.emit(
         &format!("terminal-exit-{}", term_id),
         TerminalLifecycleEvent {
             generation,
+            channel_id,
             exit_code,
         },
     ) {
@@ -389,43 +387,42 @@ fn emit_terminal_exit(
 #[derive(Debug, PartialEq, Eq)]
 enum RemoteWaitAction {
     BufferOutput,
+    RecordExit { exit_code: Option<u32> },
     PaneExit { exit_code: Option<u32> },
     TransportDrop,
     KeepWaiting,
 }
 
+/// Exit status is advisory until close: servers may still send trailing bytes.
 fn remote_wait_action(msg: Option<&ChannelMsg>) -> RemoteWaitAction {
     match msg {
         Some(ChannelMsg::Data { .. } | ChannelMsg::ExtendedData { .. }) => {
             RemoteWaitAction::BufferOutput
         }
-        Some(ChannelMsg::ExitStatus { exit_status }) => RemoteWaitAction::PaneExit {
+        Some(ChannelMsg::ExitStatus { exit_status }) => RemoteWaitAction::RecordExit {
             exit_code: Some(*exit_status),
         },
-        Some(ChannelMsg::ExitSignal { .. } | ChannelMsg::Close) => {
-            RemoteWaitAction::PaneExit { exit_code: None }
-        }
+        Some(ChannelMsg::ExitSignal { .. }) => RemoteWaitAction::RecordExit { exit_code: None },
+        Some(ChannelMsg::Close) => RemoteWaitAction::PaneExit { exit_code: None },
         Some(ChannelMsg::Eof) => RemoteWaitAction::KeepWaiting,
         None => RemoteWaitAction::TransportDrop,
         Some(_) => RemoteWaitAction::KeepWaiting,
     }
 }
 
-fn buffer_remote_wait_output(
-    msg: &ChannelMsg,
-    policy: &mut OutputFlushPolicy,
-    output_channel: &IpcChannel,
-    generation: u32,
-) {
+/// Return host-loss classification and the pane event payload when either I/O task ends.
+/// A recorded signal exit (`Some(None)`) is still pane-local, without a numeric status.
+fn remote_io_completion(recorded_exit: Option<Option<u32>>) -> (bool, Option<Option<u32>>) {
+    (recorded_exit.is_none(), Some(recorded_exit.flatten()))
+}
+
+/// Preserve stdout/stderr packet order through the common batching policy.
+fn buffer_remote_wait_output(msg: &ChannelMsg, policy: &mut OutputFlushPolicy) -> OutputCursor {
     match msg {
         ChannelMsg::Data { data } | ChannelMsg::ExtendedData { data, .. } => {
-            apply_flush_instruction(
-                output_channel,
-                generation,
-                policy.on_bytes(data.as_ref(), Instant::now()),
-            );
+            apply_flush_instruction(policy.on_bytes(data.as_ref(), Instant::now()))
         }
-        _ => {}
+        _ => OutputCursor::default(),
     }
 }
 
@@ -443,12 +440,12 @@ fn emit_connection_transport_lost(app_handle: &AppHandle, connection_id: &str) {
 // Enum to handle both local PTY and remote SSH channels
 pub enum TerminalHandle {
     Local {
-        writer: Arc<Mutex<Box<dyn Write + Send>>>,
+        writer: LocalWriter,
         reader_handle: Option<tokio::task::JoinHandle<()>>,
         /// Handle for the PowerShell prompt-injection task.
         /// Aborted on session close so it can't write to a dead PTY.
         inject_handle: Option<tokio::task::JoinHandle<()>>,
-        master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
+        master: LocalMaster,
         child_killer: Box<dyn ChildKiller + Send + Sync>,
         child_pid: Option<u32>,
     },
@@ -503,25 +500,127 @@ impl RemoteInput {
 
 pub struct PtySession {
     pub connection_id: String,
-    generation: u32,
     /// Held for the session lifetime so the frontend channel stays open until close.
     #[allow(dead_code)]
     pub output_channel: IpcChannel,
+    output: Arc<PtyOutput>,
     pub handle: TerminalHandle,
     navigate_shell: NavigateShellStyle,
 }
 
 pub struct PtyManager {
-    sessions: Arc<Mutex<HashMap<String, PtySession>>>,
+    state: Arc<StdMutex<PtyState>>,
+}
+
+/// Pending and installed owners share one lock so close cannot miss a creator.
+#[derive(Default)]
+struct PtyState {
+    sessions: HashMap<String, PtySession>,
+    pending: HashMap<String, PendingCreation>,
+}
+
+struct PendingCreation {
+    connection_id: String,
+    owner: Arc<()>,
+}
+
+/// Reserve startup order before any asynchronous transport work. Dropping an
+/// unfinished creator releases only its own reservation, never a replacement.
+pub struct PtyCreation {
+    state: Arc<StdMutex<PtyState>>,
+    term_id: String,
+    connection_id: String,
+    owner: Arc<()>,
+}
+
+/// State guards cover only map operations, never platform I/O or an await.
+fn lock_pty_state(state: &StdMutex<PtyState>) -> MutexGuard<'_, PtyState> {
+    state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+impl PtyCreation {
+    /// Publish only the latest reserved owner; stale resources stay with the
+    /// caller so the existing detached cleanup path can release them safely.
+    fn install(&self, session: PtySession) -> std::result::Result<(), PtySession> {
+        let mut state = lock_pty_state(&self.state);
+        if state.pending.get(&self.term_id).is_some_and(|pending| {
+            Arc::ptr_eq(&pending.owner, &self.owner)
+                && pending.connection_id == session.connection_id
+        }) {
+            state.pending.remove(&self.term_id);
+            state.sessions.insert(self.term_id.clone(), session);
+            Ok(())
+        } else {
+            Err(session)
+        }
+    }
+}
+
+impl Drop for PtyCreation {
+    /// Cancel only this exact unfinished startup, including same-generation reloads.
+    fn drop(&mut self) {
+        let mut state = lock_pty_state(&self.state);
+        if state
+            .pending
+            .get(&self.term_id)
+            .is_some_and(|pending| Arc::ptr_eq(&pending.owner, &self.owner))
+        {
+            state.pending.remove(&self.term_id);
+        }
+    }
 }
 
 impl PtyManager {
+    /// Start with no running or pending terminal owners.
     pub fn new() -> Self {
         Self {
-            sessions: Arc::new(Mutex::new(HashMap::new())),
+            state: Arc::new(StdMutex::new(PtyState::default())),
         }
     }
 
+    /// Reserve command arrival order before opening SSH or spawning a child.
+    /// Superseded sessions are detached atomically and cleaned outside the lock.
+    pub async fn begin_creation(&self, term_id: &str, connection_id: &str) -> Result<PtyCreation> {
+        let creation = PtyCreation {
+            state: self.state.clone(),
+            term_id: term_id.to_string(),
+            connection_id: connection_id.to_string(),
+            owner: Arc::new(()),
+        };
+        let previous = {
+            let mut state = lock_pty_state(&self.state);
+            state.pending.insert(
+                term_id.to_string(),
+                PendingCreation {
+                    connection_id: connection_id.to_string(),
+                    owner: creation.owner.clone(),
+                },
+            );
+            state.sessions.remove(term_id)
+        };
+        if let Some(session) = previous {
+            Self::close_sessions(vec![session]).await?;
+        }
+        Ok(creation)
+    }
+
+    /// Reject superseded startup without dropping child/channel resources on
+    /// the async executor or replacing the terminal that won the reservation.
+    async fn install_created_session(
+        &self,
+        creation: &PtyCreation,
+        session: PtySession,
+    ) -> Result<()> {
+        if let Err(session) = creation.install(session) {
+            Self::close_sessions(vec![session]).await?;
+            return Err(anyhow!("Terminal owner changed during startup"));
+        }
+        Ok(())
+    }
+
+    /// Stop async delivery immediately without performing platform-blocking I/O.
     fn stop_session_tasks(handle: &mut TerminalHandle) {
         match handle {
             TerminalHandle::Local {
@@ -544,6 +643,7 @@ impl PtyManager {
         }
     }
 
+    /// Release one detached session's platform handles on a blocking worker.
     fn cleanup_session_handles(handle: &mut TerminalHandle) {
         Self::stop_session_tasks(handle);
         if let TerminalHandle::Local { child_killer, .. } = handle {
@@ -570,11 +670,10 @@ impl PtyManager {
         }
     }
 
-    // Create a local PTY session
+    /// Create an ordinary local shell with bounded output and independent input.
     pub async fn create_local_session(
         &self,
-        term_id: String,
-        connection_id: String,
+        creation: PtyCreation,
         generation: u32,
         cols: u16,
         rows: u16,
@@ -583,8 +682,9 @@ impl PtyManager {
         shell_override: Option<String>,
         cwd: Option<String>,
     ) -> Result<()> {
-        // Clean up any existing dead/stale session with this ID before creating a new one
-        let _ = self.close(&term_id).await;
+        let term_id = creation.term_id.clone();
+        let connection_id = creation.connection_id.clone();
+        let channel_id = output_channel.id();
 
         let pty_system = native_pty_system();
 
@@ -710,11 +810,14 @@ impl PtyManager {
             cmd.env_remove("OWD");
         }
 
-        let mut child = pair
+        let child = pair
             .slave
             .spawn_command(cmd)
             .map_err(|e| anyhow!("Failed to spawn shell: {}", e))?;
-        let mut reader = pair
+        // The slave shares ConPTY's control handle; only the master should own
+        // that handle once the child exists, so its exit can release pipe EOF.
+        drop(pair.slave);
+        let reader = pair
             .master
             .try_clone_reader()
             .map_err(|e| anyhow!("Failed to clone reader: {}", e))?;
@@ -734,138 +837,81 @@ impl PtyManager {
 
         let navigate_shell =
             local_navigate_shell_style(shell_override.as_deref(), is_wsl_shell, &shell);
-        let session = PtySession {
+        let master = Arc::new(Mutex::new(Some(pair.master)));
+        let output = Arc::new(PtyOutput::new(output_channel.clone(), generation));
+        let mut session = PtySession {
             connection_id,
-            generation,
             output_channel: output_channel.clone(),
+            output: output.clone(),
             handle: TerminalHandle::Local {
                 writer: writer_arc,
                 reader_handle: None,
                 inject_handle,
-                master: Arc::new(Mutex::new(pair.master)),
+                master: master.clone(),
                 child_killer,
                 child_pid,
             },
             navigate_shell,
         };
 
-        let mut sessions = self.sessions.lock().await;
-        sessions.insert(term_id.clone(), session);
-        drop(sessions);
-
-        // Spawn a task to read from PTY, but gate its first read until after
-        // ready has been published. This keeps the session insertion atomic and
-        // avoids orphaning the reader if close() races immediately after insert.
+        // Gate async delivery until ready, but let the OS reader drain at once.
+        // If startup loses ownership, abort drops its bounded receiver so the
+        // dedicated reader switches to discard/drain before ConPTY closes.
         let term_id_clone = term_id.clone();
         let app_handle_clone = app_handle.clone();
-        let output_channel_clone = output_channel.clone();
-        let (reader_start_tx, reader_start_rx) = std_mpsc::channel::<()>();
-        let (output_tx, mut output_rx) = tokio::sync::mpsc::channel::<LocalReaderEvent>(64);
-        let output_tx_for_wait = output_tx.clone();
+        let (reader_start_tx, reader_start_rx) = tokio::sync::oneshot::channel();
+        let (output_tx, output_rx) = tokio::sync::mpsc::channel::<LocalReaderEvent>(64);
+        let (child_exit_tx, child_exit_rx) = tokio::sync::oneshot::channel();
 
         tokio::task::spawn_blocking(move || {
-            let exit_code = child.wait().ok().map(|status| status.exit_code());
-            let _ = output_tx_for_wait.blocking_send(LocalReaderEvent::Finished { exit_code });
+            wait_for_local_child(child, master, child_exit_tx);
         });
 
         tokio::task::spawn_blocking(move || {
-            let _ = reader_start_rx.recv();
-            let mut buf = [0u8; 8192];
-            loop {
-                match reader.read(&mut buf) {
-                    Ok(0) => {
-                        let _ =
-                            output_tx.blocking_send(LocalReaderEvent::Finished { exit_code: None });
-                        break;
-                    }
-                    Ok(n) => {
-                        if output_tx
-                            .blocking_send(LocalReaderEvent::Data(buf[..n].to_vec()))
-                            .is_err()
-                        {
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Error reading from PTY: {}", e);
-                        let _ =
-                            output_tx.blocking_send(LocalReaderEvent::Finished { exit_code: None });
-                        break;
-                    }
-                }
-            }
+            read_local_output(reader, output_tx);
         });
 
-        let exit_emitted = Arc::new(AtomicBool::new(false));
-        let exit_emitted_clone = exit_emitted.clone();
-        let sessions_for_exit = self.sessions.clone();
+        let state_for_exit = self.state.clone();
         let term_id_for_exit = term_id.clone();
 
         let reader_handle = tokio::spawn(async move {
-            let mut policy = OutputFlushPolicy::new();
-
-            loop {
-                let deadline = policy.deadline();
-                tokio::select! {
-                    event = output_rx.recv() => {
-                        match event {
-                            Some(LocalReaderEvent::Data(chunk)) => {
-                                apply_flush_instruction(
-                                    &output_channel_clone,
-                                    generation,
-                                    policy.on_bytes(&chunk, Instant::now()),
-                                );
-                            }
-                            Some(LocalReaderEvent::Finished { exit_code }) => {
-                                flush_policy_tail(&output_channel_clone, generation, &mut policy);
-                                if !exit_emitted_clone.swap(true, Ordering::SeqCst) {
-                                    emit_terminal_exit(
-                                        &app_handle_clone,
-                                        &term_id_clone,
-                                        generation,
-                                        exit_code,
-                                    );
-                                    let sessions_ref = sessions_for_exit.clone();
-                                    let term_id_cleanup = term_id_for_exit.clone();
-                                    tokio::spawn(async move {
-                                        PtyManager::finish_session(&sessions_ref, &term_id_cleanup, generation).await;
-                                    });
-                                }
-                                break;
-                            }
-                            None => {
-                                flush_policy_tail(&output_channel_clone, generation, &mut policy);
-                                break;
-                            }
-                        }
-                    }
-
-                    _ = async {
-                        if let Some(d) = deadline {
-                            tokio::time::sleep_until(d).await;
-                        }
-                    }, if deadline.is_some() => {
-                        apply_flush_instruction(
-                            &output_channel_clone,
-                            generation,
-                            policy.on_timer(Instant::now()),
-                        );
-                    }
+            if reader_start_rx.await.is_err() {
+                return;
+            }
+            let result = forward_local_output(output_rx, &output, child_exit_rx).await;
+            let exit_code = match result {
+                Ok(code) => code,
+                Err(error) => {
+                    eprintln!("[PTY] Local output stopped: {}", error);
+                    None
                 }
+            };
+            if PtyManager::finish_session(
+                &state_for_exit,
+                &term_id_for_exit,
+                generation,
+                channel_id,
+            )
+            .await
+            {
+                emit_terminal_exit(
+                    &app_handle_clone,
+                    &term_id_clone,
+                    generation,
+                    channel_id,
+                    exit_code,
+                );
             }
         });
 
-        let mut sessions = self.sessions.lock().await;
-        if let Some(session) = sessions.get_mut(&term_id) {
-            if let TerminalHandle::Local {
-                reader_handle: session_reader_handle,
-                ..
-            } = &mut session.handle
-            {
-                *session_reader_handle = Some(reader_handle);
-            }
+        if let TerminalHandle::Local {
+            reader_handle: slot,
+            ..
+        } = &mut session.handle
+        {
+            *slot = Some(reader_handle);
         }
-        drop(sessions);
+        self.install_created_session(&creation, session).await?;
 
         // Notify frontend that terminal is ready for input only after the
         // session has a live reader handle wired for cleanup.
@@ -873,6 +919,7 @@ impl PtyManager {
             &format!("terminal-ready-{}", term_id),
             TerminalLifecycleEvent {
                 generation,
+                channel_id,
                 exit_code: None,
             },
         );
@@ -881,11 +928,10 @@ impl PtyManager {
         Ok(())
     }
 
-    // Create a remote SSH session
+    /// Bind an SSH PTY to parser-credit output without blocking control traffic.
     pub async fn create_remote_session(
         &self,
-        term_id: String,
-        connection_id: String,
+        creation: PtyCreation,
         generation: u32,
         mut channel: Channel<Msg>,
         cols: u16,
@@ -898,8 +944,9 @@ impl PtyManager {
         cwd: Option<String>,
         auth_banner: Option<String>,
     ) -> Result<()> {
-        // Clean up any existing dead/stale session with this ID before creating a new one
-        let _ = self.close(&term_id).await;
+        let term_id = creation.term_id.clone();
+        let connection_id = creation.connection_id.clone();
+        let channel_id = output_channel.id();
 
         // Request PTY on the channel
         channel
@@ -968,10 +1015,11 @@ impl PtyManager {
         let (resize_tx, mut resize_rx) = mpsc::channel::<(u16, u16)>(4);
 
         let connection_id_for_transport = connection_id.clone();
-        let session = PtySession {
+        let output = Arc::new(PtyOutput::new(output_channel.clone(), generation));
+        let mut session = PtySession {
             connection_id,
-            generation,
             output_channel: output_channel.clone(),
+            output: output.clone(),
             handle: TerminalHandle::Remote {
                 input: Arc::new(RemoteInput::new(tx, !remote_os_known)),
                 resize_tx,
@@ -980,62 +1028,71 @@ impl PtyManager {
             navigate_shell,
         };
 
-        let mut sessions = self.sessions.lock().await;
-        sessions.insert(term_id.clone(), session);
-        drop(sessions);
-
-        // Notify frontend that terminal is ready for input
-        let _ = app_handle.emit(
-            &format!("terminal-ready-{}", term_id),
-            TerminalLifecycleEvent {
-                generation,
-                exit_code: None,
-            },
-        );
-
-        if let Some(banner) = auth_banner {
-            flush_output_frame(&output_channel, generation, terminal_auth_banner(&banner));
-        }
-
         let term_id_clone = term_id.clone();
         let app_handle_clone = app_handle.clone();
-        let output_channel_clone = output_channel.clone();
-        let sessions_for_exit = self.sessions.clone();
+        let input_writer = channel.make_writer();
+        let state_for_exit = self.state.clone();
         let term_id_for_exit = term_id.clone();
+        let (reader_start_tx, reader_start_rx) = tokio::sync::oneshot::channel();
 
-        // Spawn the manager task only after ready has been published so same-generation
-        // output/exit events can never arrive before the frontend has seen ready.
+        // Install cleanup ownership before publishing ready; the task cannot
+        // emit output/exit until the matching owner releases this startup gate.
         let task_handle = tokio::task::spawn(async move {
+            if reader_start_rx.await.is_err() {
+                return;
+            }
             let app_handle = app_handle_clone;
             let mut policy = OutputFlushPolicy::new();
+            let mut pending = OutputCursor::new(
+                auth_banner
+                    .map(|banner| terminal_auth_banner(&banner))
+                    .unwrap_or_default(),
+            );
+            let mut recorded_exit = None;
+            let mut output_failed = false;
+            // JoinSet owns this one task: aborting the reader also aborts its
+            // writer. A blocked remote input window cannot freeze receive/resize.
+            let mut writers = tokio::task::JoinSet::new();
+            writers.spawn(async move {
+                tokio::pin!(input_writer);
+                while let Some(bytes) = rx.recv().await {
+                    input_writer.as_mut().write_all(&bytes).await?;
+                }
+                Ok::<(), std::io::Error>(())
+            });
             let drop_transport;
             let exit_code;
 
             loop {
                 let deadline = policy.deadline();
+                let has_pending = !pending.is_empty();
                 tokio::select! {
-                    msg = channel.wait() => {
+                    result = output.send_pending(&mut pending), if has_pending => {
+                        if let Err(error) = result {
+                            eprintln!("[PTY] Remote output stopped: {}", error);
+                            output_failed = true;
+                            drop_transport = false;
+                            exit_code = Some(None);
+                            break;
+                        }
+                    }
+                    msg = channel.wait(), if !has_pending => {
                         match remote_wait_action(msg.as_ref()) {
                             RemoteWaitAction::BufferOutput => {
                                 if let Some(ref msg) = msg {
-                                    buffer_remote_wait_output(
-                                        msg,
-                                        &mut policy,
-                                        &output_channel_clone,
-                                        generation,
-                                    );
+                                    pending = buffer_remote_wait_output(msg, &mut policy);
                                 }
                             }
+                            RemoteWaitAction::RecordExit { exit_code: code } => {
+                                recorded_exit = Some(code);
+                            }
                             RemoteWaitAction::PaneExit { exit_code: code } => {
-                                flush_policy_tail(&output_channel_clone, generation, &mut policy);
                                 drop_transport = false;
-                                exit_code = Some(code);
+                                exit_code = Some(recorded_exit.unwrap_or(code));
                                 break;
                             }
                             RemoteWaitAction::TransportDrop => {
-                                flush_policy_tail(&output_channel_clone, generation, &mut policy);
-                                exit_code = Some(None);
-                                drop_transport = true;
+                                (drop_transport, exit_code) = remote_io_completion(recorded_exit);
                                 break;
                             }
                             // EOF: keep waiting for Close / ExitStatus (pane) or None (host drop).
@@ -1047,21 +1104,13 @@ impl PtyManager {
                         if let Some(d) = deadline {
                             tokio::time::sleep_until(d).await;
                         }
-                    }, if deadline.is_some() => {
-                        apply_flush_instruction(
-                            &output_channel_clone,
-                            generation,
-                            policy.on_timer(Instant::now()),
-                        );
+                    }, if !has_pending && deadline.is_some() => {
+                        pending = apply_flush_instruction(policy.on_timer(Instant::now()));
                     }
 
-                    Some(input) = rx.recv() => {
-                        if let Err(e) = channel.data(&input[..]).await {
-                             eprintln!("[PTY] Failed to send data to channel: {}", e);
-                             exit_code = Some(None);
-                             drop_transport = true;
-                             break;
-                        }
+                    _ = writers.join_next(), if !writers.is_empty() => {
+                        (drop_transport, exit_code) = remote_io_completion(recorded_exit);
+                        break;
                     }
 
                     Some((mut c, mut r)) = resize_rx.recv() => {
@@ -1069,36 +1118,60 @@ impl PtyManager {
                             c = latest_c;
                             r = latest_r;
                         }
-                        if let Err(e) = channel.window_change(c as u32, r as u32, 0, 0).await {
-                            eprintln!("[PTY] Failed to resize channel: {}", e);
-                        }
+                        // Advisory resize must not monopolize the control loop
+                        // if the transport's outgoing queue temporarily stalls.
+                        let _ = tokio::time::timeout(std::time::Duration::from_millis(100),
+                            channel.window_change(c as u32, r as u32, 0, 0)).await;
                     }
                 }
             }
 
-            flush_policy_tail(&output_channel_clone, generation, &mut policy);
-            let _ = channel.close().await;
+            if !output_failed {
+                // Close follows parser completion, not just successful IPC send.
+                // User close still aborts this task and cancels any ACK wait.
+                let tail = drain_terminal_output(&output, &mut pending, &mut policy).await;
+                if let Err(error) = tail {
+                    eprintln!("[PTY] Remote final output stopped: {}", error);
+                }
+            }
+            writers.abort_all();
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(1), channel.close()).await;
 
-            PtyManager::finish_session(&sessions_for_exit, &term_id_for_exit, generation).await;
+            let owned = PtyManager::finish_session(
+                &state_for_exit,
+                &term_id_for_exit,
+                generation,
+                channel_id,
+            )
+            .await;
+            if !owned {
+                return;
+            }
             if drop_transport {
                 // Host is gone: suspend every pane. Never emit terminal-exit
                 // (that would look like the user typed `exit` in this pane).
                 emit_connection_transport_lost(&app_handle, &connection_id_for_transport);
             } else if let Some(code) = exit_code {
-                emit_terminal_exit(&app_handle, &term_id_clone, generation, code);
+                emit_terminal_exit(&app_handle, &term_id_clone, generation, channel_id, code);
             }
         });
 
-        let mut sessions = self.sessions.lock().await;
-        if let Some(session) = sessions.get_mut(&term_id) {
-            if let TerminalHandle::Remote {
-                task_handle: session_task_handle,
-                ..
-            } = &mut session.handle
-            {
-                *session_task_handle = Some(task_handle);
-            }
+        if let TerminalHandle::Remote {
+            task_handle: slot, ..
+        } = &mut session.handle
+        {
+            *slot = Some(task_handle);
         }
+        self.install_created_session(&creation, session).await?;
+        let _ = app_handle.emit(
+            &format!("terminal-ready-{}", term_id),
+            TerminalLifecycleEvent {
+                generation,
+                channel_id,
+                exit_code: None,
+            },
+        );
+        let _ = reader_start_tx.send(());
         Ok(())
     }
 
@@ -1108,6 +1181,7 @@ impl PtyManager {
         &self,
         term_id: &str,
         generation: u32,
+        channel_id: u32,
         remote_os: &str,
         detected_shell: Option<&str>,
         shell_override: Option<&str>,
@@ -1119,11 +1193,12 @@ impl PtyManager {
             remote_navigate_shell_style(is_remote_windows(Some(remote_os)), detected_shell);
 
         let input = {
-            let sessions = self.sessions.lock().await;
+            let state = lock_pty_state(&self.state);
+            let sessions = &state.sessions;
             let Some(session) = sessions.get(term_id) else {
                 return Ok(false);
             };
-            if session.generation != generation {
+            if !session.output.matches(generation, channel_id) {
                 return Ok(false);
             }
             match &session.handle {
@@ -1140,11 +1215,12 @@ impl PtyManager {
         let apply_startup = startup_claim == DeferredStartupClaim::Apply;
 
         {
-            let mut sessions = self.sessions.lock().await;
+            let mut state = lock_pty_state(&self.state);
+            let sessions = &mut state.sessions;
             let Some(session) = sessions.get_mut(term_id) else {
                 return Ok(false);
             };
-            if session.generation != generation {
+            if !session.output.matches(generation, channel_id) {
                 return Ok(false);
             }
             session.navigate_shell = if apply_startup {
@@ -1168,9 +1244,12 @@ impl PtyManager {
         Ok(true)
     }
 
+    /// Navigate using the installed shell's quoting rules, retaining the exact
+    /// remote input owner across its send gate rather than following a respawn.
     pub async fn navigate_to_path(&self, term_id: &str, path: &str) -> Result<()> {
         let remote_input = {
-            let sessions = self.sessions.lock().await;
+            let state = lock_pty_state(&self.state);
+            let sessions = &state.sessions;
             let session = sessions
                 .get(term_id)
                 .ok_or_else(|| anyhow!("Session not found: {}", term_id))?;
@@ -1182,7 +1261,8 @@ impl PtyManager {
 
         let Some(input) = remote_input else {
             let cd_cmd = {
-                let sessions = self.sessions.lock().await;
+                let state = lock_pty_state(&self.state);
+                let sessions = &state.sessions;
                 let session = sessions
                     .get(term_id)
                     .ok_or_else(|| anyhow!("Session not found: {}", term_id))?;
@@ -1196,7 +1276,8 @@ impl PtyManager {
         input.mark_user_input_started();
         let _send_guard = input.send_gate.lock().await;
         let cd_cmd = {
-            let sessions = self.sessions.lock().await;
+            let state = lock_pty_state(&self.state);
+            let sessions = &state.sessions;
             let session = sessions
                 .get(term_id)
                 .ok_or_else(|| anyhow!("Session not found: {}", term_id))?;
@@ -1217,9 +1298,12 @@ impl PtyManager {
             .map_err(|e| anyhow!("Failed to send navigation to SSH task: {}", e))
     }
 
+    /// Clone the installed input handle under the short state lock, then perform
+    /// serialized local or remote I/O without holding the lifecycle registry.
     pub async fn write(&self, term_id: &str, data: &str) -> Result<()> {
         let (local_writer_opt, remote_input_opt) = {
-            let sessions = self.sessions.lock().await;
+            let state = lock_pty_state(&self.state);
+            let sessions = &state.sessions;
             let session = sessions
                 .get(term_id)
                 .ok_or_else(|| anyhow!("Session not found: {}", term_id))?;
@@ -1247,9 +1331,11 @@ impl PtyManager {
         Ok(())
     }
 
+    /// Resize a live PTY without holding the session map during platform I/O.
     pub async fn resize(&self, term_id: &str, cols: u16, rows: u16) -> Result<()> {
         let (local_master, remote_tx_opt) = {
-            let sessions = self.sessions.lock().await;
+            let state = lock_pty_state(&self.state);
+            let sessions = &state.sessions;
             let session = sessions
                 .get(term_id)
                 .ok_or_else(|| anyhow!("Session not found: {}", term_id))?;
@@ -1266,6 +1352,8 @@ impl PtyManager {
             let master = master.lock_owned().await;
             tokio::task::spawn_blocking(move || {
                 master
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("Local PTY has exited"))?
                     .resize(PtySize {
                         rows,
                         cols,
@@ -1292,7 +1380,8 @@ impl PtyManager {
     /// Remote sessions always return false — callers should use output-based busy detection.
     pub async fn has_active_child_processes(&self, term_id: &str) -> bool {
         let child_pid = {
-            let sessions = self.sessions.lock().await;
+            let state = lock_pty_state(&self.state);
+            let sessions = &state.sessions;
             let Some(session) = sessions.get(term_id) else {
                 // Missing session during start/teardown — treat as busy so idle suspend defers.
                 return true;
@@ -1310,8 +1399,13 @@ impl PtyManager {
         process_tree_has_children(pid)
     }
 
+    /// Explicit close cancels parser waits before killing detached OS resources.
     pub async fn close(&self, term_id: &str) -> Result<()> {
-        let session = self.sessions.lock().await.remove(term_id);
+        let session = {
+            let mut state = lock_pty_state(&self.state);
+            state.pending.remove(term_id);
+            state.sessions.remove(term_id)
+        };
         if let Some(session) = session {
             Self::close_sessions(vec![session]).await?;
         }
@@ -1322,15 +1416,17 @@ impl PtyManager {
     /// release the manager lock before platform cleanup, just as explicit close
     /// does. Do not abort the reader that reported this natural exit.
     async fn finish_session(
-        sessions: &Mutex<HashMap<String, PtySession>>,
+        state: &StdMutex<PtyState>,
         term_id: &str,
         generation: u32,
-    ) {
+        channel_id: u32,
+    ) -> bool {
         let session = {
-            let mut sessions = sessions.lock().await;
+            let mut state = lock_pty_state(state);
+            let sessions = &mut state.sessions;
             if sessions
                 .get(term_id)
-                .is_some_and(|s| s.generation == generation)
+                .is_some_and(|s| s.output.matches(generation, channel_id))
             {
                 sessions.remove(term_id)
             } else {
@@ -1338,6 +1434,7 @@ impl PtyManager {
             }
         };
         if let Some(mut session) = session {
+            session.output.close();
             if let Err(error) = tokio::task::spawn_blocking(move || {
                 Self::finalize_session_after_natural_exit(&mut session.handle);
             })
@@ -1345,12 +1442,19 @@ impl PtyManager {
             {
                 eprintln!("[PTY] Natural-exit cleanup task failed: {}", error);
             }
+            return true;
         }
+        false
     }
 
+    /// Atomically detach this connection's sessions, keeping unrelated PTYs live.
     pub async fn close_by_connection(&self, connection_id: &str) -> Result<()> {
         let removed = {
-            let mut sessions = self.sessions.lock().await;
+            let mut state = lock_pty_state(&self.state);
+            state
+                .pending
+                .retain(|_, pending| pending.connection_id != connection_id);
+            let sessions = &mut state.sessions;
             let ids: Vec<_> = sessions
                 .iter()
                 .filter(|(_, session)| session.connection_id == connection_id)
@@ -1363,6 +1467,54 @@ impl PtyManager {
         Self::close_sessions(removed).await
     }
 
+    /// Parser progress belongs to an exact PTY generation/channel owner. Late
+    /// messages after dispose/restart are inert, rather than granting new credit.
+    pub async fn acknowledge_output(
+        &self,
+        term_id: &str,
+        generation: u32,
+        channel_id: u32,
+        sequence: u32,
+    ) -> Result<()> {
+        let output = lock_pty_state(&self.state)
+            .sessions
+            .get(term_id)
+            .filter(|session| session.output.matches(generation, channel_id))
+            .map(|session| session.output.clone());
+        if let Some(output) = output {
+            output.acknowledge(sequence)?;
+        }
+        Ok(())
+    }
+
+    /// Stop only the failed output owner; a delayed failure may not kill a
+    /// replacement PTY. The caller uses existing terminal-exit UI cleanup.
+    pub async fn fail_output(
+        &self,
+        term_id: &str,
+        generation: u32,
+        channel_id: u32,
+    ) -> Result<bool> {
+        let session = {
+            let mut state = lock_pty_state(&self.state);
+            let sessions = &mut state.sessions;
+            if sessions
+                .get(term_id)
+                .is_some_and(|session| session.output.matches(generation, channel_id))
+            {
+                sessions.remove(term_id)
+            } else {
+                None
+            }
+        };
+        if let Some(session) = session {
+            Self::close_sessions(vec![session]).await?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
     /// Detach sessions before platform teardown: a slow kill/drop must not hold
     /// the manager lock or block Tokio's workers serving other terminals.
     async fn close_sessions(mut sessions: Vec<PtySession>) -> Result<()> {
@@ -1371,6 +1523,7 @@ impl PtyManager {
         }
         // Stop delivery immediately, even if the blocking pool is busy.
         for session in &mut sessions {
+            session.output.close();
             Self::stop_session_tasks(&mut session.handle);
         }
         tokio::task::spawn_blocking(move || {
@@ -1383,10 +1536,107 @@ impl PtyManager {
     }
 }
 
+/// Forward a local reader through the common parser-credit window. Child status
+/// is deliberately not a read-loop event: process exit may precede pipe EOF and
+/// must never overtake trailing output. Control/close stays in PtyManager.
+async fn forward_local_output(
+    mut reader: mpsc::Receiver<LocalReaderEvent>,
+    output: &PtyOutput,
+    child_exit: tokio::sync::oneshot::Receiver<Option<u32>>,
+) -> Result<Option<u32>> {
+    let mut policy = OutputFlushPolicy::new();
+    let mut pending = OutputCursor::default();
+    let mut reader_failed = false;
+    loop {
+        let deadline = policy.deadline();
+        let has_pending = !pending.is_empty();
+        tokio::select! {
+            result = output.send_pending(&mut pending), if has_pending => { result?; }
+            event = reader.recv(), if !has_pending => match event {
+                Some(LocalReaderEvent::Data(chunk)) => {
+                    pending = apply_flush_instruction(policy.on_bytes(&chunk, Instant::now()));
+                }
+                Some(LocalReaderEvent::Eof) => break,
+                Some(LocalReaderEvent::Failed) | None => {
+                    reader_failed = true;
+                    break;
+                }
+            },
+            _ = async { if let Some(deadline) = deadline { tokio::time::sleep_until(deadline).await; } },
+                if !has_pending && deadline.is_some() => {
+                    pending = apply_flush_instruction(policy.on_timer(Instant::now()));
+                }
+        }
+    }
+    drain_terminal_output(output, &mut pending, &mut policy).await?;
+    if reader_failed {
+        return Err(anyhow!("Local PTY reader stopped before EOF"));
+    }
+    Ok(child_exit.await.unwrap_or(None))
+}
+
+/// Deliver all already-received bytes, including a timer-buffered tail on a
+/// transport drop. Reader termination is not permission to discard that tail.
+async fn drain_terminal_output(
+    output: &PtyOutput,
+    pending: &mut OutputCursor,
+    policy: &mut OutputFlushPolicy,
+) -> Result<()> {
+    output.send_pending(pending).await?;
+    output.send_pending(&mut flush_policy_tail(policy)).await?;
+    output.drain().await
+}
+
+/// Read bounded chunks on a dedicated blocking worker. After receiver closure,
+/// continue draining OS output until EOF instead of abandoning ConPTY's final
+/// flush; a closed UI intentionally discards bytes, normal backpressure does not.
+fn read_local_output(mut reader: Box<dyn Read + Send>, output: mpsc::Sender<LocalReaderEvent>) {
+    let mut buf = [0u8; 8192];
+    let mut forwarding = true;
+    loop {
+        match reader.read(&mut buf) {
+            Ok(0) => {
+                let _ = output.blocking_send(LocalReaderEvent::Eof);
+                break;
+            }
+            Ok(count) => {
+                if forwarding
+                    && output
+                        .blocking_send(LocalReaderEvent::Data(buf[..count].to_vec()))
+                        .is_err()
+                {
+                    forwarding = false;
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => {
+                eprintln!("[PTY] Read failed: {}", error);
+                let _ = output.blocking_send(LocalReaderEvent::Failed);
+                break;
+            }
+        }
+    }
+}
+
+/// Observe process exit independently of output delivery, then close the control
+/// master on this blocking worker while the dedicated reader keeps draining.
+/// ConPTY may not produce pipe EOF until ClosePseudoConsole completes; retaining
+/// its master until reader EOF would form a shutdown cycle under backpressure.
+fn wait_for_local_child(
+    mut child: Box<dyn portable_pty::Child + Send + Sync>,
+    master: LocalMaster,
+    status: tokio::sync::oneshot::Sender<Option<u32>>,
+) {
+    let exit_code = child.wait().ok().map(|status| status.exit_code());
+    let _ = status.send(exit_code);
+    let master = master.blocking_lock().take();
+    drop(master);
+}
+
 /// Serialize local input before dispatching blocking pipe I/O. Holding an owned
 /// guard through flush prevents paste/keystroke interleaving, including when the
 /// invoking future is cancelled after the blocking operation has started.
-async fn write_local_pty(writer: Arc<Mutex<Box<dyn Write + Send>>>, data: Vec<u8>) -> Result<()> {
+async fn write_local_pty(writer: LocalWriter, data: Vec<u8>) -> Result<()> {
     let mut writer = writer.lock_owned().await;
     tokio::task::spawn_blocking(move || {
         writer
@@ -1528,16 +1778,19 @@ mod tests {
         resize: Option<std::sync::Arc<BlockingIo>>,
         kill: Option<std::sync::Arc<BlockingIo>>,
     ) -> super::PtySession {
+        let output_channel = tauri::ipc::Channel::new(|_| Ok(()));
         super::PtySession {
             connection_id: "test-local".into(),
-            generation: 1,
-            output_channel: tauri::ipc::Channel::new(|_| Ok(())),
+            output_channel: output_channel.clone(),
+            output: std::sync::Arc::new(super::PtyOutput::new(output_channel, 1)),
             navigate_shell: NavigateShellStyle::Posix,
             handle: super::TerminalHandle::Local {
                 writer: std::sync::Arc::new(tokio::sync::Mutex::new(Box::new(std::io::sink()))),
                 reader_handle: None,
                 inject_handle: None,
-                master: std::sync::Arc::new(tokio::sync::Mutex::new(Box::new(TestMaster(resize)))),
+                master: std::sync::Arc::new(tokio::sync::Mutex::new(Some(Box::new(TestMaster(
+                    resize,
+                ))))),
                 child_killer: Box::new(TestKiller(kill)),
                 child_pid: None,
             },
@@ -1610,14 +1863,14 @@ mod tests {
     async fn local_resize_yields_and_releases_manager_lock() {
         let gate = BlockingIo::new();
         let manager = std::sync::Arc::new(super::PtyManager::new());
-        manager.sessions.lock().await.insert(
+        super::lock_pty_state(&manager.state).sessions.insert(
             "resize".into(),
             test_local_session(Some(gate.clone()), None),
         );
         let operation = manager.clone();
         let task = tokio::spawn(async move { operation.resize("resize", 120, 40).await });
         gate.entered.notified().await;
-        let unlocked = manager.sessions.try_lock().is_ok();
+        let unlocked = manager.state.try_lock().is_ok();
         let yielded = !gate.finished.load(std::sync::atomic::Ordering::SeqCst);
         gate.release_tx.send(()).unwrap();
         task.await.unwrap().unwrap();
@@ -1633,10 +1886,8 @@ mod tests {
         for by_connection in [false, true] {
             let gate = BlockingIo::new();
             let manager = std::sync::Arc::new(super::PtyManager::new());
-            manager
+            super::lock_pty_state(&manager.state)
                 .sessions
-                .lock()
-                .await
                 .insert("close".into(), test_local_session(None, Some(gate.clone())));
             let operation = manager.clone();
             let task = tokio::spawn(async move {
@@ -1648,9 +1899,9 @@ mod tests {
             });
             gate.entered.notified().await;
             let detached = manager
-                .sessions
+                .state
                 .try_lock()
-                .is_ok_and(|sessions| !sessions.contains_key("close"));
+                .is_ok_and(|state| !state.sessions.contains_key("close"));
             let yielded = !gate.finished.load(std::sync::atomic::Ordering::SeqCst);
             gate.release_tx.send(()).unwrap();
             task.await.unwrap().unwrap();
@@ -1665,49 +1916,643 @@ mod tests {
     async fn natural_exit_does_not_remove_replacement_generation() {
         let manager = super::PtyManager::new();
         let mut replacement = test_local_session(None, None);
-        replacement.generation = 2;
-        manager
+        let channel_id = replacement.output_channel.id();
+        replacement.output =
+            std::sync::Arc::new(super::PtyOutput::new(replacement.output_channel.clone(), 2));
+        super::lock_pty_state(&manager.state)
             .sessions
-            .lock()
-            .await
             .insert("reused".into(), replacement);
-        super::PtyManager::finish_session(&manager.sessions, "reused", 1).await;
-        assert_eq!(
-            manager
-                .sessions
-                .lock()
-                .await
-                .get("reused")
-                .unwrap()
-                .generation,
-            2
-        );
-        super::PtyManager::finish_session(&manager.sessions, "reused", 2).await;
-        assert!(manager.sessions.lock().await.is_empty());
+        super::PtyManager::finish_session(&manager.state, "reused", 1, channel_id).await;
+        assert!(super::lock_pty_state(&manager.state)
+            .sessions
+            .get("reused")
+            .unwrap()
+            .output
+            .matches(2, channel_id));
+        super::PtyManager::finish_session(&manager.state, "reused", 2, channel_id).await;
+        assert!(super::lock_pty_state(&manager.state).sessions.is_empty());
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn natural_exit_releases_manager_lock_before_kill() {
         let gate = BlockingIo::new();
         let manager = std::sync::Arc::new(super::PtyManager::new());
-        manager
+        super::lock_pty_state(&manager.state)
             .sessions
-            .lock()
-            .await
             .insert("exit".into(), test_local_session(None, Some(gate.clone())));
+        let channel_id = super::lock_pty_state(&manager.state)
+            .sessions
+            .get("exit")
+            .unwrap()
+            .output_channel
+            .id();
         let operation = manager.clone();
         let task = tokio::spawn(async move {
-            super::PtyManager::finish_session(&operation.sessions, "exit", 1).await
+            super::PtyManager::finish_session(&operation.state, "exit", 1, channel_id).await
         });
         gate.entered.notified().await;
         let detached = manager
-            .sessions
+            .state
             .try_lock()
-            .is_ok_and(|sessions| sessions.is_empty());
+            .is_ok_and(|state| state.sessions.is_empty());
         let yielded = !gate.finished.load(std::sync::atomic::Ordering::SeqCst);
         gate.release_tx.send(()).unwrap();
         task.await.unwrap();
         assert!(yielded && detached);
+    }
+
+    /// A child exiting early must not truncate queued data or final parser drain.
+    #[tokio::test]
+    async fn child_exit_waits_for_reader_eof_and_final_parser_ack() {
+        let (frames_tx, mut frames_rx) = tokio::sync::mpsc::unbounded_channel();
+        let channel = tauri::ipc::Channel::new(move |body| {
+            if let tauri::ipc::InvokeResponseBody::Raw(frame) = body {
+                frames_tx.send(frame).unwrap();
+            }
+            Ok(())
+        });
+        let output = std::sync::Arc::new(super::PtyOutput::new(channel, 1));
+        let (reader_tx, reader_rx) = tokio::sync::mpsc::channel(4);
+        let (exit_tx, exit_rx) = tokio::sync::oneshot::channel();
+        exit_tx.send(Some(23)).unwrap(); // child status arrives before any tail bytes
+        let sender = tokio::spawn(async move {
+            for _ in 0..80 {
+                reader_tx
+                    .send(super::LocalReaderEvent::Data(vec![b'x'; 8192]))
+                    .await
+                    .unwrap();
+            }
+            reader_tx.send(super::LocalReaderEvent::Eof).await.unwrap();
+        });
+        let delivery = output.clone();
+        let task = tokio::spawn(async move {
+            super::forward_local_output(reader_rx, &delivery, exit_rx).await
+        });
+        let mut parsed = 0;
+        let mut last_sequence = 0;
+        while parsed < 80 * 8192 {
+            let frame = tokio::time::timeout(std::time::Duration::from_secs(3), frames_rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            parsed += frame.len() - 8;
+            last_sequence += 1;
+            assert_eq!(
+                u32::from_le_bytes(frame[4..8].try_into().unwrap()),
+                last_sequence
+            );
+            assert!(!task.is_finished(), "completion overtook unparsed output");
+            output.acknowledge(last_sequence).unwrap();
+        }
+        sender.await.unwrap();
+        assert_eq!(task.await.unwrap().unwrap(), Some(23));
+    }
+
+    /// Explicit close cancels a full output window without requiring any ACK.
+    #[tokio::test]
+    async fn cancelled_local_forwarding_does_not_wait_for_slow_parser() {
+        let channel = tauri::ipc::Channel::new(|_| Ok(()));
+        let output = std::sync::Arc::new(super::PtyOutput::new(channel, 1));
+        let (reader_tx, reader_rx) = tokio::sync::mpsc::channel(2);
+        let (_exit_tx, exit_rx) = tokio::sync::oneshot::channel();
+        let sender = tokio::spawn(async move {
+            for _ in 0..80 {
+                if reader_tx
+                    .send(super::LocalReaderEvent::Data(vec![b'x'; 8192]))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+        let delivery = output.clone();
+        let task = tokio::spawn(async move {
+            super::forward_local_output(reader_rx, &delivery, exit_rx).await
+        });
+        tokio::task::yield_now().await;
+        output.close();
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_secs(2), task)
+                .await
+                .unwrap()
+                .unwrap()
+                .is_err()
+        );
+        sender.await.unwrap();
+    }
+
+    /// After UI disposal, the dedicated reader must drain ConPTY until EOF.
+    #[test]
+    fn closed_output_receiver_does_not_stop_os_pipe_drain() {
+        struct CountingReader {
+            inner: std::io::Cursor<Vec<u8>>,
+            bytes: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        }
+        impl std::io::Read for CountingReader {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                let count = self.inner.read(buffer)?;
+                self.bytes
+                    .fetch_add(count, std::sync::atomic::Ordering::Relaxed);
+                Ok(count)
+            }
+        }
+        let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let reader = CountingReader {
+            inner: std::io::Cursor::new(vec![0; 1024 * 1024]),
+            bytes: count.clone(),
+        };
+        let (tx, rx) = tokio::sync::mpsc::channel(2);
+        drop(rx);
+        super::read_local_output(Box::new(reader), tx);
+        assert_eq!(
+            count.load(std::sync::atomic::Ordering::Relaxed),
+            1024 * 1024
+        );
+    }
+
+    /// An older creator cannot replace the latest channel even when both use
+    /// generation 1; its already-produced child/task are cleaned off-lock.
+    #[tokio::test(flavor = "current_thread")]
+    async fn overlapping_creations_install_only_the_latest_owner_and_clean_stale_resources() {
+        let manager = std::sync::Arc::new(super::PtyManager::new());
+        let old = manager
+            .begin_creation("reused", "test-local")
+            .await
+            .unwrap();
+        let current = manager
+            .begin_creation("reused", "test-local")
+            .await
+            .unwrap();
+        let replacement = test_local_session(None, None);
+        let current_channel = replacement.output_channel.id();
+        manager
+            .install_created_session(&current, replacement)
+            .await
+            .unwrap();
+
+        let kill = BlockingIo::new();
+        let mut stale = test_local_session(None, Some(kill.clone()));
+        let task = tokio::spawn(std::future::pending::<()>());
+        let abort = task.abort_handle();
+        if let super::TerminalHandle::Local { reader_handle, .. } = &mut stale.handle {
+            *reader_handle = Some(task);
+        }
+        let cleanup_manager = manager.clone();
+        let cleanup =
+            tokio::spawn(async move { cleanup_manager.install_created_session(&old, stale).await });
+        assert!(kill.release_after_yield().await);
+        assert!(cleanup.await.unwrap().is_err());
+        wait_for_task_abort(&abort).await;
+        drop(current); // a completed ticket must not remove its installed session
+        assert!(super::lock_pty_state(&manager.state).sessions["reused"]
+            .output
+            .matches(1, current_channel));
+        manager.close("reused").await.unwrap();
+    }
+
+    /// Close invalidates not-yet-installed resources too; connection close must
+    /// preserve other hosts' pending startups.
+    #[tokio::test]
+    async fn explicit_and_connection_close_invalidate_pending_creation() {
+        for by_connection in [false, true] {
+            let manager = super::PtyManager::new();
+            let pending = manager
+                .begin_creation("closed", "test-local")
+                .await
+                .unwrap();
+            let unrelated = manager.begin_creation("other", "other-host").await.unwrap();
+            if by_connection {
+                manager.close_by_connection("test-local").await.unwrap();
+            } else {
+                manager.close("closed").await.unwrap();
+            }
+            assert!(manager
+                .install_created_session(&pending, test_local_session(None, None))
+                .await
+                .is_err());
+            let mut other = test_local_session(None, None);
+            other.connection_id = "other-host".into();
+            manager
+                .install_created_session(&unrelated, other)
+                .await
+                .unwrap();
+            manager.close("other").await.unwrap();
+            assert!(super::lock_pty_state(&manager.state).pending.is_empty());
+        }
+    }
+
+    /// A failed or cancelled command releases its own reservation synchronously
+    /// without allowing an older ticket's Drop to erase a newer reservation.
+    #[tokio::test]
+    async fn creation_ticket_drop_is_exact_owner_checked() {
+        let manager = super::PtyManager::new();
+        let old = manager
+            .begin_creation("pending", "test-local")
+            .await
+            .unwrap();
+        let replacement = manager
+            .begin_creation("pending", "test-local")
+            .await
+            .unwrap();
+        drop(old);
+        assert!(super::lock_pty_state(&manager.state)
+            .pending
+            .contains_key("pending"));
+        drop(replacement);
+        assert!(super::lock_pty_state(&manager.state).pending.is_empty());
+    }
+
+    /// Cancellation while old OS cleanup is blocked must not retain a pending
+    /// ticket or remove a replacement installed by a later invocation.
+    #[tokio::test(flavor = "current_thread")]
+    async fn cancelled_creation_during_previous_cleanup_preserves_replacement() {
+        let manager = std::sync::Arc::new(super::PtyManager::new());
+        let initial = manager
+            .begin_creation("reused", "test-local")
+            .await
+            .unwrap();
+        let kill = BlockingIo::new();
+        manager
+            .install_created_session(&initial, test_local_session(None, Some(kill.clone())))
+            .await
+            .unwrap();
+        let old_manager = manager.clone();
+        let old =
+            tokio::spawn(async move { old_manager.begin_creation("reused", "test-local").await });
+        tokio::time::timeout(std::time::Duration::from_secs(3), kill.entered.notified())
+            .await
+            .unwrap();
+        let replacement = manager
+            .begin_creation("reused", "test-local")
+            .await
+            .unwrap();
+        old.abort();
+        assert!(matches!(old.await, Err(error) if error.is_cancelled()));
+        kill.release_tx.send(()).unwrap();
+        manager
+            .install_created_session(&replacement, test_local_session(None, None))
+            .await
+            .unwrap();
+        assert!(super::lock_pty_state(&manager.state)
+            .sessions
+            .contains_key("reused"));
+        manager.close("reused").await.unwrap();
+    }
+
+    /// Even a remote task produced after cancellation must be aborted by the
+    /// same resource cleanup path rather than becoming a detached SSH reader.
+    #[tokio::test]
+    async fn stale_remote_creation_aborts_its_produced_task() {
+        let manager = super::PtyManager::new();
+        let creation = manager
+            .begin_creation("closed", "test-local")
+            .await
+            .unwrap();
+        manager.close("closed").await.unwrap();
+        let mut session = test_local_session(None, None);
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        let (resize_tx, _resize_rx) = tokio::sync::mpsc::channel(1);
+        let task = tokio::spawn(std::future::pending::<()>());
+        let abort = task.abort_handle();
+        session.handle = super::TerminalHandle::Remote {
+            input: std::sync::Arc::new(super::RemoteInput::new(tx, true)),
+            resize_tx,
+            task_handle: Some(task),
+        };
+        assert!(manager
+            .install_created_session(&creation, session)
+            .await
+            .is_err());
+        wait_for_task_abort(&abort).await;
+        assert!(super::lock_pty_state(&manager.state).sessions.is_empty());
+    }
+
+    /// Metadata from an old channel cannot claim deferred input or change the
+    /// navigation style of a same-generation replacement, on either lock check.
+    #[tokio::test]
+    async fn deferred_remote_startup_rejects_same_generation_replaced_channels() {
+        let manager = std::sync::Arc::new(super::PtyManager::new());
+        let make_remote = || {
+            let mut session = test_local_session(None, None);
+            let (tx, rx) = tokio::sync::mpsc::channel(1);
+            let (resize_tx, _) = tokio::sync::mpsc::channel(1);
+            let input = std::sync::Arc::new(super::RemoteInput::new(tx, true));
+            session.handle = super::TerminalHandle::Remote {
+                input: input.clone(),
+                resize_tx,
+                task_handle: None,
+            };
+            (session, input, rx)
+        };
+        let (session, old_input, mut old_rx) = make_remote();
+        let old_channel = session.output_channel.id();
+        let initial = manager
+            .begin_creation("reused", "test-local")
+            .await
+            .unwrap();
+        manager
+            .install_created_session(&initial, session)
+            .await
+            .unwrap();
+        assert!(!manager
+            .finalize_remote_startup(
+                "reused",
+                1,
+                old_channel.wrapping_add(1),
+                "windows",
+                Some("cmd"),
+                None,
+                Some("C:\\fixture")
+            )
+            .await
+            .unwrap());
+        assert!(old_input
+            .startup_pending
+            .load(std::sync::atomic::Ordering::Acquire));
+
+        let send_guard = old_input.send_gate.lock().await;
+        let task_manager = manager.clone();
+        let finalizer = tokio::spawn(async move {
+            task_manager
+                .finalize_remote_startup(
+                    "reused",
+                    1,
+                    old_channel,
+                    "windows",
+                    Some("cmd"),
+                    None,
+                    Some("C:\\fixture"),
+                )
+                .await
+        });
+        // Wait until the finalizer holds its own Arc to the old input and is
+        // parked at the send gate; no sleep or scheduling-speed assumption.
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            while std::sync::Arc::strong_count(&old_input) < 3 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let replacement = manager
+            .begin_creation("reused", "test-local")
+            .await
+            .unwrap();
+        let (session, current_input, mut current_rx) = make_remote();
+        manager
+            .install_created_session(&replacement, session)
+            .await
+            .unwrap();
+        drop(send_guard);
+        assert!(!finalizer.await.unwrap().unwrap());
+        assert!(current_input
+            .startup_pending
+            .load(std::sync::atomic::Ordering::Acquire));
+        assert!(current_rx.try_recv().is_err());
+        assert!(old_rx.try_recv().is_err());
+        assert_eq!(
+            super::lock_pty_state(&manager.state).sessions["reused"].navigate_shell,
+            NavigateShellStyle::Posix
+        );
+        manager.close("reused").await.unwrap();
+    }
+
+    /// An old ACK/failure is harmless even when the terminal ID has been reused.
+    #[tokio::test]
+    async fn output_commands_reject_stale_generation_and_channel_owners() {
+        let manager = super::PtyManager::new();
+        let session = test_local_session(None, None);
+        let channel_id = session.output_channel.id();
+        super::lock_pty_state(&manager.state)
+            .sessions
+            .insert("owned".into(), session);
+        manager
+            .acknowledge_output("owned", 2, channel_id, u32::MAX)
+            .await
+            .unwrap();
+        manager
+            .acknowledge_output("owned", 1, channel_id.wrapping_add(1), u32::MAX)
+            .await
+            .unwrap();
+        assert!(manager
+            .acknowledge_output("owned", 1, channel_id, u32::MAX)
+            .await
+            .is_err());
+        assert!(!manager.fail_output("owned", 2, channel_id).await.unwrap());
+        assert!(!manager
+            .fail_output("owned", 1, channel_id.wrapping_add(1))
+            .await
+            .unwrap());
+        assert!(super::lock_pty_state(&manager.state)
+            .sessions
+            .contains_key("owned"));
+        assert!(manager.fail_output("owned", 1, channel_id).await.unwrap());
+        assert!(super::lock_pty_state(&manager.state).sessions.is_empty());
+        manager
+            .acknowledge_output("owned", 1, channel_id, 1)
+            .await
+            .unwrap();
+    }
+
+    /// A replacement can reuse a generation after webview reload; the channel
+    /// identity must still protect natural cleanup of its installed task.
+    #[tokio::test]
+    async fn output_task_cleanup_requires_exact_channel_owner() {
+        let manager = super::PtyManager::new();
+        let mut replacement = test_local_session(None, None);
+        let channel_id = replacement.output_channel.id();
+        let task = tokio::spawn(std::future::pending::<()>());
+        let abort = task.abort_handle();
+        if let super::TerminalHandle::Local { reader_handle, .. } = &mut replacement.handle {
+            *reader_handle = Some(task);
+        }
+        super::lock_pty_state(&manager.state)
+            .sessions
+            .insert("reused".into(), replacement);
+        assert!(
+            !super::PtyManager::finish_session(
+                &manager.state,
+                "reused",
+                1,
+                channel_id.wrapping_add(1)
+            )
+            .await
+        );
+        assert!(!abort.is_finished());
+        manager.close("reused").await.unwrap();
+        wait_for_task_abort(&abort).await;
+    }
+
+    /// Abort is scheduled, not synchronous; wait for its bounded completion
+    /// without relying on a single scheduler turn under parallel test load.
+    async fn wait_for_task_abort(handle: &tokio::task::AbortHandle) {
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while !handle.is_finished() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("aborted test task did not finish");
+    }
+
+    /// A transport loss before the burst timer fires must preserve bytes already
+    /// received, then wait for parser acknowledgment before lifecycle cleanup.
+    #[tokio::test]
+    async fn transport_drop_drains_pending_flush_and_timer_tail_in_order() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let channel = tauri::ipc::Channel::new(move |body| {
+            if let tauri::ipc::InvokeResponseBody::Raw(frame) = body {
+                let _ = tx.send(frame);
+            }
+            Ok(())
+        });
+        let output = std::sync::Arc::new(super::PtyOutput::new(channel, 1));
+        let mut policy = crate::pty_output_flush::OutputFlushPolicy::new();
+        let now = tokio::time::Instant::now();
+        let mut pending = super::apply_flush_instruction(policy.on_bytes(b"lead", now));
+        assert!(matches!(
+            policy.on_bytes(b"tail", now),
+            crate::pty_output_flush::FlushInstruction::None
+        ));
+        let delivery = output.clone();
+        let task = tokio::spawn(async move {
+            super::drain_terminal_output(&delivery, &mut pending, &mut policy).await
+        });
+        let mut parsed = Vec::new();
+        for sequence in 1..=2 {
+            let frame: Vec<u8> = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            parsed.extend_from_slice(&frame[8..]);
+            assert!(!task.is_finished());
+            output.acknowledge(sequence).unwrap();
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(2), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(parsed, b"leadtail");
+    }
+
+    /// A failed OS read still publishes known bytes and waits for their parser
+    /// ACK, but must not wait for a child that may still be running.
+    #[tokio::test]
+    async fn local_read_failure_drains_received_tail_before_reporting_error() {
+        let (frames_tx, mut frames_rx) = tokio::sync::mpsc::unbounded_channel();
+        let channel = tauri::ipc::Channel::new(move |body| {
+            if let tauri::ipc::InvokeResponseBody::Raw(frame) = body {
+                let _ = frames_tx.send(frame);
+            }
+            Ok(())
+        });
+        let output = std::sync::Arc::new(super::PtyOutput::new(channel, 1));
+        let (reader_tx, reader_rx) = tokio::sync::mpsc::channel(4);
+        let (_exit_tx, exit_rx) = tokio::sync::oneshot::channel();
+        reader_tx
+            .send(super::LocalReaderEvent::Data(b"lead".to_vec()))
+            .await
+            .unwrap();
+        reader_tx
+            .send(super::LocalReaderEvent::Data(b"tail".to_vec()))
+            .await
+            .unwrap();
+        reader_tx
+            .send(super::LocalReaderEvent::Failed)
+            .await
+            .unwrap();
+        let delivery = output.clone();
+        let task = tokio::spawn(async move {
+            super::forward_local_output(reader_rx, &delivery, exit_rx).await
+        });
+        let mut parsed = Vec::new();
+        for sequence in 1..=2 {
+            let frame: Vec<u8> =
+                tokio::time::timeout(std::time::Duration::from_secs(2), frames_rx.recv())
+                    .await
+                    .unwrap()
+                    .unwrap();
+            parsed.extend_from_slice(&frame[8..]);
+            assert!(!task.is_finished(), "read error overtook unparsed output");
+            output.acknowledge(sequence).unwrap();
+        }
+        let error = tokio::time::timeout(std::time::Duration::from_secs(2), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(parsed, b"leadtail");
+        assert!(error.to_string().contains("before EOF"));
+    }
+
+    /// Qualify real ConPTY handle/pipe shutdown using only an ephemeral echo
+    /// process. No user shell, profile, files, credentials or SSH hosts are used.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_child_exit_closes_master_and_preserves_final_output() -> anyhow::Result<()> {
+        let pair = portable_pty::native_pty_system().openpty(portable_pty::PtySize::default())?;
+        let mut command = portable_pty::CommandBuilder::new("cmd.exe");
+        command.args(["/d", "/c", "echo ZYNC_CONPTY_FINAL_OUTPUT"]);
+        let child = pair.slave.spawn_command(command)?;
+        let mut child_killer = child.clone_killer();
+        drop(pair.slave);
+        let reader = pair.master.try_clone_reader()?;
+        let master: super::LocalMaster =
+            std::sync::Arc::new(tokio::sync::Mutex::new(Some(pair.master)));
+        let (tx, rx) = tokio::sync::mpsc::channel(4);
+        let (exit_tx, exit_rx) = tokio::sync::oneshot::channel();
+        let child_master = master.clone();
+        let child_task = tokio::task::spawn_blocking(move || {
+            super::wait_for_local_child(child, child_master, exit_tx)
+        });
+        let reader_task = tokio::task::spawn_blocking(move || super::read_local_output(reader, tx));
+        let (frames_tx, mut frames_rx) = tokio::sync::mpsc::unbounded_channel();
+        let channel = tauri::ipc::Channel::new(move |body| {
+            if let tauri::ipc::InvokeResponseBody::Raw(frame) = body {
+                let _ = frames_tx.send(frame);
+            }
+            Ok(())
+        });
+        let output = std::sync::Arc::new(super::PtyOutput::new(channel, 1));
+        let delivery = output.clone();
+        let mut forwarding =
+            tokio::spawn(async move { super::forward_local_output(rx, &delivery, exit_rx).await });
+        let mut bytes = Vec::new();
+        let result = tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            loop {
+                tokio::select! {
+                    frame = frames_rx.recv() => {
+                        let frame: Vec<u8> = frame.ok_or_else(|| anyhow::anyhow!("test frame channel closed"))?;
+                        bytes.extend_from_slice(&frame[8..]);
+                        output.acknowledge(u32::from_le_bytes(frame[4..8].try_into().unwrap()))?;
+                    }
+                    result = &mut forwarding => return result?,
+                }
+            }
+        }).await;
+        if !matches!(&result, Ok(Ok(_))) {
+            output.close();
+            if result.is_err() {
+                forwarding.abort();
+                let _ = forwarding.await;
+            }
+            tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                tokio::task::spawn_blocking(move || {
+                    let _ = child_killer.kill();
+                    drop(master.blocking_lock().take());
+                }),
+            )
+            .await??;
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(3), child_task).await??;
+        tokio::time::timeout(std::time::Duration::from_secs(3), reader_task).await??;
+        let exit_code = result??;
+        assert_eq!(exit_code, Some(0));
+        assert!(String::from_utf8_lossy(&bytes).contains("ZYNC_CONPTY_FINAL_OUTPUT"));
+        Ok(())
     }
 
     #[test]
@@ -1726,7 +2571,7 @@ mod tests {
         );
         assert_eq!(
             remote_wait_action(Some(&ChannelMsg::ExitStatus { exit_status: 0 })),
-            RemoteWaitAction::PaneExit { exit_code: Some(0) }
+            RemoteWaitAction::RecordExit { exit_code: Some(0) }
         );
     }
 
@@ -1735,9 +2580,31 @@ mod tests {
         assert_eq!(remote_wait_action(None), RemoteWaitAction::TransportDrop);
     }
 
+    /// Writer failure must follow the same exit-status rule as a closed receive channel.
+    #[tokio::test]
+    async fn remote_writer_failure_preserves_recorded_exit_and_connection_scope() {
+        for (recorded_exit, expected_code, expected_transport_drop) in [
+            (None, None, true),
+            (Some(Some(0)), Some(0), false),
+            (Some(Some(23)), Some(23), false),
+            (Some(None), None, false),
+        ] {
+            let mut writers = tokio::task::JoinSet::new();
+            writers.spawn(async {
+                Err::<(), _>(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
+            });
+            let failure = writers.join_next().await.unwrap().unwrap().unwrap_err();
+            assert_eq!(failure.kind(), std::io::ErrorKind::BrokenPipe);
+            assert_eq!(
+                super::remote_io_completion(recorded_exit),
+                (expected_transport_drop, Some(expected_code)),
+            );
+        }
+    }
+
     #[test]
     fn remote_wait_missing_follow_up_after_eof_is_wait_none() {
-        // russh 0.46: after CHANNEL_EOF, wait() still yields Close / ExitStatus,
+        // After CHANNEL_EOF, wait() still yields Close / ExitStatus,
         // or None when the channel receiver is dropped (host gone). EOF itself
         // must not end the pane; None is the missing-follow-up fallback.
         assert_eq!(
