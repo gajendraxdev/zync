@@ -8867,7 +8867,7 @@ dependencies = [
 
 [[package]]
 name = "zync"
-version = "2.35.1"
+version = "2.36.0"
 dependencies = [
  "anyhow",
  "argon2 0.5.3",

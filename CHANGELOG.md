@@ -4,6 +4,8 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.36.0] - 2026-10-20
+
 ### Added
 
 - **Terminal mouse controls:** Choose Context menu or Pass to terminal / Paste
@@ -2632,7 +2634,8 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [840afc2]: https://github.com/zync-sh/zync/commit/840afc2
 [193f568]: https://github.com/zync-sh/zync/commit/193f568
 [4e3c5ff]: https://github.com/zync-sh/zync/commit/4e3c5ff
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.35.1...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.36.0...HEAD
+[2.36.0]: https://github.com/zync-sh/zync/compare/v2.35.1...v2.36.0
 [2.35.1]: https://github.com/zync-sh/zync/compare/v2.34.1...v2.35.1
 [2.34.1]: https://github.com/zync-sh/zync/compare/v2.34.0...v2.34.1
 [2.34.0]: https://github.com/zync-sh/zync/compare/v2.33.12...v2.34.0
