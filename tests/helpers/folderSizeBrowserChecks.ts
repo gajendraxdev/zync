@@ -1,153 +1,166 @@
 import type { createFolderSizeFixture } from '../fixtures/files-production/folderSizes';
 
-/** Real Files queue, preference and summaries; only native IPC is simulated. */
+declare global { var filesRowRenders: Record<string, number> | undefined; }
+
+const settle = () => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+const wait = async (predicate: () => unknown) => {
+    for (let i = 0; i < 120; i++) { if (predicate()) return; await settle(); }
+    throw new Error('Folder-size UI did not settle');
+};
+const button = (label: string) => document.querySelector<HTMLButtonElement>('button[aria-label="' + label + '"]')!;
+const row = (name: string) => document.querySelector<HTMLElement>('[data-file-name="' + name + '"]')!;
+const properties = () => document.querySelector('[aria-label="File properties"]');
+const size = () => properties()?.querySelector('[data-folder-size-state]');
+const closeProperties = async () => { button('Hide properties').click(); await settle(); };
+const propertyAction = (label: string) => [...document.querySelectorAll<HTMLButtonElement>('[aria-label="File properties"] button')]
+    .find(node => node.textContent === label)!;
+
+/** Properties is the sole scan owner; exercise the real lifecycle with deferred native replies. */
 export async function runFolderSizeBrowserChecks(control: ReturnType<typeof createFolderSizeFixture>['control']) {
     const passed: string[] = [];
     const check = (label: string, value: unknown) => { if (!value) throw new Error(label); passed.push(label); };
-    const settle = () => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-    const wait = async (predicate: () => unknown) => {
-        for (let i = 0; i < 120; i++) { if (predicate()) return; await settle(); }
-        throw new Error('Folder-size UI did not settle');
-    };
-    const button = (label: string) => document.querySelector<HTMLButtonElement>('button[aria-label="' + label + '"]')!;
-    const propertyAction = (label: string) => [...document.querySelectorAll<HTMLButtonElement>('[aria-label="File properties"] button')]
-        .find(node => node.textContent === label);
-    const action = async (menu: string, label: string, role = 'menuitem') => {
-        button(menu).click(); await settle();
-        const item = [...document.querySelectorAll<HTMLButtonElement>('[role="' + role + '"]')].find(node => node.textContent?.trim() === label);
-        if (!item || item.disabled) throw new Error('Missing/enabled action: ' + label);
-        item.click(); await settle();
-    };
-    const closeDialog = async () => {
-        document.querySelector<HTMLButtonElement>('[role="dialog"] button[aria-label="Close"]')!.click();
-        await wait(() => !document.querySelector('[role="dialog"]'));
-    };
     const { useAppStore } = await import('../../src/store/useAppStore');
     const host = useAppStore.getState().activeConnectionId!;
     const before = useAppStore.getState();
     const listing = before.files[host];
     const path = before.currentPath[host];
-    const row = (name: string) => document.querySelector<HTMLElement>('[data-file-name="' + name + '"]')!;
-    const summary = () => document.querySelector('.files-summary-count')?.textContent ?? '';
-    const toggle = () => action('View', 'Show folder sizes', 'menuitemcheckbox');
-    await wait(() => control.pending() === 1);
-    check('missing older preference defaults to automatic bounded calculation', useAppStore.getState().settings.fileManager.showFolderSizes !== false);
-    check('automatic calculation starts one scan and queues sibling folders', document.querySelectorAll('[data-folder-size-state="queued"]').length === 5);
-    const queued = document.querySelector('[data-folder-size-state="queued"]')!;
-    const calculating = document.querySelector('[data-folder-size-state="calculating"]')!;
-    check('pending sizes hide internal text while retaining accessible status and a scan indicator', queued.textContent === '—'
-        && queued.getAttribute('aria-label') === 'Queued' && !queued.querySelector('svg')
-        && calculating.textContent === '' && calculating.getAttribute('aria-label') === 'Calculating…' && calculating.querySelector('svg'));
     const reads = () => control.calls.filter(call => call.command === 'fs_folder_size_calculate').length;
-    row('assets').click(); await settle();
-    check('selection does not restart or duplicate the active scan', reads() === 1);
-    check('selected summary is bold and does not show calculating text', getComputedStyle(document.querySelector('.files-summary-count')!).fontWeight === '700'
-        && !summary().includes('Calculating') && !summary().includes('Queued'));
-    control.finish({ complete: false, reason: 'Entry limit reached (100,000)' });
-    await wait(() => row('assets').querySelector('[data-folder-size-state="finished"]'));
-    check('only incomplete results expose the info action', row('assets').textContent?.includes('Partial')
-        && row('assets').querySelector('[aria-label="Folder-size details"]'));
-    check('completed commands do not send redundant cancellation IPC', !control.calls.some(call => call.command === 'fs_folder_size_cancel'));
-    row('assets').querySelector<HTMLButtonElement>('[aria-label="Folder-size details"]')!.click(); await settle();
-    check('partial details use the single shared dialog and explain the safety stop', document.querySelectorAll('[role="dialog"]').length === 1
-        && document.querySelector('[role="dialog"]')?.textContent?.includes('100,000'));
-    await closeDialog();
-    await wait(() => control.pending() === 1); control.finish({ bytes: '853750579' });
-    await wait(() => row('config').querySelector('[data-folder-size-state="finished"]'));
-    check('complete sizes have no info icon and retain their visible unit', row('config').textContent?.includes('814.2 MB')
-        && !row('config').querySelector('[aria-label="Folder-size details"]'));
-    const size = row('config').querySelector<HTMLElement>('[data-folder-size-state="finished"] > span')!;
-    check('normal completed size text fits the existing Size column', size.scrollWidth <= size.clientWidth);
-    size.click(); await settle();
-    check('clicking a completed size selects its row instead of opening details', row('config').getAttribute('aria-selected') === 'true' && !document.querySelector('[role="dialog"]'));
-    await wait(() => control.pending() === 1); control.finish({ bytes: '11' });
-    await wait(() => row('docs').querySelector('[data-folder-size-state="finished"]'));
-    row('config').click(); row('docs').dispatchEvent(new MouseEvent('click', { ctrlKey: true, bubbles: true })); await settle();
-    check('two calculated folders contribute to the selected total', summary().includes('2 selected') && summary().includes('814.2 MB') && !summary().includes('Partial'));
-    button('Inspect selection').click(); await settle();
-    check('multi-folder Properties uses the same calculated total', document.querySelector('[aria-label="File properties"]')?.textContent?.includes('814.2 MB'));
-    row('assets').dispatchEvent(new MouseEvent('click', { ctrlKey: true, bubbles: true })); await settle();
-    check('including a partial folder visibly labels the aggregate incomplete', summary().includes('Partial'));
-    button('Hide properties').click(); await settle();
-    await action('Folder actions', 'Cancel folder-size calculation');
-    control.finish(); await settle();
-    const afterCancel = reads();
+    const open = async (name = 'assets') => {
+        row(name).click(); await settle(); button('Inspect selection').click();
+        await wait(() => control.pending() === 1 && size()?.getAttribute('data-folder-size-state') === 'calculating');
+    };
     await new Promise(resolve => setTimeout(resolve, 350));
-    check('cancelled batches do not automatically restart', reads() === afterCancel && !document.querySelector('[data-folder-size-state="calculating"]'));
-    row('scripts').click(); await settle(); button('Inspect selection').click(); await settle();
-    check('cancelled scans expose an explicit retry', propertyAction('Retry calculation')?.disabled === false);
-    const beforeRetry = reads();
-    const retry = propertyAction('Retry calculation')!;
-    retry.click(); retry.click();
+    check('browsing starts no folder-size IPC with older settings', control.calls.length === 0);
+    // A removed saved flag must not reactivate the former background queue.
+    useAppStore.setState(state => ({ settings: { ...state.settings,
+        fileManager: { ...state.settings.fileManager, ...{ showFolderSizes: true } } } }));
+    row('assets').click(); button('Grid view').click(); await settle(); button('List view').click(); await settle();
+    await new Promise(resolve => setTimeout(resolve, 350));
+    check('legacy enabled preference, selection and view changes cannot start scans', control.calls.length === 0);
+    const selectionText = document.querySelector('.files-summary-count')?.textContent ?? '';
+    check('folder-only selection shows counts without unavailable size text', selectionText.includes('1 selected')
+        && !selectionText.includes('Size unavailable'));
+    check('selection hint omits irrelevant zero counts and verbose explanations', selectionText.includes('Folder sizes are shown in Properties.')
+        && !selectionText.includes('0 files') && !selectionText.includes('0 links') && !selectionText.includes('guaranteed lower bound'));
+    button('View').click(); await settle();
+    check('View no longer offers Show folder sizes', ![...document.querySelectorAll('[role="menuitemcheckbox"]')]
+        .some(node => node.textContent?.includes('Show folder sizes')));
+    button('View').click(); await settle();
+    row('package.json').click(); await settle(); button('Inspect selection').click(); await settle();
+    check('regular-file Properties uses listing metadata without a folder scan', reads() === 0 && properties()?.textContent?.includes('1.8 KB'));
+    await closeProperties(); await open();
+    check('opening a folder Properties starts only that folder', reads() === 1 && control.calls.at(-1)?.path === path + '/assets');
+    check('loading belongs only to Properties, not the listing', size()?.querySelector('svg')
+        && !document.querySelector('[role="listbox"] [data-folder-size-state]'));
+    const loadingStatus = size()?.querySelector('[role="status"]');
+    check('loading has screen-reader text without a visible calculating label', loadingStatus?.textContent === 'Calculating…'
+        && loadingStatus.classList.contains('sr-only') && getComputedStyle(loadingStatus).position === 'absolute'
+        && getComputedStyle(loadingStatus).overflow === 'hidden' && size()?.querySelector('svg')?.getAttribute('aria-hidden') === 'true');
+    const rendersBefore = { ...globalThis.filesRowRenders };
+    control.finish({ bytes: '853750579' }); await wait(() => size()?.getAttribute('data-folder-size-state') === 'finished'); await settle();
+    check('completed size appears in Properties without an info button', properties()?.textContent?.includes('814.2 MB')
+        && !properties()?.querySelector('[aria-label="Folder-size details"]'));
+    check('a Properties result does not render file rows, View or Places again', globalThis.filesRowRenders
+        && ['assets', 'config', 'package.json', '@view', '@places'].every(key => rendersBefore[key] > 0
+            && globalThis.filesRowRenders![key] === rendersBefore[key]));
+    check('completed commands do not send redundant cancellation', !control.calls.some(call => call.command === 'fs_folder_size_cancel'));
+    row('config').dispatchEvent(new MouseEvent('click', { ctrlKey: true, bubbles: true })); await settle();
+    check('multi-folder Properties does not launch recursive batches or reuse another folder total', reads() === 1
+        && !size() && !properties()?.textContent?.includes('814.2 MB'));
+    row('assets').click(); await wait(() => control.pending() === 1);
+    control.finish({ bytes: '4096', complete: false, reason: 'Time limit reached' });
+    await wait(() => size()?.getAttribute('data-folder-size-state') === 'finished');
+    properties()!.querySelector<HTMLButtonElement>('[aria-label="Folder-size details"]')!.click(); await settle();
+    check('partial Properties results retain one safety explanation', document.querySelectorAll('[role="dialog"]').length === 1
+        && document.querySelector('[role="dialog"]')?.textContent?.includes('Time limit reached'));
+    check('open details omit redundant instructions while preserving safety information',
+        !document.querySelector('[role="dialog"]')?.textContent?.includes('Click for details')
+        && document.querySelector('[role="dialog"]')?.textContent?.includes('Links are not followed'));
+    document.querySelector<HTMLButtonElement>('[role="dialog"] button[aria-label="Close"]')!.click(); await settle();
+    await closeProperties(); await open();
+    propertyAction('Cancel calculation').click(); await settle();
+    control.finish({ bytes: '999999' }); await settle();
+    const cancelledReads = reads();
+    await new Promise(resolve => setTimeout(resolve, 350));
+    check('cancel fences late data and never restarts automatically', reads() === cancelledReads && size()?.getAttribute('data-folder-size-state') === 'cancelled');
+    propertyAction('Retry calculation').click(); propertyAction('Retry calculation')?.click();
     await wait(() => control.pending() === 1);
-    check('repeated retry activation starts only the selected folder once', reads() === beforeRetry + 1
-        && control.calls.filter(call => call.command === 'fs_folder_size_calculate').at(-1)?.path === path + '/scripts');
-    row('src').click(); await settle();
-    check('another cancelled folder cannot retry while a scan is active', propertyAction('Retry calculation')?.disabled === true);
-    row('scripts').click(); await settle(); control.fail('Temporary metadata failure');
-    await wait(() => row('scripts').querySelector('[data-folder-size-state="unavailable"]'));
-    check('failed scans can retry without refreshing the directory', propertyAction('Retry calculation')?.disabled === false);
-    const afterFailure = reads();
-    await new Promise(resolve => setTimeout(resolve, 350));
-    check('failed scans never retry automatically', reads() === afterFailure);
-    propertyAction('Retry calculation')!.click(); await wait(() => control.pending() === 1);
-    control.finish({ bytes: '42' });
-    await wait(() => row('scripts').querySelector('[data-folder-size-state="finished"]'));
-    check('a successful retry removes the action and preserves sibling results', !propertyAction('Retry calculation')
-        && row('scripts').textContent?.includes('42 B') && row('config').textContent?.includes('814.2 MB'));
-    button('Hide properties').click(); await settle();
-    await toggle();
-    check('View checkbox saves off and hides prior folder results', useAppStore.getState().settings.fileManager.showFolderSizes === false && !document.querySelector('[data-folder-size-state]'));
-    control.deferAdmission(); await toggle();
+    check('repeated retry starts one scan', reads() === cancelledReads + 1);
+    control.fail('Sample scan unavailable'); await wait(() => size()?.getAttribute('data-folder-size-state') === 'unavailable');
+    const failedReads = reads(); await new Promise(resolve => setTimeout(resolve, 350));
+    check('failed scans remain retryable without an automatic retry loop', reads() === failedReads && propertyAction('Retry calculation'));
+    propertyAction('Retry calculation').click(); await wait(() => control.pending() === 1);
+    const oldId = control.calls.at(-1)?.id;
+    row('config').click(); await wait(() => control.pending() === 2);
+    check('selection change cancels the old Properties scan', control.calls.some(call => call.command === 'fs_folder_size_cancel' && call.id === oldId));
+    control.finish({ bytes: '777777' }); await settle();
+    check('late old-selection result cannot replace new Properties metadata', size()?.getAttribute('data-folder-size-state') === 'calculating'
+        && !properties()?.textContent?.includes('759.5 KB'));
+    control.finish({ bytes: '11' }); await wait(() => size()?.getAttribute('aria-label') === '11 B');
+    check('new selection receives only its own size', properties()?.textContent?.includes('config') && size()?.getAttribute('aria-label') === '11 B');
+    row('docs').click(); await wait(() => control.pending() === 1);
+    await closeProperties(); control.finish(); await settle();
+    check('closing Properties clears the result and fences late replies', !size() && !document.querySelector('[data-folder-size-state]'));
+    control.deferAdmission(); row('assets').click(); await settle(); button('Inspect selection').click();
     await wait(() => control.calls.at(-1)?.command === 'fs_folder_size_begin');
-    const beforeAdmission = reads();
-    useAppStore.setState(state => ({ currentPath: { ...state.currentPath, [host]: path + '/other' }, files: { ...state.files, [host]: [] } }));
-    await settle(); control.acknowledge(); await settle();
-    check('navigation during admission cancels without starting stale reads', reads() === beforeAdmission && control.calls.at(-1)?.command === 'fs_folder_size_cancel');
-    useAppStore.setState(state => ({ currentPath: { ...state.currentPath, [host]: path }, files: { ...state.files, [host]: [...listing] } }));
-    await wait(() => control.pending() === 1);
-    control.finish({ complete: false, reason: 'Time limit reached' }); await settle();
-    row('assets').querySelector<HTMLButtonElement>('[aria-label="Folder-size details"]')!.click(); await settle();
-    await wait(() => control.pending() === 1);
-    await toggle(); control.finish(); await settle();
-    await wait(() => !document.querySelector('[role="dialog"]'));
-    check('switching off cancels the queue and closes its scope-owned details', !document.querySelector('[role="dialog"]') && !document.querySelector('[data-folder-size-state]'));
-    await toggle(); await wait(() => control.pending() === 1);
+    const beforeAdmission = reads(); await closeProperties(); control.acknowledge(); await settle();
+    check('closing during admission cancels without starting a stale read', reads() === beforeAdmission && control.pending() === 0
+        && control.calls.at(-1)?.command === 'fs_folder_size_cancel');
+    await open();
     useAppStore.setState(state => ({ connections: state.connections.map(connection => connection.id === host ? { ...connection } : connection) }));
-    await settle(); control.finish(); await settle();
-    check('connection replacement discards the previous session result', !document.querySelector('[data-folder-size-state="finished"]'));
-    await wait(() => control.pending() === 1); control.finish({ bytes: '853750579' }); await settle();
-    button('Grid view').click(); row('assets').click(); await settle(); button('Inspect selection').click(); await settle();
-    check('Grid Properties shows completed sizes without extra calculation controls', document.querySelector('[aria-label="File properties"]')?.textContent?.includes('814.2 MB')
-        && !row('assets').querySelector('[aria-label="Folder-size details"]'));
-    button('Hide properties').click(); await settle();
-    await wait(() => control.pending() === 1);
+    await wait(() => control.pending() === 2); control.finish({ bytes: '888888' }); await settle();
+    check('replaced SSH binding rejects the old scan result', size()?.getAttribute('data-folder-size-state') === 'calculating');
+    control.finish({ bytes: '22' }); await wait(() => size()?.getAttribute('aria-label') === '22 B');
+    row('config').click(); await wait(() => control.pending() === 1);
+    const previousCalls = control.calls.length;
+    // The actual surface-visibility owner is exposed by the production fixture.
+    (window as unknown as { filesUiTest: { surfaceActive: (active: boolean) => void } }).filesUiTest.surfaceActive(false);
+    await wait(() => control.calls.length > previousCalls); control.finish(); await settle();
+    check('hiding the Files surface cancels its active scan', control.pending() === 0 && !document.querySelector('[data-folder-size-state]'));
+    (window as unknown as { filesUiTest: { surfaceActive: (active: boolean) => void } }).filesUiTest.surfaceActive(true);
+    await wait(() => control.pending() === 1); await closeProperties(); control.finish(); await settle();
+    const afterClose = reads();
+    button('Grid view').click();
     useAppStore.setState(state => ({ files: { ...state.files, [host]: Array.from({ length: 1000 }, (_, i) => ({ ...listing[0], name: 'folder-' + i, path: path + '/folder-' + i })) } }));
-    await settle(); control.finish(); await wait(() => control.pending() === 1);
-    check('automatic scanning keeps the existing bounded-batch explanation', document.body.textContent?.includes('Automatic calculation is limited to the first 64 folders'));
-    control.finish({ bytes: '1024' }); await wait(() => control.pending() === 1);
-    await action('Folder actions', 'Cancel folder-size calculation');
-    control.finish(); await settle();
-    const listingNode = document.querySelector<HTMLElement>('[role="listbox"]')!;
-    listingNode.focus();
-    listingNode.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
-    await wait(() => row('folder-999'));
-    row('folder-999').click(); await settle();
-    button('Inspect selection').click(); await settle();
-    listingNode.focus();
-    listingNode.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
-    await wait(() => row('folder-0'));
-    propertyAction('Calculate size')!.click();
-    await wait(() => control.pending() === 1);
-    check('a same-scope manual scan preserves earlier results and the batch-limit notice', row('folder-0').querySelector('[data-folder-size-state="finished"]')
-        && document.body.textContent?.includes('Automatic calculation is limited to the first 64 folders'));
-    control.finish({ bytes: '11' }); await settle();
-    check('manual results are merged with existing folder totals', document.querySelector('[aria-label="File properties"]')?.textContent?.includes('11 B')
-        && row('folder-0').querySelector('[data-folder-size-state="finished"]')?.getAttribute('aria-label') === '1 KB');
-    button('Hide properties').click(); await settle();
-    await toggle(); await settle();
-    check('size projection does not mutate reported directory metadata', listing.every(file => file.type !== 'd' || file.size === 0));
-    check('calculation produces no success/error toast noise', useAppStore.getState().toasts.length === before.toasts.length);
+    await settle(); await new Promise(resolve => setTimeout(resolve, 350));
+    check('large virtualized grids remain metadata-only', reads() === afterClose
+        && document.querySelectorAll('[data-file-name]').length < 100 && !document.querySelector('[data-folder-size-state]'));
+    check('size work does not mutate directory metadata or add notification noise', listing.every(file => file.type !== 'd' || file.size === 0)
+        && useAppStore.getState().toasts.length === before.toasts.length);
     useAppStore.setState(state => ({ files: { ...state.files, [host]: [...listing] } })); await settle();
+    const pins = useAppStore.getState().settings.fileManager.bookmarksByConnection;
+    useAppStore.setState(state => ({ settings: { ...state.settings, fileManager: { ...state.settings.fileManager,
+        bookmarksByConnection: { ...pins, [host]: [path + '/updated-pin'] } } } }));
+    await settle();
+    check('memoized Places still receives live bookmark changes', document.querySelector('[aria-label="File places"]')?.textContent?.includes('updated-pin'));
+    useAppStore.setState(state => ({ settings: { ...state.settings, fileManager: { ...state.settings.fileManager, bookmarksByConnection: pins } } }));
+    await settle();
+    const [{ StrictMode, createElement }, { createRoot }, { useFolderSizes }] = await Promise.all([
+        import('react'), import('react-dom/client'), import('../../src/features/files/application/useFolderSizes'),
+    ]);
+    let observed: ReturnType<typeof useFolderSizes> | undefined;
+    const Probe = () => { observed = useFolderSizes(host, path, listing, before.connections[0], true, path + '/assets'); return null; };
+    const container = document.createElement('div'); document.body.append(container);
+    const root = createRoot(container);
+    const beforeReplay = reads();
+    try {
+        root.render(createElement(StrictMode, null, createElement(Probe)));
+        await wait(() => control.pending() === 1);
+        control.finish({ bytes: '33' }); await wait(() => observed?.state?.status === 'finished');
+        check('Strict Mode replay cancels old admission but completes one fresh inspection', reads() === beforeReplay + 1
+            && observed?.state?.status === 'finished' && observed.state.report.bytes === '33');
+    } finally { root.unmount(); container.remove(); }
     return passed;
+}
+
+/** Repeat only explicit Properties inspections; measure the existing memo boundaries. */
+export async function runFolderSizeRenderChecks(control: ReturnType<typeof createFolderSizeFixture>['control']) {
+    row('assets').click(); await settle(); button('Inspect selection').click();
+    await wait(() => control.pending() === 1 && size()?.getAttribute('data-folder-size-state') === 'calculating'); await settle();
+    const before = { ...globalThis.filesRowRenders };
+    control.finish(); await wait(() => size()?.getAttribute('data-folder-size-state') === 'finished'); await settle();
+    const delta = Object.fromEntries(Object.entries(globalThis.filesRowRenders ?? {}).map(([name, count]) => [name, count - (before[name] ?? 0)]));
+    await closeProperties();
+    if (control.pending()) throw new Error('Properties inspection retained a pending native request');
+    return delta;
 }

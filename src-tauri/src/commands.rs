@@ -5108,24 +5108,32 @@ pub fn fs_folder_size_cancel(id: String, state: State<'_, AppState>) {
     state.folder_sizes.cancel(&id);
 }
 
-/// Metadata only, with bounded global/per-endpoint admission. A disposable raw
-/// SFTP channel allows incremental READDIR without blocking shared browse or
-/// transfer handles. It never reconnects, executes commands or reads contents.
+/// Metadata only, with bounded admission and captured-transport ownership. A
+/// fixed ordinary-account Linux program avoids per-directory SSH round trips;
+/// unsupported servers retain incremental SFTP. Neither path reads contents.
 #[tauri::command]
 pub async fn fs_folder_size_calculate(
     id: String, connection_id: String, path: String, state: State<'_, AppState>,
 ) -> Result<crate::folder_sizes::Report, String> {
     crate::file_permissions::validate_path(&path)?;
     let lease = state.folder_sizes.claim(&id, &connection_id)?;
-    lease.run(async {
+    // Keep admission through explicit exec cleanup, including cancellation.
+    let _permits = lease.run(async {
+        tokio::time::timeout(Duration::from_secs(15), lease.permits()).await
+            .map_err(|_| "Folder-size scan timed out during admission")?
+    }).await?;
+    let mut owned_channel = None;
+    let result = lease.run(async {
         // Setup/admission and traversal have separate, non-overlapping budgets.
         // Keep permits until the owned channel and actual scan future have stopped.
         let setup = async {
-            let session = if connection_id == "local" { None } else {
-                Some(state.connections.lock().await.get(&connection_id).and_then(|c| c.session.clone())
-                    .ok_or("Connection is unavailable. Reconnect before calculating sizes.")?)
+            let (session, try_exec) = if connection_id == "local" { (None, false) } else {
+                let connections = state.connections.lock().await;
+                let connection = connections.get(&connection_id)
+                    .ok_or("Connection is unavailable. Reconnect before calculating sizes.")?;
+                (Some(connection.session.clone().ok_or("Connection is unavailable. Reconnect before calculating sizes.")?),
+                    connection.detected_os.as_deref().is_some_and(|os| !os.trim().is_empty() && !os.eq_ignore_ascii_case("windows")))
             };
-            let permits = lease.permits().await?;
             let endpoint = if let Some(session) = &session {
                 let stream = open_sftp_stream(session).await.map_err(|e| e.to_string())?;
                 let raw = russh_sftp::client::RawSftpSession::new(crate::folder_sizes::PacketLimited::new(stream));
@@ -5133,11 +5141,32 @@ pub async fn fs_folder_size_calculate(
                 raw.init().await.map_err(|e| e.to_string())?;
                 crate::folder_sizes::Endpoint::Remote(raw)
             } else { crate::folder_sizes::Endpoint::Local };
-            Ok::<_, String>((permits, endpoint, session))
+            Ok::<_, String>((endpoint, session, try_exec))
         };
-        let (_permits, endpoint, session) = tokio::time::timeout(Duration::from_secs(15), setup)
+        let (endpoint, session, try_exec) = tokio::time::timeout(Duration::from_secs(15), setup)
             .await.map_err(|_| "Folder-size scan timed out during admission or setup. Try again.")??;
-        let report = crate::folder_sizes::calculate(&endpoint, &path).await;
+        let mut fast_report = None;
+        if let (true, Some(session), crate::folder_sizes::Endpoint::Remote(raw)) = (try_exec, &session, &endpoint) {
+            let support = &state.folder_sizes.remote_support;
+            if support.allows(session) {
+                let nonce = uuid::Uuid::new_v4().simple().to_string();
+                if let Ok(Some(request)) = tokio::time::timeout(Duration::from_secs(5),
+                    crate::folder_sizes::remote::request(raw, &path, &nonce)).await {
+                    // Provisional block also covers a cancellation or unconfirmed
+                    // open. Never repeat that request for all queued siblings.
+                    if support.block(session) {
+                        fast_report = crate::folder_sizes::remote::calculate(session, &request, &nonce, &mut owned_channel).await?;
+                        if fast_report.is_some() { support.allow(session); }
+                    }
+                    // Confirmed unsupported/mismatched programs have exited.
+                    // Keep the channel owner here until uncancellable cleanup.
+                }
+            }
+        }
+        let report = match fast_report {
+            Some(report) => report,
+            None => crate::folder_sizes::calculate(&endpoint, &path).await,
+        };
         if let Some(session) = session {
             if !state.connections.lock().await.get(&connection_id).and_then(|c| c.session.as_ref())
                 .is_some_and(|current| Arc::ptr_eq(current, &session)) {
@@ -5145,7 +5174,9 @@ pub async fn fs_folder_size_calculate(
             }
         }
         Ok(report)
-    }).await
+    }).await;
+    crate::folder_sizes::remote::close(owned_channel).await;
+    result
 }
 
 /// Preserve setup/connection allowance while budgeting the sequential source
@@ -8383,7 +8414,7 @@ pub async fn ssh_parse_command(command: String) -> Result<crate::ssh_parser::Par
 // â”€â”€â”€ Download as Tar (SSH exec + tar streaming) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Shell-quote a path so it can be safely embedded in a remote command string.
-fn shell_quote(s: &str) -> String {
+pub(crate) fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 

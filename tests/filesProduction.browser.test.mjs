@@ -18,11 +18,32 @@ const windowsEditorOnly = process.argv.includes('--windows-editor-only');
 const accessOnly = process.argv.includes('--access-only');
 const listingAccessOnly = process.argv.includes('--listing-access-only');
 const editorOnly = process.argv.includes('--editor-only');
-const folderSizesOnly = process.argv.includes('--folder-sizes-only');
+const folderSizeMemoryOnly = process.argv.includes('--folder-size-memory-only');
+const folderSizesOnly = process.argv.includes('--folder-sizes-only') || folderSizeMemoryOnly;
 
 const { chromium } = await import(process.env.ZYNC_PLAYWRIGHT_MODULE || 'playwright');
 const server = await createServer({
-  root: fileURLToPath(new URL('../', import.meta.url)), configFile: false, plugins: [react()],
+  root: fileURLToPath(new URL('../', import.meta.url)), configFile: false, plugins: [{
+    name: 'files-row-render-probe', enforce: 'pre',
+    // Test-only leaf counters: observe the real memo boundary without shipping instrumentation.
+    transform(code, id) {
+      const probes = [
+        ['FileGrid.tsx', "const isFolder = file.type === 'd';", 'file.name'],
+        ['FileToolbar.tsx', 'const barRef =', "'@toolbar'"],
+        ['FileContentsHeader.tsx', 'const selectedCount =', "'@header'"],
+        ['FileViewControls.tsx', 'const reversed =', "'@view'"],
+        ['FilePlacesSidebar.tsx', 'const home =', "'@places'"],
+      ];
+      const probe = probes.find(([file]) => id.replaceAll('\\', '/').endsWith('/src/components/file-manager/' + file));
+      if (!probe) return;
+      const [, marker, key] = probe;
+      assert.ok(code.includes(marker), 'Missing render-probe boundary: ' + probe[0]);
+      return code.replaceAll(marker, `
+        globalThis.filesRowRenders ??= Object.create(null);
+        globalThis.filesRowRenders[${key}] = (globalThis.filesRowRenders[${key}] ?? 0) + 1;
+        ${marker}`);
+    },
+  }, react()],
   cacheDir: fileURLToPath(new URL('../node_modules/.vite-files-production-tests', import.meta.url)),
   resolve: { alias: [
     { find: '@tauri-apps/api/event', replacement: fileURLToPath(new URL('./fixtures/files-production/nativeEvents.ts', import.meta.url)) },
@@ -62,7 +83,22 @@ try {
     await mkdir(process.env.ZYNC_FILES_SCREENSHOTS, { recursive: true });
     await page.screenshot({ path: `${process.env.ZYNC_FILES_SCREENSHOTS}/${name}.png` });
   };
-  if (folderSizesOnly) {
+  if (folderSizeMemoryOnly) {
+    await listing.waitFor();
+    const cdp = await context.newCDPSession(page);
+    for (let cycle = 0; cycle < 5; cycle++) {
+      const renders = await page.evaluate(() => window.runFolderSizeRenderChecks());
+      check('size cycle ' + cycle + ' skips unchanged view controls and Places', renders['@view'] === 0 && renders['@places'] === 0);
+      check('size cycle ' + cycle + ' skips regular-file rows', renders['package.json'] === 0);
+      // Collection is diagnostic-only, in this isolated fixture, never the user's app.
+      await cdp.send('HeapProfiler.collectGarbage');
+      const heap = await cdp.send('Runtime.getHeapUsage');
+      const dom = await cdp.send('Memory.getDOMCounters');
+      console.log(JSON.stringify({ cycle, renders, heapMiB: +(heap.usedSize / 1048576).toFixed(2), dom }));
+    }
+    assert.deepEqual(errors, []); assert.deepEqual(requests, []);
+    console.log('Repeated folder-size render/memory checks passed (' + checks + ').');
+  } else if (folderSizesOnly) {
     for (const reducedMotion of ['reduce', 'no-preference']) {
       await page.emulateMedia({ reducedMotion });
       if (reducedMotion === 'no-preference') await page.reload({ waitUntil: 'domcontentloaded' });
@@ -395,7 +431,7 @@ try {
   await item('README.md').click({modifiers:['Control']});
   check('multiple selection updates existing chrome without moving file rows', await page.getByRole('option',{selected:true}).count()===2 && (await item('assets').boundingBox()).y===listOrigin && (await summary.textContent()).includes('2 selected'));
   check('selection summary shows combined regular-file sizes from existing metadata', (await summary.textContent()).includes('5.1 KB')
-    && (await summary.locator('.sr-only').textContent()).includes('link targets are not counted'));
+    && (await summary.locator('.sr-only').textContent()).includes('2 files'));
   await item('assets').locator('[data-file-select]').click();
   check('mixed selection counts folders without pretending their metadata is recursive size', (await summary.textContent()).includes('3 selected · Partial · 5.1 KB')
     && (await summary.locator('.sr-only').textContent()).includes('1 folder'));

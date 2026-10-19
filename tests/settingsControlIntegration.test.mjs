@@ -116,8 +116,10 @@ test('download folder actions use non-submit shared controls and preserve callba
   const actions = {};
   const updates = [];
   let picks = 0;
+  const toggles = [];
   const FileManagerTab = loadScreen('src/components/settings/tabs/FileManagerTab.tsx', 'FileManagerTab', {
     '../../ui/Button': { Button: props => { actions[props.children] = props; return createElement(Button, props); } },
+    '../common/Toggle': { Toggle: props => { toggles.push(props.label); return null; } },
   });
   const html = render(FileManagerTab, {
     settings: { fileManager: { defaultDownloadPath: '', placesRecentLimit: 10 } },
@@ -125,6 +127,7 @@ test('download folder actions use non-submit shared controls and preserve callba
     onPickDefaultDownloadPath: async () => { picks += 1; },
   });
   assert.match(html, /role="group" aria-label="Default download folder actions"/);
+  assert.ok(!toggles.some(label => /folder sizes/i.test(label)), 'background folder-size setting is removed');
   for (const action of Object.values(actions)) assert.equal(action.type, 'button');
   actions.Browse.onClick();
   await Promise.resolve();

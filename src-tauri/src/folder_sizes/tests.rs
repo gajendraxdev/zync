@@ -219,7 +219,25 @@ impl russh_sftp::server::Handler for Server {
             0o100644
         });
         attrs.size = Some(42);
+        attrs.uid = Some(1000);
+        attrs.gid = Some(1000);
+        attrs.mtime = Some(1_700_000_000);
         Ok(russh_sftp::protocol::Attrs { id, attrs })
+    }
+    async fn realpath(
+        &mut self,
+        id: u32,
+        path: String,
+    ) -> Result<russh_sftp::protocol::Name, Self::Error> {
+        assert!(path == "." || path == "/root");
+        Ok(russh_sftp::protocol::Name {
+            id,
+            files: vec![russh_sftp::protocol::File {
+                filename: "/root".into(),
+                longname: String::new(),
+                attrs: russh_sftp::protocol::FileAttributes::empty(),
+            }],
+        })
     }
     async fn opendir(
         &mut self,
@@ -434,4 +452,35 @@ async fn skipped_remote_entries_still_consume_the_entry_budget() {
     assert_eq!(result.errors, 782);
     assert!(result.reason.contains("Entry limit"), "{result:?}");
     assert_eq!(observed.lock().unwrap().closes, 1);
+}
+
+#[tokio::test]
+async fn exec_request_reuses_native_limits_and_requires_sftp_directory_evidence() {
+    let (Endpoint::Remote(raw), _) = remote_with_pages(false, false, Some(0)).await else {
+        panic!("SFTP fixture")
+    };
+    let bytes = super::remote::request(&raw, "/root", "nonce")
+        .await
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(value["path"], "/root");
+    assert_eq!(value["canonical"], "/root");
+    assert_eq!(value["home"], "/root");
+    assert_eq!(
+        value["snapshot"],
+        serde_json::json!([0o040755, 42, 1000, 1000, 1_700_000_000])
+    );
+    assert_eq!(
+        value["limits"],
+        serde_json::json!({
+            "entries": scan::MAX_ENTRIES, "depth": scan::MAX_DEPTH,
+            "pendingBytes": scan::MAX_PENDING_BYTES, "pendingFolders": scan::MAX_PENDING_FOLDERS,
+            "pathBytes": scan::MAX_PATH_BYTES, "seconds": scan::TIME_LIMIT.as_secs()
+        })
+    );
+    assert!(
+        super::remote::request(&raw, "/root/name:with\\slash ", "nonce")
+            .await
+            .is_none()
+    );
 }

@@ -49,12 +49,13 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   </section>;
 }
 
+/** Show selected metadata and the owner's single-folder scan, never start a listing-wide scan. */
 export function PropertiesPanel({ files, onClose, dateTimeFormat = 'simple', showHeader = true, permissionEditor, folderSizes }: PropertiesPanelProps) {
   const single = files.length === 1 ? files[0] : null;
-  const sizeState = single?.type === 'd' ? folderSizes?.states[single.path] : undefined;
+  const sizeState = single?.type === 'd' ? folderSizes?.state : undefined;
   const folderCount = files.filter((file) => file.type === 'd').length;
   const otherCount = files.length - folderCount;
-  const summary = fileSelectionSummary(files, files.map(file => file.name), folderSizes?.states);
+  const summary = fileSelectionSummary(files, files.map(file => file.name));
 
   return (
     <aside aria-label="File properties" className={cn('flex h-full w-full min-w-0 flex-col bg-app-panel/70', !showHeader && 'max-h-[70vh]')}
@@ -109,9 +110,11 @@ export function PropertiesPanel({ files, onClose, dateTimeFormat = 'simple', sho
                 </Section>
                 <Section title="Information">
                   <Row label="Size" value={single.type === 'd' ? <FolderSizeValue state={sizeState}
-                    onDetails={() => folderSizes?.inspect(single.path)} /> : formatBytes(single.size)} />
-                  {single.type === 'd' && folderSizes?.enabled && (!sizeState || sizeState.status === 'cancelled' || sizeState.status === 'unavailable') && <Row label="Contents" value={<Button type="button" variant="ghost" size="sm" disabled={folderSizes.active}
-                    onClick={() => folderSizes.start([single.path])}>{sizeState ? 'Retry calculation' : 'Calculate size'}</Button>} />}
+                    onDetails={() => folderSizes?.inspect()} /> : formatBytes(single.size)} />
+                  {single.type === 'd' && folderSizes && (folderSizes.active || sizeState?.status === 'cancelled' || sizeState?.status === 'unavailable') && <Row label="Contents" value={
+                    <Button type="button" variant="ghost" size="sm" onClick={folderSizes.active ? folderSizes.cancel : folderSizes.start}>
+                      {folderSizes.active ? 'Cancel calculation' : 'Retry calculation'}
+                    </Button>} />}
                   <Row label="Type" value={fileKindLabel(single)} />
                   <Row label="Modified" value={formatFileListDate(single.lastModified, Date.now(), dateTimeFormat) || '—'} />
                 </Section>

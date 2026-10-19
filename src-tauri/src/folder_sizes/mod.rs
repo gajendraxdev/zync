@@ -1,6 +1,7 @@
-//! Ephemeral, bounded read-only scans. No transfer receipts, persistence, shell,
-//! elevation or file-content reads. Admission and endpoint concurrency are bounded.
+//! Ephemeral, bounded metadata scans. Linux SSH exec is an optional fast path;
+//! local/SFTP traversal remains the fallback. No elevation or file-content reads.
 mod packet;
+pub mod remote;
 mod scan;
 
 pub use packet::PacketLimited;
@@ -27,13 +28,16 @@ struct Job {
 pub struct Service {
     jobs: Mutex<HashMap<String, Job>>,
     capacity: Semaphore,
+    pub remote_support: remote::SupportCache,
 }
 
 impl Default for Service {
+    /// Share the existing scan admission limits across native and SSH fast paths.
     fn default() -> Self {
         Self {
             jobs: Mutex::default(),
             capacity: Semaphore::new(2),
+            remote_support: remote::SupportCache::default(),
         }
     }
 }
