@@ -676,6 +676,8 @@ pub struct ConnectionHandle {
     pub file_permission_session: String,
     pub sftp_identity_maps: Arc<tokio::sync::OnceCell<SftpIdentityMaps>>,
     pub detected_os: Option<String>,
+    /// Canonical uname kernel name for this transport, separate from distribution IDs.
+    pub detected_kernel_os: Option<String>,
     pub detected_shell: Option<String>,
     /// SSH userauth banner, shown once when this connection opens its first terminal.
     pub auth_banner: Option<String>,
@@ -721,6 +723,7 @@ async fn reconnect_connection(
         file_permission_session: uuid::Uuid::new_v4().to_string(),
         sftp_identity_maps: Arc::new(tokio::sync::OnceCell::new()),
         detected_os: None,
+        detected_kernel_os: None,
         detected_shell: None,
         auth_banner,
         uses_vault_auth: config_uses_vault_auth(config),
@@ -2983,6 +2986,7 @@ mod reconnect_waiter_tests {
     }
 }
 
+/// Replace only the captured connection owner; reprobe kernel capabilities on its new transport.
 async fn reconnect_stored_connection(
     connection_id: &str,
     reconnect_lock: Arc<Mutex<()>>,
@@ -3048,6 +3052,7 @@ async fn reconnect_stored_connection(
     new_handle.uses_vault_auth = uses_vault_auth;
     new_handle.detected_os = previous_detected_os;
     new_handle.detected_shell = previous_detected_shell;
+    // Kernel capabilities remain unknown until probed on the new transport.
     let mut connections = state.connections.lock().await;
     match connections.get(connection_id) {
         Some(existing) if existing.reconnect_generation == expected_generation
@@ -3169,9 +3174,50 @@ fn resolve_windows_openssh_shell(probe_output: Option<String>) -> Option<String>
     })
 }
 
+/// Preserve the distribution label for UI consumers and uname's kernel for capabilities.
+fn parse_remote_os_metadata(
+    os_release: Option<&str>,
+    uname: Option<&str>,
+) -> (Option<String>, Option<String>) {
+    let kernel = uname
+        .map(|output| output.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty());
+    let distribution = os_release.and_then(|output| {
+        output.lines().find_map(|line| {
+            line.strip_prefix("ID=")
+                .map(|id| id.trim_matches('"').to_string())
+                .filter(|id| !id.is_empty())
+        })
+    });
+    let os = distribution.or_else(|| {
+        kernel.as_ref().map(|system| {
+            if system == "darwin" { "macos".to_string() } else { system.clone() }
+        })
+    });
+    (os, kernel)
+}
+
 #[cfg(test)]
 mod remote_metadata_tests {
-    use super::{parse_windows_openssh_default_shell, resolve_windows_openssh_shell};
+    use super::{parse_remote_os_metadata, parse_windows_openssh_default_shell, resolve_windows_openssh_shell};
+
+    #[test]
+    fn distribution_labels_never_determine_kernel_capabilities() {
+        for (distribution, uname, expected_os, expected_kernel) in [
+            (Some("ID=\"ubuntu\"\n"), Some("Linux\n"), Some("ubuntu"), Some("linux")),
+            (Some("ID=alpine\n"), Some(" Linux \n"), Some("alpine"), Some("linux")),
+            (Some("ID=debian\n"), Some("FreeBSD\n"), Some("debian"), Some("freebsd")),
+            (Some("ID=linux\n"), None, Some("linux"), None),
+            (None, Some("Darwin\n"), Some("macos"), Some("darwin")),
+            (None, Some("Linux\n"), Some("linux"), Some("linux")),
+            (Some("ID=\"\"\n"), Some(" \n"), None, None),
+            (None, None, None, None),
+        ] {
+            let (os, kernel) = parse_remote_os_metadata(distribution, uname);
+            assert_eq!(os.as_deref(), expected_os);
+            assert_eq!(kernel.as_deref(), expected_kernel);
+        }
+    }
 
     #[test]
     fn parses_windows_openssh_default_shell_registry_value() {
@@ -3228,7 +3274,7 @@ async fn initialize_remote_metadata_after_terminal(
     pending_cwd: Option<String>,
     state: &AppState,
 ) {
-    let (session, reconnect_generation, cached_os, cached_shell) = {
+    let (session, reconnect_generation, cached_os, cached_kernel_os, cached_shell) = {
         let connections = state.connections.lock().await;
         let Some(connection) = connections.get(connection_id) else {
             return;
@@ -3237,10 +3283,13 @@ async fn initialize_remote_metadata_after_terminal(
             connection.session.clone(),
             connection.reconnect_generation,
             connection.detected_os.clone(),
+            connection.detected_kernel_os.clone(),
             connection.detected_shell.clone(),
         )
     };
-    if cached_os.is_some() && cached_shell.is_some() {
+    if cached_os.is_some() && cached_shell.is_some()
+        && (cached_kernel_os.is_some() || cached_os.as_deref() == Some("windows"))
+    {
         if let (true, Some(term_id), Some(generation), Some(channel_id)) =
             (finalize_startup, term_id, generation, channel_id)
         {
@@ -3262,25 +3311,10 @@ async fn initialize_remote_metadata_after_terminal(
         return;
     };
 
-    let mut detected_os = None;
-    if let Some(output) = run_connection_probe(&session, "cat /etc/os-release").await {
-        detected_os = output.lines().find_map(|line| {
-            line.strip_prefix("ID=")
-                .map(|id| id.trim_matches('"').to_string())
-        });
-    }
-    if detected_os.is_none() {
-        if let Some(output) = run_connection_probe(&session, "uname -s").await {
-            let system = output.trim().to_ascii_lowercase();
-            if !system.is_empty() {
-                detected_os = Some(if system == "darwin" {
-                    "macos".to_string()
-                } else {
-                    system
-                });
-            }
-        }
-    }
+    let os_release = run_connection_probe(&session, "cat /etc/os-release").await;
+    let uname = run_connection_probe(&session, "uname -s").await;
+    let (mut detected_os, detected_kernel_os) =
+        parse_remote_os_metadata(os_release.as_deref(), uname.as_deref());
     if detected_os.is_none() {
         if let Some(output) = run_connection_probe(&session, "cmd /c ver").await {
             if output.to_ascii_lowercase().contains("windows") {
@@ -3311,13 +3345,16 @@ async fn initialize_remote_metadata_after_terminal(
     let current_metadata = {
         let mut connections = state.connections.lock().await;
         if let Some(connection) = connections.get_mut(connection_id) {
-            if connection.reconnect_generation == reconnect_generation {
+            if connection.reconnect_generation == reconnect_generation
+                && connection.session.as_ref().is_some_and(|current| Arc::ptr_eq(current, &session))
+            {
                 if detected_os.is_some() {
                     connection.detected_os = detected_os.clone();
                 }
                 if detected_shell.is_some() {
                     connection.detected_shell = detected_shell.clone();
                 }
+                connection.detected_kernel_os = detected_kernel_os;
                 Some((
                     connection.detected_os.clone(),
                     connection.detected_shell.clone(),
@@ -5132,7 +5169,7 @@ pub async fn fs_folder_size_calculate(
                 let connection = connections.get(&connection_id)
                     .ok_or("Connection is unavailable. Reconnect before calculating sizes.")?;
                 (Some(connection.session.clone().ok_or("Connection is unavailable. Reconnect before calculating sizes.")?),
-                    connection.detected_os.as_deref().is_some_and(|os| !os.trim().is_empty() && !os.eq_ignore_ascii_case("windows")))
+                    crate::folder_sizes::remote::supports_kernel(connection.detected_kernel_os.as_deref()))
             };
             let endpoint = if let Some(session) = &session {
                 let stream = open_sftp_stream(session).await.map_err(|e| e.to_string())?;

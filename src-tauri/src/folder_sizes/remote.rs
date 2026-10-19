@@ -18,6 +18,11 @@ const MAX_OUTPUT: usize = 8192;
 const MAX_REQUEST: usize = 131072;
 const MAX_CACHED: usize = 64;
 
+/// Only a canonical Linux kernel probe enables exec; distro IDs are not evidence.
+pub fn supports_kernel(kernel: Option<&str>) -> bool {
+    kernel == Some("linux")
+}
+
 pub struct SupportCache<H: client::Handler = crate::ssh::Client> {
     // Weak owners prevent reconnects, pointer reuse or a closed session from
     // inheriting old support decisions. Only unsupported transports are cached.
@@ -177,7 +182,11 @@ pub async fn calculate<H: client::Handler + 'static>(
         if output.is_empty() {
             return Ok(None);
         } // Runtime/platform unsupported.
-        let mut report = decode(&output, nonce)?;
+          // A confirmed exit cannot leave this scan running. Invalid/banner output
+          // is unsupported, not a result; keep the provisional block and use SFTP.
+        let Ok(mut report) = decode(&output, nonce) else {
+            return Ok(None);
+        };
         if let Some(report) = report.as_mut() {
             report.elapsed_ms = start.elapsed().as_millis() as u64;
         }

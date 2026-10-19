@@ -11,6 +11,22 @@ fn frame() -> serde_json::Value {
 }
 
 #[test]
+fn exec_requires_a_canonical_linux_kernel_not_a_distribution_or_unknown_os() {
+    assert!(supports_kernel(Some("linux")));
+    for kernel in [
+        None,
+        Some(""),
+        Some("ubuntu"),
+        Some("debian"),
+        Some("darwin"),
+        Some("freebsd"),
+        Some("windows"),
+    ] {
+        assert!(!supports_kernel(kernel));
+    }
+}
+
+#[test]
 fn aggregate_is_lossless_and_rejects_untrusted_or_inconsistent_output() {
     let valid = frame();
     assert_eq!(
@@ -83,6 +99,11 @@ enum Behavior {
     Missing,
     Refused,
     Mismatch,
+    Malformed,
+    MalformedFailure,
+    InvalidReport,
+    WrongNonce,
+    Unconfirmed,
     Flood,
     Hang,
 }
@@ -131,7 +152,18 @@ impl russh::server::Handler for Server {
     ) -> Result<(), Self::Error> {
         self.started.notify_one();
         let output = match self.behavior {
-            Behavior::Good => serde_json::to_vec(&frame()).unwrap(),
+            Behavior::Good | Behavior::Unconfirmed => serde_json::to_vec(&frame()).unwrap(),
+            Behavior::Malformed | Behavior::MalformedFailure => b"login banner\n{}".to_vec(),
+            Behavior::InvalidReport => {
+                let mut value = frame();
+                value["report"]["files"] = 10.into();
+                serde_json::to_vec(&value).unwrap()
+            }
+            Behavior::WrongNonce => {
+                let mut value = frame();
+                value["nonce"] = "other".into();
+                serde_json::to_vec(&value).unwrap()
+            }
             Behavior::Mismatch => serde_json::to_vec(
                 &serde_json::json!({"protocol":1,"nonce":NONCE,"status":"mismatch"}),
             )
@@ -143,14 +175,18 @@ impl russh::server::Handler for Server {
         for chunk in output.chunks(7) {
             session.data(channel, chunk.to_vec())?;
         }
-        session.exit_status_request(
-            channel,
-            if matches!(self.behavior, Behavior::Missing) {
-                127
-            } else {
-                0
-            },
-        )?;
+        if !matches!(self.behavior, Behavior::Unconfirmed) {
+            session.exit_status_request(
+                channel,
+                if matches!(self.behavior, Behavior::Missing) {
+                    127
+                } else if matches!(self.behavior, Behavior::MalformedFailure) {
+                    1
+                } else {
+                    0
+                },
+            )?;
+        }
         session.eof(channel)?;
         session.close(channel)?;
         Ok(())
@@ -221,12 +257,17 @@ async fn transport(behavior: Behavior) -> Transport {
 }
 
 #[tokio::test]
-async fn ssh_aggregate_handles_fragmentation_missing_python_refusal_and_namespace_mismatch() {
+async fn ssh_aggregate_handles_fragmentation_unsupported_output_and_unconfirmed_exit() {
     for behavior in [
         Behavior::Good,
         Behavior::Missing,
         Behavior::Refused,
         Behavior::Mismatch,
+        Behavior::Malformed,
+        Behavior::MalformedFailure,
+        Behavior::InvalidReport,
+        Behavior::WrongNonce,
+        Behavior::Unconfirmed,
         Behavior::Flood,
     ] {
         let fixture = transport(behavior).await;
@@ -240,6 +281,9 @@ async fn ssh_aggregate_handles_fragmentation_missing_python_refusal_and_namespac
         match behavior {
             Behavior::Good => assert!(result.unwrap().unwrap().complete),
             Behavior::Flood => assert!(result.unwrap_err().contains("safety limit")),
+            Behavior::Unconfirmed | Behavior::MalformedFailure => {
+                assert!(result.unwrap_err().contains("completion was not confirmed"))
+            }
             _ => assert!(result.unwrap().is_none()),
         }
         close(channel).await;
