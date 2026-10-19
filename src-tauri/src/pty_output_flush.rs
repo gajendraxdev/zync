@@ -168,9 +168,11 @@ impl OutputFlushPolicy {
     }
 }
 
-pub fn encode_output_frame(generation: u32, payload: &[u8]) -> Vec<u8> {
-    let mut frame = Vec::with_capacity(4 + payload.len());
+/// Encode the ordinary terminal wire identity before its raw ordered payload.
+pub fn encode_output_frame(generation: u32, sequence: u32, payload: &[u8]) -> Vec<u8> {
+    let mut frame = Vec::with_capacity(8 + payload.len());
     frame.extend_from_slice(&generation.to_le_bytes());
+    frame.extend_from_slice(&sequence.to_le_bytes());
     frame.extend_from_slice(payload);
     frame
 }
@@ -304,9 +306,9 @@ mod tests {
 
     #[test]
     fn encode_output_frame_is_u32_le_then_payload() {
-        let frame = encode_output_frame(0x0102_0304, b"AB");
-        assert_eq!(frame, [0x04, 0x03, 0x02, 0x01, b'A', b'B']);
-        assert_eq!(frame.len(), 4 + 2);
+        let frame = encode_output_frame(0x0102_0304, 7, b"AB");
+        assert_eq!(frame, [0x04, 0x03, 0x02, 0x01, 7, 0, 0, 0, b'A', b'B']);
+        assert_eq!(frame.len(), 8 + 2);
     }
 
     #[test]

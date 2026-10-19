@@ -234,15 +234,15 @@ mod tests {
 
     #[tokio::test]
     async fn accepted_remote_mutations_can_outlive_the_acceptance_deadline() {
-        use russh::{ChannelMsg, CryptoVec};
+        use russh::ChannelMsg;
         for accepted in [
             ChannelMsg::Success,
             ChannelMsg::Eof,
             ChannelMsg::Data {
-                data: CryptoVec::new(),
+                data: bytes::Bytes::new(),
             },
             ChannelMsg::ExtendedData {
-                data: CryptoVec::new(),
+                data: bytes::Bytes::new(),
                 ext: 1,
             },
         ] {

@@ -595,7 +595,7 @@ function harness(groups, docked = [], { activeOwner = Object.keys(groups)[0], ex
     }, { window });
     function tabBar(props = {}) {
         const { WorkspaceTabBar } = source('components/layout/WorkspaceTabBar.tsx', {
-            react: { memo: component => component }, 'react/jsx-runtime': { jsx: (type, props) => ({ type, props }) },
+            react: { memo: component => component, useMemo: fn => fn() }, 'react/jsx-runtime': { jsx: (type, props) => ({ type, props }) },
             '../../store/useAppStore': { useAppStore }, '../../hooks/useAvailableShells': { useAvailableShells: () => ({ shells: [] }) },
             '../../features/connections/application/tabService': { LOCAL_TERMINAL_CONNECTION_ID: 'local' },
             './CombinedTabBar': { CombinedTabBar: () => {} }, './tabDock': {},

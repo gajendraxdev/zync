@@ -1,4 +1,4 @@
-import { memo, type ReactNode } from 'react';
+import { memo, useMemo, type ReactNode } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import { useAvailableShells } from '../../hooks/useAvailableShells';
 import { LOCAL_TERMINAL_CONNECTION_ID } from '../../features/connections/application/tabService';
@@ -8,7 +8,7 @@ import type { ShellEntry } from '../../lib/shells/types';
 import type { FeatureId, WorkspaceFeatureTab } from './featureMeta';
 import { findWorkspaceContentPane } from '../../features/workspace/domain/contentInventory';
 import { hiddenWorkspaceContent } from '../../features/workspace/domain/visibleContent';
-import { workspaceSplitTarget } from '../../features/workspace/domain/dockingView';
+import { createWorkspaceSplitControlsSelector, workspaceSplitTarget } from '../../features/workspace/domain/dockingView';
 import { allowsAdditionalPaneBeside } from '../../features/workspace/domain/dockingTopology';
 import {
     findNode,
@@ -16,7 +16,6 @@ import {
     isPaneLeaf,
     isPluginContent,
     isSplitFeatureId,
-    isSplitLayout,
     layoutForCanvas,
     layoutForPlugin,
     collectLeaves,
@@ -89,11 +88,9 @@ export const WorkspaceTabBar = memo(function WorkspaceTabBar({
         pluginPanelId: activeView.startsWith('plugin:') ? activeView.slice('plugin:'.length) : undefined,
         featureId: isSplitFeatureId(activeView) ? activeView : undefined,
     };
-    const isSplit = useAppStore(state => isSplitLayout(workspaceSplitTarget(state, connectionId, canvasSelection)?.layout));
-    const canSplitPanes = useAppStore((state) => {
-        const target = workspaceSplitTarget(state, connectionId, canvasSelection);
-        return Boolean(target && allowsAdditionalPaneBeside(state, connectionId, { contentId: paneContentKey(target.leaf.content, target.leaf.id) }));
-    });
+    const selectSplitControls = useMemo(() => createWorkspaceSplitControlsSelector(connectionId, canvasSelection),
+        [connectionId, canvasSelection.featureInstanceId, canvasSelection.pluginPanelId, canvasSelection.featureId]);
+    const { isSplit, canSplit: canSplitPanes } = useAppStore(selectSplitControls);
     const splitPanes = useAppStore(state => state.splitPanes);
     const activatePaneGroup = useAppStore(state => state.activatePaneGroup);
     const releasePaneFromSplit = useAppStore(state => state.releasePaneFromSplit);

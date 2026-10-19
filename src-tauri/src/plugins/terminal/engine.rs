@@ -64,7 +64,7 @@ impl Drop for OwnedChannel {
     }
 }
 
-/// russh 0.46 does not close an open request when its waiting future is dropped.
+/// An ordinary channel-open request can outlive its waiting future.
 /// Retain it independently of UI cancellation and close any late-created channel.
 /// Its reservation is retained until that cleanup, never freed by a UI timeout.
 fn open_channel<H: russh::client::Handler + 'static>(

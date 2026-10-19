@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use log::error;
+use russh::keys::{self, HashAlg, PrivateKey, PrivateKeyWithHashAlg, PublicKey, PublicKeyBase64};
 use russh::*;
-use russh_keys::PublicKeyBase64;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -164,7 +164,7 @@ impl AgentConsentBroker {
 }
 
 struct ForwardedAgent {
-    key: Arc<russh_keys::key::KeyPair>,
+    key: Arc<PrivateKey>,
     broker: AgentConsentBroker,
     connection_id: String,
     host: String,
@@ -198,10 +198,10 @@ impl std::fmt::Debug for Client {
     }
 }
 
-#[async_trait::async_trait]
 impl client::Handler for Client {
     type Error = anyhow::Error;
 
+    /// Capture a bounded, sanitized authentication banner for the connection UI.
     async fn auth_banner(
         &mut self,
         banner: &str,
@@ -221,28 +221,39 @@ impl client::Handler for Client {
         Ok(())
     }
 
+    /// Require the same explicit known-host approval after transport upgrades.
     async fn check_server_key(
         &mut self,
-        server_public_key: &russh_keys::key::PublicKey,
+        server_public_key: &keys::PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
+        let keys::PublicKeyOrCertificate::PublicKey { key, .. } = server_public_key else {
+            return Err(anyhow!(
+                "SSH host certificates are not configured for this connection"
+            ));
+        };
         verify_server_key(
             &self.connection_id,
             &self.host,
             self.port,
-            server_public_key,
+            key,
             self.host_key_approval.as_ref(),
         )
     }
 
+    /// Accept forwarded-agent channels only for the explicitly selected key.
     async fn server_channel_open_agent_forward(
         &mut self,
         channel: Channel<Msg>,
+        reply: client::ChannelOpenHandle,
         _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
         let Some(agent) = self.forwarded_agent.clone() else {
-            channel.close().await?;
+            reply
+                .reject(ChannelOpenFailure::AdministrativelyProhibited)
+                .await;
             return Ok(());
         };
+        reply.accept().await;
         let mut stream = channel.into_stream();
         tokio::spawn(async move {
             use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -276,6 +287,7 @@ impl client::Handler for Client {
         Ok(())
     }
 
+    /// Accept only registered remote forwards and relay outside the SSH actor.
     async fn server_channel_open_forwarded_tcpip(
         &mut self,
         channel: Channel<Msg>,
@@ -283,6 +295,7 @@ impl client::Handler for Client {
         connected_port: u32,
         _originator_address: &str,
         _originator_port: u32,
+        reply: client::ChannelOpenHandle,
         _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
         // ... (existing implementation) ...
@@ -299,6 +312,7 @@ impl client::Handler for Client {
         };
 
         if let Some((target_host, target_port, _bind_addr)) = target {
+            reply.accept().await;
             println!("[TUNNEL] Forwarding to {}:{}", target_host, target_port);
 
             let target_addr = format!("{}:{}", target_host, target_port);
@@ -326,6 +340,9 @@ impl client::Handler for Client {
 
             Ok(())
         } else {
+            reply
+                .reject(ChannelOpenFailure::AdministrativelyProhibited)
+                .await;
             eprintln!("[TUNNEL] No tunnel found for port {}", connected_port);
             Ok(())
         }
@@ -389,47 +406,43 @@ fn parse_userauth_signature_request(
     Some(username.to_string())
 }
 
-fn key_for_signature_flags(
-    key: &russh_keys::key::KeyPair,
-    flags: u32,
-) -> Option<russh_keys::key::KeyPair> {
-    use russh_keys::key::{KeyPair, SignatureHash};
-
-    match key {
-        KeyPair::RSA { .. } => match flags {
-            0 | 2 => key.with_signature_hash(SignatureHash::SHA2_256),
-            4 => key.with_signature_hash(SignatureHash::SHA2_512),
-            _ => None,
+/// Restrict agent signature requests to the existing SHA-2 RSA policy.
+fn key_for_signature_flags(key: &Arc<PrivateKey>, flags: u32) -> Option<PrivateKeyWithHashAlg> {
+    let hash = match key.algorithm() {
+        keys::Algorithm::Rsa { .. } => match flags {
+            0 | 2 => Some(HashAlg::Sha256),
+            4 => Some(HashAlg::Sha512),
+            _ => return None,
         },
-        _ if flags == 0 => Some(key.clone()),
-        _ => None,
-    }
+        _ if flags == 0 => None,
+        _ => return None,
+    };
+    Some(PrivateKeyWithHashAlg::new(key.clone(), hash))
 }
 
-fn serialize_signature(signature: russh_keys::key::Signature) -> Vec<u8> {
+/// Encode the upstream signature representation inside an agent SIGN_RESPONSE.
+fn serialize_signature(signature: keys::ssh_key::Signature) -> Result<Vec<u8>> {
+    use keys::ssh_encoding::Encode;
     let mut signature_blob = Vec::new();
-    match signature {
-        russh_keys::key::Signature::Ed25519(bytes) => {
-            write_string(&mut signature_blob, b"ssh-ed25519");
-            write_string(&mut signature_blob, &bytes.0);
-        }
-        russh_keys::key::Signature::RSA { hash, bytes } => {
-            write_string(&mut signature_blob, hash.name().0.as_bytes());
-            write_string(&mut signature_blob, &bytes);
-        }
-        russh_keys::key::Signature::ECDSA {
-            algorithm,
-            signature,
-        } => {
-            write_string(&mut signature_blob, algorithm.as_bytes());
-            write_string(&mut signature_blob, &signature);
-        }
-    }
+    signature.encode(&mut signature_blob)?;
     let mut response = vec![14];
     write_string(&mut response, &signature_blob);
-    response
+    Ok(response)
 }
 
+/// Sign only the selected algorithm; RSA must retain its requested SHA-2 hash.
+fn sign_agent_request(key: &PrivateKeyWithHashAlg, data: &[u8]) -> Result<Vec<u8>> {
+    use keys::signature::Signer;
+    let signature = match key.key_data() {
+        keys::ssh_key::private::KeypairData::Rsa(keypair) => {
+            (keypair, key.hash_alg()).try_sign(data)?
+        }
+        keypair => keypair.try_sign(data)?,
+    };
+    serialize_signature(signature)
+}
+
+/// Enforce key, user-auth payload, algorithm and consent checks before signing.
 async fn handle_agent_request(agent: &ForwardedAgent, payload: &[u8]) -> Option<Vec<u8>> {
     let Some((&message_type, mut cursor)) = payload.split_first() else {
         return Some(vec![5]);
@@ -459,9 +472,11 @@ async fn handle_agent_request(agent: &ForwardedAgent, payload: &[u8]) -> Option<
             let Some(signing_key) = key_for_signature_flags(&agent.key, flags) else {
                 return Some(vec![5]);
             };
-            let Some(username) =
-                parse_userauth_signature_request(data, &public_key, signing_key.name().as_bytes())
-            else {
+            let Some(username) = parse_userauth_signature_request(
+                data,
+                &public_key,
+                signing_key.algorithm().as_str().as_bytes(),
+            ) else {
                 return Some(vec![5]);
             };
             if !agent.allow_session.load(Ordering::Acquire) {
@@ -484,12 +499,7 @@ async fn handle_agent_request(agent: &ForwardedAgent, payload: &[u8]) -> Option<
                     AgentSignatureDecision::Expired => return None,
                 }
             }
-            Some(
-                signing_key
-                    .sign_detached(data)
-                    .map(serialize_signature)
-                    .unwrap_or_else(|_| vec![5]),
-            )
+            Some(sign_agent_request(&signing_key, data).unwrap_or_else(|_| vec![5]))
         }
         _ => Some(vec![5]),
     }
@@ -515,11 +525,12 @@ fn known_hosts_path() -> Result<PathBuf> {
         .ok_or_else(|| anyhow!("No home directory found for SSH known_hosts"))
 }
 
+/// Verify the presented host key against the user's durable known-host store.
 fn verify_server_key(
     connection_id: &str,
     host: &str,
     port: u16,
-    server_public_key: &russh_keys::key::PublicKey,
+    server_public_key: &PublicKey,
     approval: Option<&HostKeyApproval>,
 ) -> Result<bool> {
     let path = known_hosts_path()?;
@@ -536,22 +547,22 @@ fn verify_server_key(
     )
 }
 
+/// Match SHA-256 approval fingerprints without changing their persisted format.
 fn verify_server_key_at_path(
     connection_id: &str,
     host: &str,
     port: u16,
-    server_public_key: &russh_keys::key::PublicKey,
+    server_public_key: &PublicKey,
     approval: Option<&HostKeyApproval>,
     path: &Path,
 ) -> Result<bool> {
-    let fingerprint = format!("SHA256:{}", server_public_key.fingerprint());
+    let fingerprint = server_public_key.fingerprint(HashAlg::Sha256).to_string();
     let changed_lines =
-        match russh_keys::known_hosts::check_known_hosts_path(host, port, server_public_key, &path)
-        {
+        match keys::known_hosts::check_known_hosts_path(host, port, server_public_key, &path) {
             Ok(true) => return Ok(true),
             Ok(false) => None,
-            Err(russh_keys::Error::KeyChanged { .. }) => Some(
-                russh_keys::known_hosts::known_host_keys_path(host, port, &path)?
+            Err(keys::Error::KeyChanged { .. }) => Some(
+                keys::known_hosts::known_host_keys_path(host, port, &path)?
                     .into_iter()
                     .collect::<HashMap<_, _>>(),
             ),
@@ -564,17 +575,18 @@ fn verify_server_key_at_path(
         if let Some(keys) = changed_lines {
             replace_known_host_keys(&path, &keys, host, port, server_public_key)?;
         } else {
-            russh_keys::known_hosts::learn_known_hosts_path(host, port, server_public_key, &path)?;
+            keys::known_hosts::learn_known_hosts_path(host, port, server_public_key, &path)?;
         }
         return Ok(true);
     }
 
+    let algorithm = server_public_key.algorithm();
     let challenge = HostKeyChallenge {
         kind: if is_changed { "changed" } else { "unknown" },
         connection_id,
         host,
         port,
-        algorithm: server_public_key.name(),
+        algorithm: algorithm.as_str(),
         fingerprint,
     };
     Err(anyhow!(
@@ -584,12 +596,13 @@ fn verify_server_key_at_path(
     ))
 }
 
+/// Replace approved stale host-key lines while retaining unrelated records.
 fn replace_known_host_keys(
     path: &Path,
-    keys: &HashMap<usize, russh_keys::key::PublicKey>,
+    keys: &HashMap<usize, PublicKey>,
     host: &str,
     port: u16,
-    server_public_key: &russh_keys::key::PublicKey,
+    server_public_key: &PublicKey,
 ) -> Result<()> {
     let content = std::fs::read_to_string(path)?;
     let permissions = std::fs::metadata(path)?.permissions();
@@ -603,7 +616,7 @@ fn replace_known_host_keys(
             let remove = keys.get(&logical_line).is_some_and(|expected| {
                 let encoded_key = line.split(' ').nth(2);
                 encoded_key
-                    .and_then(|key| russh_keys::parse_public_key_base64(key).ok())
+                    .and_then(|key| keys::parse_public_key_base64(key).ok())
                     .is_some_and(|key| key == *expected)
             });
             logical_line += 1;
@@ -620,7 +633,7 @@ fn replace_known_host_keys(
         format!("[{host}]:{port}")
     });
     kept.push(' ');
-    kept.push_str(server_public_key.name());
+    kept.push_str(server_public_key.algorithm().as_str());
     kept.push(' ');
     kept.push_str(&server_public_key.public_key_base64());
     kept.push('\n');
@@ -770,6 +783,7 @@ impl SshManager {
         Ok((session, (!banner.is_empty()).then_some(banner)))
     }
 
+    /// Authenticate only the configured credential and require complete success.
     async fn authenticate_session(
         &self,
         session: &mut client::Handle<Client>,
@@ -788,6 +802,7 @@ impl SshManager {
                 session
                     .authenticate_password(&config.username, password.clone())
                     .await?
+                    .success()
             }
             AuthMethod::PrivateKey {
                 key_path,
@@ -831,6 +846,7 @@ impl SshManager {
         Ok(())
     }
 
+    /// Load a single connection-scoped forwarding identity without persisting it.
     async fn load_forwarded_agent(
         &self,
         config: &ConnectionConfig,
@@ -843,7 +859,7 @@ impl SshManager {
             .clone()
             .ok_or_else(|| anyhow!("SSH agent confirmation is unavailable"))?;
         let key = Arc::new(Self::load_private_key(auth_method).await?);
-        let fingerprint = format!("SHA256:{}", key.clone_public_key()?.fingerprint());
+        let fingerprint = key.public_key().fingerprint(HashAlg::Sha256).to_string();
         Ok(Some(Arc::new(ForwardedAgent {
             key,
             broker,
@@ -854,7 +870,8 @@ impl SshManager {
         })))
     }
 
-    async fn load_private_key(auth_method: &AuthMethod) -> Result<russh_keys::key::KeyPair> {
+    /// Decode a resolved file or in-memory key, keeping passphrases backend-only.
+    async fn load_private_key(auth_method: &AuthMethod) -> Result<PrivateKey> {
         let (key_data, passphrase) = match auth_method {
             AuthMethod::PrivateKey {
                 key_path,
@@ -888,22 +905,46 @@ impl SshManager {
                 ))
             }
         };
-        russh_keys::decode_secret_key(&key_data, passphrase)
+        keys::decode_secret_key(&key_data, passphrase)
             .map_err(|error| anyhow!("Failed to decode forwarded private key: {error}"))
     }
 
-    async fn auth_with_key_data(
-        session: &mut client::Handle<Client>,
+    /// Select a server-supported RSA SHA-2 hash without silently enabling SHA-1.
+    async fn auth_with_key_data<H: client::Handler>(
+        session: &mut client::Handle<H>,
         username: &str,
         key_data: &str,
         passphrase: Option<&str>,
     ) -> Result<bool> {
-        let privkey = russh_keys::decode_secret_key(key_data, passphrase)
+        let privkey = keys::decode_secret_key(key_data, passphrase)
             .map_err(|e| anyhow!("Failed to decode private key: {}", e))?;
+        let hash = if privkey.algorithm().is_rsa() {
+            Some(rsa_auth_hash(session.best_supported_rsa_hash().await?)?)
+        } else {
+            None
+        };
         let privkey = Arc::new(privkey);
-        Ok(session.authenticate_publickey(username, privkey).await?)
+        Ok(session
+            .authenticate_publickey(username, PrivateKeyWithHashAlg::new(privkey, hash))
+            .await?
+            .success())
     }
 }
+
+/// Preserve SHA-2 for old servers lacking EXT_INFO and reject explicit SHA-1-only offers.
+fn rsa_auth_hash(supported: Option<Option<HashAlg>>) -> Result<HashAlg> {
+    match supported {
+        Some(Some(hash @ (HashAlg::Sha256 | HashAlg::Sha512))) => Ok(hash),
+        None => Ok(HashAlg::Sha512),
+        _ => Err(anyhow!(
+            "SSH server does not support RSA SHA-2 authentication"
+        )),
+    }
+}
+
+#[cfg(test)]
+#[path = "ssh/transport_tests.rs"]
+mod transport_tests;
 
 #[cfg(test)]
 mod tests {
@@ -912,6 +953,9 @@ mod tests {
         HOST_KEY_CHALLENGE_PREFIX,
     };
     use crate::types::HostKeyApproval;
+    #[cfg(target_os = "linux")]
+    use russh::keys::PublicKey;
+    use russh::keys::{self, HashAlg, PrivateKey};
     use std::time::{SystemTime, UNIX_EPOCH};
     #[cfg(target_os = "linux")]
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -925,6 +969,56 @@ mod tests {
         russh::{server, Channel},
         std::{net::SocketAddr, sync::Arc},
     };
+
+    #[test]
+    fn rsa_authentication_keeps_sha2_and_rejects_explicit_legacy_only_servers() {
+        assert_eq!(super::rsa_auth_hash(None).unwrap(), HashAlg::Sha512);
+        for hash in [HashAlg::Sha256, HashAlg::Sha512] {
+            assert_eq!(super::rsa_auth_hash(Some(Some(hash))).unwrap(), hash);
+        }
+        assert!(super::rsa_auth_hash(Some(None)).is_err());
+    }
+
+    #[test]
+    fn forwarded_signatures_preserve_algorithms_and_encode_valid_agent_responses() {
+        use keys::{signature::Verifier, ssh_encoding::Decode};
+        for algorithm in [
+            keys::Algorithm::Ed25519,
+            keys::Algorithm::Ecdsa {
+                curve: keys::EcdsaCurve::NistP256,
+            },
+            keys::Algorithm::Rsa { hash: None },
+        ] {
+            let key = std::sync::Arc::new(
+                PrivateKey::random(&mut keys::key::safe_rng(), algorithm.clone())
+                    .expect("generate signing fixture"),
+            );
+            let is_rsa = algorithm.is_rsa();
+            let flags: &[u32] = if is_rsa { &[0, 2, 4] } else { &[0] };
+            for &flag in flags {
+                let signing = super::key_for_signature_flags(&key, flag).unwrap();
+                let response = super::sign_agent_request(&signing, b"fixture payload").unwrap();
+                assert_eq!(response[0], 14);
+                let mut cursor = &response[1..];
+                let mut encoded = super::read_string(&mut cursor).unwrap();
+                assert!(cursor.is_empty());
+                let signature = keys::ssh_key::Signature::decode(&mut encoded).unwrap();
+                assert!(encoded.is_empty());
+                assert_eq!(signature.algorithm(), signing.algorithm());
+                Verifier::verify(key.public_key(), b"fixture payload", &signature).unwrap();
+                assert!(
+                    Verifier::verify(key.public_key(), b"different payload", &signature).is_err()
+                );
+            }
+            for flag in [1, 3, 5, u32::MAX] {
+                assert!(super::key_for_signature_flags(&key, flag).is_none());
+            }
+            if !is_rsa {
+                assert!(super::key_for_signature_flags(&key, 2).is_none());
+                assert!(super::key_for_signature_flags(&key, 4).is_none());
+            }
+        }
+    }
 
     #[test]
     fn agent_signing_accepts_only_complete_ssh_userauth_payloads_for_the_selected_key() {
@@ -971,7 +1065,6 @@ mod tests {
     }
 
     #[cfg(target_os = "linux")]
-    #[async_trait::async_trait]
     impl server::Handler for AgentProbeServer {
         type Error = anyhow::Error;
 
@@ -986,7 +1079,7 @@ mod tests {
         async fn auth_publickey(
             &mut self,
             _user: &str,
-            _public_key: &russh_keys::key::PublicKey,
+            _public_key: &PublicKey,
         ) -> Result<server::Auth, Self::Error> {
             Ok(server::Auth::Accept)
         }
@@ -994,8 +1087,10 @@ mod tests {
         async fn channel_open_session(
             &mut self,
             _channel: Channel<server::Msg>,
+            reply: server::ChannelOpenHandle,
             session: &mut server::Session,
-        ) -> Result<bool, Self::Error> {
+        ) -> Result<(), Self::Error> {
+            reply.accept().await;
             if let Some(result) = self.result.take() {
                 let handle = session.handle();
                 tokio::spawn(async move {
@@ -1014,12 +1109,11 @@ mod tests {
                     let _ = result.send(count);
                 });
             }
-            Ok(true)
+            Ok(())
         }
     }
 
     #[cfg(target_os = "linux")]
-    #[async_trait::async_trait]
     impl server::Handler for ConsentProbeServer {
         type Error = anyhow::Error;
 
@@ -1034,8 +1128,10 @@ mod tests {
         async fn channel_open_session(
             &mut self,
             _channel: Channel<server::Msg>,
+            reply: server::ChannelOpenHandle,
             session: &mut server::Session,
-        ) -> Result<bool, Self::Error> {
+        ) -> Result<(), Self::Error> {
+            reply.accept().await;
             if let Some(result) = self.result.take() {
                 let handle = session.handle();
                 tokio::spawn(async move {
@@ -1091,7 +1187,7 @@ mod tests {
                     let _ = result.send(probe);
                 });
             }
-            Ok(true)
+            Ok(())
         }
     }
 
@@ -1103,15 +1199,13 @@ mod tests {
             .await
             .expect("bind SSH test server");
         let address = listener.local_addr().expect("SSH test server address");
-        let host_key = russh_keys::key::KeyPair::generate_ed25519();
+        let host_key = PrivateKey::random(&mut keys::key::safe_rng(), keys::Algorithm::Ed25519)
+            .expect("generate host key");
         let approval = HostKeyApproval {
-            fingerprint: format!(
-                "SHA256:{}",
-                host_key
-                    .clone_public_key()
-                    .expect("server public key")
-                    .fingerprint()
-            ),
+            fingerprint: host_key
+                .public_key()
+                .fingerprint(HashAlg::Sha256)
+                .to_string(),
             replace: false,
         };
         let config = Arc::new(server::Config {
@@ -1138,15 +1232,13 @@ mod tests {
             .await
             .expect("bind consent probe server");
         let address = listener.local_addr().expect("consent probe server address");
-        let host_key = russh_keys::key::KeyPair::generate_ed25519();
+        let host_key = PrivateKey::random(&mut keys::key::safe_rng(), keys::Algorithm::Ed25519)
+            .expect("generate host key");
         let approval = HostKeyApproval {
-            fingerprint: format!(
-                "SHA256:{}",
-                host_key
-                    .clone_public_key()
-                    .expect("server public key")
-                    .fingerprint()
-            ),
+            fingerprint: host_key
+                .public_key()
+                .fingerprint(HashAlg::Sha256)
+                .to_string(),
             replace: false,
         };
         let config = Arc::new(server::Config {
@@ -1185,9 +1277,8 @@ mod tests {
         let path = dir.join("known_hosts");
         let first_encoded = "AAAAC3NzaC1lZDI1NTE5AAAAIJdD7y3aLq454yWBdwLWbieU1ebz9/cu7/QEXn9OIeZJ";
         let second_encoded = "AAAAC3NzaC1lZDI1NTE5AAAAILIG2T/B0l0gaqj3puu510tu9N1OkQ4znY3LYuEm5zCF";
-        let first = russh_keys::parse_public_key_base64(first_encoded).expect("first public key");
-        let second =
-            russh_keys::parse_public_key_base64(second_encoded).expect("second public key");
+        let first = keys::parse_public_key_base64(first_encoded).expect("first public key");
+        let second = keys::parse_public_key_base64(second_encoded).expect("second public key");
 
         let unknown = verify_server_key_at_path("server", "example.com", 22, &first, None, &path)
             .expect_err("unknown host must be rejected")
@@ -1208,7 +1299,7 @@ mod tests {
         )
         .is_err());
         let first_approval = HostKeyApproval {
-            fingerprint: format!("SHA256:{}", first.fingerprint()),
+            fingerprint: first.fingerprint(HashAlg::Sha256).to_string(),
             replace: false,
         };
         assert!(verify_server_key_at_path(
@@ -1237,7 +1328,7 @@ mod tests {
             .to_string();
         assert!(changed.contains("\"kind\":\"changed\""));
         let unsafe_approval = HostKeyApproval {
-            fingerprint: format!("SHA256:{}", second.fingerprint()),
+            fingerprint: second.fingerprint(HashAlg::Sha256).to_string(),
             replace: false,
         };
         assert!(verify_server_key_at_path(
@@ -1250,7 +1341,7 @@ mod tests {
         )
         .is_err());
         let second_approval = HostKeyApproval {
-            fingerprint: format!("SHA256:{}", second.fingerprint()),
+            fingerprint: second.fingerprint(HashAlg::Sha256).to_string(),
             replace: true,
         };
         assert!(verify_server_key_at_path(
@@ -1291,7 +1382,7 @@ mod tests {
             );
         }
         assert!(
-            russh_keys::known_hosts::check_known_hosts_path("example.com", 22, &second, &path)
+            keys::known_hosts::check_known_hosts_path("example.com", 22, &second, &path)
                 .expect("check replacement")
         );
         let _ = std::fs::remove_dir_all(dir);
@@ -1311,9 +1402,11 @@ mod tests {
 
         let (result_tx, result_rx) = oneshot::channel();
         let (address, approval) = spawn_consent_probe_server(result_tx).await;
-        let forwarded_key = russh_keys::key::KeyPair::generate_ed25519();
+        let forwarded_key =
+            PrivateKey::random(&mut keys::key::safe_rng(), keys::Algorithm::Ed25519)
+                .expect("generate forwarded key");
         let mut forwarded_key_data = Vec::new();
-        russh_keys::encode_pkcs8_pem(&forwarded_key, &mut forwarded_key_data)
+        keys::encode_pkcs8_pem(&forwarded_key, &mut forwarded_key_data)
             .expect("encode forwarded key");
         let forwarded_key_data = String::from_utf8(forwarded_key_data).expect("forwarded key PEM");
 
@@ -1396,9 +1489,10 @@ mod tests {
         let (address_a, approval_a) = spawn_agent_probe_server(None).await;
         let (result_tx, result_rx) = oneshot::channel();
         let (address_b, approval_b) = spawn_agent_probe_server(Some(result_tx)).await;
-        let key_a = russh_keys::key::KeyPair::generate_ed25519();
+        let key_a = PrivateKey::random(&mut keys::key::safe_rng(), keys::Algorithm::Ed25519)
+            .expect("generate client key");
         let mut key_data = Vec::new();
-        russh_keys::encode_pkcs8_pem(&key_a, &mut key_data).expect("encode client key");
+        keys::encode_pkcs8_pem(&key_a, &mut key_data).expect("encode client key");
         let key_data = String::from_utf8(key_data).expect("private key PEM");
 
         let manager = SshManager::new();

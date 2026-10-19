@@ -10,6 +10,7 @@ import { terminalService } from './terminalService.js';
 
 export { IDLE_HOST_SUSPEND_MESSAGE } from './terminalIdleSuspendNotice.js';
 
+/** Idle suspend accepts its preceding generation; unrelated shell exits remain stale. */
 export function terminalExitGenerationMatches(entry: NonNullable<ReturnType<typeof terminalCache.get>>, exitGeneration: number): boolean {
   if (exitGeneration === entry.generation) {
     return true;
@@ -20,7 +21,16 @@ export function terminalExitGenerationMatches(entry: NonNullable<ReturnType<type
 
 export interface TerminalLifecycleEvent {
   generation: number;
+  /** Native channel identity also fences generation reuse after webview reload. */
+  channel_id?: number;
   exit_code?: number;
+}
+
+/** Native events bind to the live channel; omitted IDs preserve legacy browser fixtures only. */
+export function terminalLifecycleChannelMatches(
+  entry: NonNullable<ReturnType<typeof terminalCache.get>>, event: TerminalLifecycleEvent,
+): boolean {
+  return event.channel_id === undefined || entry.outputChannel?.id === event.channel_id;
 }
 
 /** Attaches generation-gated ready and exit listeners once per cached terminal. */
@@ -38,6 +48,8 @@ export function attachTerminalLifecycleListeners(sessionId: string, _term: XTerm
   cached.listenerAttached = true;
 
   listen<TerminalLifecycleEvent>(`terminal-ready-${sessionId}`, (event) => {
+    const entry = terminalCache.get(sessionId);
+    if (!entry || !terminalLifecycleChannelMatches(entry, event.payload)) return;
     handleTerminalReady(sessionId, event.payload.generation);
   }).then((unlistenFn) => {
     if (terminalCache.has(sessionId)) {
@@ -51,7 +63,8 @@ export function attachTerminalLifecycleListeners(sessionId: string, _term: XTerm
       return;
     }
 
-    if (!terminalExitGenerationMatches(entry, event.payload.generation)) {
+    if (!terminalLifecycleChannelMatches(entry, event.payload)
+      || !terminalExitGenerationMatches(entry, event.payload.generation)) {
       return;
     }
 

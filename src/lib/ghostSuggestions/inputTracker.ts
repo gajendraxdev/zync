@@ -62,6 +62,7 @@ export class InputTracker {
   private activeSuffix   = '';
   private desynced       = false;
   private secretInputMode = false;
+  private secretInputSubmitted = false;
   private opts: InputTrackerOptions;
 
   constructor(opts: InputTrackerOptions) {
@@ -91,14 +92,18 @@ export class InputTracker {
   /** Shell is waiting for hidden input (sudo/SSH password, passphrase). */
   enterSecretInputMode(): void {
     this.secretInputMode = true;
+    this.secretInputSubmitted = false;
     this.lineBuffer = '';
     this.activeSuffix = '';
     this.desynced = true;
     this.opts.onDismiss();
   }
 
+  /** A fresh shell prompt (or explicit cancellation) ends hidden input. */
   exitSecretInputMode(): void {
+    if (!this.secretInputMode) return;
     this.secretInputMode = false;
+    this.secretInputSubmitted = false;
     this.lineBuffer = '';
     this.activeSuffix = '';
     this.desynced = false;
@@ -109,12 +114,36 @@ export class InputTracker {
     return this.secretInputMode;
   }
 
+  /** A confirmed current OSC 7 can recover a custom prompt after submission,
+   * but a subsequent password prompt must first disarm this recovery. */
+  recoverSecretInputAfterSubmit(): boolean {
+    if (!this.secretInputMode || !this.secretInputSubmitted) return false;
+    this.exitSecretInputMode();
+    return true;
+  }
+
   /**
    * Feed raw bytes from term.onData() into the tracker.
    * Returns { consumed: true } when the caller should NOT forward data to the PTY
    * (i.e. an accept key consumed part/all of the active suggestion).
    */
   feed(data: string): { consumed: boolean } {
+    // Enter can submit one of several password prompts (sudo retry, passwd,
+    // nested authentication). Stay guarded until fresh shell-prompt evidence;
+    // typing, pasting, editing and Tab must never reach inference callbacks.
+    if (this.secretInputMode) {
+      if (data === CTRL_C || data === CTRL_D) {
+        this.exitSecretInputMode();
+      } else {
+        if (data === ENTER) this.secretInputSubmitted = true;
+        this.lineBuffer = '';
+        this.activeSuffix = '';
+        this.desynced = true;
+        this.opts.onDismiss();
+      }
+      return { consumed: false };
+    }
+
     // Tab always goes to the shell (fish/zsh completion). Dismiss ghost and desync.
     if (data === TAB) {
       this.dismissAndDesync();
@@ -145,14 +174,6 @@ export class InputTracker {
 
     // ── Enter: commit command to history, reset buffer ─────────────────────────
     if (data === ENTER) {
-      if (this.secretInputMode) {
-        this.secretInputMode = false;
-        this.lineBuffer = '';
-        this.activeSuffix = '';
-        this.desynced = false;
-        this.opts.onDismiss();
-        return { consumed: false };
-      }
       if (!this.desynced) {
         const cmd = this.lineBuffer.trim();
         if (cmd) this.opts.onHistoryCommit(cmd);
@@ -212,13 +233,6 @@ export class InputTracker {
     }).join('');
 
     if (printable) {
-      // Hidden password/passphrase entry — never fetch ghost or commit history.
-      if (this.secretInputMode) {
-        this.activeSuffix = '';
-        this.opts.onDismiss();
-        return { consumed: false };
-      }
-
       // After unknown cursor/history edits we cannot trust the full line buffer.
       // Keep history commit behavior, but suppress ghost requests to avoid
       // inaccurate suggestions until shell line is reset (Enter/Ctrl+C/Ctrl+U).
@@ -241,11 +255,17 @@ export class InputTracker {
   }
 
   setSuggestion(suffix: string): void {
-    this.activeSuffix = suffix;
+    this.activeSuffix = this.secretInputMode || this.desynced ? '' : suffix;
   }
 
   clearSuggestion(): void {
     this.activeSuffix = '';
+  }
+
+  /** Context changes dismiss visible text without discarding the user's line. */
+  dismissSuggestion(): void {
+    this.activeSuffix = '';
+    this.opts.onDismiss();
   }
 
   getSuggestion(): string {
@@ -275,6 +295,7 @@ export class InputTracker {
     this.activeSuffix = '';
     this.desynced = false;
     this.secretInputMode = false;
+    this.secretInputSubmitted = false;
   }
 
   destroy(): void {

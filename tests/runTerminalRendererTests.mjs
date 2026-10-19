@@ -1,6 +1,9 @@
 import { spawnSync } from 'node:child_process';
 
 const tests = [
+  'tests/terminalLifecycleOwnership.test.mjs',
+  'tests/terminalOutputFlow.test.mjs',
+  'tests/terminalRendererLifecycle.test.mjs',
   'tests/terminalDocument.test.mjs',
   'tests/terminalRendererPolicy.test.mjs',
   'tests/terminalWebglCapability.test.mjs',

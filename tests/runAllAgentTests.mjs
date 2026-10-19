@@ -37,6 +37,12 @@ function normalizeEmittedImports(directory) {
 normalizeEmittedImports(path.resolve('.tmp-agent-tests'));
 
 const tests = [
+  'tests/terminalLifecycleOwnership.test.mjs',
+  'tests/changedFunctionDocs.test.mjs',
+  'tests/terminalOutputFlow.test.mjs',
+  'tests/terminalRendererLifecycle.test.mjs',
+  'tests/ghostCwdSafety.test.mjs',
+  'tests/ghostPromptSafety.test.mjs',
   'tests/folderSizes.test.mjs',
   'tests/filePermissions.test.mjs',
   'tests/editorSaveAccess.test.mjs',
@@ -88,6 +94,7 @@ const tests = [
   'tests/customizationSettingsStorage.test.mjs',
   'tests/workspaceDocking.test.mjs',
   'tests/workspaceDockingProjection.test.mjs',
+  'tests/workspaceSplitControls.test.mjs',
   'tests/workspaceDockingActions.test.mjs',
   'tests/workspaceRegionResize.test.mjs',
   'tests/workspaceRegionDropPointer.test.mjs',

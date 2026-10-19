@@ -8,6 +8,8 @@ mod recovery;
 mod tree;
 pub use recovery::Inspection;
 #[cfg(test)]
+mod performance_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod tree_tests;

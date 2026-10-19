@@ -61,33 +61,64 @@ jobs:
         with:
           workspaces: src-tauri
 
+      - name: Fetch Rust dependencies
+        working-directory: src-tauri
+        shell: bash
+        timeout-minutes: 15
+        env:
+          CARGO_NET_RETRY: 2
+          CARGO_HTTP_TIMEOUT: 30
+        run: |
+          host_target=$(rustc -vV | sed -n 's/^host: //p')
+          # Retry downloads only; test failures must never be retried or hidden.
+          for attempt in 1 2 3; do
+            if cargo fetch --locked --target "$host_target"; then
+              break
+            else
+              status=$?
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit "$status"
+            fi
+            delay=$((attempt * 10))
+            echo "::warning::Dependency fetch failed (attempt $attempt/3); retrying in ${delay}s."
+            sleep "$delay"
+          done
+
       - name: Run focused Rust security tests
         working-directory: src-tauri
+        shell: bash
         env:
           # Required only because sync commands compile with env!("GOOGLE_CLIENT_ID").
           # The vault crypto known-answer tests do not use Google OAuth.
           GOOGLE_CLIENT_ID: ci-known-answer-test-client-id
         run: |
-          cargo test vault::crypto::tests::known_answer_kdf_is_reproducible -- --exact
-          cargo test vault::crypto::tests::known_answer_aead_is_reproducible -- --exact
-          cargo test ai::config::tests
-          cargo test local_only
-          cargo test commands::private_key_inspection_tests
-          cargo test ssh::tests -- --test-threads=1
-          cargo test pty_output_flush
-          cargo test pty::tests
-          cargo test pty_term_env
+          cargo test --frozen vault::crypto::tests::known_answer_kdf_is_reproducible -- --exact
+          cargo test --frozen vault::crypto::tests::known_answer_aead_is_reproducible -- --exact
+          cargo test --frozen ai::config::tests
+          cargo test --frozen local_only
+          cargo test --frozen commands::private_key_inspection_tests
+          cargo test --frozen ssh::tests -- --test-threads=1
+          cargo test --frozen ssh::transport_tests
+          cargo test --frozen file_transfers
+          cargo test --frozen sftp_read
+          cargo test --frozen folder_sizes
+          cargo test --frozen terminal_output
+          cargo test --frozen pty_output
+          cargo test --frozen plugins::terminal::policy
+          cargo test --frozen pty::tests
+          cargo test --frozen pty_term_env
 
       - name: Run Windows ConPTY sideload tests
         if: matrix.platform == 'windows-latest'
         working-directory: src-tauri
         env:
           GOOGLE_CLIENT_ID: ci-known-answer-test-client-id
-        run: cargo test windows_conpty
+        run: cargo test --frozen windows_conpty
 
       - name: Run ignored SSH security tests on Linux
         if: matrix.platform == 'ubuntu-22.04'
         working-directory: src-tauri
         env:
           GOOGLE_CLIENT_ID: ci-known-answer-test-client-id
-        run: cargo test ssh::tests -- --ignored --test-threads=1
+        run: cargo test --frozen ssh::tests -- --ignored --test-threads=1

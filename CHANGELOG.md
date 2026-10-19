@@ -6,6 +6,40 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Fixed
 
+- **Transfer progress memory:** Reuse workspace Split/Find projections when layout
+  inputs are unchanged, avoiding repeated layout allocations during transfer
+  progress updates. Keep action-time targeting and capacity checks fresh.
+  ([0177174])
+
+- **Terminal output and lifecycle:** Bound queued output until the renderer has
+  parsed it, preserve final output before shell completion, and ignore obsolete
+  startup, metadata and output callbacks after a terminal is replaced. Keep
+  cancellation responsive and prevent an input-writer failure after a recorded
+  shell exit from disconnecting the whole host. ([22b5ed1])
+
+- **Local terminal responsiveness:** Move blocking PTY writes, resize and
+  teardown off async workers without holding the shared session lock during
+  slow platform calls. Preserve input ordering after cancellation and prevent
+  old natural-exit cleanup from removing a replacement session. ([5a0ce24])
+
+- **Terminal tab switching:** Cancel obsolete deferred renderer work when tab
+  visibility or terminal ownership changes, preventing an older background task
+  from releasing the active tab's GPU renderer. Ignore stale setup completions.
+  ([2b54a0d])
+
+- **Terminal path suggestions:** Distinguish existing matches, confirmed misses
+  and unavailable directory checks without reviving expired filename listings.
+  Preserve POSIX casing, isolate native Windows/WSL/SSH lookup behavior and keep
+  ordinary command history separate from filesystem evidence. ([f7bb076])
+
+- **Terminal password prompts and context:** Prevent old prompt output from
+  clearing hidden-input protection or resetting typed commands. Keep password
+  submissions and retries out of suggestion/history inference, and recover custom
+  prompts through current OSC 7 reports only after submission and password checks.
+  Use observed current-session directories instead of speculative `cd` targets;
+  reject stale output, CWD replies and shell-plugin probes after context changes.
+  Disabled or native-suppressed suggestions bypass input inference. ([43d59da])
+
 - **Paste collisions:** Keep existing-item collision choices available after an
   immediate same-connection paste fails. Refresh the destination listing without
   clearing the failed selection. ([d98c359])
@@ -40,6 +74,17 @@ All notable changes to Zync are documented in this file. The format is based on 
   deletions from restoring stale folder contents. ([d8d6586], [69a16cb])
 
 ### Changed
+
+- **File transfer throughput:** Upgrade to published `russh-sftp 3.0.1` and use
+  bounded read/write pipelining through the existing transfer service. Preserve
+  staging, cancellation, recovery and acknowledged completion, with offline
+  protocol regressions and expanded native CI coverage. ([2b17a85])
+
+- **SSH transport:** Upgrade to the published `russh 0.64.1` package, with no
+  local fork or vendored SSH source. Adapt password/encrypted-key authentication,
+  RSA SHA-2 negotiation, SFTP and forwarding while preserving explicit host-key
+  approval and agent-forwarding consent. Raise the `bytes` minimum to `1.11.1`
+  for the upstream security fix. ([67c532b])
 
 - **Maintenance:** Clarify shortcut, settings and terminal code comments without
   changing runtime behavior. ([ac067a6])
@@ -2869,3 +2914,11 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [d98c359]: https://github.com/zync-sh/zync/commit/d98c35951560eba18f012ac0e3abeb658c84c5b5
 [99856dd]: https://github.com/zync-sh/zync/commit/99856dd1217ef016a311ace4f8314b0e78f02152
 [2b1d77d]: https://github.com/zync-sh/zync/commit/2b1d77d18192d5b76e9b494d5cebbfb1c925cf92
+[f7bb076]: https://github.com/zync-sh/zync/commit/f7bb076e86979523d28fa970ddc6752d8836c8df
+[2b54a0d]: https://github.com/zync-sh/zync/commit/2b54a0de6b83c65df5bc8a463fc27e7d5a27d871
+[5a0ce24]: https://github.com/zync-sh/zync/commit/5a0ce24d82003801aaa07ad86bfbd0a8fb4769c0
+[43d59da]: https://github.com/zync-sh/zync/commit/43d59da1cdf91177c8c01683cbc0294f4da156f3
+[67c532b]: https://github.com/zync-sh/zync/commit/67c532b4345a0ba7093195316d53f92487306e68
+[22b5ed1]: https://github.com/zync-sh/zync/commit/22b5ed1e3291d72c9e3f377cfa6b81f169b7d493
+[2b17a85]: https://github.com/zync-sh/zync/commit/2b17a85894263dd196d6e56ec7220742cd41a988
+[0177174]: https://github.com/zync-sh/zync/commit/0177174e18fb8e15463ebb720bee3859ee16c799

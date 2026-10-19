@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -6,8 +7,8 @@ use crate::commands::AppState;
 use crate::fs::FileEntry;
 use crate::ghost::context::recent_entry_name_bonus;
 use crate::ghost::token::{
-    get_command_name, get_last_arg, has_path_separator, is_directory_command,
-    is_file_aware_command, line_for_suggestion_parsing, strip_leading_unmatched_quote,
+    get_command_name, get_last_arg, has_path_separator, is_directory_command_for_backend,
+    is_file_aware_command_for_backend, line_for_suggestion_parsing, strip_leading_unmatched_quote,
 };
 
 const FS_LIST_CACHE_TTL_MS: u64 = 1200;
@@ -34,6 +35,54 @@ fn fs_list_cache() -> &'static Mutex<HashMap<String, CachedEntries>> {
     FS_LIST_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+fn fresh_cached_entries(
+    cache: &Mutex<HashMap<String, CachedEntries>>,
+    key: &str,
+) -> Option<Vec<FileEntry>> {
+    let cache = cache.lock().ok()?;
+    let entry = cache.get(key)?;
+    (entry.at.elapsed() < Duration::from_millis(FS_LIST_CACHE_TTL_MS))
+        .then(|| entry.entries.clone())
+}
+
+/// Reuse only fresh listings, including a concurrent refresh after a failed request.
+async fn list_with_cache(
+    cache: &Mutex<HashMap<String, CachedEntries>>,
+    key: String,
+    request: impl Future<Output = Result<Vec<FileEntry>, String>>,
+) -> Result<Vec<FileEntry>, String> {
+    if let Some(hit) = fresh_cached_entries(cache, &key) {
+        return Ok(hit);
+    }
+    match request.await {
+        Ok(entries) => {
+            if let Ok(mut cache) = cache.lock() {
+                cache.insert(
+                    key,
+                    CachedEntries {
+                        at: Instant::now(),
+                        entries: entries.clone(),
+                    },
+                );
+                if cache.len() > 128 {
+                    cache.retain(|_, entry| {
+                        entry.at.elapsed() < Duration::from_millis(FS_LIST_CACHE_TTL_MS)
+                    });
+                    while cache.len() > 112 {
+                        if let Some(key) = cache.keys().next().cloned() {
+                            cache.remove(&key);
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+            Ok(entries)
+        }
+        Err(error) => fresh_cached_entries(cache, &key).ok_or(error),
+    }
+}
+
 fn remote_home_cache() -> &'static Mutex<HashMap<String, CachedHome>> {
     REMOTE_HOME_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
@@ -44,6 +93,11 @@ fn wsl_home_cache() -> &'static Mutex<HashMap<String, CachedHome>> {
 
 pub fn shell_id_indicates_wsl(shell_id: &str) -> bool {
     shell_id == "wsl" || shell_id.starts_with("wsl:")
+}
+
+/// Remote and WSL paths retain POSIX casing even when Zync runs on Windows.
+pub fn uses_windows_paths(connection_id: &str, shell_id: Option<&str>) -> bool {
+    cfg!(windows) && connection_id == "local" && !shell_id.is_some_and(shell_id_indicates_wsl)
 }
 
 pub fn parse_wsl_distro(shell_id: &str) -> Option<String> {
@@ -195,6 +249,15 @@ fn resolve_dir(dir: &str, cwd: &str, sep: char) -> String {
     }
 }
 
+/// Unknown terminal CWD must not turn a relative lookup into an implicit home lookup.
+fn resolve_listing_dir(dir: &str, cwd: Option<&str>, sep: char) -> Option<String> {
+    if is_absolute_or_home_path(dir) {
+        return Some(dir.to_string());
+    }
+    let cwd = cwd.filter(|path| is_absolute_or_home_path(path))?;
+    Some(resolve_dir(dir, cwd, sep))
+}
+
 fn strip_trailing_sep(path: &str) -> String {
     if path == "/" {
         return path.to_string();
@@ -281,7 +344,15 @@ pub struct PathSuggestParams<'a> {
     pub state: &'a AppState,
 }
 
-pub async fn path_suggestion(params: PathSuggestParams<'_>) -> Option<String> {
+/// A successful empty listing/match is different from unavailable path evidence.
+#[derive(Debug, PartialEq, Eq)]
+pub enum PathSuggestion {
+    Match(String),
+    Miss,
+    Unknown,
+}
+
+pub async fn path_suggestion(params: PathSuggestParams<'_>) -> PathSuggestion {
     let suggestions = path_suggestions(PathSuggestionsParams {
         line: params.line,
         cwd: params.cwd,
@@ -292,7 +363,14 @@ pub async fn path_suggestion(params: PathSuggestParams<'_>) -> Option<String> {
         limit: 1,
     })
     .await;
-    suggestions.into_iter().next()
+    match suggestions {
+        Some(suggestions) => suggestions
+            .into_iter()
+            .next()
+            .map(PathSuggestion::Match)
+            .unwrap_or(PathSuggestion::Miss),
+        None => PathSuggestion::Unknown,
+    }
 }
 
 struct PathSuggestionsParams<'a> {
@@ -305,24 +383,13 @@ struct PathSuggestionsParams<'a> {
     limit: usize,
 }
 
-fn path_entry_suffix(entry_name: &str, partial: &str) -> String {
-    if partial.is_empty() {
-        return entry_name.to_string();
+fn path_entry_suffix<'a>(entry_name: &'a str, partial: &str, windows: bool) -> Option<&'a str> {
+    let prefix = entry_name.get(..partial.len())?;
+    if prefix == partial || (windows && prefix.eq_ignore_ascii_case(partial)) {
+        entry_name.get(partial.len()..)
+    } else {
+        None
     }
-    if entry_name.starts_with(partial) {
-        return entry_name[partial.len()..].to_string();
-    }
-    let entry_lower = entry_name.to_ascii_lowercase();
-    let partial_lower = partial.to_ascii_lowercase();
-    if entry_lower.starts_with(&partial_lower) {
-        let byte_idx = entry_name
-            .char_indices()
-            .nth(partial.chars().count())
-            .map(|(i, _)| i)
-            .unwrap_or(entry_name.len());
-        return entry_name[byte_idx..].to_string();
-    }
-    entry_name.to_string()
 }
 
 /// True when the active segment is only the command token (optional trailing space).
@@ -355,18 +422,19 @@ fn classify_directory_path_partial(
     (partial, new_path_arg)
 }
 
-async fn path_suggestions(params: PathSuggestionsParams<'_>) -> Vec<String> {
+async fn path_suggestions(params: PathSuggestionsParams<'_>) -> Option<Vec<String>> {
     let timeout_ms = fs_list_timeout_ms(params.connection_id, params.wsl_shell_id);
     let parse_line = line_for_suggestion_parsing(params.line);
     let last_arg = strip_leading_unmatched_quote(&get_last_arg(&parse_line)).to_string();
 
     if looks_like_remote_target(&last_arg) {
-        return Vec::new();
+        return None;
     }
 
     let command_name = get_command_name(&parse_line);
-    let is_directory_only = is_directory_command(&command_name);
-    let is_file_aware = is_file_aware_command(&command_name);
+    let windows = uses_windows_paths(params.connection_id, params.wsl_shell_id);
+    let is_directory_only = is_directory_command_for_backend(&command_name, windows);
+    let is_file_aware = is_file_aware_command_for_backend(&command_name, windows);
 
     let mut dir = String::new();
     let partial;
@@ -379,20 +447,20 @@ async fn path_suggestions(params: PathSuggestionsParams<'_>) -> Vec<String> {
 
     if has_path_separator(&last_arg) {
         let Some((d, p, s)) = split_path(&last_arg) else {
-            return Vec::new();
+            return None;
         };
         dir = d;
         partial = p;
         sep = s;
     } else {
         if command_name.is_empty() {
-            return Vec::new();
+            return None;
         }
         if !is_directory_only && !is_file_aware {
-            return Vec::new();
+            return None;
         }
         if last_arg.starts_with('-') {
-            return Vec::new();
+            return None;
         }
         if !is_directory_only {
             let cwd = params.cwd.unwrap_or("");
@@ -400,10 +468,10 @@ async fn path_suggestions(params: PathSuggestionsParams<'_>) -> Vec<String> {
                 || last_arg.is_empty()
                 || last_arg.eq_ignore_ascii_case(&command_name)
             {
-                return Vec::new();
+                return None;
             }
             if cwd.is_empty() {
-                return Vec::new();
+                return None;
             }
         }
         let (classified_partial, classified_new) = classify_directory_path_partial(
@@ -424,25 +492,23 @@ async fn path_suggestions(params: PathSuggestionsParams<'_>) -> Vec<String> {
             if params.connection_id != "local" {
                 let Some(home) = get_remote_home_dir(params.state, params.connection_id).await
                 else {
-                    return Vec::new();
+                    return None;
                 };
                 effective_cwd = Some(expand_tilde_path_for_remote(cwd, &home));
             } else if use_wsl {
                 let Some(shell_id) = params.wsl_shell_id else {
-                    return Vec::new();
+                    return None;
                 };
                 let Some(home) = get_wsl_home_dir(shell_id).await else {
-                    return Vec::new();
+                    return None;
                 };
                 effective_cwd = Some(expand_tilde_path_for_remote(cwd, &home));
             }
         }
     }
 
-    let resolved_dir = if let Some(ref cwd) = effective_cwd {
-        resolve_dir(&dir, cwd, sep)
-    } else {
-        dir.clone()
+    let Some(resolved_dir) = resolve_listing_dir(&dir, effective_cwd.as_deref(), sep) else {
+        return None;
     };
 
     let mut api_path = normalize_fs_list_path(
@@ -453,14 +519,14 @@ async fn path_suggestions(params: PathSuggestionsParams<'_>) -> Vec<String> {
 
     if params.connection_id != "local" && api_path.contains('~') {
         let Some(home) = get_remote_home_dir(params.state, params.connection_id).await else {
-            return Vec::new();
+            return None;
         };
         api_path = expand_tilde_path_for_remote(&api_path, &home);
     } else if use_wsl {
         if let Some(shell_id) = params.wsl_shell_id {
             if api_path.contains('~') {
                 let Some(home) = get_wsl_home_dir(shell_id).await else {
-                    return Vec::new();
+                    return None;
                 };
                 api_path = expand_tilde_path_for_remote(&api_path, &home);
             }
@@ -480,91 +546,36 @@ async fn path_suggestions(params: PathSuggestionsParams<'_>) -> Vec<String> {
         format!("{}::{}", params.connection_id, api_path)
     };
 
-    let entries = {
-        let cache_hit = {
-            if let Ok(cache) = fs_list_cache().lock() {
-                if let Some(entry) = cache.get(&cache_key) {
-                    if entry.at.elapsed() < Duration::from_millis(FS_LIST_CACHE_TTL_MS) {
-                        Some(entry.entries.clone())
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        };
-        if let Some(hit) = cache_hit {
-            hit
-        } else {
-            match invoke_fs_list(
-                params.state,
-                params.connection_id,
-                &api_path,
-                timeout_ms,
-                params.wsl_shell_id,
-            )
-            .await
-            {
-                Ok(entries) => {
-                    if let Ok(mut cache) = fs_list_cache().lock() {
-                        cache.insert(
-                            cache_key.clone(),
-                            CachedEntries {
-                                at: Instant::now(),
-                                entries: entries.clone(),
-                            },
-                        );
-                        if cache.len() > 128 {
-                            let now = Instant::now();
-                            cache.retain(|_, v| {
-                                now.duration_since(v.at)
-                                    < Duration::from_millis(FS_LIST_CACHE_TTL_MS)
-                            });
-                            while cache.len() > 112 {
-                                if let Some(key) = cache.keys().next().cloned() {
-                                    cache.remove(&key);
-                                } else {
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    entries
-                }
-                Err(_) => {
-                    if let Ok(cache) = fs_list_cache().lock() {
-                        cache
-                            .get(&cache_key)
-                            .map(|e| e.entries.clone())
-                            .unwrap_or_default()
-                    } else {
-                        Vec::new()
-                    }
-                }
-            }
-        }
-    };
+    let entries = list_with_cache(
+        fs_list_cache(),
+        cache_key,
+        invoke_fs_list(
+            params.state,
+            params.connection_id,
+            &api_path,
+            timeout_ms,
+            params.wsl_shell_id,
+        ),
+    )
+    .await
+    .ok()?;
 
     if entries.is_empty() {
-        return Vec::new();
+        return Some(Vec::new());
     }
 
-    let partial_lower = partial.to_ascii_lowercase();
     let mut matches: Vec<&FileEntry> = entries
         .iter()
         .filter(|e| {
             e.name != "."
                 && e.name != ".."
                 && e.name != partial
-                && (partial.is_empty() || e.name.to_ascii_lowercase().starts_with(&partial_lower))
+                && path_entry_suffix(&e.name, &partial, windows).is_some()
         })
         .collect();
 
     if matches.is_empty() {
-        return Vec::new();
+        return Some(Vec::new());
     }
 
     if is_directory_only {
@@ -573,7 +584,7 @@ async fn path_suggestions(params: PathSuggestionsParams<'_>) -> Vec<String> {
             t == "directory" || t == "symlink"
         });
         if matches.is_empty() {
-            return Vec::new();
+            return Some(Vec::new());
         }
     }
 
@@ -600,7 +611,7 @@ async fn path_suggestions(params: PathSuggestionsParams<'_>) -> Vec<String> {
     let limit = params.limit.max(1);
     let mut out = Vec::new();
     for entry in matches.into_iter().take(limit) {
-        let name_suffix = path_entry_suffix(&entry.name, &partial);
+        let name_suffix = path_entry_suffix(&entry.name, &partial, windows).unwrap_or_default();
         let trailing_sep = {
             let t = normalize_entry_type(&entry.r#type);
             if t == "directory" || t == "symlink" {
@@ -616,7 +627,7 @@ async fn path_suggestions(params: PathSuggestionsParams<'_>) -> Vec<String> {
             out.push(piece);
         }
     }
-    out
+    Some(out)
 }
 
 #[cfg(test)]
@@ -642,8 +653,111 @@ mod tests {
 
     #[test]
     fn path_entry_suffix_preserves_entry_casing() {
-        assert_eq!(path_entry_suffix("Documents", "doc"), "uments");
-        assert_eq!(path_entry_suffix("Documents", "Doc"), "uments");
+        assert_eq!(path_entry_suffix("Documents", "doc", true), Some("uments"));
+        assert_eq!(path_entry_suffix("Documents", "Doc", false), Some("uments"));
+        assert_eq!(path_entry_suffix("Documents", "doc", false), None);
+        assert_eq!(path_entry_suffix("école", "Éc", true), None);
+    }
+
+    #[test]
+    fn windows_path_matching_does_not_apply_to_remote_or_wsl() {
+        assert_eq!(uses_windows_paths("local", None), cfg!(windows));
+        assert!(!uses_windows_paths("server", None));
+        assert!(!uses_windows_paths("server", Some("powershell")));
+        assert!(!uses_windows_paths("local", Some("wsl:Ubuntu")));
+    }
+
+    #[test]
+    fn relative_listings_require_known_cwd_but_explicit_roots_do_not() {
+        for cwd in [None, Some(""), Some("relative")] {
+            assert_eq!(resolve_listing_dir("", cwd, '/'), None);
+            assert_eq!(resolve_listing_dir("./src/", cwd, '/'), None);
+        }
+        assert_eq!(
+            resolve_listing_dir("", Some("/tmp"), '/'),
+            Some("/tmp/".into())
+        );
+        assert_eq!(
+            resolve_listing_dir("/tmp/", None, '/'),
+            Some("/tmp/".into())
+        );
+        assert_eq!(resolve_listing_dir("~/", None, '/'), Some("~/".into()));
+        assert_eq!(
+            resolve_listing_dir("C:\\tmp\\", None, '\\'),
+            Some("C:\\tmp\\".into())
+        );
+    }
+
+    fn cached_entry(name: &str, age: Duration) -> CachedEntries {
+        CachedEntries {
+            at: Instant::now() - age,
+            entries: vec![FileEntry {
+                name: name.into(),
+                path: name.into(),
+                r#type: "file".into(),
+                size: 0,
+                last_modified: 0,
+                permissions: String::new(),
+                owner: String::new(),
+                group: String::new(),
+            }],
+        }
+    }
+
+    #[tokio::test]
+    async fn fresh_listing_avoids_refresh_and_expired_failure_remains_unknown() {
+        let cache = Mutex::new(HashMap::from([(
+            "listing".into(),
+            cached_entry("current", Duration::ZERO),
+        )]));
+        let entries = list_with_cache(&cache, "listing".into(), async {
+            panic!("a fresh cache hit must not issue a listing");
+        })
+        .await
+        .expect("fresh listing");
+        assert_eq!(entries[0].name, "current");
+
+        cache.lock().unwrap().insert(
+            "listing".into(),
+            cached_entry("deleted", Duration::from_millis(FS_LIST_CACHE_TTL_MS + 1)),
+        );
+        let entries = list_with_cache(&cache, "listing".into(), async {
+            Err("session closed".into())
+        })
+        .await;
+        assert_eq!(entries.unwrap_err(), "session closed");
+    }
+
+    #[tokio::test]
+    async fn failed_listing_may_use_only_a_fresh_concurrent_refresh() {
+        let cache = Mutex::new(HashMap::new());
+        let entries = list_with_cache(&cache, "listing".into(), async {
+            cache
+                .lock()
+                .unwrap()
+                .insert("listing".into(), cached_entry("fresh", Duration::ZERO));
+            Err("request failed".into())
+        })
+        .await
+        .expect("fresh concurrent listing");
+        assert_eq!(entries[0].name, "fresh");
+    }
+
+    #[tokio::test]
+    async fn empty_listing_is_confirmed_but_errors_and_timeouts_are_not() {
+        let cache = Mutex::new(HashMap::new());
+        let entries = list_with_cache(&cache, "empty".into(), async { Ok(Vec::new()) })
+            .await
+            .expect("an empty successful listing is available evidence");
+        assert!(entries.is_empty());
+
+        for error in ["session closed", "fs_list timeout"] {
+            let result = list_with_cache(&cache, "unavailable".into(), async {
+                Err(error.to_string())
+            })
+            .await;
+            assert_eq!(result.unwrap_err(), error);
+        }
     }
 
     #[test]
@@ -679,7 +793,7 @@ mod tests {
     #[test]
     fn path_entry_suffix_for_cd_cd_style_partial() {
         // Completing an arg that starts with "cd" should glue, not inject a space.
-        assert_eq!(path_entry_suffix("cdrom", "cd"), "rom");
-        assert_eq!(path_entry_suffix("cd", "cd"), "");
+        assert_eq!(path_entry_suffix("cdrom", "cd", false), Some("rom"));
+        assert_eq!(path_entry_suffix("cd", "cd", false), Some(""));
     }
 }

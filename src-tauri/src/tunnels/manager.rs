@@ -339,6 +339,7 @@ impl TunnelManager {
         Ok(runtime_id)
     }
 
+    /// Register and request a connection-scoped remote listener, rolling back rejection.
     pub async fn start_remote_forwarding(
         &self,
         session: Arc<Mutex<Handle<Client>>>,
@@ -363,7 +364,7 @@ impl TunnelManager {
         }
 
         let res = {
-            let mut session_handle = session.lock().await;
+            let session_handle = session.lock().await;
             session_handle
                 .tcpip_forward(bind_address.clone(), remote_port as u32)
                 .await
@@ -653,7 +654,7 @@ async fn find_next_available_remote_port(
         }
 
         let bound = {
-            let mut handle = session.lock().await;
+            let handle = session.lock().await;
             handle
                 .tcpip_forward(bind_address.to_string(), candidate as u32)
                 .await

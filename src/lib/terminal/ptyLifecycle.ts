@@ -1,7 +1,7 @@
 import type { Terminal as XTerm } from '@xterm/xterm';
 import { isConnectionBackendLive } from './connectionBackend.js';
 import { clearTerminalInputQueue } from './inputQueue.js';
-import { clearTerminalPendingInput, terminalCache } from './terminalCache.js';
+import { clearTerminalPendingInput, invalidateTerminalGhostCwd, terminalCache } from './terminalCache.js';
 import {
   formatTerminalSpawnError,
   isTerminalSpawnConnectionNotReadyError,
@@ -25,6 +25,7 @@ export interface SpawnTerminalSessionOptions {
 /**
  * Starts a backend PTY for an existing cached xterm instance.
  * Returns false when spawn is already in flight or the session is live.
+ * Creation failures may update only the same cache, xterm, generation and channel owner.
  */
 export function spawnTerminalSession(options: SpawnTerminalSessionOptions): boolean {
   const { termId, connectionId, term, clearBuffer = false, cwd, shell, remoteReady = true } = options;
@@ -40,8 +41,11 @@ export function spawnTerminalSession(options: SpawnTerminalSessionOptions): bool
   const generation = cached.generation + 1;
   cached.generation = generation;
   cached.connectionId = connectionId;
-  cached.pendingSpawnCwd = cwd;
   cached.pendingSpawnShell = shell;
+  cached.spawnShell = shell;
+  cached.zshAutosuggestEnabled = undefined;
+  cached.zshAutosuggestProbe = undefined;
+  invalidateTerminalGhostCwd(termId);
   cached.spawned = true;
   cached.starting = true;
   cached.suspendedByPanel = false;
@@ -68,18 +72,20 @@ export function spawnTerminalSession(options: SpawnTerminalSessionOptions): bool
       outputChannel,
     })
     .catch((err) => {
+      // Reset/dispose may replace an in-flight create, including reusing its
+      // generation after reload. Obsolete rejection is not the new shell's error.
+      if (terminalCache.get(termId) !== cached || cached.term !== term
+        || cached.generation !== generation || cached.outputChannel !== outputChannel) return;
       console.error('Failed to create terminal:', err);
       const message = formatTerminalSpawnError(err);
       term.write(`\r\n\x1b[31mFailed to start terminal session: ${message}\x1b[0m\r\n`);
-      if (cached.generation === generation) {
-        cached.starting = false;
-        cached.spawned = false;
-        if (
-          connectionId !== 'local'
-          && isTerminalSpawnConnectionNotReadyError(err, connectionId)
-        ) {
-          cached.spawnBlocked = true;
-        }
+      cached.starting = false;
+      cached.spawned = false;
+      if (
+        connectionId !== 'local'
+        && isTerminalSpawnConnectionNotReadyError(err, connectionId)
+      ) {
+        cached.spawnBlocked = true;
       }
     });
 
