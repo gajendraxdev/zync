@@ -32,6 +32,7 @@
         "tests/filePermissions.test.ts",
         "tests/editorSaveAccess.test.ts",
         "tests/transferState.test.ts",
+        "tests/workspaceSplitControls.test.ts",
         "tests/fileDestinationReservations.test.ts",
         "tests/transferOperations.test.ts",
         "tests/fileSystemRefresh.test.ts",

@@ -1,6 +1,9 @@
 import type { SplitFeatureId } from '../../../lib/paneLayout/types';
+import { isSplitLayout, isTermContent } from '../../../lib/paneLayout/query';
+import { paneContentKey } from '../../../lib/paneLayout/contentIdentity';
 import { findWorkspacePane, workspaceCanvases } from './canvases';
 import { parseWorkspaceDocking } from './docking';
+import { allowsAdditionalPaneBeside } from './dockingTopology';
 import { projectWorkspaceDocking, projectMaximizedWorkspacePane, type MaximizedWorkspacePane } from './dockingProjection';
 import { hiddenWorkspaceContent, resolveWorkspaceCanvas, type WorkspaceContentState } from './visibleContent';
 
@@ -22,6 +25,33 @@ export function workspaceSplitTarget(state: WorkspaceDockingState, scope: string
     const view = workspaceDockingView(state, scope, selection);
     const contentId = view.projection.ok ? view.projection.value.focusedContentId : null;
     return contentId ? findWorkspacePane(view.canvases, { contentId }) : undefined;
+}
+
+/**
+ * One-entry toolbar projection keyed by immutable layout inputs, not the entire
+ * app store. Progress ticks must not rebuild canvases/validate docking metadata.
+ * Each mounted consumer owns its selector; no global cache or snapshot history.
+ * Actions still use workspaceSplitTarget and repeat capacity checks on live state.
+ */
+export function createWorkspaceSplitControlsSelector(scope: string, selection: WorkspaceCanvasSelection = {}) {
+    const selected = { ...selection };
+    let previous: unknown[] | undefined;
+    let result: { isSplit: boolean; canSplit: boolean; terminalId: string | null };
+    return (state: WorkspaceDockingState) => {
+        const inputs = [state.terminals[scope], state.paneLayouts[scope], state.activeTerminalIds[scope],
+            state.activePaneGroupOwner[scope], state.contentPresentation?.[scope], state.workspaceDocking,
+            state.workspaceDockFocus?.[scope], state.maximizedWorkspacePanes?.[scope]];
+        if (previous && inputs.every((value, index) => Object.is(value, previous![index]))) return result;
+        const target = workspaceSplitTarget(state, scope, selected);
+        result = {
+            isSplit: isSplitLayout(target?.layout),
+            canSplit: Boolean(target && allowsAdditionalPaneBeside(state, scope,
+                { contentId: paneContentKey(target.leaf.content, target.leaf.id) })),
+            terminalId: target && isTermContent(target.leaf.content) ? target.leaf.content.termId : null,
+        };
+        previous = inputs;
+        return result;
+    };
 }
 
 /**

@@ -96,7 +96,7 @@ function harness(paneGroups, { multiple = true, blocked = false } = {}) {
 function tabBarCallbacks(subject, overrides = {}) {
     const store = Object.assign(selector => selector(subject.get()), { getState: subject.get });
     const component = loadSource('src/components/layout/WorkspaceTabBar.tsx', {
-        react: { memo: component => component },
+        react: { memo: component => component, useMemo: fn => fn() },
         'react/jsx-runtime': { jsx: (type, props) => ({ type, props }) },
         '../../store/useAppStore': { useAppStore: store },
         '../../hooks/useAvailableShells': { useAvailableShells: () => ({ shells: [], isLoading: false }) },

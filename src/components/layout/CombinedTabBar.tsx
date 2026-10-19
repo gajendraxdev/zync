@@ -14,7 +14,7 @@ import { deriveWorkspaceContentInventory } from '../../features/workspace/domain
 import { resolveDisplayTitle } from '../../features/workspace/domain/presentation';
 import { projectWorkspaceTabs } from '../../features/workspace/domain/tabPresentation';
 import { parseWorkspaceDocking } from '../../features/workspace/domain/docking';
-import { workspaceSplitTarget } from '../../features/workspace/domain/dockingView';
+import { createWorkspaceSplitControlsSelector } from '../../features/workspace/domain/dockingView';
 import { describeDockedTab } from '../../features/workspace/domain/dockPresentation';
 import { useWorkspaceContextActions } from '../workspace/workspaceActionsContext';
 import { FolderOpen, X, Pin, PanelRight, Search, Terminal as TerminalIcon } from 'lucide-react';
@@ -339,14 +339,12 @@ export const CombinedTabBar = memo(function CombinedTabBar({
         ?? 'Ctrl+Shift+ArrowDown') : '';
     const canOpenFeature = Boolean(onOpenFeature);
     const splitLayout = layoutForCanvas(paneGroups, activeTerminalId, activePaneGroupOwner);
-    const findTerminalId = useAppStore(state => {
-        const target = workspaceSplitTarget(state, connectionId, {
-            featureId: isSplitFeatureId(activeView) ? activeView : undefined,
-            featureInstanceId: isSplitFeatureId(activeView) ? featureTabs.find(tab => tab.id === activeFeatureTabId)?.instanceId : undefined,
-            pluginPanelId: activeView.startsWith('plugin:') ? activeView.slice('plugin:'.length) : undefined,
-        });
-        return target && isTermContent(target.leaf.content) ? target.leaf.content.termId : null;
-    });
+    const selectSplitControls = useMemo(() => createWorkspaceSplitControlsSelector(connectionId, {
+        featureId: isSplitFeatureId(activeView) ? activeView : undefined,
+        featureInstanceId: isSplitFeatureId(activeView) ? featureTabs.find(tab => tab.id === activeFeatureTabId)?.instanceId : undefined,
+        pluginPanelId: activeView.startsWith('plugin:') ? activeView.slice('plugin:'.length) : undefined,
+    }), [connectionId, activeView, featureTabs, activeFeatureTabId]);
+    const findTerminalId = useAppStore(selectSplitControls).terminalId;
     const splitGroups = Object.entries(paneGroups ?? {})
         .filter((entry): entry is [string, NonNullable<typeof entry[1]>] => isSplitLayout(entry[1]));
     const allPaneLeaves = Object.values(paneGroups ?? {}).flatMap(layout => collectLeaves(layout.root));

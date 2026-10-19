@@ -94,6 +94,7 @@ const tests = [
   'tests/customizationSettingsStorage.test.mjs',
   'tests/workspaceDocking.test.mjs',
   'tests/workspaceDockingProjection.test.mjs',
+  'tests/workspaceSplitControls.test.mjs',
   'tests/workspaceDockingActions.test.mjs',
   'tests/workspaceRegionResize.test.mjs',
   'tests/workspaceRegionDropPointer.test.mjs',
