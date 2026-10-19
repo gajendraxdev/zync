@@ -6,6 +6,12 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Fixed
 
+- **Terminal output and lifecycle:** Bound queued output until the renderer has
+  parsed it, preserve final output before shell completion, and ignore obsolete
+  startup, metadata and output callbacks after a terminal is replaced. Keep
+  cancellation responsive and prevent an input-writer failure after a recorded
+  shell exit from disconnecting the whole host. ([22b5ed1])
+
 - **Local terminal responsiveness:** Move blocking PTY writes, resize and
   teardown off async workers without holding the shared session lock during
   slow platform calls. Preserve input ordering after cancellation and prevent
@@ -63,6 +69,12 @@ All notable changes to Zync are documented in this file. The format is based on 
   deletions from restoring stale folder contents. ([d8d6586], [69a16cb])
 
 ### Changed
+
+- **SSH transport:** Upgrade to the published `russh 0.64.1` package, with no
+  local fork or vendored SSH source. Adapt password/encrypted-key authentication,
+  RSA SHA-2 negotiation, SFTP and forwarding while preserving explicit host-key
+  approval and agent-forwarding consent. Raise the `bytes` minimum to `1.11.1`
+  for the upstream security fix. ([67c532b])
 
 - **Maintenance:** Clarify shortcut, settings and terminal code comments without
   changing runtime behavior. ([ac067a6])
@@ -2896,3 +2908,5 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [2b54a0d]: https://github.com/zync-sh/zync/commit/2b54a0de6b83c65df5bc8a463fc27e7d5a27d871
 [5a0ce24]: https://github.com/zync-sh/zync/commit/5a0ce24d82003801aaa07ad86bfbd0a8fb4769c0
 [43d59da]: https://github.com/zync-sh/zync/commit/43d59da1cdf91177c8c01683cbc0294f4da156f3
+[67c532b]: https://github.com/zync-sh/zync/commit/67c532b4345a0ba7093195316d53f92487306e68
+[22b5ed1]: https://github.com/zync-sh/zync/commit/22b5ed1e3291d72c9e3f377cfa6b81f169b7d493
