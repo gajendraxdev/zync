@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
+import { clearTerminalRendererSession, getTerminalRendererState } from '../.tmp-agent-tests/src/lib/terminal/rendererSession.js';
 import {
-  clearTerminalRendererSession,
-  getTerminalRendererState,
   reactivateTerminalWebgl,
   syncTerminalRenderer,
-} from '../.tmp-agent-tests/src/lib/terminal/index.js';
+} from '../.tmp-agent-tests/src/lib/terminal/rendererController.js';
 
 function runTest(name, fn) {
   try {
@@ -62,31 +61,6 @@ async function runAll() {
     clearTerminalRendererSession(SESSION);
   });
 
-  await runTest('gpu off during in-flight WebGL load settles on dom', async () => {
-    clearTerminalRendererSession(SESSION);
-    const state = getTerminalRendererState(SESSION);
-    let releaseWebgl;
-    const inFlightWebgl = new Promise((resolve) => {
-      releaseWebgl = () => resolve('webgl');
-    });
-    state.loadPromise = inFlightWebgl;
-    state.kind = 'dom';
-    state.desiredKind = 'webgl';
-
-    const domPromise = syncTerminalRenderer(SESSION, mockTerm, {
-      gpuAcceleration: false,
-    });
-    assert.notEqual(domPromise, inFlightWebgl);
-
-    releaseWebgl();
-    const kind = await domPromise;
-    assert.equal(kind, 'dom');
-    assert.equal(state.kind, 'dom');
-    assert.equal(state.webglAddon, undefined);
-    assert.equal(state.desiredKind, 'dom');
-    clearTerminalRendererSession(SESSION);
-  });
-
   await runTest('gpu off after WebGL loads explicit dom renderer', async () => {
     clearTerminalRendererSession(SESSION);
     const state = getTerminalRendererState(SESSION);
@@ -121,6 +95,7 @@ async function runAll() {
 
   await runTest('reactivate falls back to dom when WebGL2 is unavailable (Node)', async () => {
     clearTerminalRendererSession(SESSION);
+    getTerminalRendererState(SESSION);
     const kind = await reactivateTerminalWebgl(SESSION, mockTerm, {});
     const state = getTerminalRendererState(SESSION);
     assert.equal(kind, 'dom');

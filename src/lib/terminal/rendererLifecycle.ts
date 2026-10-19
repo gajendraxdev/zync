@@ -1,5 +1,6 @@
 import type { Terminal } from '@xterm/xterm';
 import type { TerminalRendererState } from './types.js';
+import { isTerminalDomMeasurable } from './terminalFit.js';
 
 function isWebglDisposeBenignError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
@@ -7,29 +8,28 @@ function isWebglDisposeBenignError(err: unknown): boolean {
     || message.includes("Cannot read properties of undefined (reading '_isDisposed')");
 }
 
-export interface DisposeWebglAddonOptions {
-  /** GL context already gone — skip addon.dispose() to avoid _isDisposed throws. */
-  contextAlreadyLost?: boolean;
-}
-
+/** Pause the public focus lifecycle before disposal so addon 0.19's blink timer cannot retain xterm. */
 export function disposeWebglAddonInternal(
   state: TerminalRendererState,
   term?: Terminal,
-  options?: DisposeWebglAddonOptions,
 ): void {
   const addon = state.webglAddon;
   if (!addon) return;
+  term ??= state.terminal;
+  const textarea = term?.textarea;
+  const restoreFocus = Boolean(textarea && textarea.ownerDocument.activeElement === textarea);
+
+  // Blur stops blinking even when DECSET 12 overrides the cursorBlink option.
+  // Do not alter terminal options or persist a different user preference.
+  term?.blur?.();
 
   state.webglAddon = undefined;
   state.kind = 'dom';
   state.webglLigaturesStamp = undefined;
 
-  if (options?.contextAlreadyLost) {
-    return;
-  }
-
   let disposeFailed = false;
   try {
+    // Lost GL contexts still have JS listeners/timers that need disposal.
     addon.dispose();
   } catch (err) {
     if (isWebglDisposeBenignError(err)) {
@@ -37,6 +37,10 @@ export function disposeWebglAddonInternal(
     }
     disposeFailed = true;
     console.warn('[terminal] addon dispose failed', err);
+  } finally {
+    const active = textarea?.ownerDocument.activeElement;
+    if (restoreFocus && !state.disposed && isTerminalDomMeasurable(term)
+      && (!active || active === textarea?.ownerDocument.body)) term?.focus?.();
   }
 
   if (disposeFailed && term) {
@@ -77,17 +81,14 @@ export function ensureDomRenderer(state: TerminalRendererState, term?: Terminal)
   state.kind = 'dom';
 }
 
+/** Revoke pending initialization before releasing the current addon; never refocus a closed owner. */
 export function disposeTerminalRenderer(
   state: TerminalRendererState | undefined,
   term?: Terminal,
 ): void {
   if (!state) return;
-  if (state.loadPromise) {
-    void state.loadPromise.finally(() => {
-      disposeWebglAddonInternal(state, term);
-    });
-    state.loadPromise = null;
-  } else {
-    disposeWebglAddonInternal(state, term);
-  }
+  state.disposed = true;
+  state.desiredKind = 'dom';
+  disposeWebglAddonInternal(state, term);
+  state.terminal = undefined;
 }

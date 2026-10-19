@@ -4,6 +4,10 @@
 export type TerminalRendererKind = 'webgl' | 'dom';
 
 export interface TerminalRendererState {
+  /** Closed owners cannot install addons or publish late renderer callbacks. */
+  disposed?: boolean;
+  /** The live xterm owner; also used when a caller requests cleanup by session only. */
+  terminal?: import('@xterm/xterm').Terminal;
   /** Active renderer after the last successful apply. */
   kind: TerminalRendererKind;
   /** Last renderer target requested by policy/settings. */

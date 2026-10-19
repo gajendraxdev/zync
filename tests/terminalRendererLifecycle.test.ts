@@ -1,4 +1,7 @@
 import type { useTerminalLifecycle } from '../src/components/terminal/useTerminalLifecycle';
+import { createInitialRendererState } from '../src/lib/terminal/types';
+import type { Terminal } from '@xterm/xterm';
+import { isTerminalDomMeasurable } from '../src/lib/terminal/terminalFit';
 
 type Hook = typeof useTerminalLifecycle;
 type Props = Parameters<Hook>[0];
@@ -159,4 +162,173 @@ export async function runRendererLifecycleChecks(
     f.unmount(); checks++;
   }
   console.log(`Terminal deferred-renderer lifecycle checks passed (${checks}).`);
+}
+
+/** Drive the real controller and cleanup through gated imports and explicit xterm boundary fakes. */
+export async function runRendererOwnershipChecks(
+  load: (file: string, dependencies: Record<string, unknown>, globals?: Record<string, unknown>) => unknown,
+): Promise<void> {
+  type Controller = typeof import('../src/lib/terminal/rendererController');
+  type Lifecycle = typeof import('../src/lib/terminal/rendererLifecycle');
+  function fixture() {
+    const lifecycle = load('lib/terminal/rendererLifecycle.ts', {
+      './terminalFit.js': { isTerminalDomMeasurable },
+    }) as Lifecycle;
+    let state = createInitialRendererState();
+    let constructions = 0, loads = 0, disposals = 0, focuses = 0, events = 0;
+    let failActivation = false;
+    const losses: Array<() => void> = [];
+    let release!: () => void;
+    class Addon {
+      constructor() { constructions++; }
+      onContextLoss(callback: () => void) { losses.push(callback); }
+      dispose() { equal(doc.activeElement, null, 'blur precedes addon disposal'); disposals++; }
+    }
+    const module = new Promise(resolve => { release = () => resolve({ WebglAddon: Addon }); });
+    const doc: { activeElement: unknown } = { activeElement: null };
+    const textarea = { ownerDocument: doc };
+    const term = {
+      options: { cursorBlink: true }, textarea, rows: 24, refresh() {},
+      element: { isConnected: true, clientWidth: 600, clientHeight: 300 },
+      focus() { focuses++; doc.activeElement = textarea; },
+      blur() { doc.activeElement = null; },
+      loadAddon() { loads++; if (failActivation) throw new Error('activation failure'); },
+    } as unknown as Terminal;
+    term.focus();
+    const controller = load('lib/terminal/rendererController.ts', {
+      './rendererLifecycle.js': lifecycle,
+      './terminalFit.js': { isTerminalDomMeasurable: () => true },
+      './rendererPolicy.js': { resolveDesiredTerminalRenderer: (prefs: { gpuAcceleration: boolean; webglContextLossBlocked: boolean }) =>
+        prefs.gpuAcceleration && !prefs.webglContextLossBlocked ? 'webgl' : 'dom' },
+      './rendererSession.js': { getTerminalRendererState: () => state, hasTerminalRendererSession: () => !state.disposed },
+      './webglCapability.js': { isWebgl2Available: () => true },
+      '@xterm/addon-webgl': module,
+    }, {
+      window: { dispatchEvent() { events++; } },
+      CustomEvent: class { constructor(public name: string, public options: unknown) {} },
+      console: { warn() {} },
+    }) as Controller;
+    return { controller, lifecycle, term, doc, textarea, release, losses,
+      state: () => state, replace: () => { state = createInitialRendererState(); },
+      failActivation: () => { failActivation = true; },
+      counts: () => ({ constructions, loads, disposals, focuses, events }) };
+  }
+  async function reachImport() { for (let i = 0; i < 5; i++) await Promise.resolve(); }
+  let checks = 0;
+  {
+    const f = fixture();
+    const requests = Array.from({ length: 25 }, () => f.controller.syncTerminalRenderer('s', f.term, { gpuAcceleration: true }));
+    requests.forEach(request => equal(request, requests[0], 'same-target requests reuse pending work'));
+    await reachImport(); equal(f.counts().constructions, 0, 'lazy import is genuinely pending');
+    f.release(); await Promise.all(requests);
+    equal(f.counts().loads, 1, 'overlapping requests install exactly one addon');
+    equal(f.state().loadPromise, null, 'completed work releases its promise');
+    f.lifecycle.disposeTerminalRenderer(f.state(), f.term); checks++;
+  }
+  for (const finalGpu of [false, true]) {
+    const f = fixture();
+    const first = f.controller.syncTerminalRenderer('s', f.term, { gpuAcceleration: true });
+    await reachImport();
+    equal(f.controller.syncTerminalRenderer('s', f.term, { gpuAcceleration: false }), first, 'GPU off joins the owner transition');
+    if (finalGpu) equal(f.controller.syncTerminalRenderer('s', f.term, { gpuAcceleration: true }), first, 'latest GPU on joins the same transition');
+    f.release();
+    equal(await first, finalGpu ? 'webgl' : 'dom', 'latest GPU/DOM request wins');
+    equal(f.counts().loads, finalGpu ? 1 : 0, 'obsolete GPU intent cannot install an addon');
+    f.lifecycle.disposeTerminalRenderer(f.state(), f.term); checks++;
+  }
+  {
+    const f = fixture();
+    const stale = f.controller.syncTerminalRenderer('s', f.term, { gpuAcceleration: true });
+    await reachImport();
+    const closed = f.state(); f.lifecycle.disposeTerminalRenderer(closed, f.term);
+    f.replace();
+    const replacement = { ...f.term, loadAddon() {} } as unknown as Terminal;
+    const fresh = f.controller.syncTerminalRenderer('s', replacement, { gpuAcceleration: true });
+    f.release();
+    equal(await stale, 'dom', 'closed owner cannot finish GPU initialization');
+    equal(await fresh, 'webgl', 'same-id replacement initializes independently');
+    equal(f.counts().constructions, 1, 'only the replacement constructs an addon');
+    equal(closed.terminal, undefined, 'closed state releases its terminal reference');
+    equal(f.state().terminal, replacement, 'late callbacks cannot replace current ownership');
+    f.lifecycle.disposeTerminalRenderer(f.state(), replacement); checks++;
+  }
+  {
+    const f = fixture(); f.release();
+    await f.controller.syncTerminalRenderer('s', f.term, { gpuAcceleration: true });
+    const first = f.controller.reactivateTerminalWebgl('s', f.term);
+    equal(f.controller.reactivateTerminalWebgl('s', f.term), first, 'reactivation reuses pending work');
+    await first;
+    equal(f.counts().loads, 2, 'reactivation installs one replacement');
+    equal(f.counts().disposals, 1, 'reactivation disposes the previous renderer once');
+    equal(f.doc.activeElement, f.textarea, 'live renderer replacement preserves focus');
+    equal(f.term.options.cursorBlink, true, 'cleanup does not change cursor preferences');
+    f.losses[0]();
+    equal(f.state().webglContextLossBlocked, false, 'obsolete context-loss callbacks cannot block a replacement');
+    await f.controller.syncTerminalRenderer('s', f.term, { gpuAcceleration: false });
+    equal(f.doc.activeElement, f.textarea, 'DOM fallback preserves input focus');
+    await f.controller.syncTerminalRenderer('s', f.term, { gpuAcceleration: true });
+    const beforeClose = f.counts();
+    f.lifecycle.disposeTerminalRenderer(f.state(), f.term);
+    equal(f.counts().focuses, beforeClose.focuses, 'teardown never refocuses a closed terminal');
+    checks++;
+  }
+  {
+    const f = fixture(); f.release(); f.failActivation();
+    equal(await f.controller.syncTerminalRenderer('s', f.term, { gpuAcceleration: true }), 'dom', 'activation failure falls back to DOM');
+    equal(f.counts().disposals, 1, 'partially activated addon is disposed');
+    equal(f.state().webglAddon, undefined, 'failed activation cannot leave an owned addon');
+    equal(f.state().loadPromise, null, 'failed activation releases pending work');
+    f.lifecycle.disposeTerminalRenderer(f.state(), f.term); checks++;
+  }
+  {
+    const f = fixture();
+    const pending = f.controller.syncTerminalRenderer('s', f.term, { gpuAcceleration: true });
+    await reachImport();
+    f.lifecycle.disposeTerminalRenderer(f.state(), f.term);
+    f.release(); await pending;
+    equal(f.counts().events, 0, 'closed import completion publishes no stale notification');
+    equal(await f.controller.reactivateTerminalWebgl('s', f.term), 'dom', 'late reactivation cannot resurrect a closed owner');
+    equal(f.counts().loads, 0, 'teardown during import never installs an addon'); checks++;
+  }
+  {
+    const f = fixture(); f.release();
+    await f.controller.syncTerminalRenderer('s', f.term, { gpuAcceleration: true });
+    let turnOff!: Promise<'webgl' | 'dom'>;
+    await f.controller.reactivateTerminalWebgl('s', f.term, {
+      onRefit() { turnOff = f.controller.syncTerminalRenderer('s', f.term, { gpuAcceleration: false }); },
+    });
+    await turnOff;
+    equal(f.state().kind, 'dom', 'synchronous refit requests are reconciled before settling');
+    f.lifecycle.disposeTerminalRenderer(f.state(), f.term); checks++;
+  }
+  {
+    const f = fixture(); f.release();
+    await f.controller.syncTerminalRenderer('s', f.term, { gpuAcceleration: true });
+    f.losses[0](); await reachImport();
+    equal(f.state().webglContextLossBlocked, true, 'current context loss blocks further GPU activation');
+    equal(f.counts().disposals, 1, 'context loss still disposes JS listeners and cursor timers');
+    equal(await f.controller.syncTerminalRenderer('s', f.term, { gpuAcceleration: true }), 'dom', 'context loss remains DOM-only');
+    f.lifecycle.disposeTerminalRenderer(f.state(), f.term); checks++;
+  }
+  {
+    const f = fixture(); f.release();
+    await f.controller.syncTerminalRenderer('s', f.term, { gpuAcceleration: true });
+    const before = f.counts().focuses;
+    Object.defineProperty(f.term.element, 'clientWidth', { value: 0 });
+    await f.controller.syncTerminalRenderer('s', f.term, { gpuAcceleration: false });
+    equal(f.counts().focuses, before, 'background disposal cannot refocus a hidden terminal');
+    f.lifecycle.disposeTerminalRenderer(f.state(), f.term); checks++;
+  }
+  {
+    const f = fixture(); f.release();
+    await f.controller.syncTerminalRenderer('s', f.term, { gpuAcceleration: true });
+    const elsewhere = {};
+    const addon = f.state().webglAddon!;
+    const dispose = addon.dispose.bind(addon);
+    addon.dispose = () => { dispose(); f.doc.activeElement = elsewhere; };
+    await f.controller.syncTerminalRenderer('s', f.term, { gpuAcceleration: false });
+    equal(f.doc.activeElement, elsewhere, 'cleanup cannot steal focus changed by another handler');
+    f.lifecycle.disposeTerminalRenderer(f.state(), f.term); checks++;
+  }
+  console.log(`Terminal renderer ownership and cleanup checks passed (${checks}).`);
 }
