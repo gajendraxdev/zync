@@ -84,6 +84,10 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "=0.2.180"
 
+[target.'cfg(unix)'.dev-dependencies]
+# Unix PTY test doubles implement portable-pty's libc::pid_t signature.
+libc = "=0.2.180"
+
 # Thin LTO for the PTY/SSH path without fat-LTO link times. codegen-units 8 is
 # tighter than Cargo's default 16 and cheaper than 1 on Windows/macOS release CI.
 [profile.release]
