@@ -13,6 +13,11 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Fixed
 
+- **Folder-size Properties:** Keep loading accessible to screen readers, remove
+  redundant detail instructions and unavailable-size selection text, and prevent
+  obsolete scan results or retries after closing Properties or changing folders.
+  ([e12821c])
+
 - **Terminal settings:** Separate keyboard and mouse preferences from GPU
   rendering, and remove the redundant keyboard-settings hover tooltip.
   ([7ce3773])
@@ -85,6 +90,13 @@ All notable changes to Zync are documented in this file. The format is based on 
   deletions from restoring stale folder contents. ([d8d6586], [69a16cb])
 
 ### Changed
+
+- **Folder-size calculation:** Calculate only when inspecting one folder in
+  Properties, with cancellation and retry controls. Remove automatic listing
+  scans and their settings. Use a bounded server-side metadata scan on supported
+  Linux SSH hosts, with the existing local/SFTP traversal as fallback; no file
+  contents are read or server helper installed. Reuse memoized Files controls
+  while results arrive. ([e12821c])
 
 - **File transfer throughput:** Upgrade to published `russh-sftp 3.0.1` and use
   bounded read/write pipelining through the existing transfer service. Preserve
@@ -2934,3 +2946,4 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [2b17a85]: https://github.com/zync-sh/zync/commit/2b17a85894263dd196d6e56ec7220742cd41a988
 [0177174]: https://github.com/zync-sh/zync/commit/0177174e18fb8e15463ebb720bee3859ee16c799
 [7ce3773]: https://github.com/zync-sh/zync/commit/7ce3773e0fdb115b42b9f4c1d432c6f9a236677d
+[e12821c]: https://github.com/zync-sh/zync/commit/e12821c7c6b47f45361bdaa3b4ea68d531f2fae3
