@@ -16,11 +16,6 @@ export function TerminalShortcutControl({ compact = false, showExceptions = fals
     const overrides = useAppStore(state => state.settings.keybindings) ?? {};
     const enabled = keyboard.terminalFocusPolicy === 'app';
     const choices = SHORTCUT_CATALOG.filter(command => command.terminalReservation);
-    const reserved = choices.filter(command => keyboard.terminalShortcutExceptions.includes(command.id)
-        && resolveShortcutBindings(command, overrides, SHORTCUT_CATALOG).active.length > 0);
-    const reservation = reserved.length
-        ? `Kept for Zync: ${reserved.map(command => `${activeShortcutBindingLabel(command, overrides, SHORTCUT_CATALOG)} (${command.label})`).join(', ')}.`
-        : 'No app shortcuts are reserved.';
     const description = enabled
         ? 'Zync shortcuts take priority in the focused terminal.'
         : 'Terminal keys take priority. Selected Zync shortcuts and terminal copy/paste remain available.';
@@ -41,7 +36,6 @@ export function TerminalShortcutControl({ compact = false, showExceptions = fals
                 disabled={pending}
                 value={keyboard.terminalFocusPolicy}
                 onChange={value => { void save({ terminalFocusPolicy: normalizeTerminalFocusPolicy(value) }); }}
-                title={`${description} ${reservation}`}
                 showSearch={false}
                 portal
                 triggerClassName="min-w-0 rounded-lg px-2.5 py-2 text-xs focus-visible:ring-2 focus-visible:ring-app-accent"

@@ -42,6 +42,7 @@ import { sameThemeSettings, themeSettingsSnapshot, type ThemeDocument, type Them
 import { createChromeActionUpdater } from '../features/workspace/application/updateChromeActions';
 import type { ChromeActionArea, ChromeActionChange } from '../features/workspace/domain/chromeActions';
 import type { MainTabCloseButtonMode } from '../features/workspace/domain/mainTabPresentation';
+import { normalizeTerminalRightClickAction, type TerminalRightClickAction } from '../lib/terminal/terminalMousePolicy';
 
 let usageConsentWrites: Promise<void> = Promise.resolve();
 
@@ -194,6 +195,10 @@ export interface AppSettings {
         fontLigatures: boolean;
         /** WebGL2 GPU renderer; falls back to DOM when unavailable. */
         gpuAcceleration: boolean;
+        /** Host action outside application mouse reporting; older settings retain the menu. */
+        rightClickAction?: TerminalRightClickAction;
+        /** Copy a non-empty mouse selection on release; never copy programmatic selections. */
+        copyOnSelect?: boolean;
         /**
          * When enabled, suspend background workspace host PTYs after idleHostPtySuspendMinutes.
          * Scrollback is preserved; press Enter on return to respawn (off by default — SSH respawn UX).
@@ -383,6 +388,8 @@ export const defaultSettings: AppSettings = {
         })(),
         fontLigatures: false,
         gpuAcceleration: true,
+        rightClickAction: 'context-menu',
+        copyOnSelect: false,
         suspendIdleHostPtys: DEFAULT_SUSPEND_IDLE_HOST_PTYS,
         idleHostPtySuspendMinutes: DEFAULT_IDLE_HOST_PTY_SUSPEND_MINUTES,
         cursorStyle: 'block',
@@ -674,6 +681,7 @@ export interface SettingsSlice {
     fetchSystemInfo: () => Promise<void>;
 }
 
+/** Own persisted app preferences and expose their existing field-specific update boundaries. */
 export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> = (set, get) => {
     const themeWrites = createPreferencesQueue();
     const keybindingWrites = createPreferencesQueue();
@@ -746,6 +754,7 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
         },
     }, themeWrites),
 
+    /** Merge legacy settings with safe defaults without rewriting a non-empty profile on load. */
     loadSettings: async () => {
         const generation = get().settingsLoadGeneration + 1;
         set({ settingsLoadGeneration: generation, isReloadingSettings: true });
@@ -766,6 +775,8 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
                 terminal: {
                     ...defaultSettings.terminal,
                     ...(loaded?.terminal || {}),
+                    rightClickAction: normalizeTerminalRightClickAction(loaded?.terminal?.rightClickAction),
+                    copyOnSelect: loaded?.terminal?.copyOnSelect === true,
                     fontFamily: normalizeTerminalFontFamily(loaded?.terminal?.fontFamily) ?? defaultSettings.terminal.fontFamily,
                     fontSize: normalizeTerminalFontSize(loaded?.terminal?.fontSize) ?? defaultSettings.terminal.fontSize,
                     fontWeight: (() => {
@@ -925,9 +936,14 @@ export const createSettingsSlice: StateCreator<AppStore, [], [], SettingsSlice> 
         set({ settings: { ...previous, sidebarCollapsed: collapsed } });
     },
 
+    /** Normalize and persist only the requested terminal fields, rolling back failed writes. */
     updateTerminalSettings: async (updates) => {
         const previous = get().settings;
         const normalizedUpdates = { ...updates };
+        if ('rightClickAction' in normalizedUpdates) {
+            normalizedUpdates.rightClickAction = normalizeTerminalRightClickAction(normalizedUpdates.rightClickAction);
+        }
+        if ('copyOnSelect' in normalizedUpdates) normalizedUpdates.copyOnSelect = normalizedUpdates.copyOnSelect === true;
         if ('idleHostPtySuspendMinutes' in normalizedUpdates) {
             normalizedUpdates.idleHostPtySuspendMinutes = normalizeIdleHostPtySuspendMinutes(
                 normalizedUpdates.idleHostPtySuspendMinutes,

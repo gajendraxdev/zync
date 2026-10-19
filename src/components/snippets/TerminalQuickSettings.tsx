@@ -8,6 +8,7 @@ import {
 import { Toggle } from '../settings/common/Toggle';
 import { cn } from '../../lib/utils';
 import { TerminalShortcutControl } from '../settings/common/TerminalShortcutControl';
+import { TerminalMouseControls } from '../settings/common/TerminalMouseControls';
 
 const CURSOR_STYLES = [
     { id: 'block' as const, label: 'Block' },
@@ -15,6 +16,7 @@ const CURSOR_STYLES = [
     { id: 'underline' as const, label: 'Line' },
 ];
 
+/** Sidebar shortcuts edit global terminal preferences through the ordinary settings updater. */
 export function TerminalQuickSettings() {
     const settings = useAppStore((s) => s.settings);
     const updateTerminalSettings = useAppStore((s) => s.updateTerminalSettings);
@@ -37,7 +39,7 @@ export function TerminalQuickSettings() {
     return (
         <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-app-border/40 px-2 py-2 space-y-3">
             <p className="px-1 text-[10px] text-app-muted leading-relaxed">
-                Quick controls for this session. Full options stay in Settings.
+                Global terminal preferences. Changes apply to all sessions. Full options stay in Settings.
             </p>
 
             <div className="rounded-lg border border-app-border/40 bg-app-surface/20 px-2 py-2 space-y-2">
@@ -97,7 +99,10 @@ export function TerminalQuickSettings() {
                         void updateTerminalSettings({ gpuAcceleration: v }).catch((e) => fail('GPU', e));
                     }}
                 />
+            </div>
+            <div className="rounded-lg border border-app-border/40 bg-app-surface/20 overflow-hidden">
                 <TerminalShortcutControl />
+                <TerminalMouseControls settings={settings.terminal} onChange={updateTerminalSettings} />
             </div>
         </div>
     );
