@@ -76,6 +76,9 @@ jobs:
           cargo test commands::private_key_inspection_tests
           cargo test ssh::tests -- --test-threads=1
           cargo test ssh::transport_tests
+          cargo test file_transfers
+          cargo test sftp_read
+          cargo test folder_sizes
           cargo test terminal_output
           cargo test pty_output
           cargo test plugins::terminal::policy

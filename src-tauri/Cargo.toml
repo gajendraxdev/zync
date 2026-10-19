@@ -41,7 +41,8 @@ portable-pty = "0.8"
 sysinfo = "0.33"
 anyhow = "1.0"
 async-trait = "0.1"
-russh-sftp = "2.1.1"
+# Published bounded read/write pipelining; no local protocol implementation.
+russh-sftp = "=3.0.1"
 uuid = { version = "1", features = ["v4"] }
 dirs = "5.0"
 whoami = "1.4"

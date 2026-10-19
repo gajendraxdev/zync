@@ -1,6 +1,20 @@
-//! One bounded retry for read-only preparation, never for filesystem mutations.
+//! Bounded SFTP session policy and read-only preparation recovery.
 
 use std::{future::Future, sync::Arc};
+
+/// Bound per-file protocol queues independently of the transfer service's job cap.
+/// Payload windows are at most 2 MiB for reads and 512 KiB for writes, excluding
+/// transport/codec overhead. The existing two-chunk stream remains unchanged.
+/// Server-advertised smaller limits are enforced by the published client.
+pub(crate) fn session_config() -> russh_sftp::client::Config {
+    russh_sftp::client::Config {
+        max_packet_len: 256 * 1024,
+        max_concurrent_reads: 8,
+        max_concurrent_writes: 16,
+        max_write_packet_len: 32 * 1024,
+        request_timeout_secs: 10,
+    }
+}
 
 /// Clear only the failed cached instance; a late failure must not evict a replacement.
 pub(crate) fn invalidate_if_current<T>(cached: &mut Option<Arc<T>>, failed: &Arc<T>) {
@@ -17,6 +31,8 @@ pub(crate) fn is_current_session<T>(cached: &Option<Arc<T>>, expected: &Arc<T>) 
         .is_some_and(|current| Arc::ptr_eq(current, expected))
 }
 
+/// Recognize closed-client evidence, including v3 dropping reply senders on EOF.
+/// Timeouts and permission/path failures alone do not authorize preparation retry.
 pub(crate) fn is_dead_session(err: &anyhow::Error) -> bool {
     let mut current: &dyn std::error::Error = err.as_ref();
     loop {
@@ -33,6 +49,8 @@ pub(crate) fn is_dead_session(err: &anyhow::Error) -> bool {
         if lower.contains("session closed")
             || lower.contains("connection is closed")
             || lower.contains("channel is eof")
+            || lower == "sender dropped"
+            || lower.ends_with(": sender dropped")
         {
             return true;
         }

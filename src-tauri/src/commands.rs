@@ -3501,14 +3501,18 @@ async fn open_sftp_stream(
     Ok(channel.into_stream())
 }
 
+/// Initialize the cached SFTP session with shared packet and per-file queue bounds.
 async fn open_sftp_session(
     session: &Arc<Mutex<russh::client::Handle<crate::ssh::Client>>>,
 ) -> Result<Arc<russh_sftp::client::SftpSession>, OpenSftpError> {
-    let sftp = russh_sftp::client::SftpSession::new(open_sftp_stream(session).await?)
-        .await
-        .map_err(|error| {
-            OpenSftpError::Initialize(format!("Failed to initialize SFTP: {error}"))
-        })?;
+    let sftp = russh_sftp::client::SftpSession::new_with_config(
+        open_sftp_stream(session).await?,
+        crate::sftp_read::session_config(),
+    )
+    .await
+    .map_err(|error| {
+        OpenSftpError::Initialize(format!("Failed to initialize SFTP: {error}"))
+    })?;
     Ok(Arc::new(sftp))
 }
 
@@ -5125,7 +5129,7 @@ pub async fn fs_folder_size_calculate(
             let endpoint = if let Some(session) = &session {
                 let stream = open_sftp_stream(session).await.map_err(|e| e.to_string())?;
                 let raw = russh_sftp::client::RawSftpSession::new(crate::folder_sizes::PacketLimited::new(stream));
-                raw.set_timeout(5).await;
+                raw.set_timeout(5);
                 raw.init().await.map_err(|e| e.to_string())?;
                 crate::folder_sizes::Endpoint::Remote(raw)
             } else { crate::folder_sizes::Endpoint::Local };

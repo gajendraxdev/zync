@@ -412,7 +412,7 @@ impl FileEndpoint for Endpoint {
     async fn create_link(&self, path: &str, target: &str, directory: bool) -> Result<(), String> {
         let _ = directory;
         match self {
-            // russh-sftp 2.1.1 writes these arguments in wire order. OpenSSH
+            // russh-sftp writes these arguments in wire order. OpenSSH
             // expects the target first, then the new link path (as in the
             // library's client example), despite the API parameter names.
             // Never retry this mutation with swapped arguments on failure.
