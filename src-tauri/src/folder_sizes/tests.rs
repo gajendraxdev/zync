@@ -46,7 +46,8 @@ async fn local_logical_bytes_and_empty_directories() {
     assert_eq!((result.files, result.folders, result.entries), (2, 2, 4));
 }
 
-#[cfg(unix)]
+// This fixture needs arbitrary filename bytes; macOS filesystems can reject invalid UTF-8.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn a_bad_entry_name_does_not_hide_later_files() {
     use std::os::unix::ffi::OsStringExt;
