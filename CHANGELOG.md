@@ -6,6 +6,11 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Fixed
 
+- **Transfer progress memory:** Reuse workspace Split/Find projections when layout
+  inputs are unchanged, avoiding repeated layout allocations during transfer
+  progress updates. Keep action-time targeting and capacity checks fresh.
+  ([0177174])
+
 - **Terminal output and lifecycle:** Bound queued output until the renderer has
   parsed it, preserve final output before shell completion, and ignore obsolete
   startup, metadata and output callbacks after a terminal is replaced. Keep
@@ -69,6 +74,11 @@ All notable changes to Zync are documented in this file. The format is based on 
   deletions from restoring stale folder contents. ([d8d6586], [69a16cb])
 
 ### Changed
+
+- **File transfer throughput:** Upgrade to published `russh-sftp 3.0.1` and use
+  bounded read/write pipelining through the existing transfer service. Preserve
+  staging, cancellation, recovery and acknowledged completion, with offline
+  protocol regressions and expanded native CI coverage. ([2b17a85])
 
 - **SSH transport:** Upgrade to the published `russh 0.64.1` package, with no
   local fork or vendored SSH source. Adapt password/encrypted-key authentication,
@@ -2910,3 +2920,5 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [43d59da]: https://github.com/zync-sh/zync/commit/43d59da1cdf91177c8c01683cbc0294f4da156f3
 [67c532b]: https://github.com/zync-sh/zync/commit/67c532b4345a0ba7093195316d53f92487306e68
 [22b5ed1]: https://github.com/zync-sh/zync/commit/22b5ed1e3291d72c9e3f377cfa6b81f169b7d493
+[2b17a85]: https://github.com/zync-sh/zync/commit/2b17a85894263dd196d6e56ec7220742cd41a988
+[0177174]: https://github.com/zync-sh/zync/commit/0177174e18fb8e15463ebb720bee3859ee16c799
