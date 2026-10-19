@@ -4,7 +4,18 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Added
+
+- **Terminal mouse controls:** Choose Context menu or Pass to terminal / Paste
+  from Settings or the terminal sidebar. Add optional copy-on-selection with a
+  brief Copied indicator. Keep Shift + right-click and keyboard menu access.
+  ([7ce3773])
+
 ### Fixed
+
+- **Terminal settings:** Separate keyboard and mouse preferences from GPU
+  rendering, and remove the redundant keyboard-settings hover tooltip.
+  ([7ce3773])
 
 - **Transfer progress memory:** Reuse workspace Split/Find projections when layout
   inputs are unchanged, avoiding repeated layout allocations during transfer
@@ -2922,3 +2933,4 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [22b5ed1]: https://github.com/zync-sh/zync/commit/22b5ed1e3291d72c9e3f377cfa6b81f169b7d493
 [2b17a85]: https://github.com/zync-sh/zync/commit/2b17a85894263dd196d6e56ec7220742cd41a988
 [0177174]: https://github.com/zync-sh/zync/commit/0177174e18fb8e15463ebb720bee3859ee16c799
+[7ce3773]: https://github.com/zync-sh/zync/commit/7ce3773e0fdb115b42b9f4c1d432c6f9a236677d
