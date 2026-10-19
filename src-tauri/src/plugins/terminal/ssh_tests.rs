@@ -4,12 +4,11 @@ use russh::{client, server, ChannelId};
 use tokio::sync::Notify;
 
 struct TestClient;
-#[async_trait::async_trait]
 impl client::Handler for TestClient {
     type Error = russh::Error;
     async fn check_server_key(
         &mut self,
-        _: &russh_keys::key::PublicKey,
+        _: &russh::keys::PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
         Ok(true)
     }
@@ -21,7 +20,6 @@ struct TestServer {
     closed: Option<oneshot::Sender<()>>,
 }
 
-#[async_trait::async_trait]
 impl server::Handler for TestServer {
     type Error = anyhow::Error;
     async fn auth_none(&mut self, _: &str) -> Result<server::Auth, Self::Error> {
@@ -30,11 +28,13 @@ impl server::Handler for TestServer {
     async fn channel_open_session(
         &mut self,
         _: russh::Channel<server::Msg>,
+        reply: server::ChannelOpenHandle,
         _: &mut server::Session,
-    ) -> Result<bool, Self::Error> {
+    ) -> Result<(), Self::Error> {
         self.opened.notify_one();
         self.allow.notified().await;
-        Ok(true)
+        reply.accept().await;
+        Ok(())
     }
     async fn channel_close(
         &mut self,
@@ -66,7 +66,11 @@ async fn setup() -> (
         closed: Some(closed_tx),
     };
     let config = Arc::new(server::Config {
-        keys: vec![russh_keys::key::KeyPair::generate_ed25519()],
+        keys: vec![russh::keys::PrivateKey::random(
+            &mut russh::keys::key::safe_rng(),
+            russh::keys::Algorithm::Ed25519,
+        )
+        .expect("generate fixture key")],
         ..Default::default()
     });
     let server = tokio::spawn(async move {
@@ -77,7 +81,7 @@ async fn setup() -> (
     let mut client = client::connect(Arc::new(client::Config::default()), address, TestClient)
         .await
         .unwrap();
-    assert!(client.authenticate_none("test").await.unwrap());
+    assert!(client.authenticate_none("test").await.unwrap().success());
     (
         Arc::new(tokio::sync::Mutex::new(client)),
         opened,

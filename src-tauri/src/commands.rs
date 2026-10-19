@@ -1481,6 +1481,7 @@ fn private_key_uses_encrypted_pem_container(content: &str) -> bool {
         || content.contains("Proc-Type: 4,ENCRYPTED")
 }
 
+/// Classify supported private-key content without storing the supplied secret.
 fn inspect_private_key_content(
     content: &str,
     passphrase: Option<&str>,
@@ -1494,7 +1495,7 @@ fn inspect_private_key_content(
                 remembered: false,
             };
         };
-        return match russh_keys::decode_secret_key(content, Some(passphrase)) {
+        return match russh::keys::decode_secret_key(content, Some(passphrase)) {
             Ok(_) => InspectPrivateKeyResponse {
                 status: "valid".to_string(),
                 encrypted: true,
@@ -1508,13 +1509,13 @@ fn inspect_private_key_content(
         };
     }
 
-    match russh_keys::decode_secret_key(content, None) {
+    match russh::keys::decode_secret_key(content, None) {
         Ok(_) => InspectPrivateKeyResponse {
             status: "valid".to_string(),
             encrypted: false,
             remembered: false,
         },
-        Err(russh_keys::Error::KeyIsEncrypted) => {
+        Err(russh::keys::Error::KeyIsEncrypted) => {
             let Some(passphrase) = passphrase.filter(|value| !value.is_empty()) else {
                 return InspectPrivateKeyResponse {
                     status: "passphraseRequired".to_string(),
@@ -1522,7 +1523,7 @@ fn inspect_private_key_content(
                     remembered: false,
                 };
             };
-            match russh_keys::decode_secret_key(content, Some(passphrase)) {
+            match russh::keys::decode_secret_key(content, Some(passphrase)) {
                 Ok(_) => InspectPrivateKeyResponse {
                     status: "valid".to_string(),
                     encrypted: true,
@@ -1692,9 +1693,13 @@ mod private_key_inspection_tests {
 
     #[test]
     fn accepts_unencrypted_private_keys_without_a_passphrase() {
-        let key = russh_keys::key::KeyPair::generate_ed25519();
+        let key = russh::keys::PrivateKey::random(
+            &mut russh::keys::key::safe_rng(),
+            russh::keys::Algorithm::Ed25519,
+        )
+        .expect("generate fixture key");
         let mut pem = Vec::new();
-        russh_keys::encode_pkcs8_pem(&key, &mut pem).expect("encode private key");
+        russh::keys::encode_pkcs8_pem(&key, &mut pem).expect("encode private key");
         let pem = String::from_utf8(pem).expect("PEM is UTF-8");
 
         let result = inspect_private_key_content(&pem, None);
@@ -1705,9 +1710,13 @@ mod private_key_inspection_tests {
 
     #[test]
     fn requires_and_verifies_encrypted_key_passphrases() {
-        let key = russh_keys::key::KeyPair::generate_ed25519();
+        let key = russh::keys::PrivateKey::random(
+            &mut russh::keys::key::safe_rng(),
+            russh::keys::Algorithm::Ed25519,
+        )
+        .expect("generate fixture key");
         let mut pem = Vec::new();
-        russh_keys::encode_pkcs8_pem_encrypted(&key, b"correct horse", 2, &mut pem)
+        russh::keys::encode_pkcs8_pem_encrypted(&key, b"correct horse", 2, &mut pem)
             .expect("encode encrypted private key");
         let pem = String::from_utf8(pem).expect("PEM is UTF-8");
 

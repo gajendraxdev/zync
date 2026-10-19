@@ -231,12 +231,11 @@ async fn prepared_only_token_is_required_before_native_phase_is_claimed() {
 /// Real SSH framing over memory only. Never connects a socket, executes a
 /// command, or uses the application's host-key, account or credential storage.
 struct Client;
-#[async_trait::async_trait]
 impl russh::client::Handler for Client {
     type Error = russh::Error;
     async fn check_server_key(
         &mut self,
-        _: &russh_keys::key::PublicKey,
+        _: &russh::keys::PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
         Ok(true)
     }
@@ -246,7 +245,6 @@ struct Server {
     release: Arc<tokio::sync::Notify>,
     closed: Arc<tokio::sync::Notify>,
 }
-#[async_trait::async_trait]
 impl russh::server::Handler for Server {
     type Error = russh::Error;
     async fn auth_none(&mut self, _: &str) -> Result<russh::server::Auth, Self::Error> {
@@ -255,11 +253,13 @@ impl russh::server::Handler for Server {
     async fn channel_open_session(
         &mut self,
         _: Channel<russh::server::Msg>,
+        reply: russh::server::ChannelOpenHandle,
         _: &mut russh::server::Session,
-    ) -> Result<bool, Self::Error> {
+    ) -> Result<(), Self::Error> {
         self.opened.notify_one();
         self.release.notified().await;
-        Ok(true)
+        reply.accept().await;
+        Ok(())
     }
     async fn channel_close(
         &mut self,
@@ -291,7 +291,11 @@ async fn transport() -> TransportFixture {
     let release = Arc::new(Notify::new());
     let closed = Arc::new(Notify::new());
     let config = Arc::new(server::Config {
-        keys: vec![russh_keys::key::KeyPair::generate_ed25519()],
+        keys: vec![russh::keys::PrivateKey::random(
+            &mut russh::keys::key::safe_rng(),
+            russh::keys::Algorithm::Ed25519,
+        )
+        .expect("generate fixture key")],
         ..Default::default()
     });
     let fixture = Server {
@@ -306,7 +310,7 @@ async fn transport() -> TransportFixture {
     let mut handle = client::connect_stream(Arc::new(client::Config::default()), local, Client)
         .await
         .unwrap();
-    assert!(handle.authenticate_none("fixture").await.unwrap());
+    assert!(handle.authenticate_none("fixture").await.unwrap().success());
     let session = Arc::new(AsyncMutex::new(handle));
     TransportFixture {
         session,

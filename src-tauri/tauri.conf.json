@@ -100,7 +100,9 @@
       "app",
       "dmg"
     ],
-    "resources": {}
+    "resources": {
+      "licenses/russh.txt": "licenses/russh.txt"
+    }
   },
   "plugins": {
     "updater": {
