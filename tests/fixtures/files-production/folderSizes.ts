@@ -1,7 +1,7 @@
 import type { FolderSizeReport } from '../../../src/features/files/domain/folderSizes';
 
 /** Isolated read-only IPC boundary. Real queue, lifecycle and presentation run unchanged. */
-export function createFolderSizeFixture() {
+export function createFolderSizeFixture(deferResults = true) {
     const calls: { command: string; id?: string; path?: string }[] = [];
     const pending = new Map<string, { resolve: (report: FolderSizeReport) => void; reject: (error: Error) => void }>();
     let acknowledge: (() => void) | undefined;
@@ -22,7 +22,8 @@ export function createFolderSizeFixture() {
                 defer = false;
                 await new Promise<void>(resolve => { acknowledge = resolve; });
             }
-            if (command === 'fs_folder_size_calculate') return new Promise<FolderSizeReport>((resolve, reject) => pending.set(args.id!, { resolve, reject }));
+            if (command === 'fs_folder_size_calculate') return deferResults
+                ? new Promise<FolderSizeReport>((resolve, reject) => pending.set(args.id!, { resolve, reject })) : { ...report };
         },
         control: {
             calls,

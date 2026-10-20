@@ -1,4 +1,4 @@
-import { memo, type RefObject } from 'react';
+import { memo, useCallback, useEffect, type RefObject } from 'react';
 import { Copy, Clipboard as ClipboardIcon, Trash2, Scissors, FolderOpen } from 'lucide-react';
 import type { Terminal as XTerm } from '@xterm/xterm';
 import { ContextMenu } from '../ui/ContextMenu';
@@ -10,9 +10,10 @@ import {
   writeTerminalClipboardText,
 } from '../../lib/terminal/terminalClipboard.js';
 import { pasteIntoTerminal, terminalInteractionForElement } from '../../lib/terminal/terminalInteraction';
+import type { TerminalMenuPosition } from '../../lib/terminal/terminalMouseBinding';
 
 export interface TerminalContextMenuProps {
-  position: { x: number; y: number };
+  position: TerminalMenuPosition;
   connectionId: string;
   sessionId: string;
   ghostSettings: AppSettings['ghostSuggestions'];
@@ -34,6 +35,34 @@ export const TerminalContextMenu = memo(function TerminalContextMenu({
   onAcceptGhostSuffix,
   onClose,
 }: TerminalContextMenuProps) {
+  useEffect(() => {
+    const root = termRef.current?.element;
+    const document = root?.ownerDocument;
+    const view = document?.defaultView;
+    // Host-owned clicks stop before shared menu dismissal. A sibling terminal
+    // must still dismiss this menu before handling its own mouse/keyboard action.
+    /** Dismiss without returning focus when another registered terminal takes ownership. */
+    const dismissForSibling = (event: Event) => {
+      const element = event.target instanceof Element ? event.target : null;
+      const sibling = terminalInteractionForElement(element);
+      if (sibling && sibling.root !== root) onClose();
+    };
+    view?.addEventListener('mousedown', dismissForSibling, true);
+    document?.addEventListener('focusin', dismissForSibling, true);
+    return () => {
+      view?.removeEventListener('mousedown', dismissForSibling, true);
+      document?.removeEventListener('focusin', dismissForSibling, true);
+    };
+  }, [onClose, termRef]);
+  /** Keyboard dismissal returns focus unless an action or outside click already moved it. */
+  const closeMenu = useCallback(() => {
+    onClose();
+    // Return keyboard focus only when it still belongs to this menu, never after
+    // an outside click or an action that deliberately moved it to another pane.
+    const root = termRef.current?.element;
+    const active = root?.ownerDocument.activeElement;
+    if (position.keyboard && active?.closest('.context-menu-container') && root?.isConnected) termRef.current?.focus();
+  }, [onClose, position.keyboard, termRef]);
   const ghostItems = ghostSettings.contextMenuEnabled && ghostSuggestion
     ? [
       {
@@ -50,7 +79,9 @@ export const TerminalContextMenu = memo(function TerminalContextMenu({
     <ContextMenu
       x={position.x}
       y={position.y}
-      onClose={onClose}
+      onClose={closeMenu}
+      autoFocus={position.keyboard}
+      ariaLabel="Terminal actions"
       items={[
         {
           label: terminalCache.get(sessionId)?.ghostPaused ? 'Resume Zync suggestions' : 'Pause Zync suggestions',

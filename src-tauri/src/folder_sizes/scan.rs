@@ -11,12 +11,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-const MAX_ENTRIES: u64 = 100_000;
-const MAX_DEPTH: u32 = 64;
-const MAX_PENDING_BYTES: usize = 1024 * 1024;
-const MAX_PENDING_FOLDERS: usize = 4096;
-const MAX_PATH_BYTES: usize = 32 * 1024;
-const TIME_LIMIT: Duration = Duration::from_secs(30);
+pub(super) const MAX_ENTRIES: u64 = 100_000;
+pub(super) const MAX_DEPTH: u32 = 64;
+pub(super) const MAX_PENDING_BYTES: usize = 1024 * 1024;
+pub(super) const MAX_PENDING_FOLDERS: usize = 4096;
+pub(super) const MAX_PATH_BYTES: usize = 32 * 1024;
+pub(super) const TIME_LIMIT: Duration = Duration::from_secs(30);
 
 #[derive(Default, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

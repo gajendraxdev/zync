@@ -17,6 +17,7 @@ import {
 import { TerminalRendererStatus } from './TerminalRendererStatus';
 import { TerminalTabIntro } from './TerminalTabIntro';
 import { TerminalAppearanceSection } from './terminal/TerminalAppearanceSection';
+import { TerminalMouseControls } from '../common/TerminalMouseControls';
 
 function shellSelectIcon(shellId: string, detected?: ReadonlyArray<ShellEntry>) {
     return <ShellIcon shell={shellEntryForIcon(shellId, detected)} size={14} />;
@@ -36,6 +37,7 @@ interface TerminalTabProps {
     setGhostProviderField: (patch: Partial<AppSettings['ghostSuggestions']['providers']>) => void;
 }
 
+/** Compose terminal preferences using the same controls and save path as quick settings. */
 export function TerminalTab({
     settings,
     wslDistros,
@@ -114,6 +116,12 @@ export function TerminalTab({
                     <div className="h-px bg-[var(--color-app-border)]/20 my-2" />
                 </>
             )}
+
+            <Section title="Mouse & clipboard">
+                <SettingsGroup>
+                    <TerminalMouseControls settings={settings.terminal} onChange={updateTerminalSettings} />
+                </SettingsGroup>
+            </Section>
 
             <Section title="Rendering">
                 <SettingsGroup>

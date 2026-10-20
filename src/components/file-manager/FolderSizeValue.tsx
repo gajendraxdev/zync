@@ -5,21 +5,21 @@ import { Modal } from '../ui/Modal';
 import { Tooltip } from '../ui/Tooltip';
 import { IconButton } from '../ui/IconButton';
 
-/** Shared list/Properties presentation; incomplete totals are never labelled exact. */
-export function FolderSizeValue({ state, compact = false, onDetails }: { state?: FolderSizeState; compact?: boolean; onDetails: () => void }) {
+/** Properties-only size and bounded-scan explanation; browsing never starts scans. */
+export function FolderSizeValue({ state, onDetails }: { state?: FolderSizeState; onDetails: () => void }) {
     if (!state) return <>—</>;
-    const pending = state.status === 'queued' || state.status === 'calculating';
+    const pending = state.status === 'calculating';
     const report = state.status === 'finished' ? state.report : null;
     const hint = folderSizeHint(state);
     const showInfo = state.status === 'unavailable' || (report && !report.complete);
     const label = report ? `${report.complete ? '' : 'Partial · '}${formatBytes(Number(report.bytes))}`
-        : state.status === 'queued' ? 'Queued' : state.status === 'calculating' ? 'Calculating…'
+        : state.status === 'calculating' ? 'Calculating…'
         : state.status === 'cancelled' ? 'Cancelled' : 'Unavailable';
     return <span className="inline-flex min-w-0 max-w-full items-center gap-1" data-folder-size-state={state.status} aria-label={label}>
-        {state.status === 'calculating' && <Loader2 size={11} aria-hidden="true" className="shrink-0 animate-spin motion-reduce:animate-none" />}
-        {!compact && (report && !report.complete ? <span className="flex min-w-0 flex-col leading-tight">
+        {pending && <Loader2 size={11} aria-hidden="true" className="shrink-0 animate-spin motion-reduce:animate-none" />}
+        {report && !report.complete ? <span className="flex min-w-0 flex-col leading-tight">
             <span className="truncate">Partial</span><span className="truncate">{formatBytes(Number(report.bytes))}</span>
-        </span> : state.status === 'calculating' ? null : <span className="truncate">{pending ? '—' : label}</span>)}
+        </span> : pending ? <span role="status" className="sr-only">{label}</span> : <span className="truncate">{label}</span>}
         {showInfo && <Tooltip content={`${label}. ${hint}`} contentClassName="max-w-xs whitespace-normal">
             <IconButton label="Folder-size details" className="h-5 w-5 text-app-muted" icon={<Info size={12} />}
                 onPointerDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}

@@ -162,6 +162,9 @@ try {
   });
   assert.deepEqual(await page.evaluate(() => controlsTest.bytes), [], 'toolbar Find never writes to the PTY');
   const controls = page.getByRole('combobox', { name: 'Keyboard shortcuts' });
+  assert.deepEqual(await controls.evaluateAll(nodes => nodes.map(node => node.hasAttribute('title'))), [false, false, false], 'visible shortcut help is not duplicated in a native hover tooltip');
+  const gpuCard = page.locator('#quick').getByRole('switch', { name: 'GPU renderer' }).locator('..');
+  assert.equal(await gpuCard.getByRole('combobox', { name: 'Keyboard shortcuts' }).count(), 0, 'keyboard preferences are not grouped under GPU rendering');
   await controls.first().waitFor();
   assert.equal(await controls.count(), 3, 'all three surfaces expose the same control');
   assert.equal(await page.getByText('Give keys to the shell').count(), 0);

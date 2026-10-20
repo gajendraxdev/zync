@@ -17,6 +17,7 @@ const { createUiSlice } = load('store/uiSlice.ts');
 const { DEFAULT_KEYBOARD_SETTINGS, normalizeKeyboardSettings } = load('features/shortcuts/policy.ts');
 const { SHORTCUT_CATALOG } = load('features/shortcuts/catalog.ts');
 const { resolveShortcutBindings } = load('features/shortcuts/bindings.ts');
+const { normalizeTerminalRightClickAction } = load('lib/terminal/terminalMousePolicy.ts');
 // Retired data is deliberately opaque; neither renderer nor native code decodes it.
 const fixture = { version: 99, opaque: ['retain', null] };
 const copy = value => structuredClone(value);
@@ -41,7 +42,7 @@ function realStore(invoke, persistSettings = () => assert.fail('generic settings
             keybindings: Object.fromEntries(SHORTCUT_CATALOG.filter(row => row.settingsKey).map(row => [row.settingsKey, row.defaultKeys])) },
         normalizeTerminalFontFamily: identity, normalizeTerminalFontSize: identity, normalizeTerminalFontWeight: identity,
         normalizeTerminalFontWeightBold: identity, resolveTerminalFontWeightBold: identity, normalizeIdleHostPtySuspendMinutes: identity,
-        DEFAULT_KEYBOARD_SETTINGS, normalizeKeyboardSettings, normalizeNotificationSettings: identity, normalizeStatusBarSettings: identity, normalizeSurveySettings: identity,
+        DEFAULT_KEYBOARD_SETTINGS, normalizeKeyboardSettings, normalizeTerminalRightClickAction, normalizeNotificationSettings: identity, normalizeStatusBarSettings: identity, normalizeSurveySettings: identity,
         migrateFileViewKeybindings: identity, migrateSplitPaneKeybinding: identity,
         persistSettings,
     });
@@ -49,6 +50,32 @@ function realStore(invoke, persistSettings = () => assert.fail('generic settings
     state = { ...createUiSlice(set, get), ...module.exports.createSettingsSlice(set, get) };
     return { get, set };
 }
+
+test('terminal mouse preferences persist, normalize on load, and roll back failed writes', async () => {
+    let disk = { theme: 'dark', terminal: { fontSize: 15, rightClickAction: 'auto', copyOnSelect: true } };
+    const store = realStore(async () => copy(disk), async patch => { disk.terminal = { ...disk.terminal, ...patch.terminal }; });
+    await store.get().loadSettings();
+    assert.equal(store.get().settings.terminal.rightClickAction, 'auto');
+    assert.equal(store.get().settings.terminal.copyOnSelect, true);
+    await store.get().updateTerminalSettings({ rightClickAction: 'passthrough', copyOnSelect: false });
+    await store.get().loadSettings();
+    assert.equal(store.get().settings.terminal.rightClickAction, 'auto');
+    assert.equal(store.get().settings.terminal.copyOnSelect, false);
+    assert.equal(store.get().settings.terminal.fontSize, 15);
+    disk.terminal = { fontSize: 15, rightClickAction: 'unsupported', copyOnSelect: 'true' };
+    await store.get().loadSettings();
+    assert.equal(store.get().settings.terminal.rightClickAction, 'context-menu');
+    assert.equal(store.get().settings.terminal.copyOnSelect, false);
+    const failed = realStore(async () => copy(disk), async () => { throw new Error('disk unavailable'); });
+    await failed.get().loadSettings();
+    await assert.rejects(failed.get().updateTerminalSettings({ rightClickAction: 'paste', copyOnSelect: true }));
+    assert.equal(failed.get().settings.terminal.rightClickAction, 'context-menu');
+    assert.equal(failed.get().settings.terminal.copyOnSelect, false);
+    disk.terminal = { fontSize: 15 };
+    await store.get().loadSettings();
+    assert.equal(store.get().settings.terminal.rightClickAction, 'context-menu');
+    assert.equal(store.get().settings.terminal.copyOnSelect, false);
+});
 
 test('fresh settings persist recommended reservations once; saved and legacy choices survive loading', async () => {
     let disk = {}; const writes = [];

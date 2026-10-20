@@ -1,5 +1,6 @@
 import { memo, useCallback, useState, type CSSProperties, type DragEvent, type RefObject } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
+import { createPortal } from 'react-dom';
 import { cn } from '../../lib/utils';
 import { useInternalFileDrag } from '../../lib/dragDrop';
 import type { AppSettings } from '../../store/settingsSlice';
@@ -9,6 +10,7 @@ import { pasteFilePathsIntoTerminal } from '../../lib/terminal/pasteFileDropToTe
 import { GhostSuggestionOverlay } from './GhostSuggestionOverlay';
 import { TerminalSearchBar } from './TerminalSearchBar';
 import { TerminalContextMenu } from './TerminalContextMenu';
+import type { TerminalCopyPosition, TerminalMenuPosition } from '../../lib/terminal/terminalMouseBinding';
 
 export interface TerminalHostProps {
   containerRef: RefObject<HTMLDivElement | null>;
@@ -25,8 +27,8 @@ export interface TerminalHostProps {
   onSearchNext: () => void;
   onSearchPrev: () => void;
   onSearchClose: () => void;
-  contextMenu: { x: number; y: number } | null;
-  onOpenContextMenu: (position: { x: number; y: number }) => void;
+  contextMenu: TerminalMenuPosition | null;
+  copied: TerminalCopyPosition | null;
   onCloseContextMenu: () => void;
   connectionId: string;
   ghostSettings: AppSettings['ghostSuggestions'];
@@ -52,7 +54,7 @@ export const TerminalHost = memo(function TerminalHost({
   onSearchPrev,
   onSearchClose,
   contextMenu,
-  onOpenContextMenu,
+  copied,
   onCloseContextMenu,
   connectionId,
   ghostSettings,
@@ -102,6 +104,13 @@ export const TerminalHost = memo(function TerminalHost({
         onClose={onSearchClose}
       />
 
+      {copied && termRef.current?.element && createPortal(
+        <span role="status" className="fixed z-50 pointer-events-none rounded border border-app-border bg-app-surface px-2 py-1 text-[10px] font-medium text-app-text shadow-sm"
+          style={{ left: copied.x, top: copied.y - 8, transform: 'translate(-50%, -100%)' }}>
+          Copied
+        </span>, termRef.current.element.ownerDocument.body,
+      )}
+
       {contextMenu && (
         <TerminalContextMenu
           position={contextMenu}
@@ -130,10 +139,6 @@ export const TerminalHost = memo(function TerminalHost({
             ref={containerRef}
             className="h-full w-full terminal-container pointer-events-auto"
             onClick={() => termRef.current?.focus()}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              onOpenContextMenu({ x: e.clientX, y: e.clientY });
-            }}
           />
           {termRef.current && ghostSettings.inlineEnabled && ghostSuggestion && (
             <div className="absolute inset-0 pointer-events-none overflow-hidden">

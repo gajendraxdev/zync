@@ -26,6 +26,7 @@
         "tests/changedFunctionDocs.test.ts",
         "tests/terminalOutputFlow.test.ts",
         "tests/terminalRendererLifecycle.test.ts",
+        "tests/terminalRendererMemory.browser.ts",
         "tests/ghostCwdSafety.test.ts",
         "tests/ghostPromptSafety.test.ts",
         "tests/folderSizes.test.ts",

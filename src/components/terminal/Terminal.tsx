@@ -13,6 +13,7 @@ import { useTerminalKeybindings } from './useTerminalKeybindings';
 import { useTerminalGlobalShortcuts } from './useTerminalGlobalShortcuts';
 import { TerminalDisconnectedView } from './TerminalDisconnectedView';
 import { TerminalHost } from './TerminalHost';
+import type { TerminalMenuPosition } from '../../lib/terminal/terminalMouseBinding';
 
 interface TerminalComponentProps {
   connectionId?: string;
@@ -48,7 +49,7 @@ export const TerminalComponent = memo(function TerminalComponent({
   const termRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<TerminalMenuPosition | null>(null);
 
   const globalActiveId = useAppStore((state) => state.activeConnectionId);
   const connections = useAppStore((state) => state.connections);
@@ -167,12 +168,14 @@ export const TerminalComponent = memo(function TerminalComponent({
     onBindMount,
   });
 
-  useTerminalGlobalShortcuts({
+  const { copied } = useTerminalGlobalShortcuts({
     isVisible: isVisible && isWorkspaceActive && isTerminalView && isConnected,
     isKeyboardOwner: isFocused ?? isActiveTab,
     sessionId,
     termRef,
     onOpenSearch: openSearch,
+    mousePreferences: settings.terminal,
+    onOpenContextMenu: setContextMenu,
   });
 
   useEffect(() => {
@@ -235,7 +238,7 @@ export const TerminalComponent = memo(function TerminalComponent({
       onSearchPrev={handlePrev}
       onSearchClose={handleClose}
       contextMenu={contextMenu}
-      onOpenContextMenu={setContextMenu}
+      copied={copied}
       onCloseContextMenu={() => setContextMenu(null)}
       connectionId={terminalKey}
       ghostSettings={ghostSettings}

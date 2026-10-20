@@ -6,7 +6,6 @@ import { FileActionMenu } from './FileActionMenu';
 import { FileQueryEditor, type FileSearchTypeFilter } from './FileQueryEditor';
 import { FileViewControls } from './FileViewControls';
 import { fileSelectionSizeLabel, type FileSelectionSummary } from './fileSelectionSummary';
-import { MAX_FOLDER_SIZE_BATCH } from '../../features/files/domain/folderSizes';
 
 const counted = (count: number, label: string) => `${count} ${label}${count === 1 ? '' : 's'}`;
 
@@ -16,7 +15,6 @@ export function FileContentsHeader({
   onToggleSearch, typeFilter, onTypeFilter, isPropertiesOpen, onProperties,
   onRefresh, onCopyLocation, onBookmark, isBookmarked, onOpenTerminal,
   onPaste, canPaste, onSelectAll, onClearSelection, disabled, view,
-  folderSizes,
 }: {
   folderName: string;
   visibleCount: number;
@@ -42,13 +40,16 @@ export function FileContentsHeader({
   onClearSelection: () => void;
   disabled: boolean;
   view: ComponentProps<typeof FileViewControls>;
-  folderSizes?: { active: boolean; limited: boolean; cancel: () => void };
 }) {
   const searchTrigger = useRef<HTMLButtonElement>(null);
   const selectedCount = selection.count;
   const selectedSize = fileSelectionSizeLabel(selection);
   const selectionHint = selectedCount > 0
-    ? `${selectedCount} selected. ${counted(selection.files, 'file')}, ${counted(selection.folders, 'folder')}, ${counted(selection.links, 'link')}. ${selectedSize ? `${selectedSize}. ` : ''}Folder contents are included only when calculated; link targets are not counted.${selection.unknownSizes || selection.partialSizes ? ' The total is incomplete, not a guaranteed lower bound.' : ''}`
+    ? `${selectedCount} selected${selectedSize ? ` · ${selectedSize}` : ''}. ${[
+      selection.files ? counted(selection.files, 'file') : '',
+      selection.folders ? counted(selection.folders, 'folder') : '',
+      selection.links ? counted(selection.links, 'link') : '',
+    ].filter(Boolean).join(', ')}.${selection.folders ? ' Folder sizes are shown in Properties.' : ''}${selection.links ? ' Link targets excluded.' : ''}`
     : '';
   const inventory = searchTerm || typeFilter !== 'all' ? `${visibleCount} of ${totalCount} shown` : counted(totalCount, 'item');
   const closeSearch = () => {
@@ -89,8 +90,6 @@ export function FileContentsHeader({
       </Tooltip>
       <FileActionMenu label="Folder actions" icon={<MoreHorizontal size={15} />} iconOnly items={[
         { label: 'Reload', icon: <RefreshCw size={14} />, disabled: loading || disabled, action: onRefresh },
-        ...(folderSizes?.active ? [{ label: 'Cancel folder-size calculation',
-          icon: <X size={14} />, disabled, action: folderSizes.cancel }] : []),
         { label: isBookmarked ? 'Unpin folder' : 'Pin folder', icon: <Pin size={14} />, disabled, action: onBookmark },
         { label: 'Copy path', icon: <Copy size={14} />, disabled, action: onCopyLocation },
         { label: 'Open terminal here', icon: <Terminal size={14} />, disabled: disabled || !onOpenTerminal, action: () => onOpenTerminal?.() },
@@ -99,6 +98,5 @@ export function FileContentsHeader({
         { label: 'Select all', disabled: disabled || visibleCount === 0, action: onSelectAll },
       ]} />
     </div>
-    {folderSizes?.limited && <p role="status" className="pb-1 text-xs text-app-muted">Automatic calculation is limited to the first {MAX_FOLDER_SIZE_BATCH} folders. Calculate another folder from Properties.</p>}
   </header>;
 }

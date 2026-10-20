@@ -11,6 +11,8 @@ url="https://github.com/zync-sh/zync"
 license=('FSL-1.1-ALv2')
 depends=(
   'webkit2gtk-4.1'
+  # Supplies autoaudiosink for WebKit audio; WebKit lists it as optional.
+  'gst-plugins-good'
   'gtk3'
   'libappindicator-gtk3'
   'librsvg'

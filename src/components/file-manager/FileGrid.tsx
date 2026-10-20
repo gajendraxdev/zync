@@ -1,7 +1,5 @@
 import { Folder } from 'lucide-react';
 import { FileEntryIcon } from './FileEntryIcon';
-import { FolderSizeValue } from './FolderSizeValue';
-import type { FolderSizeState } from '../../features/files/domain/folderSizes';
 import type React from 'react';
 import { cn, formatBytes } from '../../lib/utils';
 import { Tooltip } from '../ui/Tooltip';
@@ -51,8 +49,6 @@ const FileGridItem = memo(forwardRef<HTMLDivElement, {
   optionIndex: number;
   optionCount: number;
   file: FileEntry;
-  folderSize?: FolderSizeState;
-  onFolderSizeDetails?: (path: string) => void;
   viewMode: 'grid' | 'list';
   compactMode: boolean;
   isSelected: boolean;
@@ -73,8 +69,6 @@ const FileGridItem = memo(forwardRef<HTMLDivElement, {
   optionIndex,
   optionCount,
   file,
-  folderSize,
-  onFolderSizeDetails,
   viewMode,
   compactMode,
   isSelected,
@@ -183,9 +177,6 @@ const FileGridItem = memo(forwardRef<HTMLDivElement, {
       )}
     >
       <FileSelectionMark selected={isSelected} className="absolute start-0.5 top-0.5 z-10" />
-      {isFolder && folderSize && <span className="absolute end-0.5 top-0.5 z-10" onPointerEnter={() => onHoverHide?.()}>
-        <FolderSizeValue state={folderSize} compact onDetails={() => onFolderSizeDetails?.(file.path)} />
-      </span>}
       <div className={cn(
         'flex items-center justify-center shrink-0',
         viewMode === 'grid' ? 'w-full' : 'w-10 mr-4',
@@ -221,8 +212,6 @@ const FileListItem = memo(forwardRef<HTMLDivElement, {
   optionCount: number;
   columns: readonly FileSortColumn[];
   file: FileEntry;
-  folderSize?: FolderSizeState;
-  onFolderSizeDetails?: (path: string) => void;
   isSelected: boolean;
   isFocused: boolean;
   connectionId?: string;
@@ -241,8 +230,6 @@ const FileListItem = memo(forwardRef<HTMLDivElement, {
   optionCount,
   columns,
   file,
-  folderSize,
-  onFolderSizeDetails,
   isSelected,
   isFocused,
   connectionId,
@@ -353,9 +340,7 @@ const FileListItem = memo(forwardRef<HTMLDivElement, {
           </Tooltip>
         </div>
       </div>
-      {columns.filter(column => column !== 'name').map(column => column === 'size' && isFolder && folderSize
-        ? <span key={column} className="files-list-column-size min-w-0 px-2 text-right text-xs text-app-muted"><FolderSizeValue state={folderSize} onDetails={() => onFolderSizeDetails?.(file.path)} /></span>
-        : <Tooltip key={column} content={metadata[column]}
+      {columns.filter(column => column !== 'name').map(column => <Tooltip key={column} content={metadata[column]}
         position="top" className={cn(`files-list-column-${column}`, 'min-w-0 py-1 px-2', column === 'size' && 'justify-end')}>
         <span className={cn('block min-w-0 truncate text-xs text-app-muted', column === 'owner' ? 'font-mono' : 'tabular-nums', column === 'size' && 'text-right')}>
           {metadata[column]}
@@ -369,8 +354,6 @@ FileGridItem.displayName = 'FileGridItem';
 FileListItem.displayName = 'FileListItem';
 
 interface FileGridProps {
-  folderSizeStates?: Record<string, FolderSizeState>;
-  onFolderSizeDetails?: (path: string) => void;
   focusRef: RefObject<HTMLDivElement | null>;
   /** Incremented for explicit keyboard navigation, even when focus stays on the same file. */
   focusRevealRequest?: number;
@@ -403,8 +386,6 @@ interface FileGridProps {
 }
 
 type FileListRowExtra = {
-  folderSizeStates?: Record<string, FolderSizeState>;
-  onFolderSizeDetails?: (path: string) => void;
   scopeId: string;
   columns: readonly FileSortColumn[];
   files: FileEntry[];
@@ -422,9 +403,8 @@ type FileListRowExtra = {
   dateTimeFormat: 'simple' | 'detailed';
 };
 
+/** Project one virtual row into the existing memoized, metadata-only file item. */
 function FileListRow({
-  folderSizeStates,
-  onFolderSizeDetails,
   index,
   style,
   scopeId,
@@ -454,8 +434,6 @@ function FileListRow({
       <FileListItem
         optionId={fileOptionId(scopeId, index)} optionIndex={index} optionCount={files.length} columns={columns}
         file={file}
-        folderSize={folderSizeStates?.[file.path]}
-        onFolderSizeDetails={onFolderSizeDetails}
         isSelected={selectedSet.has(file.name)}
         isFocused={focusedFile === file.name}
         connectionId={connectionId}
@@ -486,8 +464,6 @@ type FileGridRowExtra = FileListRowExtra & {
 
 /** Virtualize visual rows, not semantics: every file remains an option in one listbox. */
 function FileGridRow({
-  folderSizeStates,
-  onFolderSizeDetails,
   index: rowIndex,
   style,
   scopeId,
@@ -524,8 +500,6 @@ function FileGridRow({
           <FileGridItem
             optionId={fileOptionId(scopeId, index)} optionIndex={index} optionCount={files.length}
             file={file}
-            folderSize={folderSizeStates?.[file.path]}
-            onFolderSizeDetails={onFolderSizeDetails}
             viewMode="grid"
             compactMode={compactMode}
             isSelected={selectedSet.has(file.name)}
@@ -549,8 +523,6 @@ function FileGridRow({
 }
 
 export const FileGrid = memo(function FileGrid({
-  folderSizeStates,
-  onFolderSizeDetails,
   focusRef,
   focusRevealRequest = 0,
   onFocusItem,
@@ -609,7 +581,8 @@ export const FileGrid = memo(function FileGrid({
   const listingRef = useRef<HTMLDivElement>(null);
   const listLayout = useFileListLayout(listingRef);
   const zoomTrack = FILE_GRID_ZOOM[gridZoomLevel];
-  const gridRowHeight = zoomTrack.rowHeight + zoomTrack.gap;
+  const gridTileHeight = zoomTrack.rowHeight;
+  const gridRowHeight = gridTileHeight + zoomTrack.gap;
   const { columnCount: gridColumnCount, ready: gridReady, captureAnchor, viewport: gridViewport, setViewport } = useFileGridViewport({
     enabled: viewMode === 'grid', files, path: currentPath,
     zoom: gridZoomLevel, rowPitch: gridRowHeight,
@@ -687,8 +660,6 @@ export const FileGrid = memo(function FileGrid({
 
   const listRowProps = useMemo(
     () => ({
-      folderSizeStates,
-      onFolderSizeDetails,
       scopeId,
       columns,
       files,
@@ -706,8 +677,6 @@ export const FileGrid = memo(function FileGrid({
       dateTimeFormat,
     }),
     [
-      folderSizeStates,
-      onFolderSizeDetails,
       scopeId,
       columns,
       files,
@@ -729,11 +698,11 @@ export const FileGrid = memo(function FileGrid({
   const cssGridStyle = useMemo<CSSProperties>(() => ({
     display: 'grid',
     gridTemplateColumns: fileIconGridTemplateColumns(zoomTrack.minTrack, gridColumnCount),
-    gridAutoRows: `${zoomTrack.rowHeight}px`,
+    gridAutoRows: `${gridTileHeight}px`,
     gap: zoomTrack.gap,
     justifyContent: 'start',
     alignContent: 'start',
-  }), [gridColumnCount, zoomTrack.rowHeight, zoomTrack.gap, zoomTrack.minTrack]);
+  }), [gridColumnCount, gridTileHeight, zoomTrack.gap, zoomTrack.minTrack]);
 
   const collectMarqueeNames = useCallback((rect: MarqueeRect) => {
     if (viewMode === 'list') {
@@ -1023,8 +992,6 @@ export const FileGrid = memo(function FileGrid({
                 <FileGridItem
                   optionId={fileOptionId(scopeId, index)} optionIndex={index} optionCount={files.length}
                   file={file}
-                  folderSize={folderSizeStates?.[file.path]}
-                  onFolderSizeDetails={onFolderSizeDetails}
                   viewMode="grid"
                   compactMode={compactMode}
                   isSelected={selectedSet.has(file.name)}

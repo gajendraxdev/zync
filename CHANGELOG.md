@@ -4,7 +4,25 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.36.0] - 2026-10-20
+
+### Added
+
+- **Terminal mouse controls:** Choose Context menu or Pass to terminal / Paste
+  from Settings or the terminal sidebar. Add optional copy-on-selection with a
+  brief Copied indicator. Keep Shift + right-click and keyboard menu access.
+  ([7ce3773])
+
 ### Fixed
+
+- **Folder-size Properties:** Keep loading accessible to screen readers, remove
+  redundant detail instructions and unavailable-size selection text, and prevent
+  obsolete scan results or retries after closing Properties or changing folders.
+  ([e12821c])
+
+- **Terminal settings:** Separate keyboard and mouse preferences from GPU
+  rendering, and remove the redundant keyboard-settings hover tooltip.
+  ([7ce3773])
 
 - **Transfer progress memory:** Reuse workspace Split/Find projections when layout
   inputs are unchanged, avoiding repeated layout allocations during transfer
@@ -74,6 +92,13 @@ All notable changes to Zync are documented in this file. The format is based on 
   deletions from restoring stale folder contents. ([d8d6586], [69a16cb])
 
 ### Changed
+
+- **Folder-size calculation:** Calculate only when inspecting one folder in
+  Properties, with cancellation and retry controls. Remove automatic listing
+  scans and their settings. Use a bounded server-side metadata scan on supported
+  Linux SSH hosts, with the existing local/SFTP traversal as fallback; no file
+  contents are read or server helper installed. Reuse memoized Files controls
+  while results arrive. ([e12821c])
 
 - **File transfer throughput:** Upgrade to published `russh-sftp 3.0.1` and use
   bounded read/write pipelining through the existing transfer service. Preserve
@@ -2609,7 +2634,8 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [840afc2]: https://github.com/zync-sh/zync/commit/840afc2
 [193f568]: https://github.com/zync-sh/zync/commit/193f568
 [4e3c5ff]: https://github.com/zync-sh/zync/commit/4e3c5ff
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.35.1...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.36.0...HEAD
+[2.36.0]: https://github.com/zync-sh/zync/compare/v2.35.1...v2.36.0
 [2.35.1]: https://github.com/zync-sh/zync/compare/v2.34.1...v2.35.1
 [2.34.1]: https://github.com/zync-sh/zync/compare/v2.34.0...v2.34.1
 [2.34.0]: https://github.com/zync-sh/zync/compare/v2.33.12...v2.34.0
@@ -2922,3 +2948,5 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [22b5ed1]: https://github.com/zync-sh/zync/commit/22b5ed1e3291d72c9e3f377cfa6b81f169b7d493
 [2b17a85]: https://github.com/zync-sh/zync/commit/2b17a85894263dd196d6e56ec7220742cd41a988
 [0177174]: https://github.com/zync-sh/zync/commit/0177174e18fb8e15463ebb720bee3859ee16c799
+[7ce3773]: https://github.com/zync-sh/zync/commit/7ce3773e0fdb115b42b9f4c1d432c6f9a236677d
+[e12821c]: https://github.com/zync-sh/zync/commit/e12821c7c6b47f45361bdaa3b4ea68d531f2fae3

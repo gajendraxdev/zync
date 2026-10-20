@@ -206,6 +206,7 @@ const tests = [
   'tests/shortcutBindings.test.mjs',
   'tests/shortcutUpgradeCompatibility.test.mjs',
   'tests/terminalInteraction.test.mjs',
+  'tests/terminalMouse.test.mjs',
   'tests/terminalShellContext.test.mjs',
   'tests/terminalImage.test.mjs',
   'tests/terminalRendererPolicy.test.mjs',

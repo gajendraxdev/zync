@@ -9,7 +9,7 @@ import type { InstalledPlugin } from '../src/features/plugins/types';
 import { createTransferSafetyFixture } from './fixtures/files-production/transferSafety';
 import { createPermissionFixture } from './fixtures/files-production/permissions';
 import { createFolderSizeFixture } from './fixtures/files-production/folderSizes';
-import { runFolderSizeBrowserChecks } from './helpers/folderSizeBrowserChecks';
+import { runFolderSizeBrowserChecks, runFolderSizeRenderChecks } from './helpers/folderSizeBrowserChecks';
 import { runFileListingAccessBrowserChecks, runFilePermissionBrowserChecks } from './helpers/filePermissionBrowserChecks';
 import { runFileEditorSaveBrowserChecks } from './helpers/fileEditorSaveBrowserChecks';
 import { permissionTestEditor } from './fixtures/files-production/editorProvider';
@@ -35,8 +35,12 @@ const sample = [entry('assets', 'd'), entry('config', 'd'), entry('docs', 'd'), 
 for (const [key,value] of Object.entries({ '--color-app-bg':'#20211f', '--color-app-panel':'#242522', '--color-app-surface':'#30332b',
   '--color-app-border':'#373a32', '--color-app-text':'#e8e9e3', '--color-app-muted':'#adb1a5', '--color-app-accent':'#f59c77' })) document.documentElement.style.setProperty(key,value);
 const calls: string[] = [];
-const folderSizes = new URLSearchParams(location.search).get('folderSizes') === '1' ? createFolderSizeFixture() : undefined;
-if (folderSizes) Object.assign(window, { runFolderSizeBrowserChecks: () => runFolderSizeBrowserChecks(folderSizes.control) });
+const folderSizeTests = new URLSearchParams(location.search).get('folderSizes') === '1';
+const folderSizes = createFolderSizeFixture(folderSizeTests);
+if (folderSizeTests) Object.assign(window, {
+  runFolderSizeBrowserChecks: () => runFolderSizeBrowserChecks(folderSizes.control),
+  runFolderSizeRenderChecks: () => runFolderSizeRenderChecks(folderSizes.control),
+});
 const permissionFixture = createPermissionFixture(new URLSearchParams(location.search).get('permissions') === '1', editorTests);
 if (windowsTests) {
   permissionFixture.control.setModel('windows');
@@ -127,7 +131,6 @@ useAppStore.setState(state => ({
   recentPaths: { [host]: [`${rootPath}/src`, `${rootPath}/docs`] },
   settings: { ...state.settings, iconTheme: MATERIAL_ICON_THEME_ID, fileManager: { ...state.settings.fileManager,
     defaultView: showWorkspaceChrome ? 'grid' : 'list', listZoom: 0, gridZoom: 1, placesCollapsed: false, showHiddenFiles: false,
-    showFolderSizes: folderSizes ? undefined : false,
     bookmarksByConnection: { [host]: [rootPath, `${rootPath}/config`] } } },
   updateFileManagerSettings: async updates => {
     settingsWrites.push(updates);
