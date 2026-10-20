@@ -167,14 +167,14 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Added
 
-- **Folder sizes:** Calculate logical file bytes in the background for local and
-  SSH folders, with a saved **View → Show folder sizes** toggle enabled by default.
-  Bound work by concurrency, entry, depth, time and memory budgets; label incomplete
-  totals and explain limits through the info control. Include available folder
-  sizes in selection totals and Properties, keep waiting states unobtrusive, and
-  allow explicit retry of failed or cancelled scans. No file contents are read;
-  links are skipped and results are not allocated disk usage or a snapshot.
-  ([99856dd], [2b1d77d])
+- **Folder sizes:** Calculate logical regular-file bytes for one local or SSH
+  folder when opened in Properties, with cancellation and explicit retry after
+  failure or cancellation. Bound work by concurrency, entry, depth, time and
+  memory budgets; label incomplete totals and explain limits through the info
+  control. Browsing does not start scans; automatic folder-size settings and
+  recursive selection totals are not included. No file contents are read; links
+  are skipped and results are not allocated disk usage or a snapshot.
+  ([99856dd], [2b1d77d], [e12821c])
 
 - **Extended permission controls:** Edit ordinary modes for supported local Linux
   files and folders using qualified Linux 6.6+ filesystem support. On Windows,
