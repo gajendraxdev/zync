@@ -13,6 +13,8 @@ pub struct ParsedSshConnection {
     pub port: u16,
     pub private_key_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub certificate_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub private_key_status: Option<String>,
     pub jump_server_alias: Option<String>,
     pub jump_server_id: Option<String>,
@@ -41,6 +43,7 @@ pub fn parse_config(path: &Path) -> Result<Vec<ParsedSshConnection>> {
     parse_config_text(&content)
 }
 
+/// Import supported explicit host options, keeping user certificates separate from key identities.
 pub fn parse_config_text(content: &str) -> Result<Vec<ParsedSshConnection>> {
     let mut connections = Vec::new();
 
@@ -95,6 +98,7 @@ pub fn parse_config_text(content: &str) -> Result<Vec<ParsedSshConnection>> {
                 username: whoami::username(),
                 port: 22,
                 private_key_path: None,
+                certificate_path: None,
                 private_key_status: None,
                 jump_server_alias: None,
                 jump_server_id: None,
@@ -123,6 +127,14 @@ pub fn parse_config_text(content: &str) -> Result<Vec<ParsedSshConnection>> {
                     host.private_key_path = Some(path);
                 }
                 "proxyjump" => host.jump_server_alias = Some(value_str.to_string()),
+                "certificatefile" => {
+                    host.certificate_path = (value_str != "none" && !value_str.is_empty()).then(|| {
+                        if let Some(rest) = value_str.strip_prefix("~/").or_else(|| value_str.strip_prefix("~\\")) {
+                            dirs::home_dir().map(|home| home.join(rest).to_string_lossy().into_owned())
+                                .unwrap_or_else(|| value_str.to_string())
+                        } else { value_str.to_string() }
+                    });
+                }
                 _ => {}
             }
         }
@@ -192,6 +204,15 @@ fn strip_inline_comments(line: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::parse_config_text;
+
+    #[test]
+    fn imports_user_certificate_without_confusing_it_with_identity_or_host_trust() {
+        let parsed = parse_config_text("Host cert-host\n IdentityFile /keys/user\n CertificateFile \"/keys/user cert.pub\"\n User test\n").unwrap();
+        assert_eq!(parsed[0].certificate_path.as_deref(), Some("/keys/user cert.pub"));
+        assert_eq!(parsed[0].private_key_path.as_deref(), Some("/keys/user"));
+        let parsed = parse_config_text("Host bare-host\n CertificateFile none\n").unwrap();
+        assert!(parsed[0].certificate_path.is_none());
+    }
 
     #[test]
     fn parse_config_text_parses_basic_host_block() {

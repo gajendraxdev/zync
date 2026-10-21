@@ -86,6 +86,7 @@ impl russh_sftp::server::Handler for MemoryFile {
 /// Authenticate explicit fixture credentials and accept SFTP or echo-forward channels.
 struct Server {
     key: keys::PublicKey,
+    certificate: Option<keys::Certificate>,
     sessions: HashMap<ChannelId, Channel<server::Msg>>,
     output_tasks: tokio::task::JoinSet<anyhow::Result<()>>,
 }
@@ -104,11 +105,26 @@ impl server::Handler for Server {
         user: &str,
         key: &keys::PublicKey,
     ) -> anyhow::Result<server::Auth> {
-        Ok(if user == "fixture" && *key == self.key {
-            server::Auth::Accept
-        } else {
-            server::Auth::reject()
-        })
+        Ok(
+            if self.certificate.is_none() && user == "fixture" && *key == self.key {
+                server::Auth::Accept
+            } else {
+                server::Auth::reject()
+            },
+        )
+    }
+    async fn auth_openssh_certificate(
+        &mut self,
+        user: &str,
+        certificate: &keys::Certificate,
+    ) -> anyhow::Result<server::Auth> {
+        Ok(
+            if user == "fixture" && self.certificate.as_ref() == Some(certificate) {
+                server::Auth::Accept
+            } else {
+                server::Auth::reject()
+            },
+        )
     }
     async fn channel_open_session(
         &mut self,
@@ -201,6 +217,14 @@ impl Drop for Transport {
 
 /// Exercise production encryption and channel framing over a bounded memory pipe.
 async fn transport(user_key: &keys::PublicKey) -> Transport {
+    transport_with_certificate(user_key, None).await
+}
+
+/// Reuse the bounded encrypted fixture with an optional certificate-only authentication policy.
+async fn transport_with_certificate(
+    user_key: &keys::PublicKey,
+    certificate: Option<keys::Certificate>,
+) -> Transport {
     let host_key =
         keys::PrivateKey::random(&mut keys::key::safe_rng(), keys::Algorithm::Ed25519).unwrap();
     let expected_host_key = host_key.public_key().clone();
@@ -212,6 +236,7 @@ async fn transport(user_key: &keys::PublicKey) -> Transport {
     });
     let server = Server {
         key: user_key.clone(),
+        certificate,
         sessions: HashMap::new(),
         output_tasks: tokio::task::JoinSet::new(),
     };
@@ -228,6 +253,73 @@ async fn transport(user_key: &keys::PublicKey) -> Transport {
     .await
     .unwrap();
     Transport { client, task }
+}
+
+#[tokio::test]
+async fn user_certificate_authentication_uses_certificate_without_bare_key_fallback() {
+    // RSA generation must not consume the encrypted-transport deadline under parallel CI load.
+    for algorithm in [
+        keys::Algorithm::Ed25519,
+        keys::Algorithm::Rsa { hash: None },
+    ] {
+        let key = keys::PrivateKey::random(&mut keys::key::safe_rng(), algorithm).unwrap();
+        tokio::time::timeout(DEADLINE, async {
+            let ca = keys::PrivateKey::random(&mut keys::key::safe_rng(), keys::Algorithm::Ed25519)
+                .unwrap();
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            let mut builder = keys::ssh_key::certificate::Builder::new(
+                vec![7; 32],
+                key.public_key().key_data().clone(),
+                now - 1,
+                now + 300,
+            )
+            .unwrap();
+            builder.valid_principal("fixture").unwrap();
+            let cert = builder.sign(&ca).unwrap();
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("user-cert.pub");
+            std::fs::write(&path, cert.to_openssh().unwrap()).unwrap();
+            let mut encoded = Vec::new();
+            keys::encode_pkcs8_pem(&key, &mut encoded).unwrap();
+            let encoded = String::from_utf8(encoded).unwrap();
+            let mut fixture = transport_with_certificate(key.public_key(), Some(cert)).await;
+            assert!(!SshManager::auth_with_key_data(
+                &mut fixture.client,
+                "fixture",
+                &encoded,
+                None,
+                None
+            )
+            .await
+            .unwrap());
+            assert!(SshManager::auth_with_key_data(
+                &mut fixture.client,
+                "fixture",
+                &encoded,
+                None,
+                path.to_str()
+            )
+            .await
+            .unwrap());
+            // A bad configured certificate must fail even when the server accepts the bare key.
+            let mut fixture = transport(key.public_key()).await;
+            std::fs::write(&path, "invalid certificate").unwrap();
+            assert!(SshManager::auth_with_key_data(
+                &mut fixture.client,
+                "fixture",
+                &encoded,
+                None,
+                path.to_str()
+            )
+            .await
+            .is_err());
+        })
+        .await
+        .expect("certificate transport timed out");
+    }
 }
 
 #[tokio::test]
@@ -382,7 +474,13 @@ async fn encrypted_private_key_authentication_uses_the_production_decoder_and_ha
             .expect("in-memory private-key transport handshake timed out");
         assert!(tokio::time::timeout(
             DEADLINE,
-            SshManager::auth_with_key_data(&mut fixture.client, "fixture", &encoded, Some("wrong"))
+            SshManager::auth_with_key_data(
+                &mut fixture.client,
+                "fixture",
+                &encoded,
+                Some("wrong"),
+                None
+            )
         )
         .await
         .expect("rejected private-key authentication timed out")
@@ -393,7 +491,8 @@ async fn encrypted_private_key_authentication_uses_the_production_decoder_and_ha
                 &mut fixture.client,
                 "fixture",
                 &encoded,
-                Some("fixture passphrase")
+                Some("fixture passphrase"),
+                None,
             )
         )
         .await

@@ -875,6 +875,30 @@ fn inject_remembered_key_passphrases(config: &mut ConnectionConfig) -> Result<()
     Ok(())
 }
 
+/// Enumerate local adapters on demand without changing routes or starting a VPN.
+#[tauri::command]
+pub async fn ssh_network_interfaces() -> Result<Vec<crate::network_interfaces::NetworkInterface>, String> {
+    tokio::task::spawn_blocking(crate::network_interfaces::list).await.map_err(|e| e.to_string())?
+        .map(crate::network_interfaces::picker_snapshot)
+        .map_err(|e| e.to_string())
+}
+
+/// Read host-specific, device-only routing preferences outside synced host records.
+#[tauri::command]
+pub async fn ssh_network_preference(app: AppHandle, connection_id: String) -> Result<crate::network_interfaces::Preference, String> {
+    let data_dir = get_data_dir(&app);
+    tokio::task::spawn_blocking(move || crate::network_interfaces::get_preference(&data_dir, &connection_id))
+        .await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())
+}
+
+/// Save only a validated routing preference using the existing atomic writer.
+#[tauri::command]
+pub async fn ssh_set_network_preference(app: AppHandle, connection_id: String, preference: crate::network_interfaces::Preference) -> Result<(), String> {
+    let data_dir = get_data_dir(&app);
+    tokio::task::spawn_blocking(move || crate::network_interfaces::set_preference(&data_dir, &connection_id, preference))
+        .await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())
+}
+
 async fn inject_remembered_key_passphrases_blocking(
     config: &mut ConnectionConfig,
 ) -> Result<(), String> {
@@ -2285,6 +2309,7 @@ fn csv_join(values: &Option<Vec<String>>) -> String {
         .unwrap_or_default()
 }
 
+/// Encode the same field order as the CSV export header, including optional certificate paths.
 fn connection_to_csv_line(connection: &SavedConnection) -> String {
     let fields = vec![
         csv_escape(&connection.id),
@@ -2294,6 +2319,7 @@ fn connection_to_csv_line(connection: &SavedConnection) -> String {
         csv_escape(&connection.username),
         csv_escape(&connection.password.clone().unwrap_or_default()),
         csv_escape(&connection.private_key_path.clone().unwrap_or_default()),
+        csv_escape(&connection.certificate_path.clone().unwrap_or_default()),
         csv_escape(&connection.jump_server_id.clone().unwrap_or_default()),
         csv_escape(&connection.folder.clone().unwrap_or_default()),
         csv_escape(&connection.theme.clone().unwrap_or_default()),
@@ -2434,6 +2460,7 @@ fn parse_bool_field(value: &str) -> Option<bool> {
     }
 }
 
+/// Import optional connection fields by header name, preserving older CSV files.
 fn parse_csv_connections(content: &str) -> Result<Vec<SavedConnection>, String> {
     let mut lines = content.lines().filter(|line| !line.trim().is_empty());
     let Some(header_line) = lines.next() else {
@@ -2458,6 +2485,7 @@ fn parse_csv_connections(content: &str) -> Result<Vec<SavedConnection>, String> 
     let port_idx = index_of("port");
     let password_idx = index_of("password");
     let key_idx = index_of("privatekeypath").or_else(|| index_of("private_key_path"));
+    let certificate_idx = index_of("certificatepath").or_else(|| index_of("certificate_path"));
     let jump_idx = index_of("jumpserverid").or_else(|| index_of("jump_server_id"));
     let folder_idx = index_of("folder");
     let theme_idx = index_of("theme");
@@ -2522,6 +2550,10 @@ fn parse_csv_connections(content: &str) -> Result<Vec<SavedConnection>, String> 
                     Some(value)
                 }
             },
+            certificate_path: {
+                let value = field(certificate_idx);
+                if value.is_empty() { None } else { Some(value) }
+            },
             jump_server_id: {
                 let value = field(jump_idx);
                 if value.is_empty() {
@@ -2564,6 +2596,7 @@ fn parse_csv_connections(content: &str) -> Result<Vec<SavedConnection>, String> 
     Ok(parsed)
 }
 
+/// Export explicit identities and user certificates without changing server trust configuration.
 fn build_ssh_config_export(connections: &[SavedConnection]) -> String {
     let alias_by_id = connections
         .iter()
@@ -2591,12 +2624,36 @@ fn build_ssh_config_export(connections: &[SavedConnection]) -> String {
                 output.push_str(&format!("  ProxyJump {}\n", jump_alias));
             }
         }
+        if let Some(path) = &connection.certificate_path {
+            output.push_str(&format!("  CertificateFile \"{}\"\n", path.replace('"', "\\\"")));
+        }
         output.push('\n');
     }
     output
 }
 
+#[cfg(test)]
+mod certificate_exchange_tests {
+    use super::*;
+
+    #[test]
+    fn csv_and_openssh_exports_preserve_the_certificate_pair() {
+        let raw = "id,name,host,port,username,privateKeyPath,certificatePath\nfixture,Fixture,fixture.invalid,22,user,/keys/user,/keys/user-cert.pub\n";
+        let connections = parse_csv_connections(raw).unwrap();
+        let connection = &connections[0];
+        let header = "id,name,host,port,username,password,privateKeyPath,certificatePath,jumpServerId,folder,theme,tags,isFavorite,pinnedFeatures,createdAt,lastConnected";
+        let round_trip = parse_csv_connections(&format!("{header}\n{}\n", connection_to_csv_line(connection))).unwrap();
+        assert_eq!(round_trip[0].certificate_path, connection.certificate_path);
+        let parsed = crate::ssh_config::parse_config_text(&build_ssh_config_export(&connections)).unwrap();
+        assert_eq!(parsed[0].certificate_path, connection.certificate_path);
+        assert_eq!(parsed[0].private_key_path, connection.private_key_path);
+        let json = serde_json::to_string(connection).unwrap();
+        assert_eq!(serde_json::from_str::<SavedConnection>(&json).unwrap().certificate_path, connection.certificate_path);
+    }
+}
+
 #[tauri::command]
+/// Export selected hosts using the existing explicit secret-inclusion policy.
 pub async fn connections_export_to_file(
     app: AppHandle,
     request: ConnectionExportRequest,
@@ -2628,10 +2685,16 @@ pub async fn connections_export_to_file(
         selected_connections.iter_mut().for_each(|connection| {
             connection.password = None;
             connection.private_key_path = None;
+            connection.certificate_path = None;
         });
     }
 
     let format = request.format.trim().to_ascii_lowercase();
+    if matches!(format.as_str(), "ssh_config" | "config")
+        && selected_connections.iter().any(|connection| connection.certificate_path.as_ref()
+            .is_some_and(|path| path.chars().any(char::is_control))) {
+        return Err("Cannot export a certificate path containing control characters.".into());
+    }
     let content = match format.as_str() {
         "zync" => {
             let folders = if is_scoped_export {
@@ -2689,7 +2752,7 @@ pub async fn connections_export_to_file(
             .map_err(|error| error.to_string())?,
         "csv" => {
             let mut lines = vec![
-                "id,name,host,port,username,password,privateKeyPath,jumpServerId,folder,theme,tags,isFavorite,pinnedFeatures,createdAt,lastConnected".to_string(),
+                "id,name,host,port,username,password,privateKeyPath,certificatePath,jumpServerId,folder,theme,tags,isFavorite,pinnedFeatures,createdAt,lastConnected".to_string(),
             ];
             lines.extend(selected_connections.iter().map(connection_to_csv_line));
             lines.join("\n")
