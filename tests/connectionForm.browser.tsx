@@ -30,6 +30,9 @@ Object.assign(window, { __TAURI_INTERNALS__: {
 // Test-only native boundary: no credentials, sockets, adapters or files are accessed.
 window.ipcRenderer = {
     async invoke(channel: string) {
+        if (channel === 'ssh:importConfigBySource') return [{ ...keyHost, id: 'import-fixture',
+            name: 'Repeated certificates fixture', certificatePath: '/first.pub', privateKeyStatus: 'passphraseRequired',
+            certificateWarning: 'Multiple CertificateFile entries: only the first is imported. Review the certificate after import.' }];
         if (channel === 'ssh:test') return new Promise<string>((resolve, reject) => { pendingTests.push({ resolve, reject }); });
         if (channel === 'ssh:networkPreference') return { mode: 'default' };
         if (channel === 'ssh:networkInterfaces') return [

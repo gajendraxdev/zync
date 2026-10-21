@@ -22,6 +22,12 @@ try {
     assert.equal(await dialog.getByRole('button', { name: /^Import SSH config/ }).count(), 1);
     assert.equal(await dialog.getByRole('button', { name: /^Import file/ }).count(), 1);
     assert.equal(await page.getByLabel('Host', { exact: true }).count(), 0, 'New hosts start at the entry selector');
+    await dialog.getByRole('button', { name: /^Import SSH config/ }).click();
+    const importDialog = page.getByRole('dialog', { name: 'Import SSH Connections', exact: true });
+    await importDialog.getByText('Multiple CertificateFile entries: only the first is imported. Review the certificate after import.', { exact: true }).waitFor();
+    await importDialog.getByText('Encrypted key needs a passphrase', { exact: true }).waitFor();
+    await importDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await importDialog.waitFor({ state: 'hidden' });
     await dialog.getByRole('button', { name: /^New host/ }).click();
     await page.getByLabel('Host', { exact: true }).fill('fixture.invalid');
     await page.getByLabel('Username', { exact: true }).fill('fixture');

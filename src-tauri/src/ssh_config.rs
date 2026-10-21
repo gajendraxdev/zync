@@ -14,6 +14,9 @@ pub struct ParsedSshConnection {
     pub private_key_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub certificate_path: Option<String>,
+    /// Import-only warning: saved hosts can represent one certificate, not an ordered candidate list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub certificate_warning: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub private_key_status: Option<String>,
     pub jump_server_alias: Option<String>,
@@ -66,6 +69,7 @@ pub fn parse_config_text(content: &str) -> Result<Vec<ParsedSshConnection>> {
     let mut connections = Vec::new();
 
     let mut current_host: Option<ParsedSshConnection> = None;
+    let mut certificate_seen = false;
 
     for line in content.lines() {
         let line = strip_inline_comments(line).trim();
@@ -110,6 +114,7 @@ pub fn parse_config_text(content: &str) -> Result<Vec<ParsedSshConnection>> {
                 .map(|s| s.to_string())
                 .collect();
 
+            certificate_seen = false;
             current_host = Some(ParsedSshConnection {
                 id: String::new(),               // Will be set on push
                 name: primary_alias.to_string(), // First alias
@@ -118,6 +123,7 @@ pub fn parse_config_text(content: &str) -> Result<Vec<ParsedSshConnection>> {
                 port: 22,
                 private_key_path: None,
                 certificate_path: None,
+                certificate_warning: None,
                 private_key_status: None,
                 jump_server_alias: None,
                 jump_server_id: None,
@@ -147,6 +153,11 @@ pub fn parse_config_text(content: &str) -> Result<Vec<ParsedSshConnection>> {
                 }
                 "proxyjump" => host.jump_server_alias = Some(value_str.to_string()),
                 "certificatefile" => {
+                    if certificate_seen {
+                        host.certificate_warning = Some("Multiple CertificateFile entries: only the first is imported. Review the certificate after import.".into());
+                        continue;
+                    }
+                    certificate_seen = true;
                     let path = decode_config_path(raw_value_str);
                     host.certificate_path = (!value_str.eq_ignore_ascii_case("none")
                         && !value_str.is_empty())
@@ -231,6 +242,30 @@ fn strip_inline_comments(line: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::parse_config_text;
+
+    #[test]
+    fn repeated_certificates_keep_the_first_and_warn_per_host() {
+        let parsed = parse_config_text("Host first\n CertificateFile /first.pub\n CertificateFile /second.pub\n CertificateFile NONE\nHost next\n CertificateFile /next.pub\n").unwrap();
+        assert_eq!(parsed[0].certificate_path.as_deref(), Some("/first.pub"));
+        assert!(parsed[0]
+            .certificate_warning
+            .as_deref()
+            .unwrap()
+            .contains("only the first"));
+        assert_eq!(parsed[1].certificate_path.as_deref(), Some("/next.pub"));
+        assert!(parsed[1].certificate_warning.is_none());
+        let serialized = serde_json::to_value(&parsed[0]).unwrap();
+        assert!(serialized["certificateWarning"]
+            .as_str()
+            .unwrap()
+            .contains("only the first"));
+        let none_first = parse_config_text(
+            "Host disabled\n CertificateFile NONE\n CertificateFile /later.pub\n",
+        )
+        .unwrap();
+        assert!(none_first[0].certificate_path.is_none());
+        assert!(none_first[0].certificate_warning.is_some());
+    }
 
     #[test]
     fn imports_user_certificate_without_confusing_it_with_identity_or_host_trust() {

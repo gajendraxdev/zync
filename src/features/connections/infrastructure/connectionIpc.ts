@@ -66,6 +66,8 @@ export interface ImportedConnectionPayload {
     port: number;
     privateKeyPath?: string;
     certificatePath?: string;
+    /** Import-only feedback when the single-certificate host model cannot represent the source. */
+    certificateWarning?: string;
     privateKeyStatus?: 'valid' | 'passphraseRequired' | 'invalidKey' | 'unavailable';
     jumpServerAlias?: string;
     jumpServerId?: string;

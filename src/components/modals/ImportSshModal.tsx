@@ -339,6 +339,7 @@ function ImportSourceBar({
     );
 }
 
+/** Preview imported hosts with source-scoped warnings that never enter saved connection records. */
 export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: ImportSshModalProps) {
     const existingConnections = useAppStore(state => state.connections);
     const showToast = useAppStore(state => state.showToast);
@@ -357,7 +358,8 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
     const [sourceDiagnostics, setSourceDiagnostics] = useState<{ severity: 'info' | 'success' | 'error'; message: string } | null>(null);
     const [importReport, setImportReport] = useState<ImportReport | null>(null);
     const [bulkConflictDecision, setBulkConflictDecision] = useState<ImportResolution>('update');
-    const [keyStatusById, setKeyStatusById] = useState<Record<string, ImportedConnectionPayload['privateKeyStatus']>>({});
+    const [metadataById, setMetadataById] = useState<Record<string,
+        Pick<ImportedConnectionPayload, 'privateKeyStatus' | 'certificateWarning'>>>({});
     const loadRequestIdRef = useRef(0);
     const importRequestIdRef = useRef(0);
     const isModalActiveRef = useRef(false);
@@ -396,10 +398,11 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
             setSourceDiagnostics(null);
             setImportReport(null);
             setBulkConflictDecision('update');
-            setKeyStatusById({});
+            setMetadataById({});
         }
     }, [isOpen]);
 
+    /** Replace preview/auth metadata together; late responses cannot cross source or modal changes. */
     const loadConfigsFromSource = async (
         source: SshImportSourceType,
         filePath: string,
@@ -424,11 +427,9 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
 
             if (Array.isArray(result)) {
                 const normalizedConnections = result.map(normalizeImportedConnectionPayload);
-                setKeyStatusById(Object.fromEntries(
-                    result
-                        .filter(connection => connection.privateKeyStatus)
-                        .map(connection => [connection.id, connection.privateKeyStatus])
-                ));
+                setMetadataById(Object.fromEntries(result.map(connection => [connection.id, {
+                    privateKeyStatus: connection.privateKeyStatus, certificateWarning: connection.certificateWarning,
+                }])));
                 setConfigs(normalizedConnections);
                 setSelectedIds(new Set(normalizedConnections.map(c => c.id)));
                 setDecisions(createDefaultDecisionMap(baselineConnections, normalizedConnections));
@@ -441,7 +442,7 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
                 setConfigs([]);
                 setSelectedIds(new Set());
                 setDecisions({});
-                setKeyStatusById({});
+                setMetadataById({});
                 setSourceDiagnostics({
                     severity: 'info',
                     message: `No connections were parsed from ${IMPORT_SOURCE_LABELS[source]}.`,
@@ -460,7 +461,7 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
             setConfigs([]);
             setSelectedIds(new Set());
             setDecisions({});
-            setKeyStatusById({});
+            setMetadataById({});
         } finally {
             if (isRequestActive(requestId, 'load')) {
                 setIsLoadingConfigs(false);
@@ -472,6 +473,7 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
         void loadConfigsFromSource(sourceType, sourceFilePath, sourceText, existingConnectionsOnOpenRef.current);
     };
 
+    /** Clear source-owned diagnostics and selections before loading another import source. */
     const handleSourceTypeChange = (nextSource: SshImportSourceType) => {
         setSourceType(nextSource);
         setError(null);
@@ -480,7 +482,7 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
         setConfigs([]);
         setSelectedIds(new Set());
         setDecisions({});
-        setKeyStatusById({});
+        setMetadataById({});
         setSearchQuery('');
         setIsSourceBarExpanded(true);
         if (nextSource === 'default_ssh') {
@@ -541,7 +543,7 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
     const visibleCount = filteredRowIds.length;
     const selectedCount = selectedIds.size;
     const selectedKeyAttentionCount = [...selectedIds].filter(id => {
-        const status = keyStatusById[id];
+        const status = metadataById[id]?.privateKeyStatus;
         return status === 'passphraseRequired' || status === 'invalidKey' || status === 'unavailable';
     }).length;
     const hasConfigs = configs.length > 0;
@@ -796,7 +798,8 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
                                 const matchedConnection = row.matchedByName || row.matchedByEndpoint;
                                 const hasConflict = !!matchedConnection;
                                 const statusLabel = hasConflict ? 'Conflict' : 'New';
-                                const keyStatus = keyStatusById[config.id];
+                                const keyStatus = metadataById[config.id]?.privateKeyStatus;
+                                const certificateWarning = metadataById[config.id]?.certificateWarning;
 
                                 return (
                                     <div
@@ -860,6 +863,9 @@ export function ImportSshModal({ isOpen, onClose, onImport, onImportReport }: Im
                                                     <AlertCircle size={10} /> Key file needs attention
                                                 </div>
                                             )}
+                                            {certificateWarning && <p role="status" className="mt-1 whitespace-normal text-[11px] text-amber-300">
+                                                {certificateWarning}
+                                            </p>}
                                         </div>
 
                                         <div className="min-w-0 text-[11px] text-app-muted">
