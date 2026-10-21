@@ -4,6 +4,39 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Added
+
+- **SSH user certificates:** Select an optional OpenSSH user certificate for a
+  private key or vault-backed key, or import `CertificateFile` from SSH config.
+  Validate the key pairing, signature and validity period without changing
+  server host-key verification. ([91a0a73], [38628ac])
+- **SSH network interface:** On Windows, Linux and macOS, choose System default,
+  a specific adapter, or Ask every time under a host's Advanced settings.
+  Preferences stay on this device; automatic transport recovery retains the
+  selected adapter. Missing adapters or denied OS binding permissions fail
+  explicitly. DNS continues to use system settings. ([91a0a73], [38628ac])
+
+### Changed
+
+- **Host onboarding:** Refresh the initial new-host/import selector, group
+  optional naming and folder placement, and simplify credential choices.
+  Expand certificates only when needed, improve adapter identification and
+  error details, and prevent stale connection-test results after editing.
+  ([38628ac])
+
+### Fixed
+
+- **Folder-size cancellation:** Keep cancelled or failed inspections stopped
+  across listing refreshes until Retry, a new target, or reopening Properties.
+  ([a676f06])
+- **Connection tests:** Ignore unrelated host status updates without losing
+  pending results; run the browser-test entrypoint as compiled JavaScript.
+  ([38628ac])
+- **Large adapter lists:** Keep saved adapters connectable beyond the picker's
+  256-entry limit, and show available adapters first. ([91a0a73])
+- **Certificate selection:** Report file-picker failures without clearing the
+  current certificate path. ([38628ac])
+
 ## [2.36.0] - 2026-10-20
 
 ### Added
@@ -2950,3 +2983,6 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [0177174]: https://github.com/zync-sh/zync/commit/0177174e18fb8e15463ebb720bee3859ee16c799
 [7ce3773]: https://github.com/zync-sh/zync/commit/7ce3773e0fdb115b42b9f4c1d432c6f9a236677d
 [e12821c]: https://github.com/zync-sh/zync/commit/e12821c7c6b47f45361bdaa3b4ea68d531f2fae3
+[91a0a73]: https://github.com/zync-sh/zync/commit/91a0a73edea630b5163033696d2caccfd97f159b
+[38628ac]: https://github.com/zync-sh/zync/commit/38628acc7af16efcf92761316356c7a777fa565a
+[a676f06]: https://github.com/zync-sh/zync/commit/a676f06a8663197edfbad54d5e50c5924e26846e
