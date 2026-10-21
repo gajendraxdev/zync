@@ -43,6 +43,24 @@ pub fn parse_config(path: &Path) -> Result<Vec<ParsedSshConnection>> {
     parse_config_text(&content)
 }
 
+/// Decode escaped quotes/backslashes in quoted paths without consuming ordinary Windows separators.
+fn decode_config_path(raw: &str) -> String {
+    let value = strip_wrapping_quotes(raw);
+    if !raw.starts_with('"') {
+        return value.to_owned();
+    }
+    let mut result = String::with_capacity(value.len());
+    let mut chars = value.chars().peekable();
+    while let Some(character) = chars.next() {
+        if character == '\\' && matches!(chars.peek(), Some('\\' | '"')) {
+            result.push(chars.next().unwrap());
+        } else {
+            result.push(character);
+        }
+    }
+    result
+}
+
 /// Import supported explicit host options, keeping user certificates separate from key identities.
 pub fn parse_config_text(content: &str) -> Result<Vec<ParsedSshConnection>> {
     let mut connections = Vec::new();
@@ -72,6 +90,7 @@ pub fn parse_config_text(content: &str) -> Result<Vec<ParsedSshConnection>> {
             };
 
         // Normalize value_str by removing wrapping quotes
+        let raw_value_str = value_str;
         value_str = strip_wrapping_quotes(value_str);
 
         if key_str.to_lowercase() == "host" {
@@ -116,7 +135,7 @@ pub fn parse_config_text(content: &str) -> Result<Vec<ParsedSshConnection>> {
                 "identityfile" => {
                     // expansion of ~ is tricky in rust std, but crucial
                     // Strip quotes FIRST
-                    let mut path = value_str.to_string();
+                    let mut path = decode_config_path(raw_value_str);
 
                     // Then expand ~
                     if path.starts_with("~") {
@@ -128,11 +147,19 @@ pub fn parse_config_text(content: &str) -> Result<Vec<ParsedSshConnection>> {
                 }
                 "proxyjump" => host.jump_server_alias = Some(value_str.to_string()),
                 "certificatefile" => {
-                    host.certificate_path = (value_str != "none" && !value_str.is_empty()).then(|| {
-                        if let Some(rest) = value_str.strip_prefix("~/").or_else(|| value_str.strip_prefix("~\\")) {
-                            dirs::home_dir().map(|home| home.join(rest).to_string_lossy().into_owned())
-                                .unwrap_or_else(|| value_str.to_string())
-                        } else { value_str.to_string() }
+                    let path = decode_config_path(raw_value_str);
+                    host.certificate_path = (!value_str.eq_ignore_ascii_case("none")
+                        && !value_str.is_empty())
+                    .then(|| {
+                        if let Some(rest) =
+                            path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\"))
+                        {
+                            dirs::home_dir()
+                                .map(|home| home.join(rest).to_string_lossy().into_owned())
+                                .unwrap_or_else(|| path.clone())
+                        } else {
+                            path
+                        }
                     });
                 }
                 _ => {}
@@ -208,10 +235,19 @@ mod tests {
     #[test]
     fn imports_user_certificate_without_confusing_it_with_identity_or_host_trust() {
         let parsed = parse_config_text("Host cert-host\n IdentityFile /keys/user\n CertificateFile \"/keys/user cert.pub\"\n User test\n").unwrap();
-        assert_eq!(parsed[0].certificate_path.as_deref(), Some("/keys/user cert.pub"));
+        assert_eq!(
+            parsed[0].certificate_path.as_deref(),
+            Some("/keys/user cert.pub")
+        );
         assert_eq!(parsed[0].private_key_path.as_deref(), Some("/keys/user"));
         let parsed = parse_config_text("Host bare-host\n CertificateFile none\n").unwrap();
         assert!(parsed[0].certificate_path.is_none());
+        for sentinel in ["NONE", "None", "nOnE", "\"NONE\"", ""] {
+            let parsed =
+                parse_config_text(&format!("Host bare-host\n CertificateFile {sentinel}\n"))
+                    .unwrap();
+            assert!(parsed[0].certificate_path.is_none());
+        }
     }
 
     #[test]

@@ -2597,7 +2597,13 @@ fn parse_csv_connections(content: &str) -> Result<Vec<SavedConnection>, String> 
 }
 
 /// Export explicit identities and user certificates without changing server trust configuration.
-fn build_ssh_config_export(connections: &[SavedConnection]) -> String {
+fn build_ssh_config_export(connections: &[SavedConnection]) -> Result<String, String> {
+    if connections.iter()
+        .flat_map(|connection| [connection.private_key_path.as_deref(), connection.certificate_path.as_deref()])
+        .flatten()
+        .any(|path| path.chars().any(char::is_control)) {
+        return Err("Cannot export private-key or certificate paths containing control characters.".into());
+    }
     let alias_by_id = connections
         .iter()
         .map(|connection| (connection.id.clone(), build_host_alias(connection)))
@@ -2616,7 +2622,7 @@ fn build_ssh_config_export(connections: &[SavedConnection]) -> String {
         output.push_str(&format!("  Port {}\n", connection.port));
         if let Some(key_path) = &connection.private_key_path {
             if !key_path.trim().is_empty() {
-                output.push_str(&format!("  IdentityFile {}\n", key_path));
+                output.push_str(&format!("  IdentityFile {}\n", quote_ssh_config_path(key_path)));
             }
         }
         if let Some(jump_id) = &connection.jump_server_id {
@@ -2625,16 +2631,43 @@ fn build_ssh_config_export(connections: &[SavedConnection]) -> String {
             }
         }
         if let Some(path) = &connection.certificate_path {
-            output.push_str(&format!("  CertificateFile \"{}\"\n", path.replace('"', "\\\"")));
+            output.push_str(&format!("  CertificateFile {}\n", quote_ssh_config_path(path)));
         }
         output.push('\n');
     }
-    output
+    Ok(output)
+}
+
+/// Quote one SSH-config path; backslashes must be escaped before double quotes.
+fn quote_ssh_config_path(path: &str) -> String {
+    format!("\"{}\"", path.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 #[cfg(test)]
 mod certificate_exchange_tests {
     use super::*;
+
+    #[test]
+    fn openssh_path_exports_escape_and_validate_both_path_fields() {
+        let mut connection = parse_csv_connections("id,name,host,port,username\nfixture,Fixture,fixture.invalid,22,user\n")
+            .unwrap().remove(0);
+        for path in [r"C:\Users\Fixture Name\cert.pub", r"\\server\share\cert.pub", "/tmp/a \"quoted\" #name.pub", r"C:\"] {
+            connection.private_key_path = Some(path.into());
+            connection.certificate_path = Some(path.into());
+            let exported = build_ssh_config_export(&[connection.clone()]).unwrap();
+            let parsed = crate::ssh_config::parse_config_text(&exported).unwrap();
+            assert_eq!(parsed[0].private_key_path.as_deref(), Some(path));
+            assert_eq!(parsed[0].certificate_path.as_deref(), Some(path));
+        }
+        for path in ["bad\nHost injected", "bad\rpath", "bad\tpath", "bad\0path"] {
+            connection.private_key_path = Some(path.into());
+            connection.certificate_path = None;
+            assert!(build_ssh_config_export(&[connection.clone()]).unwrap_err().contains("control characters"));
+            connection.private_key_path = None;
+            connection.certificate_path = Some(path.into());
+            assert!(build_ssh_config_export(&[connection.clone()]).unwrap_err().contains("control characters"));
+        }
+    }
 
     #[test]
     fn csv_and_openssh_exports_preserve_the_certificate_pair() {
@@ -2644,7 +2677,7 @@ mod certificate_exchange_tests {
         let header = "id,name,host,port,username,password,privateKeyPath,certificatePath,jumpServerId,folder,theme,tags,isFavorite,pinnedFeatures,createdAt,lastConnected";
         let round_trip = parse_csv_connections(&format!("{header}\n{}\n", connection_to_csv_line(connection))).unwrap();
         assert_eq!(round_trip[0].certificate_path, connection.certificate_path);
-        let parsed = crate::ssh_config::parse_config_text(&build_ssh_config_export(&connections)).unwrap();
+        let parsed = crate::ssh_config::parse_config_text(&build_ssh_config_export(&connections).unwrap()).unwrap();
         assert_eq!(parsed[0].certificate_path, connection.certificate_path);
         assert_eq!(parsed[0].private_key_path, connection.private_key_path);
         let json = serde_json::to_string(connection).unwrap();
@@ -2690,11 +2723,6 @@ pub async fn connections_export_to_file(
     }
 
     let format = request.format.trim().to_ascii_lowercase();
-    if matches!(format.as_str(), "ssh_config" | "config")
-        && selected_connections.iter().any(|connection| connection.certificate_path.as_ref()
-            .is_some_and(|path| path.chars().any(char::is_control))) {
-        return Err("Cannot export a certificate path containing control characters.".into());
-    }
     let content = match format.as_str() {
         "zync" => {
             let folders = if is_scoped_export {
@@ -2757,7 +2785,7 @@ pub async fn connections_export_to_file(
             lines.extend(selected_connections.iter().map(connection_to_csv_line));
             lines.join("\n")
         }
-        "ssh_config" | "config" => build_ssh_config_export(&selected_connections),
+        "ssh_config" | "config" => build_ssh_config_export(&selected_connections)?,
         _ => return Err("Unsupported export format.".to_string()),
     };
 

@@ -21,6 +21,12 @@ equal(result.config.certificate_path, host.certificatePath, 'Connect preserves c
 equal(result.config.jump_host?.certificate_path, jump.certificatePath, 'Jump host has its own certificate');
 const test = buildConnectionTestPayload({ formData: host, authMethod: 'key', connections: [] });
 equal(test.certificate_path, host.certificatePath, 'Test and connect use same certificate');
+const stalePasswordDraft = { ...host, privateKeyPath: undefined, password: 'fixture' };
+equal(buildConnectionTestPayload({ formData: stalePasswordDraft, authMethod: 'password', connections: [] }).certificate_path,
+    undefined, 'Password test omits a stale certificate even if it remains in the draft');
+const passwordJump = { ...stalePasswordDraft, id: 'password-jump' };
+equal(buildConnectionTestPayload({ formData: { ...host, jumpServerId: passwordJump.id }, authMethod: 'key', connections: [passwordJump] })
+    .jump_host?.certificate_path, undefined, 'Password jump hops omit stale certificates independently');
 const saved = buildConnectionSavePayload({ formData: host, authMethod: 'key', editingConnectionId: host.id, connections: [host] });
 equal(saved.certificatePath, host.certificatePath, 'Save preserves certificate path');
 equal(saved.password, undefined, 'Certificate save never persists passphrase');

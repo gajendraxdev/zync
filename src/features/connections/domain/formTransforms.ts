@@ -165,7 +165,7 @@ const toBackendConfig = (
         port: portResult.normalizedPort,
         username,
         auth_method,
-        ...(normalizeText(candidate.certificatePath)
+        ...(auth_method.type !== 'Password' && normalizeText(candidate.certificatePath)
             ? { certificate_path: normalizeText(candidate.certificatePath) } : {}),
         jump_host: null,
     };

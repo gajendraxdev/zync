@@ -46,15 +46,27 @@ pub(crate) fn list() -> Result<Vec<NetworkInterface>> {
     let indices = windows::family_indices()?;
     let mut interfaces = normalize(netdev::get_interfaces())?;
     #[cfg(windows)]
-    for interface in &mut interfaces {
-        let &(v4, v6) = indices
-            .get(&interface.id.to_ascii_lowercase())
-            .context("Network adapters changed while enumerating; refresh and try again")?;
-        interface.ipv4_index = v4;
-        interface.ipv6_index = v6;
-    }
+    enrich_windows_indices(&mut interfaces, &indices);
     interfaces.sort_by(|a, b| a.name.cmp(&b.name).then(a.id.cmp(&b.id)));
     Ok(interfaces)
+}
+
+/// A hot-plug race disables only the unmatched adapter; it must not reuse netdev's single index.
+#[cfg(windows)]
+fn enrich_windows_indices(
+    interfaces: &mut [NetworkInterface],
+    indices: &BTreeMap<String, (u32, u32)>,
+) {
+    for interface in interfaces {
+        if let Some(&(v4, v6)) = indices.get(&interface.id.to_ascii_lowercase()) {
+            interface.ipv4_index = v4;
+            interface.ipv6_index = v6;
+        } else {
+            interface.available = false;
+            interface.ipv4_index = 0;
+            interface.ipv6_index = 0;
+        }
+    }
 }
 
 /// Bound only picker output, prioritizing available adapters without limiting dial-time lookup.
@@ -339,6 +351,25 @@ mod tests {
         assert!(snapshot[20..].iter().all(|item| !item.available));
         assert_eq!(snapshot[0].id, "fixture-280");
         assert_eq!(snapshot[20].id, "fixture-000");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn missing_windows_enrichment_disables_only_the_unmatched_adapter() {
+        let mut interfaces = normalize(vec![fixture_interface()]).unwrap();
+        interfaces.push(NetworkInterface {
+            id: "gone".into(),
+            ..interfaces[0].clone()
+        });
+        enrich_windows_indices(
+            &mut interfaces,
+            &BTreeMap::from([("fixture0".into(), (7, 9))]),
+        );
+        assert!(selected(&interfaces, "fixture0").is_ok());
+        assert_eq!((interfaces[0].ipv4_index, interfaces[0].ipv6_index), (7, 9));
+        assert!(!interfaces[1].available);
+        assert_eq!((interfaces[1].ipv4_index, interfaces[1].ipv6_index), (0, 0));
+        assert!(selected(&interfaces, "gone").is_err());
     }
 
     #[cfg(windows)]
