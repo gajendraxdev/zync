@@ -37,6 +37,8 @@ export interface ConnectConfig {
     port: number;
     username: string;
     auth_method: ConnectAuthMethod;
+    certificate_path?: string;
+    network_interface_id?: string;
     agent_forwarding?: ConnectAgentForwardingConfig;
     jump_host: ConnectConfig | null;
     host_key_approval?: {
@@ -154,6 +156,7 @@ export const buildAgentForwardingConfig = (
         : null;
 };
 
+/** Build a bounded hop chain without resolving secrets or changing per-hop certificate ownership. */
 export const buildConnectConfigResult = (
     connections: Connection[],
     connectionId: string,
@@ -185,6 +188,8 @@ export const buildConnectConfigResult = (
         port: connection.port,
         username: connection.username,
         auth_method: authResult.auth,
+        ...(normalizeOptionalText(connection.certificatePath)
+            ? { certificate_path: normalizeOptionalText(connection.certificatePath) } : {}),
         jump_host: null,
     };
 

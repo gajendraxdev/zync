@@ -142,6 +142,9 @@ const ipcRenderer = {
     // Map Electron IPC channels to Tauri commands
     const channelMap: Record<string, string> = {
       'ssh:connect': 'ssh_connect',
+      'ssh:networkInterfaces': 'ssh_network_interfaces',
+      'ssh:networkPreference': 'ssh_network_preference',
+      'ssh:setNetworkPreference': 'ssh_set_network_preference',
       'ssh:cancelConnect': 'ssh_cancel_connect',
       'ssh:disconnect': 'ssh_disconnect',
       'ssh:transportLost': 'ssh_transport_lost',

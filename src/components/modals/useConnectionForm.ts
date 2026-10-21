@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useAppStore, Connection } from '../../store/useAppStore';
 import {
     validateConnectionDraft,
-    getCredentialHealthChecks,
     buildConnectionSavePayload,
     SELF_AGENT_FORWARDING_KEY,
     applyAuthMethodTransition,
@@ -108,10 +107,6 @@ export function useConnectionForm(isOpen: boolean, editingConnectionId: string |
         () => findBlockingDuplicateConnectionByEndpoint(connections, formData, activeEditingConnectionId),
         [activeEditingConnectionId, connections, formData]
     );
-    const credentialHealthChecks = useMemo(
-        () => getCredentialHealthChecks(formData, authMethod),
-        [formData, authMethod]
-    );
     const jumpCycleWarning = useMemo(() => {
         if (!formData.jumpServerId || !activeEditingConnectionId) return false;
         const visited = new Set<string>();
@@ -125,7 +120,8 @@ export function useConnectionForm(isOpen: boolean, editingConnectionId: string |
         return false;
     }, [formData.jumpServerId, activeEditingConnectionId, connections]);
 
-    const saveForm = async (canSave: boolean): Promise<Connection | null> => {
+    /** Reuse host transforms with an optional ordered persistence boundary supplied by the editor. */
+    const saveForm = async (canSave: boolean, persist?: (connection: Connection) => Promise<void>): Promise<Connection | null> => {
         if (!canSave || !validation.ok) return null;
         const connectionData = buildConnectionSavePayload({
             formData,
@@ -133,7 +129,9 @@ export function useConnectionForm(isOpen: boolean, editingConnectionId: string |
             editingConnectionId: activeEditingConnectionId,
             connections,
         });
-        if (activeEditingConnectionId) {
+        if (persist) {
+            await persist(connectionData);
+        } else if (activeEditingConnectionId) {
             await editConnection(connectionData);
         } else {
             await addConnection(connectionData);
@@ -153,7 +151,7 @@ export function useConnectionForm(isOpen: boolean, editingConnectionId: string |
         activeEditingConnectionId,
         validation,
         visibleHostError, visibleUsernameError, visiblePortError, visibleKeyPathError,
-        duplicateConnection, credentialHealthChecks, jumpCycleWarning,
+        duplicateConnection, jumpCycleWarning,
         saveForm,
     };
 }

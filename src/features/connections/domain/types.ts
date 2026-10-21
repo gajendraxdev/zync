@@ -8,6 +8,20 @@ export type TabView = CoreTabView | PluginTabView;
 export type CredentialItemKind = 'ssh-password' | 'ssh-private-key' | 'ssh-agent-key';
 export type CredentialPurpose = 'ssh-auth';
 
+/** Device-only egress policy, intentionally absent from synced/exported Connection records. */
+export type NetworkPreference = { mode: 'default' } | { mode: 'ask' } | { mode: 'interface'; id: string };
+
+export interface NetworkInterface {
+    id: string;
+    name: string;
+    /** OS-provided adapter/driver description, when available; not a VPN guarantee. */
+    description?: string | null;
+    addresses: string[];
+    available: boolean;
+    /** Reported by the OS, not inferred from a user-editable adapter name. */
+    kind?: 'wifi' | 'ethernet' | 'loopback' | 'tunnel' | 'other';
+}
+
 export interface CredentialRef {
     vaultId: string;
     /** Stable logical credential identity; itemId is the current physical vault record. */
@@ -26,6 +40,8 @@ export interface Connection {
     /** SSH login password, plus legacy key passphrases until their next successful connect/edit. */
     password?: string;
     privateKeyPath?: string;
+    /** Local OpenSSH user-certificate file; separate from server host-key trust. */
+    certificatePath?: string;
     /** Vault credential reference — when set, password/privateKeyPath are ignored for SSH auth. */
     authRef?: CredentialRef;
     status: 'disconnected' | 'connecting' | 'connected' | 'error';

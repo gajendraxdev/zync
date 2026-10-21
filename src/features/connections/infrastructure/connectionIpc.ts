@@ -1,3 +1,14 @@
+import type { NetworkInterface, NetworkPreference } from '../domain/types.js';
+
+/** Enumerate device adapters only on an explicit picker/connection request. */
+export const listNetworkInterfacesIpc = (): Promise<NetworkInterface[]> => window.ipcRenderer.invoke('ssh:networkInterfaces');
+/** Device egress preferences are kept outside synced/exported host records. */
+export const getNetworkPreferenceIpc = (connectionId: string): Promise<NetworkPreference> =>
+    window.ipcRenderer.invoke('ssh:networkPreference', { connectionId });
+/** Persist an adapter identity rather than a transient IP address or interface index. */
+export const saveNetworkPreferenceIpc = (connectionId: string, preference: NetworkPreference): Promise<void> =>
+    window.ipcRenderer.invoke('ssh:setNetworkPreference', { connectionId, preference });
+
 export interface AuthMethodPassword {
     type: 'Password';
     password: string;
@@ -24,6 +35,8 @@ export interface ConnectionConfigPayload {
     port: number;
     username: string;
     auth_method: AuthMethodPayload;
+    certificate_path?: string;
+    network_interface_id?: string;
     agent_forwarding?: {
         source_connection_id: string;
         auth_method: AuthMethodPrivateKey | AuthMethodVaultRef;
@@ -52,6 +65,7 @@ export interface ImportedConnectionPayload {
     username: string;
     port: number;
     privateKeyPath?: string;
+    certificatePath?: string;
     privateKeyStatus?: 'valid' | 'passphraseRequired' | 'invalidKey' | 'unavailable';
     jumpServerAlias?: string;
     jumpServerId?: string;

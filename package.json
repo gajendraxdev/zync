@@ -27,6 +27,7 @@
     "test:redact": "npm run compile:agent-tests && node tests/redactContext.test.mjs",
     "test:agent-run-store": "npm run compile:agent-tests && node tests/agentRunStore.partialize.test.mjs",
     "test:connection-domain": "npm run compile:agent-tests && node tests/connectionDomain.test.mjs",
+    "test:connection-form-ui": "npm run compile:agent-tests && node .tmp-agent-tests/tests/connectionForm.browser.test.js",
     "test:host-catalog": "npm run compile:agent-tests && node tests/hostCatalog.test.mjs",
     "test:connection-display": "npm run compile:agent-tests && node tests/connectionDisplay.test.mjs",
     "test:notification-history": "npm run compile:agent-tests && node tests/notificationHistory.test.mjs",

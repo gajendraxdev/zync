@@ -95,6 +95,7 @@ const IMPORT_SOURCE_LABELS: Record<SshImportSourceType, string> = {
     text: 'Pasted SSH config text',
 };
 
+/** Preserve key/certificate paths while converting native config-import metadata to a host draft. */
 const normalizeImportedConnectionPayload = (payload: ImportedConnectionPayload): Connection => ({
     id: payload.id,
     name: payload.name,
@@ -102,12 +103,14 @@ const normalizeImportedConnectionPayload = (payload: ImportedConnectionPayload):
     username: payload.username,
     port: payload.port,
     privateKeyPath: payload.privateKeyPath,
+    certificatePath: payload.certificatePath,
     jumpServerId: payload.jumpServerId,
     status: 'disconnected',
     icon: 'Server',
     tags: [],
 });
 
+/** Carry both identity paths through the existing imported-key internalization boundary. */
 const toImportedConnectionPayload = (connection: Connection): ImportedConnectionPayload => ({
     id: connection.id,
     name: connection.name,
@@ -115,6 +118,7 @@ const toImportedConnectionPayload = (connection: Connection): ImportedConnection
     username: connection.username,
     port: connection.port,
     privateKeyPath: connection.privateKeyPath,
+    certificatePath: connection.certificatePath,
     jumpServerId: connection.jumpServerId,
 });
 

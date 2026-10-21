@@ -21,6 +21,10 @@
         "sourceMap": false
     },
     "include": [
+        "tests/connectionForm.browser.tsx",
+        "tests/connectionForm.browser.test.ts",
+        "tests/connectionOptions.test.ts",
+        "tests/networkInterface.test.ts",
         "tests/terminalOutputFlow.browser.ts",
         "tests/terminalLifecycleOwnership.test.ts",
         "tests/changedFunctionDocs.test.ts",
