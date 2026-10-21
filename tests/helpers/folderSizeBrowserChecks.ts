@@ -139,7 +139,10 @@ export async function runFolderSizeBrowserChecks(control: ReturnType<typeof crea
         import('react'), import('react-dom/client'), import('../../src/features/files/application/useFolderSizes'),
     ]);
     let observed: ReturnType<typeof useFolderSizes> | undefined;
-    const Probe = () => { observed = useFolderSizes(host, path, listing, before.connections[0], true, path + '/assets'); return null; };
+    let probeListing = listing;
+    let probeBinding = before.connections[0];
+    let probeTarget = path + '/assets';
+    const Probe = () => { observed = useFolderSizes(host, path, probeListing, probeBinding, true, probeTarget); return null; };
     const container = document.createElement('div'); document.body.append(container);
     const root = createRoot(container);
     const beforeReplay = reads();
@@ -149,6 +152,40 @@ export async function runFolderSizeBrowserChecks(control: ReturnType<typeof crea
         control.finish({ bytes: '33' }); await wait(() => observed?.state?.status === 'finished');
         check('Strict Mode replay cancels old admission but completes one fresh inspection', reads() === beforeReplay + 1
             && observed?.state?.status === 'finished' && observed.state.report.bytes === '33');
+        observed!.start(); await wait(() => control.pending() === 1);
+        observed!.cancel(); control.finish(); await settle();
+        const cancelledProbeReads = reads();
+        probeListing = [...listing];
+        root.render(createElement(StrictMode, null, createElement(Probe))); await settle();
+        probeBinding = { ...probeBinding };
+        root.render(createElement(StrictMode, null, createElement(Probe))); await settle();
+        check('user cancellation survives listing and binding refreshes without restarting',
+            reads() === cancelledProbeReads && observed?.state?.status === 'cancelled');
+        observed!.start(); await wait(() => control.pending() === 1);
+        control.fail('Owned probe failure'); await wait(() => observed?.state?.status === 'unavailable');
+        const failedProbeReads = reads();
+        const staleRetry = observed!.start;
+        probeListing = [...listing];
+        root.render(createElement(StrictMode, null, createElement(Probe))); await settle();
+        staleRetry(); await settle();
+        check('owned failure survives refresh and a stale Retry cannot release the halt',
+            reads() === failedProbeReads && observed?.state?.status === 'unavailable');
+        observed!.start(); await wait(() => control.pending() === 1);
+        check('explicit Retry clears the same-target halt', reads() === failedProbeReads + 1);
+        observed!.cancel(); await settle();
+        probeTarget = path + '/config';
+        root.render(createElement(StrictMode, null, createElement(Probe)));
+        await wait(() => control.pending() === 2);
+        check('changing the target releases a user-cancelled halt automatically', observed?.state?.status === 'calculating');
+        control.fail('Old selection failure'); await settle();
+        check('a superseded failure cannot halt the new target', observed?.state?.status === 'calculating');
+        probeListing = [...listing];
+        root.render(createElement(StrictMode, null, createElement(Probe)));
+        await wait(() => control.pending() === 2);
+        control.finish(); control.finish({ bytes: '44' });
+        await wait(() => observed?.state?.status === 'finished');
+        check('target changes and cleanup still allow fresh owned scans',
+            observed?.state?.status === 'finished' && observed.state.report.bytes === '44');
     } finally { root.unmount(); container.remove(); }
     return passed;
 }
