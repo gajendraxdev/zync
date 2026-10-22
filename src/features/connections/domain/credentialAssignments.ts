@@ -8,6 +8,7 @@ const normalizeCredentialRef = (authRef: CredentialRef): CredentialRef => ({
     purpose: authRef.purpose,
 });
 
+/** Assign a vault reference and clear key-only certificate metadata for password credentials. */
 export const assignCredentialToConnections = (
     connections: Connection[],
     connectionIds: string[],
@@ -21,10 +22,12 @@ export const assignCredentialToConnections = (
             authRef: normalizeCredentialRef(authRef),
             password: undefined,
             privateKeyPath: undefined,
+            certificatePath: authRef.itemKind === 'ssh-password' ? undefined : connection.certificatePath,
         };
     });
 };
 
+/** Reconcile explicit assignments using stable credential identity without retaining incompatible certificates. */
 export const syncCredentialAssignments = (
     connections: Connection[],
     selectedConnectionIds: string[],
@@ -49,6 +52,7 @@ export const syncCredentialAssignments = (
                 authRef: normalizeCredentialRef(authRef),
                 password: undefined,
                 privateKeyPath: undefined,
+                certificatePath: authRef.itemKind === 'ssh-password' ? undefined : connection.certificatePath,
             };
         }
 

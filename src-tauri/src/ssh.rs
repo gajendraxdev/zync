@@ -432,6 +432,11 @@ fn serialize_signature(signature: keys::ssh_key::Signature) -> Result<Vec<u8>> {
 
 /// Sign only the selected algorithm; RSA must retain its requested SHA-2 hash.
 fn sign_agent_request(key: &PrivateKeyWithHashAlg, data: &[u8]) -> Result<Vec<u8>> {
+    serialize_signature(sign_key_data(key, data)?)
+}
+
+/// Share private-key signature encoding between forwarded-agent and local certificate auth.
+fn sign_key_data(key: &PrivateKeyWithHashAlg, data: &[u8]) -> Result<keys::ssh_key::Signature> {
     use keys::signature::Signer;
     let signature = match key.key_data() {
         keys::ssh_key::private::KeypairData::Rsa(keypair) => {
@@ -439,7 +444,34 @@ fn sign_agent_request(key: &PrivateKeyWithHashAlg, data: &[u8]) -> Result<Vec<u8
         }
         keypair => keypair.try_sign(data)?,
     };
-    serialize_signature(signature)
+    Ok(signature)
+}
+
+/// Connection-local signer using an already unlocked key; never opens a system SSH agent.
+struct CertificateSigner(PrivateKeyWithHashAlg);
+
+impl russh::Signer for CertificateSigner {
+    type Error = anyhow::Error;
+
+    /// Append the SSH signature to upstream's exact auth payload, preserving RSA SHA-2.
+    async fn auth_sign(
+        &mut self,
+        _: &keys::agent::AgentIdentity,
+        hash: Option<HashAlg>,
+        mut data: Vec<u8>,
+    ) -> Result<Vec<u8>> {
+        use keys::ssh_encoding::Encode;
+        if hash != self.0.hash_alg() {
+            return Err(anyhow!(
+                "Certificate signing algorithm changed unexpectedly"
+            ));
+        }
+        let signature = sign_key_data(&self.0, &data)?;
+        let mut encoded = Vec::new();
+        signature.encode(&mut encoded)?;
+        write_string(&mut data, &encoded);
+        Ok(data)
+    }
 }
 
 /// Enforce key, user-auth payload, algorithm and consent checks before signing.
@@ -694,6 +726,7 @@ impl SshManager {
             .map(|(session, _)| session)
     }
 
+    /// Establish the configured hop chain with explicit egress, host trust and authentication.
     pub async fn connect_with_banner(
         &self,
         config: ConnectionConfig,
@@ -711,6 +744,11 @@ impl SshManager {
 
         // Recursive Jump Host Logic
         if let Some(ref jump_host_config) = config.jump_host {
+            if config.network_interface_id.is_some() {
+                return Err(anyhow!(
+                    "Select the network interface on the first jump host, not the remote target"
+                ));
+            }
             // 1. Connect to Jump Host (Recursive)
             let jump_session =
                 Box::pin(self.connect((**jump_host_config).clone(), tunnel_manager.clone()))
@@ -768,12 +806,17 @@ impl SshManager {
             auth_banner: auth_banner.clone(),
         };
 
-        let mut session = client::connect(
-            client_config,
-            (config.host.as_str(), config.port),
-            client_handler,
+        let stream = crate::network_interfaces::connect(
+            &config.host,
+            config.port,
+            config.network_interface_id.as_deref(),
         )
         .await?;
+        // Preserve russh's normal low-latency TCP policy when supplying our own stream.
+        if client_config.nodelay {
+            stream.set_nodelay(true)?;
+        }
+        let mut session = client::connect_stream(client_config, stream, client_handler).await?;
 
         self.authenticate_session(&mut session, &config).await?;
         let banner = auth_banner
@@ -789,6 +832,13 @@ impl SshManager {
         session: &mut client::Handle<Client>,
         config: &ConnectionConfig,
     ) -> Result<()> {
+        if config.certificate_path.is_some()
+            && matches!(config.auth_method, AuthMethod::Password { .. })
+        {
+            return Err(anyhow!(
+                "SSH user certificates require private-key authentication"
+            ));
+        }
         let auth_res = match &config.auth_method {
             AuthMethod::Password { password } => {
                 if password.trim().is_empty() {
@@ -822,15 +872,25 @@ impl SshManager {
                     &config.username,
                     &key_data,
                     passphrase.as_deref(),
+                    config.certificate_path.as_deref(),
+                    None,
                 )
                 .await?
             }
             AuthMethod::PrivateKeyData {
                 key_data,
                 passphrase,
+                certificate,
             } => {
-                Self::auth_with_key_data(session, &config.username, key_data, passphrase.as_deref())
-                    .await?
+                Self::auth_with_key_data(
+                    session,
+                    &config.username,
+                    key_data,
+                    passphrase.as_deref(),
+                    config.certificate_path.as_deref(),
+                    certificate.as_deref(),
+                )
+                .await?
             }
             AuthMethod::VaultRef { item_id, .. } => {
                 return Err(anyhow!(
@@ -895,6 +955,7 @@ impl SshManager {
             AuthMethod::PrivateKeyData {
                 key_data,
                 passphrase,
+                ..
             } => (key_data.clone(), passphrase.as_deref()),
             AuthMethod::Password { .. } => {
                 return Err(anyhow!("Agent forwarding requires a private key"))
@@ -909,12 +970,14 @@ impl SshManager {
             .map_err(|error| anyhow!("Failed to decode forwarded private key: {error}"))
     }
 
-    /// Select a server-supported RSA SHA-2 hash without silently enabling SHA-1.
+    /// Authenticate a configured key/certificate while preserving the shared RSA SHA-2 policy.
     async fn auth_with_key_data<H: client::Handler>(
         session: &mut client::Handle<H>,
         username: &str,
         key_data: &str,
         passphrase: Option<&str>,
+        certificate_path: Option<&str>,
+        certificate_data: Option<&str>,
     ) -> Result<bool> {
         let privkey = keys::decode_secret_key(key_data, passphrase)
             .map_err(|e| anyhow!("Failed to decode private key: {}", e))?;
@@ -924,6 +987,21 @@ impl SshManager {
             None
         };
         let privkey = Arc::new(privkey);
+        // A per-host file explicitly overrides the vault attachment (including on read failure).
+        let certificate = if let Some(path) = certificate_path {
+            Some(crate::ssh_certificate::load(path, &privkey).await?)
+        } else {
+            certificate_data
+                .map(|text| crate::ssh_certificate::from_text(text, &privkey))
+                .transpose()?
+        };
+        if let Some(cert) = certificate {
+            let mut signer = CertificateSigner(PrivateKeyWithHashAlg::new(privkey, hash));
+            return Ok(session
+                .authenticate_certificate_with(username, cert, hash, &mut signer)
+                .await?
+                .success());
+        }
         Ok(session
             .authenticate_publickey(username, PrivateKeyWithHashAlg::new(privkey, hash))
             .await?
@@ -1432,11 +1510,14 @@ mod tests {
                         auth_method: AuthMethod::PrivateKeyData {
                             key_data: forwarded_key_data,
                             passphrase: None,
+                            certificate: None,
                         },
                     }),
                     jump_host: None,
                     host_key_approval: Some(approval),
                     connect_attempt_id: None,
+                    certificate_path: None,
+                    network_interface_id: None,
                 },
                 tunnels,
             )
@@ -1509,11 +1590,14 @@ mod tests {
                     auth_method: AuthMethod::PrivateKeyData {
                         key_data,
                         passphrase: None,
+                        certificate: None,
                     },
                     agent_forwarding: None,
                     jump_host: None,
                     host_key_approval: Some(approval_a),
                     connect_attempt_id: None,
+                    certificate_path: None,
+                    network_interface_id: None,
                 },
                 tunnels.clone(),
             )
@@ -1534,6 +1618,8 @@ mod tests {
                     jump_host: None,
                     host_key_approval: Some(approval_b),
                     connect_attempt_id: None,
+                    certificate_path: None,
+                    network_interface_id: None,
                 },
                 tunnels,
             )

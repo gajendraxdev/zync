@@ -95,7 +95,7 @@ export const CREDENTIAL_KIND_OPTIONS: CredentialKindOption[] = [
   {
     kind: 'ssh-private-key',
     label: 'SSH private key',
-    description: 'Paste an OpenSSH private key, with optional passphrase.',
+    description: 'Paste an OpenSSH private key, with optional passphrase and SSH certificate.',
     enabled: true,
   },
   {
@@ -184,6 +184,7 @@ export function isHostAssignableCredentialKind(kind: string): boolean {
   );
 }
 
+/** Reconstruct metadata-only field references, including optional encrypted SSH attachments. */
 export function vaultItemToCredentialEnvelope(item: VaultItem | VaultItemDetail): CredentialEnvelope {
   if ('credential' in item && item.credential) {
     return {
@@ -200,6 +201,10 @@ export function vaultItemToCredentialEnvelope(item: VaultItem | VaultItemDetail)
   if (hasPassphraseField && kind === 'ssh-private-key') {
     fields.push(vaultItemPassphraseReferenceField());
   }
+  if (kind === 'ssh-private-key' && 'hasSshCertificateField' in item && item.hasSshCertificateField) {
+    fields.push({ name: 'sshCertificate', label: 'SSH user certificate', secret: true,
+      required: false, format: 'certificate', valueRef: 'secret:sshCertificate' });
+  }
   return {
     credentialId: item.logicalId || item.id,
     kind,
@@ -214,6 +219,15 @@ export function vaultItemToCredentialEnvelope(item: VaultItem | VaultItemDetail)
     updatedAt: item.updatedAt,
     revision: item.revision,
     schemaVersion: CURRENT_CREDENTIAL_SCHEMA_VERSION,
+  };
+}
+
+/** Build one SSH credential payload without trimming private-key passphrase bytes. */
+export function sshPrivateKeySecretValues(privateKey: string, passphrase: string, certificate: string): Record<string, string> {
+  return {
+    privateKey,
+    ...(passphrase.length > 0 ? { passphrase } : {}),
+    ...(certificate.trim() ? { sshCertificate: certificate.trim() } : {}),
   };
 }
 

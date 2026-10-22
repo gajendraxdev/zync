@@ -21,6 +21,13 @@
         "sourceMap": false
     },
     "include": [
+        "tests/vaultSshCertificate.browser.tsx",
+        "tests/vaultSshCertificate.browser.test.ts",
+        "tests/vaultSshCertificate.test.ts",
+        "tests/connectionForm.browser.tsx",
+        "tests/connectionForm.browser.test.ts",
+        "tests/connectionOptions.test.ts",
+        "tests/networkInterface.test.ts",
         "tests/terminalOutputFlow.browser.ts",
         "tests/terminalLifecycleOwnership.test.ts",
         "tests/changedFunctionDocs.test.ts",

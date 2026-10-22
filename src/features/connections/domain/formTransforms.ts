@@ -27,6 +27,8 @@ interface ToBackendConfig {
         | { type: 'PrivateKey'; key_path: string; passphrase: string | null }
         | { type: 'VaultRef'; item_id: string; credential_id?: string };
     agent_forwarding?: ConnectAgentForwardingConfig;
+    certificate_path?: string;
+    network_interface_id?: string;
     jump_host: ToBackendConfig | null;
     host_key_approval?: {
         fingerprint: string;
@@ -35,6 +37,44 @@ interface ToBackendConfig {
 }
 
 type ConfigCandidate = Connection | ConnectionFormDraft;
+
+type TestConnectionDependency = Partial<Pick<Connection, 'name' | 'host' | 'port' | 'username' | 'password'
+    | 'privateKeyPath' | 'certificatePath' | 'jumpServerId' | 'agentForwardingKeyConnectionId'>> & {
+    id: string; vaultId?: string; credentialId?: string; itemId?: string; itemKind?: string; purpose?: string;
+};
+
+/** Retain a stable auth/route snapshot for only the jump chain and offered keys; never stringify secrets. */
+export function connectionTestDependencies(
+    connections: readonly Connection[], draft: ConnectionFormDraft,
+    previous: readonly TestConnectionDependency[] = [],
+): readonly TestConnectionDependency[] {
+    const byId = new Map(connections.map(connection => [connection.id, connection]));
+    const selected = new Set<string>();
+    const jumps = new Set<string>();
+    let jumpId = draft.jumpServerId;
+    while (jumpId && !jumps.has(jumpId)) {
+        jumps.add(jumpId);
+        selected.add(jumpId);
+        const jump = byId.get(jumpId);
+        if (jump?.agentForwardingKeyConnectionId) selected.add(jump.agentForwardingKeyConnectionId);
+        jumpId = jump?.jumpServerId;
+    }
+    if (draft.agentForwardingKeyConnectionId && draft.agentForwardingKeyConnectionId !== SELF_AGENT_FORWARDING_KEY) {
+        selected.add(draft.agentForwardingKeyConnectionId);
+    }
+    const next = [...selected].map(id => {
+        const connection = byId.get(id);
+        return { id, name: connection?.name, host: connection?.host, port: connection?.port,
+            username: connection?.username, password: connection?.password, privateKeyPath: connection?.privateKeyPath,
+            certificatePath: connection?.certificatePath, jumpServerId: connection?.jumpServerId,
+            agentForwardingKeyConnectionId: connection?.agentForwardingKeyConnectionId,
+            vaultId: connection?.authRef?.vaultId, credentialId: connection?.authRef?.credentialId,
+            itemId: connection?.authRef?.itemId, itemKind: connection?.authRef?.itemKind, purpose: connection?.authRef?.purpose };
+    });
+    return previous.length === next.length && next.every((item, index) =>
+        (Object.keys(item) as (keyof TestConnectionDependency)[]).every(key => item[key] === previous[index][key]))
+        ? previous : next;
+}
 
 const requireNormalizedText = (value: unknown, fieldName: string): string => {
     const normalized = normalizeText(typeof value === 'string' ? value : String(value ?? ''));
@@ -100,6 +140,7 @@ const resolveAuthMethod = (
     return { type: 'Password', password: normalizedPassword };
 };
 
+/** Normalize one auth candidate while keeping its optional public certificate attached to that hop. */
 const toBackendConfig = (
     candidate: ConfigCandidate,
     formDraft: ConnectionFormDraft,
@@ -124,6 +165,8 @@ const toBackendConfig = (
         port: portResult.normalizedPort,
         username,
         auth_method,
+        ...(auth_method.type !== 'Password' && normalizeText(candidate.certificatePath)
+            ? { certificate_path: normalizeText(candidate.certificatePath) } : {}),
         jump_host: null,
     };
 };
@@ -155,6 +198,7 @@ const buildJumpChain = (
     return config;
 };
 
+/** Persist host metadata and key/certificate paths, never a local private-key passphrase. */
 export const buildConnectionSavePayload = ({
     formData,
     authMethod,
@@ -185,6 +229,8 @@ export const buildConnectionSavePayload = ({
         // Local-key passphrases are runtime/keychain credentials, never host-record fields.
         password: authMethod === 'password' ? (formData.password || undefined) : undefined,
         privateKeyPath: authMethod === 'key' ? formData.privateKeyPath : undefined,
+        certificatePath: authMethod !== 'password' && formData.authRef?.itemKind !== 'ssh-password'
+            ? normalizeText(formData.certificatePath) || undefined : undefined,
         authRef: authMethod === 'vault' ? formData.authRef : undefined,
         status: editingConnectionId ? (connections.find((c) => c.id === editingConnectionId)?.status || 'disconnected') : 'disconnected',
         jumpServerId: formData.jumpServerId,

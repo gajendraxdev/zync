@@ -7,12 +7,13 @@ export interface ConnectionDraft {
     port?: number | string;
     password?: string;
     privateKeyPath?: string;
+    certificatePath?: string;
     folder?: string;
 }
 
 export type AuthMode = 'password' | 'key' | 'vault';
 
-export type ConnectionDraftField = 'host' | 'username' | 'port' | 'privateKeyPath';
+export type ConnectionDraftField = 'host' | 'username' | 'port' | 'privateKeyPath' | 'certificatePath';
 
 export interface ValidationResult {
     ok: boolean;
@@ -58,6 +59,7 @@ const isIpLiteral = (value: string): boolean => {
 export const hasRequiredHostAndUsername = (draft: ConnectionDraft): boolean =>
     !!normalizeText(draft.host) && !!normalizeText(draft.username);
 
+/** Validate required host fields and reject control characters in user-supplied identity paths. */
 export const validateConnectionDraft = (
     draft: ConnectionDraft,
     authMode: AuthMode,
@@ -103,11 +105,17 @@ export const validateConnectionDraft = (
         errors.push(portResult.error);
         fieldErrors.port = portResult.error;
     }
+    if (/[\r\n\0]/.test(draft.certificatePath || '')) {
+        const message = 'Certificate path contains invalid characters.';
+        errors.push(message);
+        fieldErrors.certificatePath = message;
+    }
 
     return { ok: errors.length === 0, errors, fieldErrors, normalizedPort, normalizedFolder };
 };
 
-export const getCredentialHealthChecks = (draft: ConnectionDraft, authMode: AuthMode): CredentialHealthCheck[] => {
+/** Content inspection supersedes filename heuristics; existing callers retain their pre-inspection hints. */
+export const getCredentialHealthChecks = (draft: ConnectionDraft, authMode: AuthMode, options?: { keyInspected?: boolean }): CredentialHealthCheck[] => {
     const checks: CredentialHealthCheck[] = [];
     const password = normalizeText(draft.password);
     const keyPath = normalizeText(draft.privateKeyPath);
@@ -126,12 +134,12 @@ export const getCredentialHealthChecks = (draft: ConnectionDraft, authMode: Auth
         });
     }
 
-    if (authMode === 'key' && keyPath.toLowerCase().endsWith('.pub')) {
+    if (authMode === 'key' && !options?.keyInspected && keyPath.toLowerCase().endsWith('.pub')) {
         checks.push({
             severity: 'warning',
             message: 'Selected key looks like a public key (.pub). Choose a private key file.',
         });
-    } else if (authMode === 'key' && keyPath && !/(\.pem|id_rsa|id_ed25519|id_ecdsa|id_dsa)$/i.test(keyPath)) {
+    } else if (authMode === 'key' && !options?.keyInspected && keyPath && !/(\.pem|id_rsa|id_ed25519|id_ecdsa|id_dsa)$/i.test(keyPath)) {
         checks.push({
             severity: 'info',
             message: 'Key filename is uncommon. Confirm this is a private key.',

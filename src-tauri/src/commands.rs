@@ -875,6 +875,30 @@ fn inject_remembered_key_passphrases(config: &mut ConnectionConfig) -> Result<()
     Ok(())
 }
 
+/// Enumerate local adapters on demand without changing routes or starting a VPN.
+#[tauri::command]
+pub async fn ssh_network_interfaces() -> Result<Vec<crate::network_interfaces::NetworkInterface>, String> {
+    tokio::task::spawn_blocking(crate::network_interfaces::list).await.map_err(|e| e.to_string())?
+        .map(crate::network_interfaces::picker_snapshot)
+        .map_err(|e| e.to_string())
+}
+
+/// Read host-specific, device-only routing preferences outside synced host records.
+#[tauri::command]
+pub async fn ssh_network_preference(app: AppHandle, connection_id: String) -> Result<crate::network_interfaces::Preference, String> {
+    let data_dir = get_data_dir(&app);
+    tokio::task::spawn_blocking(move || crate::network_interfaces::get_preference(&data_dir, &connection_id))
+        .await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())
+}
+
+/// Save only a validated routing preference using the existing atomic writer.
+#[tauri::command]
+pub async fn ssh_set_network_preference(app: AppHandle, connection_id: String, preference: crate::network_interfaces::Preference) -> Result<(), String> {
+    let data_dir = get_data_dir(&app);
+    tokio::task::spawn_blocking(move || crate::network_interfaces::set_preference(&data_dir, &connection_id, preference))
+        .await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())
+}
+
 async fn inject_remembered_key_passphrases_blocking(
     config: &mut ConnectionConfig,
 ) -> Result<(), String> {
@@ -1161,6 +1185,7 @@ pub async fn ssh_cancel_connect(
     Ok(())
 }
 
+/// Resolve a vault credential natively, including its optional encrypted SSH certificate.
 async fn resolve_auth_method(
     connection_id: &str,
     auth_method: &mut crate::types::AuthMethod,
@@ -1215,6 +1240,10 @@ async fn resolve_auth_method(
             crate::types::AuthMethod::PrivateKeyData {
                 key_data: key_data.to_string(),
                 passphrase: passphrase.map(str::to_string),
+                certificate: record
+                    .secret_values
+                    .get(crate::vault::credential::SSH_CERTIFICATE_FIELD)
+                    .cloned(),
             }
         }
         kind if require_private_key => {
@@ -2285,6 +2314,7 @@ fn csv_join(values: &Option<Vec<String>>) -> String {
         .unwrap_or_default()
 }
 
+/// Encode the same field order as the CSV export header, including optional certificate paths.
 fn connection_to_csv_line(connection: &SavedConnection) -> String {
     let fields = vec![
         csv_escape(&connection.id),
@@ -2294,6 +2324,7 @@ fn connection_to_csv_line(connection: &SavedConnection) -> String {
         csv_escape(&connection.username),
         csv_escape(&connection.password.clone().unwrap_or_default()),
         csv_escape(&connection.private_key_path.clone().unwrap_or_default()),
+        csv_escape(&connection.certificate_path.clone().unwrap_or_default()),
         csv_escape(&connection.jump_server_id.clone().unwrap_or_default()),
         csv_escape(&connection.folder.clone().unwrap_or_default()),
         csv_escape(&connection.theme.clone().unwrap_or_default()),
@@ -2434,6 +2465,7 @@ fn parse_bool_field(value: &str) -> Option<bool> {
     }
 }
 
+/// Import optional connection fields by header name, preserving older CSV files.
 fn parse_csv_connections(content: &str) -> Result<Vec<SavedConnection>, String> {
     let mut lines = content.lines().filter(|line| !line.trim().is_empty());
     let Some(header_line) = lines.next() else {
@@ -2458,6 +2490,7 @@ fn parse_csv_connections(content: &str) -> Result<Vec<SavedConnection>, String> 
     let port_idx = index_of("port");
     let password_idx = index_of("password");
     let key_idx = index_of("privatekeypath").or_else(|| index_of("private_key_path"));
+    let certificate_idx = index_of("certificatepath").or_else(|| index_of("certificate_path"));
     let jump_idx = index_of("jumpserverid").or_else(|| index_of("jump_server_id"));
     let folder_idx = index_of("folder");
     let theme_idx = index_of("theme");
@@ -2522,6 +2555,10 @@ fn parse_csv_connections(content: &str) -> Result<Vec<SavedConnection>, String> 
                     Some(value)
                 }
             },
+            certificate_path: {
+                let value = field(certificate_idx);
+                if value.is_empty() { None } else { Some(value) }
+            },
             jump_server_id: {
                 let value = field(jump_idx);
                 if value.is_empty() {
@@ -2564,7 +2601,14 @@ fn parse_csv_connections(content: &str) -> Result<Vec<SavedConnection>, String> 
     Ok(parsed)
 }
 
-fn build_ssh_config_export(connections: &[SavedConnection]) -> String {
+/// Export explicit identities and user certificates without changing server trust configuration.
+fn build_ssh_config_export(connections: &[SavedConnection]) -> Result<String, String> {
+    if connections.iter()
+        .flat_map(|connection| [connection.private_key_path.as_deref(), connection.certificate_path.as_deref()])
+        .flatten()
+        .any(|path| path.chars().any(char::is_control)) {
+        return Err("Cannot export private-key or certificate paths containing control characters.".into());
+    }
     let alias_by_id = connections
         .iter()
         .map(|connection| (connection.id.clone(), build_host_alias(connection)))
@@ -2583,7 +2627,7 @@ fn build_ssh_config_export(connections: &[SavedConnection]) -> String {
         output.push_str(&format!("  Port {}\n", connection.port));
         if let Some(key_path) = &connection.private_key_path {
             if !key_path.trim().is_empty() {
-                output.push_str(&format!("  IdentityFile {}\n", key_path));
+                output.push_str(&format!("  IdentityFile {}\n", quote_ssh_config_path(key_path)));
             }
         }
         if let Some(jump_id) = &connection.jump_server_id {
@@ -2591,12 +2635,96 @@ fn build_ssh_config_export(connections: &[SavedConnection]) -> String {
                 output.push_str(&format!("  ProxyJump {}\n", jump_alias));
             }
         }
+        if let Some(path) = &connection.certificate_path {
+            output.push_str(&format!("  CertificateFile {}\n", quote_ssh_config_path(path)));
+        }
         output.push('\n');
     }
-    output
+    Ok(output)
+}
+
+/// Quote one SSH-config path; backslashes must be escaped before double quotes.
+fn quote_ssh_config_path(path: &str) -> String {
+    format!("\"{}\"", path.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+#[cfg(test)]
+mod certificate_exchange_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn ssh_certificate_vault_resolution_keeps_attachment_backend_only() {
+        use russh::keys::{key::safe_rng, ssh_key::certificate::Builder, Algorithm, PrivateKey};
+        let directory = tempfile::tempdir().unwrap();
+        let mut service = crate::vault::store::VaultService::new(directory.path().to_path_buf());
+        service.initialize("correct horse battery staple", false).unwrap();
+        let key = PrivateKey::random(&mut safe_rng(), Algorithm::Ed25519).unwrap();
+        let ca = PrivateKey::random(&mut safe_rng(), Algorithm::Ed25519).unwrap();
+        let mut builder = Builder::new(vec![8; 32], key.public_key().key_data().clone(), 100, 200).unwrap();
+        builder.valid_principal("fixture").unwrap();
+        let certificate = builder.sign(&ca).unwrap().to_openssh().unwrap();
+        let mut encoded = Vec::new();
+        russh::keys::encode_pkcs8_pem(&key, &mut encoded).unwrap();
+        let values = std::collections::BTreeMap::from([
+            ("privateKey".into(), String::from_utf8(encoded).unwrap()),
+            ("sshCertificate".into(), certificate.clone()),
+        ]);
+        let record = service.item_create_with_secret_values("fixture", "ssh-private-key", &values, None, None).unwrap();
+        let mut auth = crate::types::AuthMethod::VaultRef { item_id: "stale-item".into(), credential_id: record.logical_id.clone() };
+        let vault = tokio::sync::Mutex::new(service);
+        let relinked = resolve_auth_method("fixture-host", &mut auth, &vault, false).await.unwrap();
+        assert_eq!(relinked.len(), 1);
+        match &auth {
+            crate::types::AuthMethod::PrivateKeyData { key_data, certificate: Some(actual), .. } => {
+                assert_eq!(actual, &certificate);
+                assert_eq!(key_data, &values["privateKey"]);
+            }
+            _ => panic!("expected native key plus certificate"),
+        }
+        assert!(!serde_json::to_string(&auth).unwrap_or_default().contains(&certificate));
+        assert!(serde_json::from_str::<crate::types::AuthMethod>(r#"{"type":"PrivateKeyData","key_data":"untrusted","passphrase":null,"certificate":"untrusted"}"#).is_err());
+    }
+
+    #[test]
+    fn openssh_path_exports_escape_and_validate_both_path_fields() {
+        let mut connection = parse_csv_connections("id,name,host,port,username\nfixture,Fixture,fixture.invalid,22,user\n")
+            .unwrap().remove(0);
+        for path in [r"C:\Users\Fixture Name\cert.pub", r"\\server\share\cert.pub", "/tmp/a \"quoted\" #name.pub", r"C:\"] {
+            connection.private_key_path = Some(path.into());
+            connection.certificate_path = Some(path.into());
+            let exported = build_ssh_config_export(&[connection.clone()]).unwrap();
+            let parsed = crate::ssh_config::parse_config_text(&exported).unwrap();
+            assert_eq!(parsed[0].private_key_path.as_deref(), Some(path));
+            assert_eq!(parsed[0].certificate_path.as_deref(), Some(path));
+        }
+        for path in ["bad\nHost injected", "bad\rpath", "bad\tpath", "bad\0path"] {
+            connection.private_key_path = Some(path.into());
+            connection.certificate_path = None;
+            assert!(build_ssh_config_export(&[connection.clone()]).unwrap_err().contains("control characters"));
+            connection.private_key_path = None;
+            connection.certificate_path = Some(path.into());
+            assert!(build_ssh_config_export(&[connection.clone()]).unwrap_err().contains("control characters"));
+        }
+    }
+
+    #[test]
+    fn csv_and_openssh_exports_preserve_the_certificate_pair() {
+        let raw = "id,name,host,port,username,privateKeyPath,certificatePath\nfixture,Fixture,fixture.invalid,22,user,/keys/user,/keys/user-cert.pub\n";
+        let connections = parse_csv_connections(raw).unwrap();
+        let connection = &connections[0];
+        let header = "id,name,host,port,username,password,privateKeyPath,certificatePath,jumpServerId,folder,theme,tags,isFavorite,pinnedFeatures,createdAt,lastConnected";
+        let round_trip = parse_csv_connections(&format!("{header}\n{}\n", connection_to_csv_line(connection))).unwrap();
+        assert_eq!(round_trip[0].certificate_path, connection.certificate_path);
+        let parsed = crate::ssh_config::parse_config_text(&build_ssh_config_export(&connections).unwrap()).unwrap();
+        assert_eq!(parsed[0].certificate_path, connection.certificate_path);
+        assert_eq!(parsed[0].private_key_path, connection.private_key_path);
+        let json = serde_json::to_string(connection).unwrap();
+        assert_eq!(serde_json::from_str::<SavedConnection>(&json).unwrap().certificate_path, connection.certificate_path);
+    }
 }
 
 #[tauri::command]
+/// Export selected hosts using the existing explicit secret-inclusion policy.
 pub async fn connections_export_to_file(
     app: AppHandle,
     request: ConnectionExportRequest,
@@ -2628,6 +2756,7 @@ pub async fn connections_export_to_file(
         selected_connections.iter_mut().for_each(|connection| {
             connection.password = None;
             connection.private_key_path = None;
+            connection.certificate_path = None;
         });
     }
 
@@ -2689,12 +2818,12 @@ pub async fn connections_export_to_file(
             .map_err(|error| error.to_string())?,
         "csv" => {
             let mut lines = vec![
-                "id,name,host,port,username,password,privateKeyPath,jumpServerId,folder,theme,tags,isFavorite,pinnedFeatures,createdAt,lastConnected".to_string(),
+                "id,name,host,port,username,password,privateKeyPath,certificatePath,jumpServerId,folder,theme,tags,isFavorite,pinnedFeatures,createdAt,lastConnected".to_string(),
             ];
             lines.extend(selected_connections.iter().map(connection_to_csv_line));
             lines.join("\n")
         }
-        "ssh_config" | "config" => build_ssh_config_export(&selected_connections),
+        "ssh_config" | "config" => build_ssh_config_export(&selected_connections)?,
         _ => return Err("Unsupported export format.".to_string()),
     };
 

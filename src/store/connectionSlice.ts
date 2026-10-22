@@ -104,6 +104,7 @@ import {
     KeyPassphraseVaultRequestedError,
     prepareConnectKeyPassphrases,
 } from '../features/connections/application/keyPassphraseRuntime';
+import { prepareNetworkInterface, cancelNetworkPrompts, NetworkSelectionCancelledError } from '../features/connections/application/networkInterface';
 export type { Connection, Folder, Tab } from '../features/connections/domain/types.js';
 
 const activeConnectAttempts = new Map<string, string>();
@@ -290,6 +291,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
     },
 
     deleteConnection: (id) => {
+        cancelNetworkPrompts(id);
         clearRemoteShellCache(id);
         set(state => {
             const newConns = state.connections.filter(c => c.id !== id);
@@ -629,6 +631,11 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
 
             await prepareConnectKeyPassphrases(fullConfig);
             if (await finishCancelledConnect()) return;
+            await prepareNetworkInterface(fullConfig, {
+                /** Deleting a host while a picker/read is pending invalidates that operation too. */
+                cancelled: () => cancelledConnectAttempts.has(attemptId) || !get().connections.some(connection => connection.id === id),
+            });
+            if (await finishCancelledConnect()) return;
 
             const response = await connectWithHostKeyVerification(
                 fullConfig,
@@ -763,7 +770,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
             }
         } catch (error) {
             if (await finishCancelledConnect()) return;
-            if (error instanceof KeyPassphrasePromptCancelledError) {
+            if (error instanceof KeyPassphrasePromptCancelledError || error instanceof NetworkSelectionCancelledError) {
                 set(state => ({
                     connections: markConnectionStatus(state.connections, id, 'disconnected'),
                 }));
@@ -888,6 +895,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
 
     cancelConnect: async (id) => {
         if (id === 'local') return;
+        cancelNetworkPrompts(id);
 
         const attemptId = activeConnectAttempts.get(id);
         recordConnectCancellation({
@@ -1412,12 +1420,14 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
 
 let pendingSave: Promise<void> = Promise.resolve();
 
+/** Changing an auth identity invalidates cached remote-shell metadata just like changing the target. */
 function hasRemoteTargetChanged(previous: Connection, next: Connection): boolean {
     return previous.host !== next.host
         || previous.port !== next.port
         || previous.username !== next.username
         || previous.jumpServerId !== next.jumpServerId
         || previous.privateKeyPath !== next.privateKeyPath
+        || previous.certificatePath !== next.certificatePath
         || previous.password !== next.password;
 }
 

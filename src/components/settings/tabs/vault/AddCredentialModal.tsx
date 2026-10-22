@@ -2,6 +2,9 @@ import { Input } from '../../../ui/Input';
 import { Modal } from '../../../ui/Modal';
 import { Button } from '../../../ui/Button';
 import { cn } from '../../../../lib/utils';
+import { SshCertificateField } from './SshCertificateField';
+import { CredentialFileButton } from './CredentialFileButton';
+import type { BeginCredentialFileImport } from './hooks/useCredentialFileImports';
 import {
   CREDENTIAL_KIND_OPTIONS,
   isSupportedCreateCredentialKind,
@@ -14,30 +17,39 @@ interface AddCredentialModalProps {
   label: string;
   secret: string;
   passphrase: string;
+  certificate: string;
   notes: string;
   isCreating: boolean;
+  isImporting: boolean;
+  onImportStart: BeginCredentialFileImport;
   onClose: () => void;
   onKindChange: (kind: SupportedCreateCredentialKind) => void;
   onLabelChange: (value: string) => void;
   onSecretChange: (value: string) => void;
   onPassphraseChange: (value: string) => void;
+  onCertificateChange: (value: string) => void;
   onNotesChange: (value: string) => void;
   onSubmit: () => void;
 }
 
+/** Add a supported credential without changing the stable vault identity model. */
 export function AddCredentialModal({
   isOpen,
   kind,
   label,
   secret,
   passphrase,
+  certificate,
   notes,
   isCreating,
+  isImporting,
+  onImportStart,
   onClose,
   onKindChange,
   onLabelChange,
   onSecretChange,
   onPassphraseChange,
+  onCertificateChange,
   onNotesChange,
   onSubmit,
 }: AddCredentialModalProps) {
@@ -128,12 +140,17 @@ export function AddCredentialModal({
         ) : (
           <div className="space-y-3">
             <div className="space-y-1">
-              <label
-                htmlFor="vault-add-private-key"
-                className="mb-2 block px-1 text-[10px] font-bold uppercase tracking-[0.15em] text-app-muted/40"
-              >
-                Private Key
-              </label>
+              <div className="flex items-center justify-between gap-3">
+                <label
+                  htmlFor="vault-add-private-key"
+                  className="block px-1 text-[10px] font-bold uppercase tracking-[0.15em] text-app-muted/40"
+                >
+                  Private Key
+                </label>
+                <CredentialFileButton kind="privateKey" value={secret} onChange={onSecretChange}
+                  onImportStart={onImportStart}
+                  disabled={isCreating || !isOpen} />
+              </div>
               <textarea
                 id="vault-add-private-key"
                 value={secret}
@@ -144,8 +161,11 @@ export function AddCredentialModal({
                 className="w-full rounded-xl border border-app-border bg-app-surface/50 px-3.5 py-2 text-[13px] text-app-text shadow-sm transition-all duration-300 placeholder:text-app-muted/50 focus-visible:outline-none focus-visible:border-app-accent/40 focus-visible:bg-app-surface/80 focus-visible:ring-1 focus-visible:ring-app-accent/20 disabled:cursor-not-allowed disabled:opacity-40"
               />
             </div>
+            <SshCertificateField id="vault-add-ssh-certificate" value={certificate}
+              onImportStart={onImportStart}
+              onChange={onCertificateChange} disabled={isCreating || !isOpen} />
             <Input
-              label="Passphrase (optional)"
+              label="Private key passphrase (optional)"
               type="password"
               value={passphrase}
               onChange={(event) => onPassphraseChange(event.target.value)}
@@ -175,7 +195,7 @@ export function AddCredentialModal({
           <Button variant="ghost" size="sm" onClick={onClose} disabled={isCreating}>
             Cancel
           </Button>
-          <Button size="sm" onClick={onSubmit} isLoading={isCreating}>
+          <Button size="sm" onClick={onSubmit} disabled={isImporting} isLoading={isCreating}>
             Add Credential
           </Button>
         </div>

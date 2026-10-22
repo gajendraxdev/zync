@@ -118,6 +118,7 @@ pub struct VaultItemMeta {
     pub schema_version: u32,
     pub secret_field_count: u32,
     pub has_passphrase_field: bool,
+    pub has_ssh_certificate_field: bool,
     pub revision: u64,
     pub created_at: u64,
     pub updated_at: u64,
@@ -130,6 +131,7 @@ pub struct VaultItemMeta {
 pub struct VaultItemDetail {
     pub id: String,
     pub logical_id: String,
+    pub secret_fingerprint: String,
     pub kind: String,
     pub label: String,
     pub notes: Option<String>,

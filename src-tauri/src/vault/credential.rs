@@ -16,6 +16,7 @@ use super::types::PlaintextRecord;
 pub const CURRENT_CREDENTIAL_SCHEMA_VERSION: u32 = 2;
 pub const PRIVATE_KEY_FIELD: &str = "privateKey";
 pub const PASSPHRASE_FIELD: &str = "passphrase";
+pub const SSH_CERTIFICATE_FIELD: &str = "sshCertificate";
 pub const PASSWORD_FIELD: &str = "password";
 pub const TOKEN_FIELD: &str = "token";
 pub const SECRET_FIELD: &str = "secret";
@@ -258,6 +259,7 @@ pub fn primary_secret_field_name(kind: &CredentialKind) -> &'static str {
     }
 }
 
+/// Validate required named fields for the credential kind.
 pub fn validate_secret_values_for_kind(
     kind: &str,
     secret_values: &BTreeMap<String, String>,
@@ -274,6 +276,28 @@ pub fn validate_secret_values_for_kind(
     Err(format!(
         "credential kind '{kind}' requires a non-empty '{required_field}' value"
     ))
+}
+
+/// Validate an optional encrypted SSH attachment; key-only credentials retain their existing policy.
+pub fn validate_ssh_certificate(
+    kind: &str,
+    values: &BTreeMap<String, String>,
+) -> Result<(), String> {
+    let Some(certificate) = values.get(SSH_CERTIFICATE_FIELD) else {
+        return Ok(());
+    };
+    if CredentialKind::from_legacy_kind(kind) != CredentialKind::SshPrivateKey {
+        return Err("SSH certificates require an SSH private-key credential".into());
+    }
+    let key_data = values
+        .get(PRIVATE_KEY_FIELD)
+        .ok_or("SSH certificate requires a private key")?;
+    let key =
+        russh::keys::decode_secret_key(key_data, values.get(PASSPHRASE_FIELD).map(String::as_str))
+            .map_err(|_| "Cannot decode the private key; check its passphrase".to_string())?;
+    crate::ssh_certificate::validate_identity(certificate, &key)
+        .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 pub fn primary_secret_value(record: &PlaintextRecord) -> Option<&str> {
@@ -394,6 +418,7 @@ fn secret_field(
     }
 }
 
+/// Describe named encrypted fields without exposing their values through metadata IPC.
 fn canonical_fields(
     kind: &CredentialKind,
     secret_values: &BTreeMap<String, String>,
@@ -413,6 +438,15 @@ fn canonical_fields(
                     "Passphrase",
                     false,
                     CredentialFieldFormat::Password,
+                    None,
+                ));
+            }
+            if secret_values.contains_key(SSH_CERTIFICATE_FIELD) {
+                fields.push(secret_field(
+                    SSH_CERTIFICATE_FIELD,
+                    "SSH user certificate",
+                    false,
+                    CredentialFieldFormat::Certificate,
                     None,
                 ));
             }

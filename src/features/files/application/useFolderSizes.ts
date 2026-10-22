@@ -10,11 +10,15 @@ type Snapshot = { scope: number; state: FolderSizeState };
  */
 export function useFolderSizes(connectionId: string | undefined, path: string, listing: unknown, binding: unknown,
     active: boolean, target: string | undefined) {
-    const owner = useRef({ connectionId, path, listing, binding, active, target, scope: 0 });
+    const owner = useRef({ connectionId, path, listing, binding, active, target, scope: 0,
+        halted: undefined as FolderSizeState | undefined });
     const previous = owner.current;
     if (previous.connectionId !== connectionId || previous.path !== path || previous.listing !== listing
         || previous.binding !== binding || previous.active !== active || previous.target !== target) {
-        owner.current = { connectionId, path, listing, binding, active, target, scope: previous.scope + 1 };
+        const sameTarget = previous.connectionId === connectionId && previous.path === path
+            && previous.target === target && previous.active === active;
+        owner.current = { connectionId, path, listing, binding, active, target, scope: previous.scope + 1,
+            halted: sameTarget ? previous.halted : undefined };
     }
     const scope = owner.current.scope;
     const run = useRef<Run | null>(null);
@@ -23,21 +27,28 @@ export function useFolderSizes(connectionId: string | undefined, path: string, l
     const [inspected, setInspected] = useState<number | null>(null);
     const inspect = useCallback(() => setInspected(scope), [scope]);
     const closeDetails = useCallback(() => setInspected(null), []);
-    const cancel = useCallback(() => {
+    /** Cleanup releases work but must not record a user decision or suppress Strict Mode replay. */
+    const cancelRun = useCallback((ownedScope: number) => {
         const current = run.current;
-        if (!current || current.cancelled) return;
+        if (!current || current.scope !== ownedScope || current.cancelled) return;
         current.cancelled = true;
         void window.ipcRenderer.invoke('fs_folder_size_cancel', { id: current.id }).catch(() => {});
-        setSnapshot(old => old?.scope === current.scope ? { scope: current.scope, state: { status: 'cancelled' } } : old);
     }, []);
+    const cancel = useCallback(() => {
+        if (owner.current.scope !== scope || !active || !target) return;
+        owner.current.halted = { status: 'cancelled' };
+        cancelRun(scope);
+        setSnapshot({ scope, state: owner.current.halted });
+    }, [scope, active, target, cancelRun]);
     useEffect(() => () => {
-        if (run.current?.scope === scope) cancel();
+        cancelRun(scope);
         // Strict Mode replays mount effects; a replay needs a fresh owned request.
         if (startedScope.current === scope) startedScope.current = -1;
-    }, [scope, cancel]);
+    }, [scope, cancelRun]);
 
     const start = useCallback(() => {
         if (!active || !connectionId || !path || !target || owner.current.scope !== scope || (run.current && !run.current.cancelled)) return;
+        owner.current.halted = undefined;
         startedScope.current = scope;
         const current: Run = { scope, cancelled: false, id: crypto.randomUUID() };
         run.current = current;
@@ -54,7 +65,10 @@ export function useFolderSizes(connectionId: string | undefined, path: string, l
                 completed = true;
                 update({ status: 'finished', report });
             } catch (error) {
-                update({ status: 'unavailable', reason: String(error) });
+                if (owns()) {
+                    owner.current.halted = { status: 'unavailable', reason: String(error) };
+                    update(owner.current.halted);
+                }
             } finally {
                 // Failed setup/cancelled admission can leave a registration; a
                 // completed command has already released its native lease.
@@ -64,10 +78,10 @@ export function useFolderSizes(connectionId: string | undefined, path: string, l
         })();
     }, [active, connectionId, path, target, scope]);
     useEffect(() => {
-        if (active && target && startedScope.current !== scope) start();
+        if (active && target && !owner.current.halted && startedScope.current !== scope) start();
         if (!active || !target) setSnapshot(null);
     }, [active, target, scope, start]);
-    const state = active && target && snapshot?.scope === scope ? snapshot.state : undefined;
+    const state = active && target ? owner.current.halted ?? (snapshot?.scope === scope ? snapshot.state : undefined) : undefined;
     return { state, active: state?.status === 'calculating', start, cancel, inspect, closeDetails,
         details: inspected === scope ? state : undefined };
 }

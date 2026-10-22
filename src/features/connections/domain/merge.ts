@@ -30,20 +30,15 @@ export const preserveVaultCredentialOnUpdate = (
     existing: Connection,
     incoming: Connection,
 ): Connection => {
-    if (incoming.authRef) {
-        return {
-            ...incoming,
-            password: undefined,
-            privateKeyPath: undefined,
-        };
-    }
-    if (!existing.authRef) return incoming;
+    const authRef = incoming.authRef ?? existing.authRef;
+    if (!authRef) return incoming;
 
     return {
         ...incoming,
-        authRef: existing.authRef,
+        authRef,
         password: undefined,
         privateKeyPath: undefined,
+        ...(authRef.itemKind === 'ssh-password' ? { certificatePath: undefined } : {}),
     };
 };
 

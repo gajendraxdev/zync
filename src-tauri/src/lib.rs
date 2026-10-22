@@ -24,6 +24,8 @@ mod preference_settings;
 mod shell_icons;
 mod snippets;
 mod ssh;
+mod ssh_certificate;
+mod network_interfaces;
 mod sftp_read;
 mod ssh_config;
 mod ssh_key_passphrase_cache;
@@ -185,6 +187,9 @@ pub fn run() {
             commands::ssh_write_managed_key,
             commands::ssh_read_local_key_file,
             commands::ssh_inspect_private_key,
+            commands::ssh_network_interfaces,
+            commands::ssh_network_preference,
+            commands::ssh_set_network_preference,
             commands::ssh_private_key_readiness,
             commands::ssh_remember_key_passphrase,
             commands::ssh_forget_key_passphrase,
@@ -387,6 +392,7 @@ pub fn run() {
             vault::commands::vault_item_list,
             vault::commands::vault_item_get,
             vault::commands::vault_item_update,
+            vault::commands::vault_item_set_ssh_certificate,
             vault::commands::vault_item_delete,
             vault::commands::vault_item_revision_history,
             vault::commands::vault_item_restore_revision,

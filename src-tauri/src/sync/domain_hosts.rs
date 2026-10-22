@@ -102,6 +102,7 @@ fn host_timestamp_from_sync(updated_at: u64) -> u64 {
     updated_at.saturating_mul(1000)
 }
 
+/// Restore non-secret host metadata; local key/certificate paths are never added to new hosts.
 pub fn apply_hosts_restore_records(
     data_dir: &Path,
     records: &[HostSyncRecord],
@@ -139,6 +140,11 @@ pub fn apply_hosts_restore_records(
             existing.created_at = Some(restored_timestamp);
             existing.last_connected = Some(restored_timestamp);
             existing.auth_ref = record.auth_ref.clone();
+            if !record.auth_ref.as_ref().is_some_and(|reference| {
+                reference.item_kind == crate::types::CredentialItemKind::SshPrivateKey
+            }) {
+                existing.certificate_path = None;
+            }
             existing.password = None;
             existing.private_key_path = None;
             updated = updated.saturating_add(1);
@@ -153,6 +159,7 @@ pub fn apply_hosts_restore_records(
             username: record.username.clone(),
             password: None,
             private_key_path: None,
+            certificate_path: None,
             jump_server_id: record.jump_server_id.clone(),
             last_connected: Some(host_timestamp_from_sync(record.updated_at)),
             icon: None,
@@ -269,6 +276,7 @@ mod tests {
             username: "u".into(),
             password: None,
             private_key_path: None,
+            certificate_path: None,
             jump_server_id: None,
             last_connected: Some(1),
             icon: None,
@@ -374,51 +382,74 @@ mod tests {
 
     #[test]
     fn restore_existing_host_updates_auth_ref_and_clears_plaintext_fallbacks() {
-        let dir = temp_dir("restore-existing-auth-ref");
-        std::fs::create_dir_all(&dir).expect("create temp dir");
-        let mut existing = test_connection("host-1");
-        existing.password = Some("old-password".into());
-        existing.private_key_path = Some("C:\\Users\\me\\.ssh\\old.pem".into());
-        existing.jump_server_id = Some("old-jump".into());
-        let initial = SavedData {
-            connections: vec![existing],
-            folders: Vec::new(),
-        };
-        std::fs::write(
-            dir.join(CONNECTIONS_FILE),
-            serde_json::to_string_pretty(&initial).expect("serialize initial"),
-        )
-        .expect("write initial");
+        for kind in [
+            Some(CredentialItemKind::SshPassword),
+            Some(CredentialItemKind::SshAgentKey),
+            None,
+            Some(CredentialItemKind::SshPrivateKey),
+        ] {
+            let dir = temp_dir("restore-existing-auth-ref");
+            std::fs::create_dir_all(&dir).expect("create temp dir");
+            let mut existing = test_connection("host-1");
+            existing.password = Some("old-password".into());
+            existing.private_key_path = Some("C:\\Users\\me\\.ssh\\old.pem".into());
+            existing.certificate_path = Some("C:\\Users\\me\\.ssh\\old-cert.pub".into());
+            existing.jump_server_id = Some("old-jump".into());
+            let initial = SavedData {
+                connections: vec![existing],
+                folders: Vec::new(),
+            };
+            std::fs::write(
+                dir.join(CONNECTIONS_FILE),
+                serde_json::to_string_pretty(&initial).expect("serialize initial"),
+            )
+            .expect("write initial");
 
-        let record = HostSyncRecord {
-            logical_id: "host-1".into(),
-            name: "Updated Host".into(),
-            host: "example.com".into(),
-            port: 2222,
-            username: "app".into(),
-            jump_server_id: Some("jump-2".into()),
-            folder: Some("prod".into()),
-            tags: vec!["prod".into()],
-            is_favorite: true,
-            updated_at: 9,
-            auth_ref: Some(test_auth_ref()),
-        };
+            let record = HostSyncRecord {
+                logical_id: "host-1".into(),
+                name: "Updated Host".into(),
+                host: "example.com".into(),
+                port: 2222,
+                username: "app".into(),
+                jump_server_id: Some("jump-2".into()),
+                folder: Some("prod".into()),
+                tags: vec!["prod".into()],
+                is_favorite: true,
+                updated_at: 9,
+                auth_ref: Some(test_auth_ref()),
+            };
 
-        let (restored, updated) = apply_hosts_restore_records(&dir, &[record]).expect("apply");
-        assert_eq!((restored, updated), (0, 1));
+            let mut record = record;
+            record.auth_ref = kind.clone().map(|item_kind| CredentialRef {
+                item_kind,
+                ..test_auth_ref()
+            });
+            let (restored, updated) =
+                apply_hosts_restore_records(&dir, &[record.clone()]).expect("apply");
+            assert_eq!((restored, updated), (0, 1));
 
-        let raw = std::fs::read_to_string(dir.join(CONNECTIONS_FILE)).expect("read saved hosts");
-        let saved: SavedData = serde_json::from_str(&raw).expect("parse saved hosts");
-        let updated = saved.connections.first().expect("updated host");
-        assert_eq!(updated.auth_ref, Some(test_auth_ref()));
-        assert_eq!(updated.jump_server_id.as_deref(), Some("jump-2"));
-        assert_eq!(updated.password, None);
-        assert_eq!(updated.private_key_path, None);
-        assert_eq!(updated.port, 2222);
-        assert_eq!(updated.created_at, Some(9_000));
-        assert_eq!(updated.last_connected, Some(9_000));
+            let raw =
+                std::fs::read_to_string(dir.join(CONNECTIONS_FILE)).expect("read saved hosts");
+            let saved: SavedData = serde_json::from_str(&raw).expect("parse saved hosts");
+            let updated = saved.connections.first().expect("updated host");
+            assert_eq!(updated.auth_ref, record.auth_ref);
+            assert_eq!(
+                updated.certificate_path.as_deref(),
+                if kind == Some(CredentialItemKind::SshPrivateKey) {
+                    Some("C:\\Users\\me\\.ssh\\old-cert.pub")
+                } else {
+                    None
+                }
+            );
+            assert_eq!(updated.jump_server_id.as_deref(), Some("jump-2"));
+            assert_eq!(updated.password, None);
+            assert_eq!(updated.private_key_path, None);
+            assert_eq!(updated.port, 2222);
+            assert_eq!(updated.created_at, Some(9_000));
+            assert_eq!(updated.last_connected, Some(9_000));
 
-        std::fs::remove_dir_all(&dir).expect("cleanup");
+            std::fs::remove_dir_all(&dir).expect("cleanup");
+        }
     }
 
     #[test]

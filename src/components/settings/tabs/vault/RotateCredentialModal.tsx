@@ -4,6 +4,9 @@ import { useShowHostAddressesInLists } from '../../../../features/connections/pr
 import { Button } from '../../../ui/Button';
 import { Input } from '../../../ui/Input';
 import { Modal } from '../../../ui/Modal';
+import { SshCertificateField } from './SshCertificateField';
+import { CredentialFileButton } from './CredentialFileButton';
+import type { BeginCredentialFileImport } from './hooks/useCredentialFileImports';
 
 interface RotateCredentialModalProps {
   isOpen: boolean;
@@ -11,28 +14,37 @@ interface RotateCredentialModalProps {
   label: string;
   secret: string;
   passphrase: string;
+  certificate: string;
   notes: string;
   isLoading: boolean;
+  isImporting: boolean;
+  onImportStart: BeginCredentialFileImport;
   onClose: () => void;
   onLabelChange: (value: string) => void;
   onSecretChange: (value: string) => void;
   onPassphraseChange: (value: string) => void;
+  onCertificateChange: (value: string) => void;
   onNotesChange: (value: string) => void;
   onSubmit: () => void;
 }
 
+/** Rotate an SSH key/certificate together; certificate-only renewal lives in credential details. */
 export function RotateCredentialModal({
   isOpen,
   item,
   label,
   secret,
   passphrase,
+  certificate,
   notes,
   isLoading,
+  isImporting,
+  onImportStart,
   onClose,
   onLabelChange,
   onSecretChange,
   onPassphraseChange,
+  onCertificateChange,
   onNotesChange,
   onSubmit,
 }: RotateCredentialModalProps) {
@@ -70,12 +82,17 @@ export function RotateCredentialModal({
         ) : (
           <div className="space-y-3">
             <div className="space-y-1">
-              <label
-                htmlFor="vault-rotate-private-key"
-                className="text-[10px] font-bold text-app-muted uppercase tracking-[0.15em] opacity-40 mb-2 block px-1"
-              >
-                New Private Key
-              </label>
+              <div className="flex items-center justify-between gap-3">
+                <label
+                  htmlFor="vault-rotate-private-key"
+                  className="block px-1 text-[10px] font-bold uppercase tracking-[0.15em] text-app-muted/40"
+                >
+                  New Private Key
+                </label>
+                <CredentialFileButton kind="privateKey" value={secret} onChange={onSecretChange}
+                  onImportStart={onImportStart}
+                  disabled={isLoading || !isOpen} />
+              </div>
               <textarea
                 id="vault-rotate-private-key"
                 value={secret}
@@ -86,8 +103,21 @@ export function RotateCredentialModal({
                 className="w-full rounded-xl border border-app-border bg-app-surface/50 px-3.5 py-2 text-[13px] text-app-text shadow-sm transition-all duration-300 placeholder:text-app-muted/50 focus-visible:outline-none focus-visible:border-app-accent/40 focus-visible:bg-app-surface/80 focus-visible:ring-1 focus-visible:ring-app-accent/20 disabled:cursor-not-allowed disabled:opacity-40"
               />
             </div>
+            {item?.kind === 'ssh-private-key' && (
+              <>
+                <SshCertificateField id="vault-rotate-ssh-certificate" value={certificate}
+                  onImportStart={onImportStart}
+                  onChange={onCertificateChange} disabled={isLoading || !isOpen} />
+                {item.hasSshCertificateField && (
+                  <p className="text-xs text-app-muted">
+                    This replaces the key and its certificate. Leave the certificate blank for key-only login.
+                    To renew only the certificate, use credential details instead.
+                  </p>
+                )}
+              </>
+            )}
             <Input
-              label="Passphrase (optional)"
+              label="Private key passphrase (optional)"
               type="password"
               value={passphrase}
               onChange={(event) => onPassphraseChange(event.target.value)}
@@ -118,7 +148,7 @@ export function RotateCredentialModal({
           <Button variant="ghost" size="sm" onClick={onClose} disabled={isLoading}>
             Cancel
           </Button>
-          <Button size="sm" onClick={onSubmit} isLoading={isLoading}>
+          <Button size="sm" onClick={onSubmit} disabled={isImporting} isLoading={isLoading}>
             Rotate Credential
           </Button>
         </div>

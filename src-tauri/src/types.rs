@@ -8,6 +8,12 @@ pub struct ConnectionConfig {
     pub port: u16,
     pub username: String,
     pub auth_method: AuthMethod,
+    /// Optional OpenSSH user certificate; never a server CA trust configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub certificate_path: Option<String>,
+    /// Ephemeral device adapter identity retained only for this connection's reconnects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network_interface_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_forwarding: Option<AgentForwardingConfig>,
     pub jump_host: Option<Box<ConnectionConfig>>,
@@ -53,6 +59,8 @@ pub enum AuthMethod {
     PrivateKeyData {
         key_data: String,
         passphrase: Option<String>,
+        /// Backend-only encrypted-vault attachment; never serialized into host records or IPC.
+        certificate: Option<String>,
     },
 }
 
@@ -113,6 +121,8 @@ pub struct SavedConnection {
     pub username: String,
     pub password: Option<String>,
     pub private_key_path: Option<String>, // TS: privateKeyPath
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub certificate_path: Option<String>,
     pub jump_server_id: Option<String>,
     pub last_connected: Option<u64>,
     pub icon: Option<String>,

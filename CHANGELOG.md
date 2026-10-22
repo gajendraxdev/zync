@@ -4,6 +4,54 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.37.0] - 2026-10-22
+
+### Added
+
+- **SSH user certificates:** Select an optional OpenSSH user certificate for a
+  private key or vault-backed key, or import `CertificateFile` from SSH config.
+  Validate the key pairing, signature and validity period without changing
+  server host-key verification. ([91a0a73], [38628ac])
+- **Vault SSH certificates:** Store a matching OpenSSH user certificate with
+  an encrypted Vault SSH key. Paste or import key/certificate files, and attach,
+  replace or remove certificates from credential details without re-entering
+  the private key. Attachments follow existing credential sync and history;
+  a host-specific certificate file takes precedence. Certificate validity is
+  enforced when connecting. ([bcfe6f4], [387ddc7])
+- **SSH network interface:** On Windows, Linux and macOS, choose System default,
+  a specific adapter, or Ask every time under a host's Advanced settings.
+  Preferences stay on this device; automatic transport recovery retains the
+  selected adapter. Missing adapters or denied OS binding permissions fail
+  explicitly. DNS continues to use system settings. ([91a0a73], [38628ac])
+
+### Changed
+
+- **Host onboarding:** Refresh the initial new-host/import selector, group
+  optional naming and folder placement, and simplify credential choices.
+  Expand certificates only when needed, improve adapter identification and
+  error details, and prevent stale connection-test results after editing.
+  ([38628ac])
+
+### Fixed
+
+- **Vault certificate editing:** Reject stale certificate changes after key
+  rotation or sync restores, including restores that retain the same revision.
+  Preserve the current key, passphrase and credential identity. ([bcfe6f4])
+- **Vault file imports:** Block saving while key or certificate imports are
+  pending, including overlapping imports. Preserve draft text on cancellation
+  or failure and ignore late results after edits or closing the editor.
+  ([387ddc7], [354db7d])
+- **Folder-size cancellation:** Keep cancelled or failed inspections stopped
+  across listing refreshes until Retry, a new target, or reopening Properties.
+  ([a676f06])
+- **Connection tests:** Ignore unrelated host status updates without losing
+  pending results; run the browser-test entrypoint as compiled JavaScript.
+  ([38628ac])
+- **Large adapter lists:** Keep saved adapters connectable beyond the picker's
+  256-entry limit, and show available adapters first. ([91a0a73])
+- **Certificate selection:** Report file-picker failures without clearing the
+  current certificate path. ([38628ac])
+
 ## [2.36.0] - 2026-10-20
 
 ### Added
@@ -167,14 +215,14 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Added
 
-- **Folder sizes:** Calculate logical file bytes in the background for local and
-  SSH folders, with a saved **View → Show folder sizes** toggle enabled by default.
-  Bound work by concurrency, entry, depth, time and memory budgets; label incomplete
-  totals and explain limits through the info control. Include available folder
-  sizes in selection totals and Properties, keep waiting states unobtrusive, and
-  allow explicit retry of failed or cancelled scans. No file contents are read;
-  links are skipped and results are not allocated disk usage or a snapshot.
-  ([99856dd], [2b1d77d])
+- **Folder sizes:** Calculate logical regular-file bytes for one local or SSH
+  folder when opened in Properties, with cancellation and explicit retry after
+  failure or cancellation. Bound work by concurrency, entry, depth, time and
+  memory budgets; label incomplete totals and explain limits through the info
+  control. Browsing does not start scans; automatic folder-size settings and
+  recursive selection totals are not included. No file contents are read; links
+  are skipped and results are not allocated disk usage or a snapshot.
+  ([99856dd], [2b1d77d], [e12821c])
 
 - **Extended permission controls:** Edit ordinary modes for supported local Linux
   files and folders using qualified Linux 6.6+ filesystem support. On Windows,
@@ -2634,7 +2682,8 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [840afc2]: https://github.com/zync-sh/zync/commit/840afc2
 [193f568]: https://github.com/zync-sh/zync/commit/193f568
 [4e3c5ff]: https://github.com/zync-sh/zync/commit/4e3c5ff
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.36.0...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.37.0...HEAD
+[2.37.0]: https://github.com/zync-sh/zync/compare/v2.36.0...v2.37.0
 [2.36.0]: https://github.com/zync-sh/zync/compare/v2.35.1...v2.36.0
 [2.35.1]: https://github.com/zync-sh/zync/compare/v2.34.1...v2.35.1
 [2.34.1]: https://github.com/zync-sh/zync/compare/v2.34.0...v2.34.1
@@ -2950,3 +2999,9 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [0177174]: https://github.com/zync-sh/zync/commit/0177174e18fb8e15463ebb720bee3859ee16c799
 [7ce3773]: https://github.com/zync-sh/zync/commit/7ce3773e0fdb115b42b9f4c1d432c6f9a236677d
 [e12821c]: https://github.com/zync-sh/zync/commit/e12821c7c6b47f45361bdaa3b4ea68d531f2fae3
+[91a0a73]: https://github.com/zync-sh/zync/commit/91a0a73edea630b5163033696d2caccfd97f159b
+[38628ac]: https://github.com/zync-sh/zync/commit/38628acc7af16efcf92761316356c7a777fa565a
+[a676f06]: https://github.com/zync-sh/zync/commit/a676f06a8663197edfbad54d5e50c5924e26846e
+[bcfe6f4]: https://github.com/zync-sh/zync/commit/bcfe6f42dd3f00b3ff650da0f3622b1bb60154d1
+[387ddc7]: https://github.com/zync-sh/zync/commit/387ddc7efa2905cc29e1842730daa5f2aa6b3c4e
+[354db7d]: https://github.com/zync-sh/zync/commit/354db7d2cf43a04d42c6dc7213d078a7be1eca3b

@@ -32,11 +32,13 @@ const SESSION_CACHE_VERIFIER_RECORD_ID: &str = "__session_cache_verifier__";
 const SESSION_CACHE_VERIFIER_REVISION: u64 = 1;
 const SESSION_CACHE_VERIFIER_PLAINTEXT: &[u8] = b"zync-vault-session-verify-v1";
 
-fn validate_secret_values(
+/// Validate normalized SSH attachments without changing legacy/custom credential field semantics.
+fn validate_certificate_attachment(
     kind: &str,
     secret_values: &BTreeMap<String, String>,
 ) -> Result<(), VaultError> {
-    validate_secret_values_for_kind(kind, secret_values).map_err(VaultError::InvalidData)
+    crate::vault::credential::validate_ssh_certificate(kind, secret_values)
+        .map_err(VaultError::InvalidData)
 }
 
 // ── Service ───────────────────────────────────────────────────────────────────
@@ -670,6 +672,9 @@ impl VaultService {
                 .unwrap_or(CURRENT_CREDENTIAL_SCHEMA_VERSION),
             secret_field_count: fields.iter().filter(|field| field.secret).count() as u32,
             has_passphrase_field: fields.iter().any(|field| field.name == "passphrase"),
+            has_ssh_certificate_field: fields
+                .iter()
+                .any(|field| field.name == crate::vault::credential::SSH_CERTIFICATE_FIELD),
             revision: record.revision,
             created_at: record.created_at,
             updated_at: record.updated_at,
@@ -717,7 +722,7 @@ impl VaultService {
         notes: Option<&str>,
         logical_id: Option<&str>,
     ) -> Result<PlaintextRecord, VaultError> {
-        validate_secret_values(kind, secret_values)?;
+        validate_secret_values_for_kind(kind, secret_values).map_err(VaultError::InvalidData)?;
         let vek = self.vek.as_ref().ok_or(VaultError::Locked)?;
         let db = self.db.as_ref().ok_or(VaultError::NotInitialized)?;
         let meta = self.meta.as_ref().ok_or(VaultError::Locked)?;
@@ -746,6 +751,7 @@ impl VaultService {
         };
         normalize_record_credential(&mut record);
 
+        validate_certificate_attachment(&record.kind, &record.secret_values)?;
         let plaintext = serde_json::to_vec(&record)?;
         let record_key = derive_record_key(vek, record_info_bytes(&id, revision).as_bytes())?;
         let aad = record_aad_string(&meta.vault_id, &id, revision);
@@ -815,7 +821,7 @@ impl VaultService {
         let vek = self.vek.as_ref().ok_or(VaultError::Locked)?;
         let db = self.db.as_ref().ok_or(VaultError::NotInitialized)?;
         let meta = self.meta.as_ref().ok_or(VaultError::Locked)?;
-        validate_secret_values(kind, secret_values)?;
+        validate_secret_values_for_kind(kind, secret_values).map_err(VaultError::InvalidData)?;
 
         let id = Uuid::new_v4().to_string();
         let logical_id = logical_id.trim();
@@ -842,6 +848,7 @@ impl VaultService {
         };
         normalize_record_credential(&mut record);
 
+        validate_certificate_attachment(&record.kind, &record.secret_values)?;
         let plaintext = serde_json::to_vec(&record)?;
         let record_key = derive_record_key(vek, record_info_bytes(&id, revision).as_bytes())?;
         let aad = record_aad_string(&meta.vault_id, &id, revision);
@@ -950,6 +957,7 @@ impl VaultService {
         self.item_update_with_secret_values(item_id, label, kind, &secret_values, notes, None)
     }
 
+    /// Replace a credential payload with a revision snapshot, preserving its logical identity.
     pub fn item_update_with_secret_values(
         &self,
         item_id: &str,
@@ -959,7 +967,7 @@ impl VaultService {
         notes: Option<&str>,
         credential: Option<&CredentialEnvelope>,
     ) -> Result<PlaintextRecord, VaultError> {
-        validate_secret_values(kind, secret_values)?;
+        validate_secret_values_for_kind(kind, secret_values).map_err(VaultError::InvalidData)?;
         let existing = self.item_get(item_id)?;
         let vek = self.vek.as_ref().ok_or(VaultError::Locked)?;
         let db = self.db.as_ref().ok_or(VaultError::NotInitialized)?;
@@ -987,6 +995,7 @@ impl VaultService {
         };
         normalize_record_credential(&mut record);
 
+        validate_certificate_attachment(&record.kind, &record.secret_values)?;
         let plaintext = serde_json::to_vec(&record)?;
         let record_key = derive_record_key(vek, record_info_bytes(item_id, revision).as_bytes())?;
         let aad = record_aad_string(&meta.vault_id, item_id, revision);
@@ -1044,6 +1053,50 @@ impl VaultService {
         Ok(record)
     }
 
+    /// Update only the SSH certificate, keeping key material native and rejecting stale editors.
+    pub fn item_set_ssh_certificate(
+        &self,
+        item_id: &str,
+        expected_revision: u64,
+        expected_secret_fingerprint: &str,
+        certificate: Option<&str>,
+    ) -> Result<PlaintextRecord, VaultError> {
+        use crate::vault::credential::SSH_CERTIFICATE_FIELD;
+        let mut record = self.item_get(item_id)?;
+        if record.kind != "ssh-private-key" {
+            return Err(VaultError::InvalidData(
+                "SSH certificates require an SSH private-key credential".into(),
+            ));
+        }
+        // Sync may restore a newer payload at the same revision. Guard the entire
+        // named-secret payload as well, without changing sync's revision contract.
+        if record.revision != expected_revision
+            || self.record_secret_fingerprint(&record)? != expected_secret_fingerprint
+        {
+            return Err(VaultError::InvalidData(
+                "Credential changed; reopen its details before updating the certificate".into(),
+            ));
+        }
+        match certificate.map(str::trim).filter(|value| !value.is_empty()) {
+            Some(value) => {
+                record
+                    .secret_values
+                    .insert(SSH_CERTIFICATE_FIELD.into(), value.into());
+            }
+            None => {
+                record.secret_values.remove(SSH_CERTIFICATE_FIELD);
+            }
+        }
+        self.item_update_with_secret_values(
+            item_id,
+            &record.label,
+            &record.kind,
+            &record.secret_values,
+            record.notes.as_deref(),
+            record.credential.as_ref(),
+        )
+    }
+
     /// Overwrites an existing record from remote sync while preserving remote
     /// revision/updated_at metadata so restore reconciliation converges.
     pub fn item_apply_sync_restore(
@@ -1058,7 +1111,7 @@ impl VaultService {
         revision: u64,
         updated_at: u64,
     ) -> Result<PlaintextRecord, VaultError> {
-        validate_secret_values(kind, secret_values)?;
+        validate_secret_values_for_kind(kind, secret_values).map_err(VaultError::InvalidData)?;
         let existing = self.item_get(item_id)?;
         let vek = self.vek.as_ref().ok_or(VaultError::Locked)?;
         let db = self.db.as_ref().ok_or(VaultError::NotInitialized)?;
@@ -1099,6 +1152,7 @@ impl VaultService {
         };
         normalize_record_credential(&mut record);
 
+        validate_certificate_attachment(&record.kind, &record.secret_values)?;
         if revision == existing.revision
             && existing.kind == record.kind
             && existing.label == record.label
@@ -2179,6 +2233,297 @@ mod tests {
             .initialize("correct horse battery staple", false)
             .expect("initialize vault");
         vault
+    }
+
+    #[test]
+    fn ssh_certificate_attachment_preserves_key_identity_history_and_sync() {
+        use crate::vault::credential::{
+            PASSPHRASE_FIELD, PRIVATE_KEY_FIELD, SSH_CERTIFICATE_FIELD,
+        };
+        use russh::keys::{
+            key::safe_rng,
+            ssh_key::{certificate::Builder, Cipher, Kdf, LineEnding},
+            Algorithm, PrivateKey,
+        };
+        let mut vault = initialized_test_vault();
+        let ca = PrivateKey::random(&mut safe_rng(), Algorithm::Ed25519).unwrap();
+        let key = PrivateKey::random(&mut safe_rng(), Algorithm::Ed25519).unwrap();
+        // Low-cost test KDF only; production key encryption is not changed.
+        let key_text = key
+            .encrypt_with(
+                Cipher::Aes256Ctr,
+                Kdf::Bcrypt {
+                    salt: vec![7; 16],
+                    rounds: 1,
+                },
+                42,
+                b" fixture passphrase ",
+            )
+            .unwrap()
+            .to_openssh(LineEnding::LF)
+            .unwrap();
+        // Expired certificates remain restorable; connect-time validation rejects their lifetime.
+        let mut builder =
+            Builder::new(vec![1; 32], key.public_key().key_data().clone(), 100, 200).unwrap();
+        builder.valid_principal("fixture").unwrap();
+        let certificate = builder.sign(&ca).unwrap().to_openssh().unwrap();
+        let values = BTreeMap::from([
+            (PRIVATE_KEY_FIELD.into(), key_text.to_string()),
+            (PASSPHRASE_FIELD.into(), " fixture passphrase ".into()),
+        ]);
+        let original = vault
+            .service
+            .item_create_with_secret_values(
+                "cert key",
+                "ssh-private-key",
+                &values,
+                Some("keep notes"),
+                None,
+            )
+            .unwrap();
+        let original_fingerprint = vault.service.record_secret_fingerprint(&original).unwrap();
+        let updated = vault
+            .service
+            .item_set_ssh_certificate(
+                &original.id,
+                original.revision,
+                &original_fingerprint,
+                Some(&certificate),
+            )
+            .unwrap();
+        let updated_fingerprint = vault.service.record_secret_fingerprint(&updated).unwrap();
+        assert_eq!(updated.logical_id, original.logical_id);
+        assert_eq!(updated.revision, original.revision + 1);
+        for (name, value) in &values {
+            assert_eq!(updated.secret_values.get(name), Some(value));
+        }
+        assert_eq!(updated.notes, original.notes);
+        let meta = vault.service.item_meta(&updated).unwrap();
+        assert!(meta.has_ssh_certificate_field);
+        let metadata = serde_json::to_string(&meta).unwrap();
+        let envelope = serde_json::to_string(&updated.credential).unwrap();
+        assert!(!metadata.contains(&certificate) && !envelope.contains(&certificate));
+        assert!(envelope.contains("secret:sshCertificate"));
+        assert!(crate::ssh_certificate::from_text(&certificate, &key).is_err());
+
+        // Reject mismatches and stale editors without changing the existing revision/payload.
+        let wrong_key = PrivateKey::random(&mut safe_rng(), Algorithm::Ed25519).unwrap();
+        let mut builder = Builder::new(
+            vec![2; 32],
+            wrong_key.public_key().key_data().clone(),
+            100,
+            200,
+        )
+        .unwrap();
+        builder.valid_principal("fixture").unwrap();
+        let wrong_cert = builder.sign(&ca).unwrap().to_openssh().unwrap();
+        assert!(vault
+            .service
+            .item_set_ssh_certificate(
+                &original.id,
+                updated.revision,
+                &updated_fingerprint,
+                Some(&wrong_cert)
+            )
+            .is_err());
+        assert!(vault
+            .service
+            .item_set_ssh_certificate(&original.id, original.revision, &original_fingerprint, None)
+            .is_err());
+        assert_eq!(
+            vault.service.item_get(&original.id).unwrap().secret_values,
+            updated.secret_values
+        );
+        assert!(vault
+            .service
+            .item_set_ssh_certificate(
+                &original.id,
+                updated.revision,
+                &updated_fingerprint,
+                Some("bad certificate")
+            )
+            .is_err());
+        assert!(vault
+            .service
+            .item_set_ssh_certificate(
+                &original.id,
+                updated.revision,
+                &updated_fingerprint,
+                Some(&"x".repeat(65537))
+            )
+            .is_err());
+
+        let restored = initialized_test_vault();
+        let restored_record = restored
+            .service
+            .item_create_from_sync(
+                &updated.label,
+                &updated.kind,
+                &updated.secret_values,
+                updated.notes.as_deref(),
+                updated.credential.as_ref(),
+                updated.logical_id.as_deref().unwrap(),
+                updated.revision,
+                updated.updated_at,
+            )
+            .unwrap();
+        assert_eq!(restored_record.secret_values, updated.secret_values);
+        let removed = vault
+            .service
+            .item_set_ssh_certificate(&original.id, updated.revision, &updated_fingerprint, None)
+            .unwrap();
+        assert!(!removed.secret_values.contains_key(SSH_CERTIFICATE_FIELD));
+        assert_eq!(removed.secret_values, original.secret_values);
+        assert!(
+            !vault
+                .service
+                .item_meta(&removed)
+                .unwrap()
+                .has_ssh_certificate_field
+        );
+        let historical = vault
+            .service
+            .item_restore_revision(&original.id, updated.revision)
+            .unwrap();
+        assert_eq!(historical.secret_values, updated.secret_values);
+        vault.service.lock();
+        assert!(vault
+            .service
+            .item_set_ssh_certificate(
+                &original.id,
+                historical.revision,
+                &updated_fingerprint,
+                None
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn ssh_certificate_stale_edit_rejects_same_revision_sync_restore() {
+        use crate::vault::credential::{PRIVATE_KEY_FIELD, SSH_CERTIFICATE_FIELD};
+        use russh::keys::{
+            key::safe_rng,
+            ssh_key::{certificate::Builder, LineEnding},
+            Algorithm, PrivateKey,
+        };
+        let vault = initialized_test_vault();
+        let ca = PrivateKey::random(&mut safe_rng(), Algorithm::Ed25519).unwrap();
+        let key = PrivateKey::random(&mut safe_rng(), Algorithm::Ed25519).unwrap();
+        let certificate = |nonce: u8| {
+            let mut builder = Builder::new(
+                vec![nonce; 32],
+                key.public_key().key_data().clone(),
+                100,
+                200,
+            )
+            .unwrap();
+            builder.valid_principal("fixture").unwrap();
+            builder.sign(&ca).unwrap().to_openssh().unwrap()
+        };
+        let original_cert = certificate(1);
+        let restored_cert = certificate(2);
+        let values = BTreeMap::from([
+            (
+                PRIVATE_KEY_FIELD.into(),
+                key.to_openssh(LineEnding::LF).unwrap().to_string(),
+            ),
+            (SSH_CERTIFICATE_FIELD.into(), original_cert.clone()),
+        ]);
+        let original = vault
+            .service
+            .item_create_with_secret_values("cert key", "ssh-private-key", &values, None, None)
+            .unwrap();
+        let stale_fingerprint = vault.service.record_secret_fingerprint(&original).unwrap();
+        let mut restored_values = values.clone();
+        restored_values.insert(SSH_CERTIFICATE_FIELD.into(), restored_cert);
+        let restored = vault
+            .service
+            .item_apply_sync_restore(
+                &original.id,
+                original.logical_id.as_deref().unwrap(),
+                &original.label,
+                &original.kind,
+                &restored_values,
+                Some("restored notes"),
+                original.credential.as_ref(),
+                original.revision,
+                original.updated_at + 1,
+            )
+            .unwrap();
+        assert_eq!(restored.revision, original.revision);
+        let fresh_fingerprint = vault.service.record_secret_fingerprint(&restored).unwrap();
+        assert_ne!(fresh_fingerprint, stale_fingerprint);
+        for value in [None, Some(original_cert.as_str())] {
+            let error = vault
+                .service
+                .item_set_ssh_certificate(
+                    &original.id,
+                    original.revision,
+                    &stale_fingerprint,
+                    value,
+                )
+                .err()
+                .expect("stale certificate edit must fail");
+            assert!(error.to_string().contains("Credential changed"));
+            let unchanged = vault.service.item_get(&original.id).unwrap();
+            assert_eq!(unchanged.revision, restored.revision);
+            assert_eq!(unchanged.secret_values, restored.secret_values);
+            assert_eq!(unchanged.notes, restored.notes);
+        }
+        // A reopened editor can replace and subsequently remove the certificate.
+        let replaced = vault
+            .service
+            .item_set_ssh_certificate(
+                &original.id,
+                restored.revision,
+                &fresh_fingerprint,
+                Some(&original_cert),
+            )
+            .unwrap();
+        assert_eq!(
+            replaced.secret_values.get(SSH_CERTIFICATE_FIELD),
+            Some(&original_cert)
+        );
+        let replacement_fingerprint = vault.service.record_secret_fingerprint(&replaced).unwrap();
+        let removed = vault
+            .service
+            .item_set_ssh_certificate(
+                &original.id,
+                replaced.revision,
+                &replacement_fingerprint,
+                None,
+            )
+            .unwrap();
+        assert!(!removed.secret_values.contains_key(SSH_CERTIFICATE_FIELD));
+        assert_eq!(
+            removed.secret_values.get(PRIVATE_KEY_FIELD),
+            values.get(PRIVATE_KEY_FIELD)
+        );
+        assert_eq!(removed.notes, restored.notes);
+        assert_eq!(removed.logical_id, original.logical_id);
+    }
+
+    #[test]
+    fn ssh_certificate_invalid_creation_and_non_key_attachment_are_rejected() {
+        use crate::vault::credential::{PRIVATE_KEY_FIELD, SSH_CERTIFICATE_FIELD};
+        let vault = initialized_test_vault();
+        let values = BTreeMap::from([
+            (PRIVATE_KEY_FIELD.into(), "invalid key".into()),
+            (SSH_CERTIFICATE_FIELD.into(), "invalid certificate".into()),
+        ]);
+        assert!(vault
+            .service
+            .item_create_with_secret_values("bad", "ssh-private-key", &values, None, None)
+            .is_err());
+        assert!(vault.service.item_list().unwrap().is_empty());
+        let password = vault
+            .service
+            .item_create("password", "ssh-password", "fixture", None)
+            .unwrap();
+        assert!(vault
+            .service
+            .item_set_ssh_certificate(&password.id, password.revision, "", Some("cert"))
+            .is_err());
     }
 
     #[test]

@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { KeyRound, ShieldCheck, ShieldEllipsis } from 'lucide-react';
-import type { VaultItemDetail } from '../../../../vault/ipc';
+import type { VaultItem, VaultItemDetail } from '../../../../vault/ipc';
+import { VaultSshCertificateEditor } from './VaultSshCertificateEditor';
 import { getCredentialKindLabel, type CredentialField } from '../../../../vault/credentialTypes';
 import type { Connection } from '../../../../features/connections/domain/types';
 import {
@@ -17,6 +18,7 @@ interface VaultCredentialDetailModalProps {
   assignedConnections: Connection[];
   isLoading: boolean;
   onClose: () => void;
+  onCertificateUpdated: (item: VaultItem) => Promise<void>;
 }
 
 function formatTimestamp(unixSecs: number): string {
@@ -43,12 +45,14 @@ function secretFieldSummary(fields: CredentialField[]): {
   };
 }
 
+/** Show metadata only, with native-only certificate renewal for SSH keys. */
 export function VaultCredentialDetailModal({
   isOpen,
   item,
   assignedConnections,
   isLoading,
   onClose,
+  onCertificateUpdated,
 }: VaultCredentialDetailModalProps) {
   const showHostAddressesInLists = useShowHostAddressesInLists();
   const fields = item?.credential?.fields ?? [];
@@ -105,6 +109,11 @@ export function VaultCredentialDetailModal({
               ]}
             />
           </div>
+
+          {item.kind === 'ssh-private-key' && (
+            <VaultSshCertificateEditor key={`${item.id}:${item.revision}:${item.secretFingerprint}`} item={item}
+              onUpdated={onCertificateUpdated} />
+          )}
 
           <div className="rounded-xl border border-app-border/60 bg-app-surface/20 p-4">
             <p className="text-sm font-medium text-app-text">Assigned Hosts</p>

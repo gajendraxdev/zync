@@ -1,8 +1,9 @@
 import { useMemo, useRef, useState } from 'react';
+import { useCredentialFileImports } from './useCredentialFileImports';
 import { vaultIpc, type VaultItem } from '../../../../../vault/ipc';
 import type { ToastType } from '../../../../../store/toastSlice';
 import type { Connection } from '../../../../../features/connections/domain/types';
-import { vaultItemSecretReferenceField } from '../../../../../vault/credentialTypes';
+import { sshPrivateKeySecretValues, vaultItemSecretReferenceField } from '../../../../../vault/credentialTypes';
 
 interface UseRotateCredentialModalOptions {
   items: VaultItem[];
@@ -15,6 +16,7 @@ interface UseRotateCredentialModalOptions {
 const extractErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
+/** Replace key material and its optional certificate while preserving credential identity. */
 export function useRotateCredentialModal({
   items,
   connections,
@@ -26,15 +28,18 @@ export function useRotateCredentialModal({
   const [label, setLabel] = useState('');
   const [secret, setSecret] = useState('');
   const [passphrase, setPassphrase] = useState('');
+  const [certificate, setCertificate] = useState('');
   const [notes, setNotes] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const currentOpenRequestTokenRef = useRef<symbol | null>(null);
+  const fileImports = useCredentialFileImports();
 
   const item = useMemo(
     () => items.find(i => i.id === itemId) ?? null,
     [items, itemId],
   );
 
+  /** Load only metadata; existing private keys and certificates never cross detail IPC. */
   const open = async (id: string) => {
     const found = items.find(i => i.id === id);
     if (!found) return;
@@ -43,6 +48,7 @@ export function useRotateCredentialModal({
     setLabel(found.label);
     setSecret('');
     setPassphrase('');
+    setCertificate('');
     setNotes('');
     currentOpenRequestTokenRef.current = requestToken;
     try {
@@ -61,23 +67,30 @@ export function useRotateCredentialModal({
     }
   };
 
-  const close = () => {
-    if (isLoading) return;
+  /** Clear sensitive editor state after a completed rotation or explicit close. */
+  const reset = () => {
     currentOpenRequestTokenRef.current = null;
     setItemId(null);
     setLabel('');
     setSecret('');
     setPassphrase('');
+    setCertificate('');
     setNotes('');
   };
 
-  const submit = async () => {
+  /** Prevent dismissing the editor while its native credential mutation is pending. */
+  const close = () => {
     if (isLoading) return;
+    reset();
+  };
+
+  /** Replace the complete key payload; native storage validates any matching certificate. */
+  const submit = async () => {
+    if (isLoading || fileImports.hasPendingImports()) return;
     if (!item) return;
 
     const trimmedLabel = label.trim();
     const trimmedSecret = secret.trim();
-    const trimmedPassphrase = passphrase.trim();
 
     if (!trimmedLabel) {
       showToast('error', 'Credential label is required.');
@@ -90,10 +103,7 @@ export function useRotateCredentialModal({
 
     const secretValues: Record<string, string> =
       item.kind === 'ssh-private-key'
-        ? {
-            privateKey: secret,
-            ...(trimmedPassphrase ? { passphrase } : {}),
-          }
+        ? sshPrivateKeySecretValues(secret, passphrase, certificate)
         : { [vaultItemSecretReferenceField(item).name]: secret };
 
     setIsLoading(true);
@@ -113,7 +123,7 @@ export function useRotateCredentialModal({
         notes.trim() || undefined,
       );
       await onRotated();
-      close();
+      reset();
       showToast('success', `Rotated "${trimmedLabel}". Hosts keep the same credential identity.`);
       await onPromptDisconnect(affectedConnectionIds, `Rotating "${trimmedLabel}"`);
     } catch (e: unknown) {
@@ -130,13 +140,17 @@ export function useRotateCredentialModal({
     label,
     secret,
     passphrase,
+    certificate,
     notes,
     isLoading,
+    isImporting: fileImports.isImporting,
+    beginImport: fileImports.beginImport,
     open,
     close,
     setLabel,
     setSecret,
     setPassphrase,
+    setCertificate,
     setNotes,
     submit,
   };

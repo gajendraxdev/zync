@@ -13,6 +13,11 @@ pub struct ParsedSshConnection {
     pub port: u16,
     pub private_key_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub certificate_path: Option<String>,
+    /// Import-only warning: saved hosts can represent one certificate, not an ordered candidate list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub certificate_warning: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub private_key_status: Option<String>,
     pub jump_server_alias: Option<String>,
     pub jump_server_id: Option<String>,
@@ -41,10 +46,30 @@ pub fn parse_config(path: &Path) -> Result<Vec<ParsedSshConnection>> {
     parse_config_text(&content)
 }
 
+/// Decode escaped quotes/backslashes in quoted paths without consuming ordinary Windows separators.
+fn decode_config_path(raw: &str) -> String {
+    let value = strip_wrapping_quotes(raw);
+    if !raw.starts_with('"') {
+        return value.to_owned();
+    }
+    let mut result = String::with_capacity(value.len());
+    let mut chars = value.chars().peekable();
+    while let Some(character) = chars.next() {
+        if character == '\\' && matches!(chars.peek(), Some('\\' | '"')) {
+            result.push(chars.next().unwrap());
+        } else {
+            result.push(character);
+        }
+    }
+    result
+}
+
+/// Import supported explicit host options, keeping user certificates separate from key identities.
 pub fn parse_config_text(content: &str) -> Result<Vec<ParsedSshConnection>> {
     let mut connections = Vec::new();
 
     let mut current_host: Option<ParsedSshConnection> = None;
+    let mut certificate_seen = false;
 
     for line in content.lines() {
         let line = strip_inline_comments(line).trim();
@@ -69,6 +94,7 @@ pub fn parse_config_text(content: &str) -> Result<Vec<ParsedSshConnection>> {
             };
 
         // Normalize value_str by removing wrapping quotes
+        let raw_value_str = value_str;
         value_str = strip_wrapping_quotes(value_str);
 
         if key_str.to_lowercase() == "host" {
@@ -88,6 +114,7 @@ pub fn parse_config_text(content: &str) -> Result<Vec<ParsedSshConnection>> {
                 .map(|s| s.to_string())
                 .collect();
 
+            certificate_seen = false;
             current_host = Some(ParsedSshConnection {
                 id: String::new(),               // Will be set on push
                 name: primary_alias.to_string(), // First alias
@@ -95,6 +122,8 @@ pub fn parse_config_text(content: &str) -> Result<Vec<ParsedSshConnection>> {
                 username: whoami::username(),
                 port: 22,
                 private_key_path: None,
+                certificate_path: None,
+                certificate_warning: None,
                 private_key_status: None,
                 jump_server_alias: None,
                 jump_server_id: None,
@@ -112,7 +141,7 @@ pub fn parse_config_text(content: &str) -> Result<Vec<ParsedSshConnection>> {
                 "identityfile" => {
                     // expansion of ~ is tricky in rust std, but crucial
                     // Strip quotes FIRST
-                    let mut path = value_str.to_string();
+                    let mut path = decode_config_path(raw_value_str);
 
                     // Then expand ~
                     if path.starts_with("~") {
@@ -123,6 +152,27 @@ pub fn parse_config_text(content: &str) -> Result<Vec<ParsedSshConnection>> {
                     host.private_key_path = Some(path);
                 }
                 "proxyjump" => host.jump_server_alias = Some(value_str.to_string()),
+                "certificatefile" => {
+                    if certificate_seen {
+                        host.certificate_warning = Some("Multiple CertificateFile entries: only the first is imported. Review the certificate after import.".into());
+                        continue;
+                    }
+                    certificate_seen = true;
+                    let path = decode_config_path(raw_value_str);
+                    host.certificate_path = (!value_str.eq_ignore_ascii_case("none")
+                        && !value_str.is_empty())
+                    .then(|| {
+                        if let Some(rest) =
+                            path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\"))
+                        {
+                            dirs::home_dir()
+                                .map(|home| home.join(rest).to_string_lossy().into_owned())
+                                .unwrap_or_else(|| path.clone())
+                        } else {
+                            path
+                        }
+                    });
+                }
                 _ => {}
             }
         }
@@ -192,6 +242,48 @@ fn strip_inline_comments(line: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::parse_config_text;
+
+    #[test]
+    fn repeated_certificates_keep_the_first_and_warn_per_host() {
+        let parsed = parse_config_text("Host first\n CertificateFile /first.pub\n CertificateFile /second.pub\n CertificateFile NONE\nHost next\n CertificateFile /next.pub\n").unwrap();
+        assert_eq!(parsed[0].certificate_path.as_deref(), Some("/first.pub"));
+        assert!(parsed[0]
+            .certificate_warning
+            .as_deref()
+            .unwrap()
+            .contains("only the first"));
+        assert_eq!(parsed[1].certificate_path.as_deref(), Some("/next.pub"));
+        assert!(parsed[1].certificate_warning.is_none());
+        let serialized = serde_json::to_value(&parsed[0]).unwrap();
+        assert!(serialized["certificateWarning"]
+            .as_str()
+            .unwrap()
+            .contains("only the first"));
+        let none_first = parse_config_text(
+            "Host disabled\n CertificateFile NONE\n CertificateFile /later.pub\n",
+        )
+        .unwrap();
+        assert!(none_first[0].certificate_path.is_none());
+        assert!(none_first[0].certificate_warning.is_some());
+    }
+
+    #[test]
+    fn imports_user_certificate_without_confusing_it_with_identity_or_host_trust() {
+        let parsed = parse_config_text("Host cert-host\n IdentityFile /keys/user\n CertificateFile \"/keys/user cert.pub\"\n User test\n").unwrap();
+        assert_eq!(
+            parsed[0].certificate_path.as_deref(),
+            Some("/keys/user cert.pub")
+        );
+        assert_eq!(parsed[0].private_key_path.as_deref(), Some("/keys/user"));
+        let parsed = parse_config_text("Host bare-host\n CertificateFile none\n").unwrap();
+        assert!(parsed[0].certificate_path.is_none());
+        for sentinel in ["NONE", "None", "nOnE", "\"NONE\"", ""] {
+            let parsed =
+                parse_config_text(&format!("Host bare-host\n CertificateFile {sentinel}\n"))
+                    .unwrap();
+            assert!(parsed[0].certificate_path.is_none());
+        }
+    }
 
     #[test]
     fn parse_config_text_parses_basic_host_block() {
