@@ -4,12 +4,20 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+## [2.37.0] - 2026-10-22
+
 ### Added
 
 - **SSH user certificates:** Select an optional OpenSSH user certificate for a
   private key or vault-backed key, or import `CertificateFile` from SSH config.
   Validate the key pairing, signature and validity period without changing
   server host-key verification. ([91a0a73], [38628ac])
+- **Vault SSH certificates:** Store a matching OpenSSH user certificate with
+  an encrypted Vault SSH key. Paste or import key/certificate files, and attach,
+  replace or remove certificates from credential details without re-entering
+  the private key. Attachments follow existing credential sync and history;
+  a host-specific certificate file takes precedence. Certificate validity is
+  enforced when connecting. ([bcfe6f4], [387ddc7])
 - **SSH network interface:** On Windows, Linux and macOS, choose System default,
   a specific adapter, or Ask every time under a host's Advanced settings.
   Preferences stay on this device; automatic transport recovery retains the
@@ -26,6 +34,13 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Fixed
 
+- **Vault certificate editing:** Reject stale certificate changes after key
+  rotation or sync restores, including restores that retain the same revision.
+  Preserve the current key, passphrase and credential identity. ([bcfe6f4])
+- **Vault file imports:** Block saving while key or certificate imports are
+  pending, including overlapping imports. Preserve draft text on cancellation
+  or failure and ignore late results after edits or closing the editor.
+  ([387ddc7], [354db7d])
 - **Folder-size cancellation:** Keep cancelled or failed inspections stopped
   across listing refreshes until Retry, a new target, or reopening Properties.
   ([a676f06])
@@ -2667,7 +2682,8 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [840afc2]: https://github.com/zync-sh/zync/commit/840afc2
 [193f568]: https://github.com/zync-sh/zync/commit/193f568
 [4e3c5ff]: https://github.com/zync-sh/zync/commit/4e3c5ff
-[Unreleased]: https://github.com/zync-sh/zync/compare/v2.36.0...HEAD
+[Unreleased]: https://github.com/zync-sh/zync/compare/v2.37.0...HEAD
+[2.37.0]: https://github.com/zync-sh/zync/compare/v2.36.0...v2.37.0
 [2.36.0]: https://github.com/zync-sh/zync/compare/v2.35.1...v2.36.0
 [2.35.1]: https://github.com/zync-sh/zync/compare/v2.34.1...v2.35.1
 [2.34.1]: https://github.com/zync-sh/zync/compare/v2.34.0...v2.34.1
@@ -2986,3 +3002,6 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [91a0a73]: https://github.com/zync-sh/zync/commit/91a0a73edea630b5163033696d2caccfd97f159b
 [38628ac]: https://github.com/zync-sh/zync/commit/38628acc7af16efcf92761316356c7a777fa565a
 [a676f06]: https://github.com/zync-sh/zync/commit/a676f06a8663197edfbad54d5e50c5924e26846e
+[bcfe6f4]: https://github.com/zync-sh/zync/commit/bcfe6f42dd3f00b3ff650da0f3622b1bb60154d1
+[387ddc7]: https://github.com/zync-sh/zync/commit/387ddc7efa2905cc29e1842730daa5f2aa6b3c4e
+[354db7d]: https://github.com/zync-sh/zync/commit/354db7d2cf43a04d42c6dc7213d078a7be1eca3b
