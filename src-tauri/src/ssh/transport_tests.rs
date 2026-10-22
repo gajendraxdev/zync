@@ -279,17 +279,20 @@ async fn user_certificate_authentication_uses_certificate_without_bare_key_fallb
             .unwrap();
             builder.valid_principal("fixture").unwrap();
             let cert = builder.sign(&ca).unwrap();
+            let certificate_text = cert.to_openssh().unwrap();
             let directory = tempfile::tempdir().unwrap();
             let path = directory.path().join("user-cert.pub");
             std::fs::write(&path, cert.to_openssh().unwrap()).unwrap();
             let mut encoded = Vec::new();
             keys::encode_pkcs8_pem(&key, &mut encoded).unwrap();
             let encoded = String::from_utf8(encoded).unwrap();
-            let mut fixture = transport_with_certificate(key.public_key(), Some(cert)).await;
+            let mut fixture =
+                transport_with_certificate(key.public_key(), Some(cert.clone())).await;
             assert!(!SshManager::auth_with_key_data(
                 &mut fixture.client,
                 "fixture",
                 &encoded,
+                None,
                 None,
                 None
             )
@@ -300,7 +303,20 @@ async fn user_certificate_authentication_uses_certificate_without_bare_key_fallb
                 "fixture",
                 &encoded,
                 None,
-                path.to_str()
+                path.to_str(),
+                None,
+            )
+            .await
+            .unwrap());
+            // The backend-only vault attachment uses the identical SSH certificate exchange.
+            let mut fixture = transport_with_certificate(key.public_key(), Some(cert)).await;
+            assert!(SshManager::auth_with_key_data(
+                &mut fixture.client,
+                "fixture",
+                &encoded,
+                None,
+                None,
+                Some(&certificate_text),
             )
             .await
             .unwrap());
@@ -312,7 +328,18 @@ async fn user_certificate_authentication_uses_certificate_without_bare_key_fallb
                 "fixture",
                 &encoded,
                 None,
-                path.to_str()
+                path.to_str(),
+                Some(&certificate_text),
+            )
+            .await
+            .is_err());
+            assert!(SshManager::auth_with_key_data(
+                &mut fixture.client,
+                "fixture",
+                &encoded,
+                None,
+                None,
+                Some("invalid certificate"),
             )
             .await
             .is_err());
@@ -479,6 +506,7 @@ async fn encrypted_private_key_authentication_uses_the_production_decoder_and_ha
                 "fixture",
                 &encoded,
                 Some("wrong"),
+                None,
                 None
             )
         )
@@ -492,6 +520,7 @@ async fn encrypted_private_key_authentication_uses_the_production_decoder_and_ha
                 "fixture",
                 &encoded,
                 Some("fixture passphrase"),
+                None,
                 None,
             )
         )

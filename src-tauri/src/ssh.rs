@@ -873,12 +873,14 @@ impl SshManager {
                     &key_data,
                     passphrase.as_deref(),
                     config.certificate_path.as_deref(),
+                    None,
                 )
                 .await?
             }
             AuthMethod::PrivateKeyData {
                 key_data,
                 passphrase,
+                certificate,
             } => {
                 Self::auth_with_key_data(
                     session,
@@ -886,6 +888,7 @@ impl SshManager {
                     key_data,
                     passphrase.as_deref(),
                     config.certificate_path.as_deref(),
+                    certificate.as_deref(),
                 )
                 .await?
             }
@@ -952,6 +955,7 @@ impl SshManager {
             AuthMethod::PrivateKeyData {
                 key_data,
                 passphrase,
+                ..
             } => (key_data.clone(), passphrase.as_deref()),
             AuthMethod::Password { .. } => {
                 return Err(anyhow!("Agent forwarding requires a private key"))
@@ -973,6 +977,7 @@ impl SshManager {
         key_data: &str,
         passphrase: Option<&str>,
         certificate_path: Option<&str>,
+        certificate_data: Option<&str>,
     ) -> Result<bool> {
         let privkey = keys::decode_secret_key(key_data, passphrase)
             .map_err(|e| anyhow!("Failed to decode private key: {}", e))?;
@@ -982,8 +987,15 @@ impl SshManager {
             None
         };
         let privkey = Arc::new(privkey);
-        if let Some(path) = certificate_path {
-            let cert = crate::ssh_certificate::load(path, &privkey).await?;
+        // A per-host file explicitly overrides the vault attachment (including on read failure).
+        let certificate = if let Some(path) = certificate_path {
+            Some(crate::ssh_certificate::load(path, &privkey).await?)
+        } else {
+            certificate_data
+                .map(|text| crate::ssh_certificate::from_text(text, &privkey))
+                .transpose()?
+        };
+        if let Some(cert) = certificate {
             let mut signer = CertificateSigner(PrivateKeyWithHashAlg::new(privkey, hash));
             return Ok(session
                 .authenticate_certificate_with(username, cert, hash, &mut signer)
@@ -1498,6 +1510,7 @@ mod tests {
                         auth_method: AuthMethod::PrivateKeyData {
                             key_data: forwarded_key_data,
                             passphrase: None,
+                            certificate: None,
                         },
                     }),
                     jump_host: None,
@@ -1577,6 +1590,7 @@ mod tests {
                     auth_method: AuthMethod::PrivateKeyData {
                         key_data,
                         passphrase: None,
+                        certificate: None,
                     },
                     agent_forwarding: None,
                     jump_host: None,

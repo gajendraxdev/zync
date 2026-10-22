@@ -1185,6 +1185,7 @@ pub async fn ssh_cancel_connect(
     Ok(())
 }
 
+/// Resolve a vault credential natively, including its optional encrypted SSH certificate.
 async fn resolve_auth_method(
     connection_id: &str,
     auth_method: &mut crate::types::AuthMethod,
@@ -1239,6 +1240,10 @@ async fn resolve_auth_method(
             crate::types::AuthMethod::PrivateKeyData {
                 key_data: key_data.to_string(),
                 passphrase: passphrase.map(str::to_string),
+                certificate: record
+                    .secret_values
+                    .get(crate::vault::credential::SSH_CERTIFICATE_FIELD)
+                    .cloned(),
             }
         }
         kind if require_private_key => {
@@ -2646,6 +2651,39 @@ fn quote_ssh_config_path(path: &str) -> String {
 #[cfg(test)]
 mod certificate_exchange_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn ssh_certificate_vault_resolution_keeps_attachment_backend_only() {
+        use russh::keys::{key::safe_rng, ssh_key::certificate::Builder, Algorithm, PrivateKey};
+        let directory = tempfile::tempdir().unwrap();
+        let mut service = crate::vault::store::VaultService::new(directory.path().to_path_buf());
+        service.initialize("correct horse battery staple", false).unwrap();
+        let key = PrivateKey::random(&mut safe_rng(), Algorithm::Ed25519).unwrap();
+        let ca = PrivateKey::random(&mut safe_rng(), Algorithm::Ed25519).unwrap();
+        let mut builder = Builder::new(vec![8; 32], key.public_key().key_data().clone(), 100, 200).unwrap();
+        builder.valid_principal("fixture").unwrap();
+        let certificate = builder.sign(&ca).unwrap().to_openssh().unwrap();
+        let mut encoded = Vec::new();
+        russh::keys::encode_pkcs8_pem(&key, &mut encoded).unwrap();
+        let values = std::collections::BTreeMap::from([
+            ("privateKey".into(), String::from_utf8(encoded).unwrap()),
+            ("sshCertificate".into(), certificate.clone()),
+        ]);
+        let record = service.item_create_with_secret_values("fixture", "ssh-private-key", &values, None, None).unwrap();
+        let mut auth = crate::types::AuthMethod::VaultRef { item_id: "stale-item".into(), credential_id: record.logical_id.clone() };
+        let vault = tokio::sync::Mutex::new(service);
+        let relinked = resolve_auth_method("fixture-host", &mut auth, &vault, false).await.unwrap();
+        assert_eq!(relinked.len(), 1);
+        match &auth {
+            crate::types::AuthMethod::PrivateKeyData { key_data, certificate: Some(actual), .. } => {
+                assert_eq!(actual, &certificate);
+                assert_eq!(key_data, &values["privateKey"]);
+            }
+            _ => panic!("expected native key plus certificate"),
+        }
+        assert!(!serde_json::to_string(&auth).unwrap_or_default().contains(&certificate));
+        assert!(serde_json::from_str::<crate::types::AuthMethod>(r#"{"type":"PrivateKeyData","key_data":"untrusted","passphrase":null,"certificate":"untrusted"}"#).is_err());
+    }
 
     #[test]
     fn openssh_path_exports_escape_and_validate_both_path_fields() {

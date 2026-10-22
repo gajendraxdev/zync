@@ -5,7 +5,7 @@ use russh::keys::{Certificate, PrivateKey};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncReadExt;
 
-const MAX_CERTIFICATE_BYTES: u64 = 64 * 1024;
+pub(crate) const MAX_CERTIFICATE_BYTES: u64 = 64 * 1024;
 
 /// Read the configured public certificate afresh, so renewed certificates work on reconnect.
 pub(crate) async fn load(path: &str, key: &PrivateKey) -> Result<Certificate> {
@@ -33,13 +33,22 @@ pub(crate) async fn load(path: &str, key: &PrivateKey) -> Result<Certificate> {
         bail!("SSH user certificate exceeds 64 KiB");
     }
     let text = std::str::from_utf8(&bytes).context("SSH user certificate is not UTF-8")?;
-    let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
-    validate(text.trim(), key, now)
+    from_text(text, key)
 }
 
-/// Check key ownership, certificate type, signature and lifetime, not server authorization policy.
-fn validate(text: &str, key: &PrivateKey, now: u64) -> Result<Certificate> {
-    let cert = Certificate::from_openssh(text).context("Invalid OpenSSH user certificate")?;
+/// Validate in-memory vault material using the same policy as certificate files.
+pub(crate) fn from_text(text: &str, key: &PrivateKey) -> Result<Certificate> {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+    validate(text, key, now)
+}
+
+/// Check stored identity without rejecting expired backups; lifetime is enforced at authentication.
+pub(crate) fn validate_identity(text: &str, key: &PrivateKey) -> Result<Certificate> {
+    if text.len() as u64 > MAX_CERTIFICATE_BYTES {
+        bail!("SSH user certificate exceeds 64 KiB");
+    }
+    let cert =
+        Certificate::from_openssh(text.trim()).context("Invalid OpenSSH user certificate")?;
     if cert.cert_type() != russh::keys::ssh_key::certificate::CertType::User {
         bail!("A user certificate is required, not a host certificate");
     }
@@ -48,6 +57,12 @@ fn validate(text: &str, key: &PrivateKey, now: u64) -> Result<Certificate> {
     }
     cert.verify_signature()
         .map_err(|_| anyhow!("SSH user certificate signature is invalid"))?;
+    Ok(cert)
+}
+
+/// Check key ownership, certificate type, signature and lifetime, not server authorization policy.
+fn validate(text: &str, key: &PrivateKey, now: u64) -> Result<Certificate> {
+    let cert = validate_identity(text, key)?;
     if now < cert.valid_after() {
         bail!("SSH user certificate is not valid yet");
     }

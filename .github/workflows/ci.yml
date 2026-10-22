@@ -101,6 +101,7 @@ jobs:
           cargo test --frozen ssh::tests -- --test-threads=1
           cargo test --frozen ssh::transport_tests
           cargo test --frozen network_interfaces
+          cargo test --frozen ssh_certificate
           cargo test --frozen file_transfers
           cargo test --frozen sftp_read
           cargo test --frozen folder_sizes

@@ -59,6 +59,8 @@ pub enum AuthMethod {
     PrivateKeyData {
         key_data: String,
         passphrase: Option<String>,
+        /// Backend-only encrypted-vault attachment; never serialized into host records or IPC.
+        certificate: Option<String>,
     },
 }
 

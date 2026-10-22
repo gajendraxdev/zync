@@ -238,13 +238,15 @@ pub async fn vault_item_get(
     vault: State<'_, Mutex<VaultService>>,
     args: ItemGetArgs,
 ) -> VaultResult<VaultItemDetail> {
+    let vault = vault.lock().await;
     let record = vault
-        .lock()
-        .await
         .item_get(&args.item_id)
         .map_err(VaultCommandError::from)?;
     Ok(VaultItemDetail {
         logical_id: VaultService::record_logical_id(&record),
+        secret_fingerprint: vault
+            .record_secret_fingerprint(&record)
+            .map_err(VaultCommandError::from)?,
         id: record.id.clone(),
         kind: record.kind.clone(),
         label: record.label.clone(),
@@ -334,6 +336,33 @@ pub async fn vault_item_update(
     vault.item_meta(&record).map_err(Into::into)
 }
 
+#[derive(Deserialize)]
+pub struct SetSshCertificateArgs {
+    pub item_id: String,
+    pub expected_revision: u64,
+    pub expected_secret_fingerprint: String,
+    pub certificate: Option<SecretString>,
+}
+
+/// Renew/remove a certificate without returning or resubmitting the private key through IPC.
+#[tauri::command]
+pub async fn vault_item_set_ssh_certificate(
+    vault: State<'_, Mutex<VaultService>>,
+    args: SetSshCertificateArgs,
+) -> VaultResult<VaultItemMeta> {
+    let vault = vault.lock().await;
+    let record = vault
+        .item_set_ssh_certificate(
+            &args.item_id,
+            args.expected_revision,
+            &args.expected_secret_fingerprint,
+            args.certificate.as_ref().map(|value| value.expose_secret()),
+        )
+        .map_err(VaultCommandError::from)?;
+    vault.item_meta(&record).map_err(Into::into)
+}
+
+/// Trim pasted key/certificate text, preserving passphrase bytes required to decrypt a key.
 fn sanitize_secret_values(
     kind: &str,
     values: &BTreeMap<String, SecretString>,
@@ -341,8 +370,13 @@ fn sanitize_secret_values(
     let mut sanitized = BTreeMap::new();
     for (name, value) in values {
         let trimmed = value.expose_secret().trim();
-        if !trimmed.is_empty() {
-            sanitized.insert(name.clone(), trimmed.to_string());
+        let sanitized_value = if name == crate::vault::credential::PASSPHRASE_FIELD {
+            value.expose_secret()
+        } else {
+            trimmed
+        };
+        if !sanitized_value.is_empty() {
+            sanitized.insert(name.clone(), sanitized_value.to_string());
         }
     }
     validate_secret_values_for_kind(kind, &sanitized).map_err(|message| VaultCommandError {
@@ -357,6 +391,36 @@ fn zeroize_secret_values(values: &mut BTreeMap<String, String>) {
         value.zeroize();
     }
     values.clear();
+}
+
+#[cfg(test)]
+mod ssh_certificate_secret_tests {
+    use super::*;
+
+    #[test]
+    fn certificate_input_trims_public_text_without_changing_passphrase_bytes() {
+        for passphrase in [" fixture ", "   "] {
+            let values = BTreeMap::from([
+                (
+                    "privateKey".into(),
+                    SecretString::from(" key text ".to_string()),
+                ),
+                (
+                    "passphrase".into(),
+                    SecretString::from(passphrase.to_string()),
+                ),
+                (
+                    "sshCertificate".into(),
+                    SecretString::from(" certificate text \n".to_string()),
+                ),
+            ]);
+            let mut result = sanitize_secret_values("ssh-private-key", &values).unwrap();
+            assert_eq!(result["privateKey"], "key text");
+            assert_eq!(result["passphrase"], passphrase);
+            assert_eq!(result["sshCertificate"], "certificate text");
+            zeroize_secret_values(&mut result);
+        }
+    }
 }
 
 // ── Revision history commands ─────────────────────────────────────────────────

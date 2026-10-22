@@ -392,6 +392,7 @@ pub fn run() {
             vault::commands::vault_item_list,
             vault::commands::vault_item_get,
             vault::commands::vault_item_update,
+            vault::commands::vault_item_set_ssh_certificate,
             vault::commands::vault_item_delete,
             vault::commands::vault_item_revision_history,
             vault::commands::vault_item_restore_revision,
