@@ -84,7 +84,7 @@ try {
     await page.getByText('Connection successful!', { exact: true }).waitFor();
     assert.equal(await page.getByText('Key filename is uncommon. Confirm this is a private key.', { exact: true }).count(), 0);
     assert.equal(await page.getByLabel('User certificate (optional)', { exact: true }).count(), 0);
-    await page.getByRole('button', { name: 'Add certificate', exact: true }).click();
+    await page.getByRole('button', { name: 'Add certificate file', exact: true }).click();
     const certificateInput = page.getByLabel('User certificate (optional)', { exact: true });
     await certificateInput.fill('C:\\fixture\\existing-cert.pub');
     const certificateBrowse = page.getByRole('button', { name: 'Browse', exact: true }).last();

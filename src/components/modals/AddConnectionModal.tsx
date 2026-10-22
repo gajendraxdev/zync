@@ -1314,6 +1314,11 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
                                     </div>
                                 )}
 
+                                {authMethod === 'vault' && vaultInputMode === 'existing'
+                                    && vaultItems.find(item => item.id === formData.authRef?.itemId)?.hasSshCertificateField
+                                    && !formData.certificatePath && (
+                                    <p className="text-xs text-app-muted">Using the SSH certificate stored with this Vault key.</p>
+                                )}
                                 {authMethod !== 'password' && !(authMethod === 'vault' && vaultInputMode === 'existing' && formData.authRef?.itemKind === 'ssh-password') && (
                                     <div className="space-y-2">
                                         {isCertificateOpen || formData.certificatePath ? <>
@@ -1339,7 +1344,8 @@ export function AddConnectionModal({ isOpen, onClose, editingConnectionId }: Add
                                                 setIsCertificateOpen(false);
                                             }}>Remove</Button>
                                         </div>
-                                        </> : <Button type="button" variant="ghost" size="sm" onClick={() => setIsCertificateOpen(true)}>Add certificate</Button>}
+                                            {authMethod === 'vault' && <p className="text-xs text-app-muted">A selected file overrides the certificate stored with the Vault key.</p>}
+                                        </> : <Button type="button" variant="ghost" size="sm" onClick={() => setIsCertificateOpen(true)}>Add certificate file</Button>}
                                     </div>
                                 )}
 

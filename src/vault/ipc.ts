@@ -46,6 +46,7 @@ export interface VaultItem {
   schemaVersion: number;
   secretFieldCount: number;
   hasPassphraseField: boolean;
+  hasSshCertificateField?: boolean;
   revision: number;
   createdAt: number;
   updatedAt: number;
@@ -54,6 +55,7 @@ export interface VaultItem {
 export interface VaultItemDetail {
   id: string;
   logicalId: string;
+  secretFingerprint: string;
   kind: string;
   label: string;
   notes?: string;
@@ -221,6 +223,12 @@ export const vaultIpc = {
 
   itemDelete: (itemId: string): Promise<void> =>
     invoke('vault_item_delete', { args: { item_id: itemId } }),
+
+  /** Update only the encrypted SSH certificate; the key never leaves the native vault. */
+  itemSetSshCertificate: (itemId: string, expectedRevision: number, expectedSecretFingerprint: string, certificate: string | null): Promise<VaultItem> =>
+    invoke('vault_item_set_ssh_certificate', {
+      args: { item_id: itemId, expected_revision: expectedRevision, expected_secret_fingerprint: expectedSecretFingerprint, certificate },
+    }),
 
   secureToVaultPreview: (): Promise<SecureToVaultPreview> =>
     invoke('vault_secure_to_vault_preview'),

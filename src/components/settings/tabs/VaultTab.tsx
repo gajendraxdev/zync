@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RefreshCw, ArrowRight, KeyRound, Download, Upload } from 'lucide-react';
 import { useVaultStore } from '../../../vault/useVaultStore';
 import { isVaultInUseError, isVaultStatusPending } from '../../../vault/vaultLoading';
-import { vaultIpc, type VaultItemDetail } from '../../../vault/ipc';
+import { vaultIpc, type VaultItem, type VaultItemDetail } from '../../../vault/ipc';
 
 import { RecoveryKeyModal } from '../../vault/RecoveryKeyModal';
 import { ResetVaultModal } from '../../vault/ResetVaultModal';
@@ -267,6 +267,18 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
     setDetailItem(null);
     setIsDetailLoading(false);
   }, []);
+
+  /** Refresh metadata after native certificate updates without reopening a closed detail dialog. */
+  const handleCertificateUpdated = async (updated: VaultItem) => {
+    const full = await vaultIpc.itemGet(updated.id);
+    setDetailItem(current => current?.id === updated.id && current.revision <= full.revision ? full : current);
+    await refreshItems();
+    showToast('success', 'SSH certificate updated. Reconnect to use the change.');
+    const affectedIds = connections.filter(connection =>
+      connection.authRef?.credentialId === updated.logicalId || connection.authRef?.itemId === updated.id,
+    ).map(connection => connection.id);
+    await promptDisconnectAffectedConnections(affectedIds, 'Updating the SSH certificate');
+  };
 
   useEffect(() => {
     const wasUnlocked = wasUnlockedRef.current;
@@ -595,12 +607,16 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
         label={rotateCredential.label}
         secret={rotateCredential.secret}
         passphrase={rotateCredential.passphrase}
+        certificate={rotateCredential.certificate}
         notes={rotateCredential.notes}
         isLoading={rotateCredential.isLoading}
+        isImporting={rotateCredential.isImporting}
+        onImportStart={rotateCredential.beginImport}
         onClose={rotateCredential.close}
         onLabelChange={rotateCredential.setLabel}
         onSecretChange={rotateCredential.setSecret}
         onPassphraseChange={rotateCredential.setPassphrase}
+        onCertificateChange={rotateCredential.setCertificate}
         onNotesChange={rotateCredential.setNotes}
         onSubmit={rotateCredential.submit}
       />
@@ -621,6 +637,7 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
         assignedConnections={detailAssignedConnections}
         isLoading={isDetailLoading}
         onClose={closeCredentialDetails}
+        onCertificateUpdated={handleCertificateUpdated}
       />
 
       <AddCredentialModal
@@ -629,13 +646,17 @@ export function VaultTab({ focusedProfileId = DEFAULT_VAULT_PROFILE_ID }: VaultT
         label={addCredential.label}
         secret={addCredential.secret}
         passphrase={addCredential.passphrase}
+        certificate={addCredential.certificate}
         notes={addCredential.notes}
         isCreating={addCredential.isCreating}
+        isImporting={addCredential.isImporting}
+        onImportStart={addCredential.beginImport}
         onClose={addCredential.close}
         onKindChange={addCredential.setKind}
         onLabelChange={addCredential.setLabel}
         onSecretChange={addCredential.setSecret}
         onPassphraseChange={addCredential.setPassphrase}
+        onCertificateChange={addCredential.setCertificate}
         onNotesChange={addCredential.setNotes}
         onSubmit={addCredential.submit}
       />

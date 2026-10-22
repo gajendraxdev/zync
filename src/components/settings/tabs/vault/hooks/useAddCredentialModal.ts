@@ -1,8 +1,10 @@
 import { useRef, useState } from 'react';
+import { useCredentialFileImports } from './useCredentialFileImports';
 import { vaultIpc } from '../../../../../vault/ipc';
 import type { ToastType } from '../../../../../store/toastSlice';
 import {
   isSupportedCreateCredentialKind,
+  sshPrivateKeySecretValues,
   type SupportedCreateCredentialKind,
 } from '../../../../../vault/credentialTypes';
 
@@ -12,6 +14,7 @@ interface UseAddCredentialModalOptions {
   onCreated: () => Promise<void>;
 }
 
+/** Create typed vault credentials; optional certificates remain encrypted with their SSH key. */
 export function useAddCredentialModal({
   isUnlocked,
   showToast,
@@ -22,15 +25,19 @@ export function useAddCredentialModal({
   const [label, setLabel] = useState('');
   const [secret, setSecret] = useState('');
   const [passphrase, setPassphrase] = useState('');
+  const [certificate, setCertificate] = useState('');
   const [notes, setNotes] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const creatingRef = useRef(false);
+  const fileImports = useCredentialFileImports();
 
+  /** Clear editor-held key, passphrase and certificate text when closing or after saving. */
   const reset = () => {
     setKind('ssh-private-key');
     setLabel('');
     setSecret('');
     setPassphrase('');
+    setCertificate('');
     setNotes('');
   };
 
@@ -42,8 +49,9 @@ export function useAddCredentialModal({
     reset();
   };
 
+  /** Send named fields to native validation/storage, never copying them onto a host record. */
   const submit = async () => {
-    if (creatingRef.current) return;
+    if (creatingRef.current || fileImports.hasPendingImports()) return;
 
     if (!isUnlocked) {
       showToast('error', 'Unlock the vault before adding credentials.');
@@ -70,10 +78,7 @@ export function useAddCredentialModal({
 
     const secretValues: Record<string, string> =
       kind === 'ssh-private-key'
-        ? {
-            privateKey: rawSecret,
-            ...(rawPassphrase.length > 0 ? { passphrase: rawPassphrase } : {}),
-          }
+        ? sshPrivateKeySecretValues(rawSecret, rawPassphrase, certificate)
         : { password: rawSecret };
 
     creatingRef.current = true;
@@ -111,14 +116,18 @@ export function useAddCredentialModal({
     label,
     secret,
     passphrase,
+    certificate,
     notes,
     isCreating,
+    isImporting: fileImports.isImporting,
+    beginImport: fileImports.beginImport,
     open,
     close,
     setKind,
     setLabel,
     setSecret,
     setPassphrase,
+    setCertificate,
     setNotes,
     submit,
   };
