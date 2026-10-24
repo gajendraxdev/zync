@@ -51,7 +51,7 @@ impl<T: Clone> Registry<T> {
         let mut jobs = self.0.lock().unwrap();
         jobs.retain(|_, job| job.claimed || job.created.elapsed() < Duration::from_secs(30));
         if jobs.len() >= 2 || jobs.values().any(|job| job.connection == connection) {
-            return Err("An assessment is already running on this host, or both scan slots are busy. Try again shortly.".into());
+            return Err("An assessment is already running on this server, or two assessments are running elsewhere. Try again shortly.".into());
         }
         let id = uuid::Uuid::new_v4().to_string();
         jobs.insert(
@@ -75,7 +75,7 @@ impl<T: Clone> Registry<T> {
             .get_mut(id)
             .ok_or("Assessment expired or was cancelled. Start a new assessment.")?;
         if job.claimed || job.created.elapsed() >= Duration::from_secs(30) {
-            return Err("Assessment registration is no longer available.".into());
+            return Err("This assessment can no longer be started. Start a new assessment.".into());
         }
         job.claimed = true;
         Ok(Lease {

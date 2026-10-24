@@ -51,9 +51,11 @@ impl AccessEvidence {
                     .unwrap_or("");
                     let (action, key) = token
                         .split_once('-')
-                        .ok_or("Invalid access-evidence marker.")?;
+                        .ok_or("The assessment access response could not be verified.")?;
                     if !is_protected_read(key) {
-                        return Err("Unsupported access-evidence record.".into());
+                        return Err(
+                            "The assessment returned an unsupported access response.".into()
+                        );
                     }
                     match action {
                         "begin" if self.active.is_none() => self.active = Some((key.into(), false)),
@@ -68,7 +70,12 @@ impl AccessEvidence {
                                 self.denied.insert(key);
                             }
                         }
-                        _ => return Err("Inconsistent access-evidence sequence.".into()),
+                        _ => {
+                            return Err(
+                                "The assessment returned access responses in an unexpected order."
+                                    .into(),
+                            )
+                        }
                     }
                     self.tail.clear();
                 }

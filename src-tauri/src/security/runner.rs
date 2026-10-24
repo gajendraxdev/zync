@@ -115,7 +115,7 @@ async fn collect(
         biased;
         _ = async { let _ = cancel.wait_for(|value| *value).await; } => return Err("Assessment cancelled.".into()),
         result = tokio::time::timeout(Duration::from_secs(5), async { lease.session.lock().await.channel_open_session().await }) => {
-            result.map_err(|_| "Timed out opening the assessment channel.")?.map_err(|_| "Could not open the assessment channel.")?
+            result.map_err(|_| "The SSH connection took too long to start the assessment.")?.map_err(|_| "The SSH connection could not start the assessment.")?
         }
     };
     let work = async {
@@ -128,7 +128,7 @@ async fn collect(
                 command(request.kind, &nonce, request.elevation_consent),
             )
             .await
-            .map_err(|_| "The SSH host refused the assessment collector.")?;
+            .map_err(|_| "The SSH server refused to start the assessment commands.")?;
         let mut output = Output::default();
         let mut prompts = super::sudo::Prompts::new(&nonce);
         let mut access = super::access::AccessEvidence::new(&nonce);
@@ -142,7 +142,7 @@ async fn collect(
                     if prompts.feed(&data)? {
                         if !request.elevation_consent {
                             return Err(
-                                "Unexpected sudo prompt in an unprivileged assessment.".into()
+                                "The server requested sudo without approval for this run. No password was sent.".into()
                             );
                         }
                         if password.is_none() {
@@ -160,7 +160,7 @@ async fn collect(
                                                 access.feed(&data)?;
                                                 if prompts.feed(&data)? || !prompts.awaiting() { return Err("Sudo authentication request ended before password submission.".to_string()); }
                                             },
-                                            Some(russh::ChannelMsg::Close | russh::ChannelMsg::Eof | russh::ChannelMsg::ExitStatus { .. } | russh::ChannelMsg::ExitSignal { .. } | russh::ChannelMsg::Failure) | None => return Err("Sudo authentication channel ended. No password was sent.".into()),
+                                            Some(russh::ChannelMsg::Close | russh::ChannelMsg::Eof | russh::ChannelMsg::ExitStatus { .. } | russh::ChannelMsg::ExitSignal { .. } | russh::ChannelMsg::Failure) | None => return Err("The SSH connection ended during the sudo request. No password was sent.".into()),
                                             _ => {},
                                         },
                                         result = &mut answer => return result.map_err(|_| "Sudo password request was cancelled.".to_string()),
@@ -185,14 +185,14 @@ async fn collect(
                         channel
                             .data(line.as_slice())
                             .await
-                            .map_err(|_| "Sudo authentication channel closed.")?;
+                            .map_err(|_| "The SSH connection closed during sudo authentication.")?;
                     }
                 }
                 Some(russh::ChannelMsg::ExitStatus { exit_status }) => {
                     output.exit = Some(exit_status)
                 }
                 Some(russh::ChannelMsg::ExitSignal { .. } | russh::ChannelMsg::Failure) => {
-                    return Err("Assessment collector terminated unexpectedly.".into())
+                    return Err("The assessment commands stopped unexpectedly.".into())
                 }
                 Some(russh::ChannelMsg::Close) | None => break,
                 _ => {}
@@ -214,7 +214,7 @@ async fn collect(
         biased;
         _ = async { let _ = cancel.wait_for(|value| *value).await; } => Err("Assessment cancelled.".into()),
         _ = monitor => Err("The SSH connection changed. Start a new assessment.".into()),
-        result = tokio::time::timeout(Duration::from_secs(if request.elevation_consent { 160 } else { 50 }), work) => result.unwrap_or_else(|_| Err("Host collection timed out. No completed report was published. MFA/TTY-only sudo authentication is unsupported.".into())),
+        result = tokio::time::timeout(Duration::from_secs(if request.elevation_consent { 160 } else { 50 }), work) => result.unwrap_or_else(|_| Err("The server took too long to finish the checks. No completed report is available. Sudo methods requiring multiple prompts or an interactive terminal are not supported.".into())),
     };
     // Cleanup always precedes releasing admission. A remote timeout remains the independent
     // backstop; SSH signal requests are best effort, not a sandbox.
@@ -269,8 +269,8 @@ pub async fn security_assessment_run(
     loop {
         tokio::select! {
             biased;
-            _ = async { let _ = cancel.wait_for(|value| *value).await; } => return Err("Assessment cancelled. No completed report was published.".into()),
-            _ = &mut deadline => return Err("Assessment reached its five-minute deadline. No completed report was published.".into()),
+            _ = async { let _ = cancel.wait_for(|value| *value).await; } => return Err("Assessment cancelled. No completed report is available.".into()),
+            _ = &mut deadline => return Err("Assessment reached its five-minute deadline. No completed report is available.".into()),
             _ = monitor.tick() => {
                 if !current(&lease, &state).await { return Err("The SSH connection changed. Start a new assessment.".into()); }
             },
@@ -323,8 +323,8 @@ impl Output {
         match self.exit {
             Some(0) => facts::decode(&self.bytes, nonce, keys),
             Some(65) => Err("Assessments currently support Linux SSH hosts only.".into()),
-            Some(124 | 137) => Err("Host collection reached its deadline. No completed report was published.".into()),
-            _ => Err("Host collection failed. Linux, /bin/sh and GNU coreutils timeout are required. No scanner or Python installation is needed.".into()),
+            Some(124 | 137) => Err("The server took too long to finish the checks. No completed report is available.".into()),
+            _ => Err("The assessment commands could not finish. The server needs Linux, /bin/sh and GNU coreutils timeout. No scanner or Python installation is needed.".into()),
         }
     }
 }

@@ -79,7 +79,18 @@ reboot_state() {
     if [ -e /run/reboot-required ]; then printf 'present\n'; else printf 'absent\n'; fi
 }
 privilege() { printf '%s %s\n' "$collector_uid" "$collection_mode"; }
-collect os sed -n '/^ID=/p; /^VERSION_ID=/p' /etc/os-release
+# Use one vendor identity file, with /etc precedence; never merge or source shell text.
+os_identity() {
+    if [ -e /etc/os-release ] || [ -L /etc/os-release ]; then
+        sed -n '/^ID=/p; /^VERSION_ID=/p; /^ID_LIKE=/p' /etc/os-release
+    elif [ -r /etc ] && [ -x /etc ]; then
+        sed -n '/^ID=/p; /^VERSION_ID=/p; /^ID_LIKE=/p' /usr/lib/os-release
+    else
+        # An inaccessible parent cannot establish that the identity entry is absent.
+        return 77
+    fi
+}
+collect os os_identity
 collect privilege privilege
 collect aslr sysctl -n kernel.randomize_va_space
 collect ptrace sysctl -n kernel.yama.ptrace_scope

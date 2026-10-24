@@ -10,7 +10,14 @@ const path = await import(pathModule);
 const { spawnSync } = await import(childModule);
 const { default: assert } = await import(assertModule);
 const script = path.join(process.cwd(), 'src-tauri/src/security/collect.sh');
-assert.equal((await fs.readFile(script, 'utf8')).includes('\r'), false, 'Embedded POSIX collector must retain LF on Windows checkouts');
+const collectorSource: string = await fs.readFile(script, 'utf8');
+assert.equal(collectorSource.includes('\r'), false, 'Embedded POSIX collector must retain LF on Windows checkouts');
+const nativeFactsSource: string = await fs.readFile(path.join(process.cwd(), 'src-tauri/src/security/facts.rs'), 'utf8');
+const keySection = nativeFactsSource.match(/pub const HARDENING_KEYS: &\[&str\] = &\[([\s\S]*?)\];/)?.[1] ?? '';
+const expectedKeys = [...keySection.matchAll(/"([a-z0-9_]+)"/g)].map(match => match[1]);
+const shellKeys = [...collectorSource.matchAll(/^collect ([a-z0-9_]+) /gm)].map(match => match[1]);
+assert.equal(expectedKeys.length, 33, 'The exact bounded hardening protocol retains its fixed 33 records');
+assert.deepEqual(shellKeys, expectedKeys, 'Native and shell protocol keys match exactly in order');
 
 if (process.platform !== 'linux') {
     console.log('Fixed Linux collector integration is exercised on Linux CI; no host commands run on this OS.');
@@ -26,11 +33,71 @@ if (process.platform !== 'linux') {
         const initialFields = initial.stdout.toString().split('\0');
         assert.deepEqual(initialFields.slice(0, 2), ['ZYNC_FACTS_V2', 'fixture-nonce']);
         assert.deepEqual(initialFields.slice(-2), ['complete', '']);
+        assert.equal(initialFields.length, 2 + expectedKeys.length * 3 + 2);
+        assert.deepEqual(expectedKeys.map((_, index) => initialFields[2 + index * 3]), expectedKeys);
         assert.equal(initialFields[initialFields.indexOf('os') + 2], '0');
         assert.equal(initialFields[initialFields.indexOf('ssh_defaults') + 2], '1', 'Denied SSH defaults remain unknown');
         assert.equal(initialFields.includes('packages'), false, 'Hardening never collects a VA inventory');
         assert.equal(initialFields[initialFields.indexOf('shadow') + 1].trim(), '81a4 0 0', 'File records carry numeric type, UID and GID');
         assert.equal(initialFields[initialFields.indexOf('shadow_group') + 2], '0', 'Local shadow group evidence is a required ordered record');
+
+        // Exercise OS-file precedence against disposable paths, with actual sed and no shell sourcing.
+        const identityFunction = collectorSource.match(/\nos_identity\(\) \{\n[\s\S]*?\n\}/)?.[0];
+        if (!identityFunction) throw new Error('Missing production identity reader for disposable fixtures');
+        const identityReader = identityFunction.replaceAll('/etc/os-release', '"$ZYNC_ETC_OS_RELEASE"')
+            .replaceAll('/usr/lib/os-release', '"$ZYNC_VENDOR_OS_RELEASE"')
+            .replaceAll('[ -r /etc ]', '[ -r "$ZYNC_ETC_DIRECTORY" ]')
+            .replaceAll('[ -x /etc ]', '[ -x "$ZYNC_ETC_DIRECTORY" ]') + '\nos_identity\n';
+        const etcIdentity = path.join(folder, 'etc-os-release');
+        const vendorIdentity = path.join(folder, 'vendor-os-release');
+        const identityMarker = path.join(folder, 'identity-must-not-execute');
+        await fs.writeFile(vendorIdentity, 'ID=debian\nVERSION_ID=13\n');
+        const identityEnv = { PATH: '/usr/bin:/bin', LC_ALL: 'C', ZYNC_ETC_OS_RELEASE: etcIdentity,
+            ZYNC_VENDOR_OS_RELEASE: vendorIdentity, ZYNC_ETC_DIRECTORY: folder, ZYNC_IDENTITY_MARKER: identityMarker };
+        await fs.writeFile(etcIdentity, 'ID=ubuntu\nVERSION_ID=24.04\nID_LIKE="debian"\nNAME=ignored\n');
+        let identityResult = spawnSync('/bin/sh', ['-c', identityReader], { env: identityEnv, timeout: 3000 });
+        assert.equal(identityResult.status, 0);
+        assert.equal(identityResult.stdout.toString(), 'ID=ubuntu\nVERSION_ID=24.04\nID_LIKE="debian"\n');
+        await fs.unlink(etcIdentity);
+        identityResult = spawnSync('/bin/sh', ['-c', identityReader], { env: identityEnv, timeout: 3000 });
+        assert.equal(identityResult.status, 0);
+        assert.equal(identityResult.stdout.toString(), 'ID=debian\nVERSION_ID=13\n', 'Only absent /etc identity permits vendor fallback');
+        identityResult = spawnSync('/bin/sh', ['-c', identityReader], {
+            env: { ...identityEnv, ZYNC_ETC_DIRECTORY: path.join(folder, 'unavailable-etc-parent') }, timeout: 3000,
+        });
+        assert.equal(identityResult.status, 77, 'An unavailable parent cannot establish that the identity entry is absent');
+        assert.equal(identityResult.stdout.length, 0);
+        await fs.writeFile(etcIdentity, 'ID=$(touch "$ZYNC_IDENTITY_MARKER")\nVERSION_ID=malformed\n');
+        identityResult = spawnSync('/bin/sh', ['-c', identityReader], { env: identityEnv, timeout: 3000 });
+        assert.equal(identityResult.status, 0);
+        assert.equal(identityResult.stdout.toString(), 'ID=$(touch "$ZYNC_IDENTITY_MARKER")\nVERSION_ID=malformed\n', 'Assignments are inert data, never shell commands or vendor-merged identity');
+        assert.equal(await fs.stat(identityMarker).then(() => true, () => false), false);
+        if (process.getuid?.() !== 0) {
+            await fs.chmod(etcIdentity, 0o000);
+            try {
+                identityResult = spawnSync('/bin/sh', ['-c', identityReader], { env: identityEnv, timeout: 3000 });
+                assert.notEqual(identityResult.status, 0);
+                assert.equal(identityResult.stdout.length, 0, 'Unreadable existing /etc identity cannot use vendor fallback');
+            } finally { await fs.chmod(etcIdentity, 0o600); }
+            const restrictedParent = path.join(folder, 'restricted-etc');
+            await fs.mkdir(restrictedParent, { mode: 0o700 });
+            const restrictedIdentity = path.join(restrictedParent, 'os-release');
+            await fs.writeFile(restrictedIdentity, 'ID=ubuntu\nVERSION_ID=24.04\n', { mode: 0o600 });
+            await fs.chmod(restrictedParent, 0o400);
+            try {
+                identityResult = spawnSync('/bin/sh', ['-c', identityReader], {
+                    env: { ...identityEnv, ZYNC_ETC_OS_RELEASE: restrictedIdentity, ZYNC_ETC_DIRECTORY: restrictedParent }, timeout: 3000,
+                });
+                assert.equal(identityResult.status, 77, 'Denied parent traversal cannot establish primary identity absence');
+                assert.equal(identityResult.stdout.length, 0, 'An inaccessible primary identity cannot be replaced by readable vendor data');
+            } finally { await fs.chmod(restrictedParent, 0o700); }
+        }
+        await fs.unlink(etcIdentity);
+        await fs.symlink(path.join(folder, 'missing-identity-target'), etcIdentity);
+        identityResult = spawnSync('/bin/sh', ['-c', identityReader], { env: identityEnv, timeout: 3000 });
+        assert.notEqual(identityResult.status, 0);
+        assert.equal(identityResult.stdout.length, 0, 'A dangling /etc identity entry is not silently replaced by vendor data');
+        await fs.unlink(etcIdentity);
 
         const groupFixture = path.join(folder, 'group-fixture');
         const groupFunction = (await fs.readFile(script, 'utf8')).match(/\nshadow_group\(\) \{\n[\s\S]*?\n\}/)?.[0];

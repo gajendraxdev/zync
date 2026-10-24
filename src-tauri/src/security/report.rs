@@ -1,9 +1,10 @@
 //! Bounded, inert report contract for read-only host hardening.
+use super::profile::Profile;
 use serde::{Deserialize, Serialize};
 
 pub const MAX_REPORT_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_FINDINGS: usize = 1000;
-pub const BASELINE: &str = "zync-linux-4 (2026-10-24)";
+pub const BASELINE: &str = "zync-linux-5 (2026-10-25)";
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -50,6 +51,14 @@ pub struct Finding {
     pub status: String,
     pub title: String,
     pub target: String,
+    pub observed: String,
+    pub expected: String,
+    pub rationale: String,
+    pub scope: String,
+    pub rule_version: String,
+    pub reviewed_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub applicability_reason: Option<String>,
     pub evidence: String,
     pub recommendation: String,
     pub reference: String,
@@ -61,6 +70,7 @@ pub struct Report {
     pub version: String,
     pub target: String,
     pub os: String,
+    pub profile: Profile,
     pub findings: Vec<Finding>,
     pub total_findings: usize,
     pub truncated: bool,
@@ -70,18 +80,19 @@ pub struct Report {
 }
 impl Report {
     /// Reports describe a bounded scope, never a certification or an inferred clean host.
-    pub fn new(kind: Kind, os: String) -> Self {
+    pub fn new(kind: Kind, os: String, profile: Profile) -> Self {
         Self {
             kind,
             version: BASELINE.into(),
             target: "Connected Linux host".into(),
             os,
+            profile,
             findings: vec![],
             total_findings: 0,
             truncated: false,
             collector_uid: None,
             elevation_requested: false,
-            notes: vec!["Point-in-time hardening review only. No settings, packages or services were changed.".into()],
+            notes: vec!["These results describe the server at the time of this read-only review. No settings, packages or services were changed.".into()],
         }
     }
     /// Count all observations while bounding renderer/export allocations.

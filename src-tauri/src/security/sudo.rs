@@ -48,21 +48,19 @@ impl Prompts {
                     let (key, completion) = if let Some(end) = token.strip_prefix("end-") {
                         let (key, status) = end
                             .rsplit_once('-')
-                            .ok_or("Invalid sudo completion marker.")?;
+                            .ok_or("The sudo response could not be verified for this run.")?;
                         (
                             key,
-                            Some(
-                                status
-                                    .parse::<u8>()
-                                    .map_err(|_| "Invalid sudo completion status.")?,
-                            ),
+                            Some(status.parse::<u8>().map_err(|_| {
+                                "The sudo response returned an invalid exit status."
+                            })?),
                         )
                     } else {
                         (token.as_str(), None)
                     };
                     if !is_protected_read(key) {
                         return Err(
-                            "Unsupported sudo authentication challenge. No password was sent."
+                            "This sudo password request is not supported. No password was sent."
                                 .into(),
                         );
                     }
@@ -70,14 +68,14 @@ impl Prompts {
                         if self.active.as_deref() == Some(key) {
                             self.active = None;
                             if status != 0 {
-                                return Err("The protected command or sudo authentication failed after password submission. The password was not replayed. No completed report was retained.".into());
+                                return Err("The protected command or sudo authentication failed after the password was sent. The password was not sent again. No completed report is available.".into());
                             }
                         }
                         self.tail.clear();
                         continue;
                     }
                     if self.active.is_some() || !self.seen.insert(key.into()) || requested {
-                        return Err("Sudo authentication was not accepted. The password was not retried. MFA and TTY-only authentication are unsupported.".into());
+                        return Err("Sudo authentication was not accepted. The password was not sent again. Methods requiring multiple prompts or an interactive terminal are not supported.".into());
                     }
                     requested = true;
                     self.active = Some(key.into());
