@@ -1,7 +1,7 @@
 # Security Notes
 
-**Last updated:** 2026-09-27
-**Scope:** Vault, Google Drive sync, Public URLs (Beta), plugins, credential handling, anonymous usage, and operator guidance, including the Zync 2.33.0 release candidate.
+**Last updated:** 2026-10-24
+**Scope:** Vault, Google Drive sync, Public URLs (Beta), plugins, credential handling, anonymous usage, optional host assessments, and operator guidance. Host assessments described here are unreleased.
 
 ---
 
@@ -39,6 +39,37 @@ Zync’s core security surface is **encrypted local vaulting**, optional **remem
 ### Anonymous usage (optional)
 
 When **Settings → General → Share anonymous usage** is on (default), the desktop app may POST to the Zync analytics API (`/api/v1/usage`). A random install id is stored on this device and sent in that request so the same install can be counted across days. The **payload** also has app version, OS, UTC day, and feature names you opened (Files, terminal, split, tunnels, vault, Public URLs, snippets, dashboard, plugins) with a use count. The payload does **not** include an IP address, hostnames, paths, commands, vault contents, or terminal output. Turn the setting off to stop sending. The queue stays local until a flush on open, close, or every 15 minutes.
+
+### Host security hardening (unreleased)
+
+- Hardening is account-free, explicitly confirmed, and read-only over an existing
+  Linux SSH connection. No scanner/agent/Python installation or automatic remediation.
+  Optional per-run approval permits sudo for fixed protected read-only commands,
+  never a root shell. A run-bound masked dialog accepts a sudo password only when
+  challenged and sends it through SSH standard input, not command arguments.
+  Passwords are memory-only for collection: never logged, saved, synced or exported.
+  Native secret buffers are cleared on drop; JavaScript/transport erasure is not
+  guaranteed. Rejected/expired challenges are not retried. MFA/TTY-only rules are
+  unsupported; normal server cache/logging policies apply. Sudoers is not modified.
+- A versioned 38-check host baseline makes no external assessment lookup.
+  Unavailable evidence is not a pass or failure; default SSH observations require
+  contextual review. Reports distinguish Standard access, Root session and Sudo allowed.
+  Approval does not prove that every protected command succeeded.
+- Confirmed protected-read denials on unelevated non-root runs show **Needs elevated
+  access** and may offer **Retry with sudo**. Eligible uncertain protected-read failures
+  retain **Evidence unavailable** and may offer **Try with sudo**. Both require approval,
+  rerun the full assessment and replace rather than merge old evidence.
+  Missing tools, deadlines and malformed evidence do not receive speculative badges.
+  Local account evidence contains counts only, never password hashes.
+- Results remain pane-local. Explicit local JSON exports contain captured host and
+  system metadata; review before sharing. No automatic report history, sync or upload.
+  Cancellation/reconnect fences late results, with bounded cleanup and a remote
+  collector deadline. This is not a hostile-host sandbox or hard remote CPU/RAM quota.
+- Passed checks are not a security/compliance certification. Vulnerability,
+  application, database and container-image assessments are outside this feature's scope.
+
+See [Security assessments](SECURITY_ASSESSMENTS.md) for requirements, access
+boundaries, concrete resource limits and hardening coverage.
 
 ### Plugins and granted capabilities (2.33.0)
 

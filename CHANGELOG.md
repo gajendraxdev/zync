@@ -4,6 +4,31 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Added
+
+- **Security hardening:** Open an on-demand Security pane in a Linux SSH workspace
+  for a first-party, read-only baseline of 38 host checks and observations.
+  Covers kernel, SSH, account, file, network, mount, update and service settings,
+  with evidence, contextual recommendations, searchable/paginated results,
+  cancellation and local JSON export. No scanner/agent installation, account,
+  external assessment lookup or automatic remediation.
+  Optional per-run sudo uses fixed protected commands and a memory-only password
+  prompt when needed, without a root shell or sudoers changes. Reports distinguish
+  Standard access, Root session and Sudo allowed, with separate evaluated,
+  elevated-access and unavailable counts. Confirmed denials offer **Retry with sudo**;
+  eligible uncertain protected-read failures offer **Try with sudo**. Both require
+  approval and rerun the full assessment, without guaranteeing successful access.
+  Focused idle setup keeps scope/access details expandable; compact findings retain
+  complete evidence and guidance under **Technical details**.
+  Results separate **Needs attention**, **Informational**, **Passed** and unavailable
+  evidence, with matching counts and filters. Contextual observations no longer
+  inflate the attention count; SSH defaults retain their connection-policy limits.
+  File permission checks include group ownership and support empty regular files;
+  a shared evidence-size limit applies before every rule's interpretation.
+  Listener observations handle scoped IPv6 addresses and preserve loopback counts.
+  SSH policy prefers config-only OpenSSH `-G` when supported, with a bounded probe
+  and legacy `-T` fallback. Linux collection requires GNU coreutils `timeout`.
+
 ## [2.37.0] - 2026-10-22
 
 ### Added
