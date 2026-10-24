@@ -21,6 +21,10 @@
         "sourceMap": false
     },
     "include": [
+        "tests/securityAssessment.test.ts",
+        "tests/securityCollector.test.ts",
+        "tests/securityAssessment.browser.tsx",
+        "tests/securityAssessment.browser.test.ts",
         "tests/vaultSshCertificate.browser.tsx",
         "tests/vaultSshCertificate.browser.test.ts",
         "tests/vaultSshCertificate.test.ts",
