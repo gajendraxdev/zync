@@ -16,6 +16,7 @@ mod pty_output;
 mod terminal_output;
 mod pty_term_env;
 mod session;
+mod security;
 mod navigation_settings;
 mod element_color_settings;
 mod theme_settings;
@@ -92,6 +93,7 @@ pub fn run() {
             let data_dir = commands::get_data_dir(&app_handle);
             let app_state = AppState::new(data_dir.clone(), app_handle.clone());
             app.manage(app_state);
+            app.manage(security::SecurityJobs::default());
             app.manage(feedback_inbox::TransportState::default());
             app.manage(plugins::broker::PluginBrokerState::new());
             app.manage(plugins::pane_document::PaneDocuments::default());
@@ -114,6 +116,7 @@ pub fn run() {
             if webview.label() == "main" {
                 match payload.event() {
                     tauri::webview::PageLoadEvent::Started => {
+                        if let Some(jobs) = webview.try_state::<security::SecurityJobs>() { jobs.cancel_all(); }
                         plugins::pane_document::clear_all(webview.app_handle());
                         plugins::terminal::clear_all(webview.app_handle());
                     }
@@ -149,6 +152,7 @@ pub fn run() {
                 }
                 tauri::WindowEvent::Destroyed => {
                     if window.label() == "main" {
+                        if let Some(jobs) = window.try_state::<security::SecurityJobs>() { jobs.cancel_all(); }
                         plugins::pane_document::clear_all(window.app_handle());
                         plugins::terminal::clear_all(window.app_handle());
                     }
@@ -177,6 +181,11 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            security::runner::security_assessment_begin,
+            security::runner::security_assessment_run,
+            security::runner::security_assessment_cancel,
+            security::runner::security_assessment_needs_password,
+            security::runner::security_assessment_authenticate,
             feedback_inbox::feedback_inbox_identity,
             feedback_inbox::transport::feedback_inbox_request,
             feedback_inbox::transport::feedback_inbox_stream,
