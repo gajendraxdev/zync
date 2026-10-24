@@ -9,11 +9,13 @@ const Dashboard = lazy(() => import('../dashboard/Dashboard').then((module) => (
 const TunnelManager = lazy(() => import('../tunnel/TunnelManager').then((module) => ({ default: module.TunnelManager })));
 const SnippetsManager = lazy(() => import('../snippets/SnippetsManager').then((module) => ({ default: module.SnippetsManager })));
 const PluginPanel = lazy(() => import('../plugins/PluginPanel').then((module) => ({ default: module.PluginPanel })));
+const SecurityPanel = lazy(() => import('../../features/security/ui/SecurityPanel').then((module) => ({ default: module.SecurityPanel })));
 
 function FeaturePaneFallback() {
     return <div className="h-full w-full bg-app-bg" />;
 }
 
+/** Lazy feature content rendering; pane layout, identity and resource ownership stay generic. */
 export function FeaturePaneBody({
     connectionId,
     featureId,
@@ -33,6 +35,11 @@ export function FeaturePaneBody({
     const plugin = pluginId ? panels.find((panel) => panel.id === pluginId) : undefined;
     return (
         <Suspense fallback={<FeaturePaneFallback />}>
+            {featureId === 'security' && (
+                <ErrorBoundary isolate>
+                    <SecurityPanel connectionId={connectionId} />
+                </ErrorBoundary>
+            )}
             {featureId === 'files' && (
                 <ErrorBoundary isolate>
                     <FileManager connectionId={connectionId} surface="pane" instanceId={instanceId} active={visible} />

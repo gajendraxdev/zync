@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { buildWorkspaceOpenItems } from '../.tmp-agent-tests/src/components/layout/workspaceOpen/buildWorkspaceOpenItems.js';
 import { filterWorkspaceOpenItems, groupWorkspaceOpenItems, visibleWorkspaceOpenItems, workspaceOpenEscapeAction } from '../.tmp-agent-tests/src/components/layout/workspaceOpen/filterWorkspaceOpenItems.js';
+import { SPLIT_FEATURE_IDS } from '../.tmp-agent-tests/src/lib/paneLayout/types.js';
 
 function runTest(name, fn) {
   try {
@@ -140,10 +141,10 @@ runTest('open menu stays at tab rows and never adds split-feature entries', () =
       { id: 'snippets', isOpen: true, isActive: false },
     ],
   });
-  assert.equal(items.filter((item) => item.kind === 'feature').length, 4);
+  assert.equal(items.filter((item) => item.kind === 'feature').length, SPLIT_FEATURE_IDS.length);
   assert.equal(items.filter((item) => item.kind === 'new-shell').length, 1);
   assert.equal(items.every((item) => item.kind !== 'split-feature'), true);
-  assert.equal(items.length, 5);
+  assert.equal(items.length, SPLIT_FEATURE_IDS.length + 1);
 });
 
 console.log('Workspace open item tests passed.');

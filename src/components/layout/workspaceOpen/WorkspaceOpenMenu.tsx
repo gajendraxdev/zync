@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { Braces, ChevronLeft, ChevronRight, FolderOpen, LayoutDashboard, Loader2, Plus, RotateCw, Search, Terminal as TerminalIcon, Waypoints } from 'lucide-react';
+import { Braces, ChevronLeft, ChevronRight, FolderOpen, LayoutDashboard, Loader2, Plus, RotateCw, Search, ShieldCheck, Terminal as TerminalIcon, Waypoints } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 import { ShellIcon } from '../../icons/ShellIcon';
 import { PluginIcon } from '../../icons/PluginIcon';
@@ -26,6 +26,7 @@ const FEATURE_ICON: Record<FeatureId, typeof FolderOpen> = {
     'port-forwarding': Waypoints,
     dashboard: LayoutDashboard,
     snippets: Braces,
+    security: ShieldCheck,
 };
 
 export function WorkspaceOpenMenu({

@@ -1,7 +1,7 @@
 import type { VaultProfileId } from '../../../vault/profileTypes';
 import type { MainTabPresentation } from '../../workspace/domain/mainTabPresentation';
 
-export type CoreTabView = 'dashboard' | 'files' | 'port-forwarding' | 'snippets' | 'terminal';
+export type CoreTabView = 'dashboard' | 'files' | 'port-forwarding' | 'snippets' | 'terminal' | 'security';
 export type PluginTabView = `plugin:${string}`;
 export type TabView = CoreTabView | PluginTabView;
 

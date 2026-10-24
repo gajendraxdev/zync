@@ -49,6 +49,7 @@ const FEATURE_ITEMS: Array<{ id: FeatureId; label: string }> = [
     { id: 'port-forwarding', label: 'Port Forwarding' },
     { id: 'snippets', label: 'Snippets' },
     { id: 'dashboard', label: 'Dashboard' },
+    { id: 'security', label: 'Security' },
 ];
 
 

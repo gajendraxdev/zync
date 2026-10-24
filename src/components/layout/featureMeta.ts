@@ -1,4 +1,4 @@
-import { Braces, FolderOpen, LayoutDashboard, Waypoints, type LucideIcon } from 'lucide-react';
+import { Braces, FolderOpen, LayoutDashboard, ShieldCheck, Waypoints, type LucideIcon } from 'lucide-react';
 import { builtinWorkspaceViewLabel } from '../../features/workspace/domain/registrations';
 import type { SplitFeatureId } from '../../lib/paneLayout/types';
 
@@ -18,6 +18,7 @@ export interface FeatureMeta {
 }
 
 export const FEATURE_META: Record<FeatureId, FeatureMeta> = {
+    'security': { icon: ShieldCheck, label: builtinWorkspaceViewLabel('security'), keys: [] },
     'files': { icon: FolderOpen, label: builtinWorkspaceViewLabel('files'), keys: ['mod', 'shift', 'f'] },
     'port-forwarding': { icon: Waypoints, label: builtinWorkspaceViewLabel('port-forwarding'), keys: ['mod', 'shift', 'n'] },
     'snippets': { icon: Braces, label: builtinWorkspaceViewLabel('snippets'), keys: ['mod', 'shift', 's'] },

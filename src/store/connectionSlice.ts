@@ -210,7 +210,7 @@ export interface ConnectionSlice {
     loadConnections: () => Promise<void>;
 }
 
-const VALID_RESTORABLE_VIEWS = new Set<CoreTabView>(['terminal', 'files', 'port-forwarding', 'snippets', 'dashboard']);
+const VALID_RESTORABLE_VIEWS = new Set<CoreTabView>(['terminal', 'files', 'port-forwarding', 'snippets', 'dashboard', 'security']);
 const RESTORABLE_TAB_TYPES = new Set(['connection', 'port-forwarding', 'release-notes', 'snippets', 'settings', 'vault', 'sync', 'public-urls']);
 
 type PersistedConnection = Omit<Connection, 'status'> & Partial<Pick<Connection, 'status'>>;

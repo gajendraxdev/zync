@@ -7,7 +7,7 @@ export const MAX_PANE_NESTING = 8;
 export const MIN_PANE_RATIO = 0.2;
 
 /** Host feature tabs that may occupy a split leaf. Plugins use `PluginPaneContent`. */
-export const SPLIT_FEATURE_IDS = ['files', 'port-forwarding', 'dashboard', 'snippets'] as const;
+export const SPLIT_FEATURE_IDS = ['files', 'port-forwarding', 'dashboard', 'snippets', 'security'] as const;
 export type SplitFeatureId = (typeof SPLIT_FEATURE_IDS)[number];
 
 const SPLIT_FEATURE_ID_SET: ReadonlySet<string> = new Set(SPLIT_FEATURE_IDS);
