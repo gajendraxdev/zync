@@ -20,12 +20,18 @@ All notable changes to Zync are documented in this file. The format is based on 
   approval and rerun the full assessment, without guaranteeing successful access.
   Focused idle setup keeps scope/access details expandable; compact findings retain
   complete evidence and guidance under **Technical details**.
-  Results separate **Needs attention**, **Informational**, **Passed** and unavailable
-  evidence, with matching counts and filters. Contextual observations no longer
+  Results separate **Needs attention**, **Informational**, **Passed**,
+  **Not applicable** and unavailable evidence, with matching counts and filters.
+  Contextual observations no longer
   inflate the attention count; SSH defaults retain their connection-policy limits.
   File permission checks include group ownership and support empty regular files;
   a shared evidence-size limit applies before every rule's interpretation.
   Listener observations handle scoped IPv6 addresses and preserve loopback counts.
+  OS-specific and limited generic profiles identify assessment scope. A versioned
+  rule catalog supplies observed values, conditions, rationale and evidence scope;
+  essential findings appear before expandable technical details.
+  Plain-language results explain settings and next steps while retaining exact
+  technical evidence for inspection and export.
   SSH policy prefers config-only OpenSSH `-G` when supported, with a bounded probe
   and legacy `-T` fallback. Linux collection requires GNU coreutils `timeout`.
 

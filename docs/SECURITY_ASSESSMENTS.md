@@ -43,13 +43,29 @@ The report identifies its recorded access mode:
 - **Sudo allowed:** approved, but individual protected commands may still fail.
 - **Access not recorded:** sufficient access metadata is unavailable.
 
-The coverage summary separates three disjoint groups:
+The report identifies the detected platform and the selected Zync baseline:
+
+- **Checks for this OS version:** a profile authored for Ubuntu 22.04/24.04 or Debian
+  12/13. Selection identifies rule scope; it does not imply complete host coverage,
+  certification or validation against a full VM test matrix.
+- **Limited coverage for this OS version:** another valid OS ID/release, or a missing
+  release version. Useful generic Linux observations remain available. Related-distribution
+  hints do not establish support for a derivative.
+
+Open **About this assessment** for the profile ID, platform, baseline version and
+exact coverage qualification. Profile selection is automatic and does not start a scan.
+
+The coverage summary separates four disjoint groups:
 
 - **Evaluated:** usable evidence exists, with needs-attention, informational and
   passed subtotals.
 - **Needs elevated access:** confirmed access denial for a protected read on an
   unelevated non-root run.
 - **Evidence unavailable:** other missing, failed or uninterpretable evidence.
+- **Not applicable:** an established platform-scope exclusion. For example,
+  Debian/Ubuntu package observations do not apply to a known non-Debian OS.
+  An unfamiliar derivative remains unqualified; missing tools, denied access and
+  failed reads on an applicable platform remain unavailable.
 
 Result filters match these groups. Counts describe retained baseline checks,
 not a security score:
@@ -68,16 +84,29 @@ passed. Explicit defaults such as unrestricted root login, password/empty-passwo
 or host-based authentication, X11 forwarding, or disabled StrictModes need attention;
 whether they should change depends on the host's requirements.
 
-Unavailable checks are neither passed nor failed. Informational details use
-**Guidance**; attention findings use **Recommendation**. Results put attention
-first, followed by unavailable evidence, informational observations and passes.
-New runs use baseline `zync-linux-4 (2026-10-24)`; existing exported reports retain
+Unavailable and not-applicable checks are neither passed nor failed. Not-applicable
+checks are excluded from evaluated/unavailable totals and cannot offer sudo retry.
+Result filters expose each group independently. Informational details use
+**Guidance**; attention findings use **Recommendation**.
+New runs use baseline `zync-linux-5 (2026-10-25)`; existing exported reports retain
 their original results and baseline version.
 
-Search by ID, check, target or recommendation; filter by result/category. Expanded
-findings show a short explanation, a documentation reference and relevant actions.
-**Technical details** contains the complete target, evidence and recommendation or
-collection next step, collapsed until opened. JSON exports retain the full report.
+Search by ID, check, target or recommendation; filter by result/category. Rows show
+the observed value or a short collection explanation. The first expansion shows
+**What we found**, **What we look for** (or **What to consider** for contextual
+observations), why it matters and **What was checked**. Conditions are Zync's
+own narrow rules; contextual observations do not invent a universal pass threshold.
+**Technical details** contains the complete target/evidence, guidance or collection
+next step, rule version, source-review date and documentation reference. The review
+date, shown as **Guidance reviewed**, identifies rule metadata review, not when a
+host value was collected. JSON exports retain the full normalized report and
+captured run timestamps.
+
+Result explanations use plain language for settings, counts and missing information.
+The short wording explains the observed value; it does not decide whether a check
+passes. Exact values, paths, flags, limits and system-command details remain available
+under **Technical details** and in the exported `evidence` field. Unknown failures
+do not imply a security weakness or a confirmed need for administrator permissions.
 
 Unavailable checks show **Next step**, not a recommendation to change settings
 without evidence. Guidance distinguishes missing tools, execution failures,
@@ -177,6 +206,11 @@ sensitive system metadata; review before sharing.
 access restrictions; `sudoRetryEligible` independently records optional elevated
 attempt eligibility, not a proven permission error. For unavailable checks,
 `recommendation` contains collection guidance.
+
+Exports also retain the selected `profile`, per-rule `observed`, `expected`,
+`rationale`, `scope`, `ruleVersion`, `reviewedAt`, and any `applicabilityReason`.
+These are first-party rule definitions and evidence qualifications, not benchmark
+certification or a security score.
 
 Reports stay in this pane until another run, pane close or connection identity/epoch
 change. There is no automatic history, sync, scheduling, upload or remediation.
