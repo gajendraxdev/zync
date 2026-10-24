@@ -17,7 +17,7 @@ export const assessmentIpc: AssessmentPort = {
     /** Bypass generic IPC error logging; neither arguments nor native errors can reflect a secret. */
     authenticate: async (id, password) => {
         try { await invoke('security_assessment_authenticate', { id, password }); }
-        catch { throw new Error('Sudo authentication could not be submitted.'); }
+        catch { throw new Error('Zync could not send the sudo password.'); }
     },
 };
 

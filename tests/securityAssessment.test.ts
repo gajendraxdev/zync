@@ -96,6 +96,7 @@ check(authentication.snapshot().status === 'completed', 'Authenticated collectio
 check(secretSnapshots.every(snapshot => !snapshot.includes('fixture-secret')), 'No password enters published states, completed results or exports');
 unsubscribe();
 check(referenceUrl('https://man.openbsd.org/sshd_config') !== null, 'Reviewed hardening references are navigable');
+check(referenceUrl('https://ubuntu.com/server/docs/how-to/software/automatic-updates/') !== null, 'The reviewed update/reboot source is navigable');
 for (const url of ['javascript:alert(1)', 'https://osv.dev/vulnerability/CVE-fixture', 'https://man.openbsd.org.evil.invalid/sshd_config', 'https://man.openbsd.org/sshd_config?redirect=evil', 'https://evil.invalid']) check(referenceUrl(url) === null, 'Untrusted or removed advisory navigation is rejected');
 const findings: Finding[] = ['passed', 'attention', 'notAssessed', 'informational'].map((status, index) => ({
     id: `CHECK-${index}`, status: status as Finding['status'], title: 'Fixture', target: '/fixture', evidence: 'fixture',
@@ -110,7 +111,7 @@ const coverageFixtures: Finding[] = [
     { ...findings[0], status: 'informational', sudoRetryEligible: true },
 ];
 const coverageSnapshot = JSON.stringify(coverageFixtures);
-check(JSON.stringify(hardeningCoverage(coverageFixtures)) === JSON.stringify({ evaluated: 3, elevated: 1, unavailable: 2, passed: 1, attention: 1, informational: 1 }), 'Coverage groups are disjoint and information counts as evaluated without counting as attention or passed');
+check(JSON.stringify(hardeningCoverage(coverageFixtures)) === JSON.stringify({ evaluated: 3, elevated: 1, unavailable: 2, notApplicable: 0, passed: 1, attention: 1, informational: 1 }), 'Coverage groups are disjoint and information counts as evaluated without counting as attention or passed');
 check(findingStatusLabel(findings[1]) === 'Needs attention' && findingStatusLabel(findings[3]) === 'Informational', 'Attention and contextual observations have distinct labels');
 check(filterFindings(coverageFixtures, '', 'attention').length === 1 && filterFindings(coverageFixtures, '', 'informational').length === 1, 'Attention and information filters agree with their counts');
 check(hardeningCoverage([]).evaluated === 0, 'An empty report cannot imply complete coverage');
@@ -131,13 +132,23 @@ check(hardeningAccessLabel({ collectorUid: 1000, elevationRequested: true }) ===
 check(hardeningAccessLabel({ collectorUid: 0, elevationRequested: false }) === 'Root session', 'A root connection is not mislabeled standard access');
 check(hardeningAccessLabel({}) === 'Access not recorded', 'Old missing access metadata is not guessed');
 check(JSON.stringify(coverageFixtures) === coverageSnapshot, 'Coverage, filters and retry presentation never mutate exports');
-check(findingSummary({ ...findings[0], id: 'SSH-pubkeyauthentication', status: 'notAssessed' }) === 'Couldn’t read SSH settings.', 'Unavailable SSH summary does not guess a permission error or disabled authentication');
-check(findingSummary({ ...findings[0], status: 'notAssessed', needsElevatedAccess: true }) === 'Access to protected evidence was denied.', 'Verified restricted evidence has a short access explanation');
-check(findingSummary({ ...findings[0], status: 'notAssessed' }) === 'Couldn’t collect usable evidence for this check.', 'Other unavailable summaries stay generic without guessing a cause');
-check(findingSummary({ ...findings[0], status: 'passed', needsElevatedAccess: true }) === 'This check met its baseline condition.', 'A stale access flag cannot override an assessed result');
+check(findingSummary({ ...findings[0], id: 'SSH-pubkeyauthentication', status: 'notAssessed' }) === 'Zync could not collect enough information for this check.', 'Old unavailable summaries do not infer a cause or security rule from an identifier');
+check(findingSummary({ ...findings[0], status: 'notAssessed', needsElevatedAccess: true }) === 'Your SSH account was denied access to information for this check.', 'Verified restricted evidence has a short access explanation');
+check(findingSummary({ ...findings[0], status: 'notAssessed' }) === 'Zync could not collect enough information for this check.', 'Other unavailable summaries stay generic without guessing a cause');
+check(findingSummary({ ...findings[0], status: 'passed', needsElevatedAccess: true }) === 'This check meets the expected condition.', 'A stale access flag cannot override an assessed result');
 check(findingSummary({ ...findings[0], status: 'attention' }).includes('requirements'), 'Attention summaries preserve contextual interpretation');
-check(findingSummary({ ...findings[0], status: 'informational' }) === 'Contextual observation; no automatic pass or fail decision.', 'Information never suggests a failed security check');
-for (const status of ['attention', 'informational'] as const) check(findingSummary({ ...findings[0], id: 'SSH-strictmodes', status }).includes('Connection-specific policy was not verified'), 'SSH summaries retain the default-only qualification');
+check(findingSummary({ ...findings[0], status: 'informational' }) === 'Information to review. This check has no automatic pass or fail result.', 'Information never suggests a failed security check');
+const nativeObservation: Finding = { ...findings[0], status: 'informational', observed: 'Password sign-in is disabled in the default SSH configuration.', expected: 'Compare this default with the host’s needs.', rationale: 'Context matters.', scope: 'Default configuration; Match policy not verified.', ruleVersion: '1', reviewedAt: '2026-10-25' };
+check(findingSummary(nativeObservation) === nativeObservation.observed, 'Concise native observations replace generic state prose without parsing evidence');
+check(findingSummary({ ...nativeObservation, id: 'CUSTOM-id' }) === nativeObservation.observed, 'Presentation has no identifier-based security interpretation');
+const notApplicable: Finding = { ...nativeObservation, status: 'notApplicable', observed: 'Not applicable to this host.', applicabilityReason: 'The detected platform does not use this package profile.', needsElevatedAccess: true, sudoRetryEligible: true };
+check(findingStatusLabel(notApplicable) === 'Not applicable' && findingSudoRetryLabel(notApplicable) === undefined, 'Inapplicability cannot become an access denial or suggest sudo even with stale flags');
+check(JSON.stringify(hardeningCoverage([notApplicable])) === JSON.stringify({ evaluated: 0, elevated: 0, unavailable: 0, notApplicable: 1, passed: 0, attention: 0, informational: 0 }), 'Inapplicability is excluded from evaluated and unavailable totals');
+check(filterFindings([notApplicable, ...coverageFixtures], '', 'notApplicable').length === 1, 'Not-applicable checks have their own filter');
+check(filterFindings([notApplicable], '', 'evidenceUnavailable').length === 0 && filterFindings([notApplicable], '', 'needsElevatedAccess').length === 0, 'Unavailable filters never absorb not-applicable checks');
+check(hardeningSudoRetryLabel({ ...retryReport, findings: [notApplicable] }) === undefined, 'A report with only not-applicable checks cannot suggest elevation');
+for (const query of ['password sign-in', 'match policy', 'context matters']) check(filterFindings([nativeObservation], query).length === 1, 'Search covers native observations, scope and rationale');
+check(filterFindings([notApplicable], 'package profile').length === 1, 'Search covers the native applicability reason');
 check(filterFindings(findings, 'fixture').map(item => item.status).join(',') === 'attention,notAssessed,informational,passed', 'Attention sorts first, then unavailable evidence, information and passes');
 check(findings[0].status === 'passed', 'Filtering does not mutate the retained report');
 check(filterFindings(findings, 'CHECK-2', 'notAssessed').length === 1, 'Search and status compose');

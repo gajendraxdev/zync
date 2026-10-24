@@ -12,16 +12,21 @@ export function ReportOverview({ result, onRetryWithSudo }: { result: Assessment
         { label: 'Evaluated', value: coverage.evaluated, icon: ListChecks },
         { label: 'Needs elevated access', value: coverage.elevated, icon: CircleHelp },
         { label: 'Evidence unavailable', value: coverage.unavailable, icon: CircleHelp },
+        { label: 'Not applicable', value: coverage.notApplicable, icon: CircleHelp },
     ];
     return <>
         <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-app-muted">
             <span className="inline-flex items-center gap-1.5 text-app-text">
-                <CircleCheck size={14} aria-hidden="true" />Assessment finished{report.truncated ? ' · Report capped' : ''}
+                <CircleCheck size={14} aria-hidden="true" />Assessment finished{report.truncated ? ' · Report limit reached' : ''}
             </span>
             <span>{new Date(result.completedAt).toLocaleString()}</span><span>{report.os}</span>
             <span className="rounded-full border border-app-border px-2 py-1 text-app-text">{hardeningAccessLabel(report)}</span>
         </div>
-        <div role="group" aria-label="Hardening coverage" className="grid grid-cols-3 divide-x divide-app-border rounded-lg border border-app-border bg-app-panel py-4">
+        {report.profile && <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+            <span className="font-medium">{report.profile.label}</span>
+            <span className="text-app-muted">· {report.profile.coverage === 'targeted' ? 'Checks for this OS version' : 'Limited coverage for this OS version'}</span>
+        </div>}
+        <div role="group" aria-label="Hardening coverage" className="grid grid-cols-2 gap-y-4 rounded-lg border border-app-border bg-app-panel py-4 sm:grid-cols-4">
             {metrics.map(({ label, value, icon: Icon }) => <div key={label} className="flex min-w-0 flex-col px-3 sm:px-5">
                 <div className="flex flex-1 items-start gap-1.5 text-app-muted">
                     <Icon size={13} className="mt-0.5 shrink-0" aria-hidden="true" /><span className="text-[11px] sm:text-xs">{label}</span>
@@ -30,30 +35,34 @@ export function ReportOverview({ result, onRetryWithSudo }: { result: Assessment
             </div>)}
         </div>
         {report.truncated && <p className="flex items-start gap-2 text-xs text-app-muted">
-            <CircleHelp size={14} className="shrink-0" aria-hidden="true" />Coverage is incomplete. Do not interpret these results as a full assessment.
+            <CircleHelp size={14} className="shrink-0" aria-hidden="true" />The report reached its size limit. Some checks are missing from these results.
         </p>}
         <p className="text-xs leading-relaxed text-app-muted">
             {coverage.attention} need attention · {coverage.informational} informational · {coverage.passed} passed.
-            {' '}{coverage.evaluated} / {report.findings.length} retained checks evaluated.
-            {' '}Unavailable checks are neither passed nor failed.
-            {report.elevationRequested ? ' Sudo approval does not guarantee access to every protected check.' : ''}
+            {' '}Checks marked unavailable or not applicable do not count as passed or failed.
+            {report.elevationRequested ? ' Allowing sudo does not guarantee that every protected check can be read.' : ''}
         </p>
         {retryLabel && onRetryWithSudo && <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-app-border bg-app-panel px-4 py-3">
             <p className="text-xs text-app-muted">
-                {retryLabel === 'Try with sudo' ? 'Elevation may help protected reads; the failure cause is unconfirmed.' : 'Protected evidence was denied.'}
-                {' '}Approval reruns all hardening checks and replaces this report.
+                {retryLabel === 'Try with sudo' ? 'Sudo may help read protected information, but we could not confirm why it was unavailable.' : 'Your SSH account was denied access to information for some checks.'}
+                {' '}If you approve, all checks run again and replace this report.
             </p>
             <Button variant="secondary" size="sm" onClick={() => onRetryWithSudo(retryLabel)}>{retryLabel}</Button>
         </div>}
-        <details className="rounded-lg border border-app-border bg-app-panel text-xs">
+        <details data-assessment-report-scope className="rounded-lg border border-app-border bg-app-panel text-xs">
             <summary className="cursor-pointer px-4 py-3 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-control-focus">
-                Scope &amp; coverage <span className="ml-2 font-normal text-app-muted">{report.version}</span>
+                About this assessment <span className="ml-2 font-normal text-app-muted">{report.version}</span>
             </summary>
             <div className="space-y-3 border-t border-app-border px-4 py-3 text-app-muted">
                 <p className="break-all">{result.subject.username}@{result.subject.host}:{result.subject.port} · {report.target}</p>
-                <p>{report.collectorUid === undefined || report.collectorUid === null ? 'Connected UID not recorded' : `Connected UID ${report.collectorUid}`} · {
+                {report.profile && <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+                    <div><dt>Detected system</dt><dd className="mt-1 break-words text-app-text">{report.profile.platformId} {report.profile.platformVersion}</dd></div>
+                    <div><dt>Check profile</dt><dd className="mt-1 break-words text-app-text">{report.profile.id} · {report.version}</dd></div>
+                    <div className="sm:col-span-2"><dt>What this covers</dt><dd className="mt-1 break-words leading-relaxed">{report.profile.coverageNote}</dd></div>
+                </dl>}
+                <p>{report.collectorUid === undefined || report.collectorUid === null ? 'SSH user ID not recorded' : `SSH user ID (UID): ${report.collectorUid}`} · {
                     report.elevationRequested === undefined ? 'Sudo approval not recorded.' : report.elevationRequested
-                        ? 'Sudo authorized for protected checks; individual reads may still fail.' : 'No sudo requested; existing account privileges apply.'
+                        ? 'Sudo was allowed for protected checks. Some information may still be unreadable.' : 'Sudo was not requested. Checks used your SSH account’s permissions.'
                 }</p>
                 <ul className="list-disc space-y-2 pl-4">{report.notes.map((note, index) => <li key={index}>{note}</li>)}</ul>
             </div>

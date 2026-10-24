@@ -4,12 +4,15 @@ import { cn } from '../../../lib/utils';
 import { useAppStore } from '../../../store/useAppStore';
 import { findingSummary, findingSudoRetryLabel, referenceUrl, type Finding, type SudoRetryLabel } from '../domain/assessment';
 
-/** Show complete evidence on demand; the short presentation never edits retained report or export data. */
-function FindingTechnicalDetails({ finding }: { finding: Finding }) {
+/** Complete normalized evidence and rule provenance are secondary to the observed baseline comparison. */
+function FindingTechnicalDetails({ finding, reference, onOpenReference }: { finding: Finding; reference: string | null; onOpenReference: () => void }) {
     const fields = [
-        { label: 'Detected in', value: finding.target, mono: true },
+        { label: 'Check ID', value: finding.id, mono: true },
+        { label: 'Rule version', value: finding.ruleVersion },
+        { label: 'Guidance reviewed', value: finding.reviewedAt },
+        { label: 'Check target', value: finding.target, mono: true },
         { label: 'Evidence', value: finding.evidence },
-        { label: finding.status === 'notAssessed' ? 'Next step' : finding.status === 'informational' ? 'Guidance' : 'Recommendation', value: finding.recommendation },
+        { label: finding.status === 'notAssessed' ? 'Next step' : finding.status === 'informational' || finding.status === 'notApplicable' ? 'Guidance' : 'Recommendation', value: finding.recommendation },
     ];
     return <details className="group/technical border-t border-app-border pt-2">
         <summary className="flex w-fit cursor-pointer list-none items-center gap-1.5 rounded py-1 text-xs text-app-muted hover:text-app-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-control-focus [&::-webkit-details-marker]:hidden">
@@ -18,13 +21,16 @@ function FindingTechnicalDetails({ finding }: { finding: Finding }) {
         <dl className="mt-3 space-y-3 text-xs">
             {fields.filter(field => Boolean(field.value)).map(field => <div key={field.label}>
                 <dt className="text-app-muted">{field.label}</dt>
-                <dd className={cn('mt-1 break-words', field.mono && 'font-mono')}>{field.value}</dd>
+                <dd className={cn('mt-1 break-words leading-relaxed', field.mono && 'font-mono')}>{field.value}</dd>
             </div>)}
         </dl>
+        {reference && <Button variant="ghost" size="sm" aria-label="Open reference" onClick={onOpenReference} className="mt-3 h-auto max-w-full px-0 py-1 text-xs text-app-muted">
+            Read source guidance<ArrowUpRight size={12} className="ml-1 shrink-0" aria-hidden="true" />
+        </Button>}
     </details>;
 }
 
-/** Compact explanation and explicit safe actions; technical evidence stays collapsed until requested. */
+/** Native rule metadata explains the observation without duplicating security rules in the renderer. */
 export function FindingDetails({ finding, onRetryWithSudo }: { finding: Finding; onRetryWithSudo?: (label: SudoRetryLabel) => void }) {
     const showToast = useAppStore(state => state.showToast);
     const reference = referenceUrl(finding.reference);
@@ -36,14 +42,17 @@ export function FindingDetails({ finding, onRetryWithSudo }: { finding: Finding;
     };
     const retryLabel = onRetryWithSudo ? findingSudoRetryLabel(finding) : undefined;
     return <div className="space-y-3 border-t border-app-border bg-app-bg/50 px-4 py-3 text-xs">
-        <p className="leading-relaxed">{findingSummary(finding)}</p>
-        {retryLabel === 'Try with sudo' && <p className="text-[11px] text-app-muted">Elevation may help; the failure cause is unconfirmed.</p>}
-        {(retryLabel || reference) && <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            {retryLabel && <Button variant="secondary" size="sm" onClick={() => onRetryWithSudo?.(retryLabel)}>{retryLabel}</Button>}
-            {reference && <Button variant="ghost" size="sm" aria-label="Open reference" onClick={() => void openReference()} className="h-auto max-w-full px-0 py-1 text-xs text-app-muted">
-                Reference<ArrowUpRight size={12} className="ml-1 shrink-0" aria-hidden="true" />
-            </Button>}
+        <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+            <div><dt className="text-app-muted">What we found</dt><dd className="mt-1 break-words font-medium leading-relaxed">{findingSummary(finding)}</dd></div>
+            {finding.expected && <div><dt className="text-app-muted">{finding.status === 'informational' ? 'What to consider' : 'What we look for'}</dt><dd className="mt-1 break-words leading-relaxed">{finding.expected}</dd></div>}
+        </dl>
+        {finding.applicabilityReason && finding.applicabilityReason !== findingSummary(finding) && <p className="break-words leading-relaxed text-app-muted">{finding.applicabilityReason}</p>}
+        {finding.rationale && <p className="break-words leading-relaxed"><span className="text-app-muted">Why it matters: </span>{finding.rationale}</p>}
+        {finding.scope && <p className="break-words leading-relaxed text-app-muted"><span className="font-medium">What was checked: </span>{finding.scope}</p>}
+        {retryLabel && <div className="flex flex-wrap items-center gap-3">
+            <Button variant="secondary" size="sm" onClick={() => onRetryWithSudo?.(retryLabel)}>{retryLabel}</Button>
+            {retryLabel === 'Try with sudo' && <p className="text-[11px] text-app-muted">Sudo may help, but we could not confirm why this check was unavailable.</p>}
         </div>}
-        <FindingTechnicalDetails finding={finding} />
+        <FindingTechnicalDetails finding={finding} reference={reference} onOpenReference={() => void openReference()} />
     </div>;
 }

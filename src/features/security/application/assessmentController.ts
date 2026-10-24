@@ -62,13 +62,13 @@ export class AssessmentController {
                             this.publish({ ...this.state, authenticationRequired: true });
                         }
                     } catch {
-                        if (this.owned === run && !run.cancelled) { run.failure = 'Could not read the sudo authentication request. Restart the app and retry.'; this.cancel(); }
+                        if (this.owned === run && !run.cancelled) { run.failure = 'Zync could not read the sudo password request. Restart the app and try again.'; this.cancel(); }
                     } finally { pending = false; }
                 }, 250);
             }
             const report = await this.port.run(run.id, captured);
             if (!run.cancelled) {
-                if (report.kind !== captured.kind) throw new Error('Assessment response does not match the requested scope.');
+                if (report.kind !== captured.kind) throw new Error('Zync received a different assessment type than requested. Run the assessment again.');
                 next = { status: 'completed', result: { report, subject: boundSubject, startedAt, completedAt: Date.now() } };
             }
         } catch (error) {
@@ -91,7 +91,7 @@ export class AssessmentController {
         this.publish({ ...this.state, authenticationRequired: false });
         try { await this.port.authenticate(run.id, password); }
         catch {
-            if (this.owned === run && !run.cancelled) { run.failure = 'Sudo authentication could not be submitted. No automatic retry was made.'; this.cancel(); }
+            if (this.owned === run && !run.cancelled) { run.failure = 'Zync could not send the sudo password. The assessment stopped without retrying.'; this.cancel(); }
         }
     }
 

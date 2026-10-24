@@ -1,17 +1,24 @@
 export type AssessmentKind = 'hardening';
-export type FindingStatus = 'attention' | 'informational' | 'passed' | 'notAssessed';
+export type FindingStatus = 'attention' | 'informational' | 'passed' | 'notAssessed' | 'notApplicable';
 export interface AssessmentRequest { kind: AssessmentKind; elevationConsent?: boolean }
 export interface Finding {
     id: string; status: FindingStatus; title: string; target: string;
     evidence: string; recommendation: string; reference: string;
     category?: string;
+    observed?: string; expected?: string; rationale?: string; scope?: string;
+    ruleVersion?: string; reviewedAt?: string; applicabilityReason?: string;
     needsElevatedAccess?: boolean;
     sudoRetryEligible?: boolean;
+}
+export interface AssessmentProfile {
+    id: string; label: string; platformId: string; platformVersion: string;
+    coverage: 'targeted' | 'generic'; coverageNote: string;
 }
 export interface AssessmentReport {
     kind: AssessmentKind; target: string; os: string; version: string;
     findings: Finding[]; totalFindings: number; truncated: boolean;
     notes: string[]; collectorUid?: number | null; elevationRequested?: boolean;
+    profile?: AssessmentProfile;
 }
 export interface AssessmentSubject { connectionId: string; name: string; host: string; username: string; port: number }
 export interface AssessmentAdmission { id: string; identity: Pick<AssessmentSubject, 'host' | 'username' | 'port'> }
@@ -22,7 +29,7 @@ export type AssessmentState =
     | { status: 'failed'; message: string }
     | { status: 'completed'; result: AssessmentResult };
 
-export const STATUS_LABELS: Record<FindingStatus, string> = { attention: 'Needs attention', informational: 'Informational', passed: 'Passed', notAssessed: 'Evidence unavailable' };
+export const STATUS_LABELS: Record<FindingStatus, string> = { attention: 'Needs attention', informational: 'Informational', passed: 'Passed', notAssessed: 'Evidence unavailable', notApplicable: 'Not applicable' };
 
 /** Access is a known evidence restriction, not a failed security check or a guess from a generic error. */
 export function findingStatusLabel(finding: Pick<Finding, 'status' | 'needsElevatedAccess'>): string {
@@ -49,7 +56,8 @@ export function hardeningSudoRetryLabel(report: AssessmentReport): SudoRetryLabe
 /** Disjoint coverage counts describe retained checks, not a score or a claim that sudo succeeded. */
 export function hardeningCoverage(findings: readonly Finding[]) {
     return findings.reduce((counts, finding) => {
-        if (finding.status === 'notAssessed') {
+        if (finding.status === 'notApplicable') counts.notApplicable++;
+        else if (finding.status === 'notAssessed') {
             if (finding.needsElevatedAccess) counts.elevated++;
             else counts.unavailable++;
         } else {
@@ -59,7 +67,7 @@ export function hardeningCoverage(findings: readonly Finding[]) {
             else counts.informational++;
         }
         return counts;
-    }, { evaluated: 0, elevated: 0, unavailable: 0, passed: 0, attention: 0, informational: 0 });
+    }, { evaluated: 0, elevated: 0, unavailable: 0, notApplicable: 0, passed: 0, attention: 0, informational: 0 });
 }
 
 /** Describe recorded run access without treating authorization as successful privilege elevation. */
@@ -70,19 +78,18 @@ export function hardeningAccessLabel(report: Pick<AssessmentReport, 'collectorUi
     return 'Access not recorded';
 }
 
-/** Short explanations depend on structured result state, never guessed causes or truncated security advice. */
+/** Native observations carry check-specific meaning; old inert fixtures receive only a state-based fallback. */
 export function findingSummary(finding: Finding): string {
+    if (finding.observed) return finding.observed;
+    if (finding.status === 'notApplicable') return finding.applicabilityReason || 'This check does not apply to this host.';
     if (finding.status === 'notAssessed') {
-        if (finding.needsElevatedAccess) return 'Access to protected evidence was denied.';
-        return finding.id.startsWith('SSH-') ? 'Couldn’t read SSH settings.' : 'Couldn’t collect usable evidence for this check.';
+        if (finding.needsElevatedAccess) return 'Your SSH account was denied access to information for this check.';
+        return 'Zync could not collect enough information for this check.';
     }
-    if (finding.status === 'passed') return 'This check met its baseline condition.';
-    if (finding.id.startsWith('SSH-')) return finding.status === 'attention'
-        ? 'This SSH default needs attention. Connection-specific policy was not verified.'
-        : 'SSH default recorded. Connection-specific policy was not verified.';
+    if (finding.status === 'passed') return 'This check meets the expected condition.';
     return finding.status === 'attention'
-        ? 'A baseline deviation or maintenance signal needs attention. Check the evidence against your host’s requirements.'
-        : 'Contextual observation; no automatic pass or fail decision.';
+        ? 'Review this result against your host’s requirements.'
+        : 'Information to review. This check has no automatic pass or fail result.';
 }
 
 /** Reference navigation accepts only reviewed hardening documentation locations. */
@@ -90,7 +97,8 @@ export function referenceUrl(value: string): string | null {
     const fixed = ['https://docs.kernel.org/admin-guide/sysctl/', 'https://man.openbsd.org/sshd_config', 'https://man7.org/linux/man-pages/man7/inode.7.html',
         'https://man7.org/linux/man-pages/man5/passwd.5.html', 'https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html',
         'https://man7.org/linux/man-pages/man8/ss.8.html', 'https://netfilter.org/projects/nftables/manpage.html', 'https://man7.org/linux/man-pages/man8/findmnt.8.html',
-        'https://manpages.debian.org/bookworm/apt/apt-config.8.en.html', 'https://manpages.debian.org/bookworm/dpkg/dpkg.1.en.html'];
+        'https://manpages.debian.org/bookworm/apt/apt-config.8.en.html', 'https://manpages.debian.org/bookworm/dpkg/dpkg.1.en.html',
+        'https://ubuntu.com/server/docs/how-to/software/automatic-updates/'];
     return fixed.includes(value) ? value : null;
 }
 
@@ -105,9 +113,9 @@ export function filterFindings(findings: readonly Finding[], query: string, stat
     return findings.filter(item => (status === 'needsElevatedAccess' ? item.status === 'notAssessed' && item.needsElevatedAccess
             : status === 'evidenceUnavailable' ? item.status === 'notAssessed' && !item.needsElevatedAccess : status === 'all' || item.status === status)
         && (category === 'all' || item.category === category)
-        && (!search || `${item.id} ${item.title} ${item.target} ${item.category ?? ''} ${item.recommendation}`.toLocaleLowerCase().includes(search)))
+        && (!search || `${item.id} ${item.title} ${item.target} ${item.category ?? ''} ${item.observed ?? ''} ${item.expected ?? ''} ${item.rationale ?? ''} ${item.scope ?? ''} ${item.applicabilityReason ?? ''} ${item.recommendation}`.toLocaleLowerCase().includes(search)))
         .sort((left, right) => {
-            const rank = { attention: 0, notAssessed: 1, informational: 2, passed: 3 };
+            const rank = { attention: 0, notAssessed: 1, informational: 2, passed: 3, notApplicable: 4 };
             return rank[left.status] - rank[right.status];
         });
 }

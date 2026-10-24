@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { Provider as TooltipProvider } from '@radix-ui/react-tooltip';
 import { SecurityPanel } from '../src/features/security/ui/SecurityPanel';
 import { useAppStore } from '../src/store/useAppStore';
-import type { AssessmentReport, AssessmentRequest } from '../src/features/security/domain/assessment';
+import type { AssessmentReport, AssessmentRequest, Finding } from '../src/features/security/domain/assessment';
 import '../src/index.css';
 import './uiOverlays.browser.css';
 
@@ -15,24 +15,56 @@ let cancellations = 0;
 let authenticationRequired = false;
 let uncertainOnly = false;
 let rootSession = false;
+let genericProfile = false;
 
 /** Generate public synthetic findings, never read files or contact a host. */
 function report(request: AssessmentRequest): AssessmentReport {
-    return {
-        kind: 'hardening', target: 'Connected Linux host', os: 'ubuntu 24.04', version: 'zync-linux-4 (fixture)',
-        findings: Array.from({ length: 53 }, (_, index) => ({
-            id: `AUTH-${index}`, title: `Fixture recommendation ${index}`,
-            needsElevatedAccess: !request.elevationConsent && !rootSession && !uncertainOnly && index % 3 === 2 && index % 2 === 0,
+    const findings: Finding[] = Array.from({ length: 53 }, (_, index) => {
+        const needsElevatedAccess = !request.elevationConsent && !rootSession && !uncertainOnly && index % 3 === 2 && index % 2 === 0;
+        const status = index % 3 === 0 ? (index % 2 === 0 ? 'passed' : 'informational') : index % 3 === 1 ? 'attention' : 'notAssessed';
+        return {
+            id: `AUTH-${index}`, title: index === 1 ? 'Process tracing restrictions' : `Fixture recommendation ${index}`,
+            needsElevatedAccess,
             sudoRetryEligible: !request.elevationConsent && !rootSession && index % 3 === 2 && (index % 2 === 0 || index === 5),
-            category: index % 2 ? 'Network' : 'Accounts',
-            status: index % 3 === 0 ? (index % 2 === 0 ? 'passed' : 'informational') : index % 3 === 1 ? 'attention' : 'notAssessed',
-            target: '/fixture', evidence: 'Synthetic evidence only',
+            category: index === 1 ? 'Kernel' : status === 'informational' ? 'SSH' : index % 2 ? 'Network' : 'Accounts', status,
+            target: index === 1 ? 'kernel.yama.ptrace_scope' : '/fixture', evidence: 'Synthetic evidence only',
+            observed: index === 1 ? 'Process tracing uses the least restrictive setting (ptrace_scope = 0).' : status === 'notAssessed'
+                ? needsElevatedAccess ? 'Your SSH account was denied access to information for this check.' : 'Zync could not collect enough information for this check.'
+                : status === 'informational' ? 'Password sign-in is disabled in the default SSH configuration.' : 'There is one local account with full administrator access.',
+            expected: index === 1 ? 'Restrict which processes can inspect another process (ptrace_scope = 1–3).' : status === 'informational'
+                ? 'Compare this default with the host’s needs. The active server and per-connection rules may differ.'
+                : 'Keep one managed local account with full administrator access.',
+            rationale: index === 1 ? 'Process tracing can expose another process’s memory and credentials.' : 'Account and access settings need to fit the work this host does.',
+            scope: status === 'informational' ? 'Default SSH settings only. Settings used by the running server and per-connection Match rules were not checked.' : 'This local setting only. Zync cannot determine what the host’s applications require.',
+            ruleVersion: '1', reviewedAt: '2026-10-25',
             recommendation: index % 3 === 2
-                ? 'Resolve the collection failure described in Evidence, then rerun the assessment. Do not change security settings based on this unavailable check.'
+                ? 'Review why information was unavailable in Evidence, then run the assessment again. Do not change security settings based on this unavailable check.'
                 : 'Review host guidance before changing settings.',
             reference: 'https://man.openbsd.org/sshd_config',
-        })),
-        totalFindings: 53, truncated: false, notes: ['Fixture coverage: restricted files may be unavailable. No changes were applied.'],
+        };
+    });
+    for (const index of genericProfile ? [53, 54] : []) findings.push({
+        id: `AUTH-${index}`, title: index === 53 ? 'APT automatic-update configuration' : 'dpkg database consistency',
+        status: 'notApplicable', category: 'Updates',
+        target: index === 53 ? 'APT::Periodic settings' : 'dpkg --audit',
+        observed: 'This check does not apply to Fedora.', expected: 'These package checks are for Debian and Ubuntu.',
+        applicabilityReason: index === 53 ? 'This APT check is for Debian and Ubuntu. The host runs Fedora.' : 'This dpkg check is for Debian and Ubuntu. The host runs Fedora.',
+        rationale: 'Different Linux systems manage software updates in different ways.',
+        scope: 'Debian and Ubuntu package tools only. Other package managers were not checked.',
+        evidence: 'Synthetic applicability evidence only', recommendation: 'Review the host’s package manager separately.',
+        reference: 'https://ubuntu.com/server/docs/how-to/software/automatic-updates/', ruleVersion: '1', reviewedAt: '2026-10-25',
+        needsElevatedAccess: false, sudoRetryEligible: false,
+    });
+    return {
+        kind: 'hardening', target: 'Connected Linux host', os: genericProfile ? 'fedora 41' : 'ubuntu 24.04', version: 'zync-linux-5 (fixture)', findings,
+        profile: genericProfile ? {
+            id: 'zync-linux-generic', label: 'Generic Linux', platformId: 'fedora', platformVersion: '41', coverage: 'generic',
+            coverageNote: 'Only general Linux checks are available for Fedora. Zync has no checks written for this Fedora version. Testing on real SSH hosts and virtual machines is still required.',
+        } : {
+            id: 'zync-ubuntu-24.04', label: 'Ubuntu 24.04', platformId: 'ubuntu', platformVersion: '24.04', coverage: 'targeted',
+            coverageNote: 'Checks are written for Ubuntu 24.04 and cover selected Linux and package settings. Testing on real SSH hosts and virtual machines is still required; this label is not a support or compliance certification.',
+        },
+        totalFindings: findings.length, truncated: false, notes: ['Fixture coverage: restricted files may be unavailable. No changes were applied.'],
         collectorUid: rootSession ? 0 : 1000, elevationRequested: request.elevationConsent ?? false,
     };
 }
@@ -73,6 +105,7 @@ function Fixture() {
             <button onClick={() => { if (pending) { const run = pending; pending = null; run.resolve(report(run.request)); } }}>Complete scan fixture</button>
             <button onClick={() => { uncertainOnly = !uncertainOnly; }}>Toggle uncertain-only fixture</button>
             <button onClick={() => { rootSession = !rootSession; }}>Toggle root fixture</button>
+            <button onClick={() => { genericProfile = !genericProfile; }}>Toggle generic profile fixture</button>
             <button onClick={() => { authenticationRequired = true; }}>Request sudo fixture</button>
             <button onClick={() => { pending?.reject(new Error('Host collection unavailable. Try again later.')); pending = null; }}>Fail scan fixture</button>
             <button onClick={() => { hold = true; }}>Hold admission fixture</button>

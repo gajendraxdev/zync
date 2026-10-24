@@ -4,7 +4,7 @@ import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
 import { Select } from '../../../components/ui/Select';
 import { cn } from '../../../lib/utils';
-import { filterFindings, findingStatusLabel, type AssessmentReport, type SudoRetryLabel } from '../domain/assessment';
+import { filterFindings, findingStatusLabel, findingSummary, type AssessmentReport, type SudoRetryLabel } from '../domain/assessment';
 import { FindingDetails } from './FindingDetails';
 
 const PAGE_SIZE = 25;
@@ -28,12 +28,13 @@ export function FindingResults({ report, onRetryWithSudo }: { report: Assessment
     const visible = findings.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
     return <section aria-label="Assessment findings" className="overflow-hidden rounded-xl border border-app-border bg-app-panel">
         <div className="flex flex-wrap items-end gap-3 border-b border-app-border p-4">
-            <div className="min-w-40 flex-1"><Input label="Search findings" placeholder="ID, check or recommendation" value={query} maxLength={256}
+            <div className="min-w-40 flex-1"><Input label="Search findings" placeholder="Check, observation or ID" value={query} maxLength={256}
                 onChange={event => { setQuery(event.target.value); setPage(0); }} rightElement={<Search size={14} aria-hidden="true" />} /></div>
             <div className="w-48"><Select label="Result" value={status} onChange={value => { setStatus(value); setPage(0); }} options={[
                 { value: 'all', label: 'All results' }, { value: 'attention', label: 'Needs attention' },
                 { value: 'informational', label: 'Informational' }, { value: 'passed', label: 'Passed' },
                 { value: 'needsElevatedAccess', label: 'Needs elevated access' }, { value: 'evidenceUnavailable', label: 'Evidence unavailable' },
+                { value: 'notApplicable', label: 'Not applicable' },
             ]} /></div>
             {categories.length > 1 && <div className="w-40"><Select label="Category" value={category} onChange={value => { setCategory(value); setPage(0); }} options={[{ value: 'all', label: 'All categories' }, ...categories.map(value => ({ value, label: value }))]} /></div>}
         </div>
@@ -42,13 +43,13 @@ export function FindingResults({ report, onRetryWithSudo }: { report: Assessment
                 <summary className="flex cursor-pointer list-none items-start gap-3 px-4 py-3.5 text-sm hover:bg-app-surface/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-control-focus [&::-webkit-details-marker]:hidden">
                     <span className="mt-0.5 max-w-[45%] shrink-0"><FindingStatusBadge label={findingStatusLabel(finding)} /></span>
                     <span className="min-w-0 flex-1"><span className="block break-words font-medium">{finding.title || finding.id}</span>
-                        <span className="mt-1 block break-words text-xs text-app-muted">{finding.id}</span></span>
+                        <span className="mt-1 block break-words text-xs leading-relaxed text-app-muted">{findingSummary(finding)}</span></span>
                     <ChevronRight size={15} aria-hidden="true" className="mt-1 shrink-0 text-app-muted transition-transform group-open/finding:rotate-90 motion-reduce:transition-none" />
                 </summary>
                 <FindingDetails finding={finding} onRetryWithSudo={onRetryWithSudo} />
             </details>)}
             {visible.length === 0 && <div className="px-6 py-12 text-center text-sm text-app-muted">
-                {report.findings.length === 0 ? 'No checks reported in this scope. This does not guarantee the host is secure; review scope and coverage.' : 'No findings match your filters.'}
+                {report.findings.length === 0 ? 'No check results were returned. Review what this assessment covers; an empty report does not mean the host is secure.' : 'No results match your filters.'}
             </div>}
         </div>
         <div className="flex items-center justify-between gap-3 border-t border-app-border px-4 py-2 text-xs text-app-muted">

@@ -13,17 +13,18 @@ import { HardeningSetup } from './HardeningSetup';
 
 
 /** Describe the exact read-only approval without suggesting that sudo must resolve an uncertain failure. */
-function confirmationMessage(host: string, username: string, elevation: boolean, retry: SudoRetryLabel | null): string {
-    return [
-        retry === 'Try with sudo' ? 'The failure cause is unconfirmed; sudo may not resolve it.' : '',
-        retry ? 'Rerun the full hardening assessment and replace the current report, not just this check.' : '',
-        `Assess ${host} as ${username} without configuration changes?`,
+function confirmationMessage(host: string, username: string, elevation: boolean, retry: SudoRetryLabel | null) {
+    const paragraphs = [
+        `Check ${host} as ${username}? No settings will change.`,
+        retry === 'Try with sudo' ? 'We could not confirm why some information was unavailable. Sudo may not help.' : '',
+        retry ? 'All hardening checks will run again and replace this report, including checks that already completed.' : '',
         elevation
-            ? 'You are authorizing sudo for fixed protected read-only commands in this run. Zync asks for a password only if sudo requests authentication; it is kept only in memory for this assessment. No sudo shell or sudoers change. Existing sudo policy may deny collection.'
-            : 'No sudo will be requested; the existing SSH user privileges apply.',
-        'Checks cover selected host configuration and observations, not complete compliance or external reachability. No external service is contacted.',
-        `Host collection is limited to ${elevation ? '150 seconds including authentication' : '45 seconds'}; the whole run has a five-minute budget. Requires GNU coreutils timeout on the host.`,
-    ].filter(Boolean).join(' ');
+            ? 'Allow sudo only for fixed, read-only commands that read protected information during this run. Zync asks for a password only if sudo needs one. It stays in memory for this assessment and is never saved, synced or logged. No root shell or sudoers changes. Server policy may still deny access.'
+            : 'Checks use your SSH account’s permissions. Sudo will not be requested.',
+        'Checks cover selected Linux settings, not a full security or compliance audit or access from the internet. No external service is contacted.',
+        `Remote checks have a ${elevation ? '150-second limit, including password entry' : '45-second limit'}. The whole run is limited to five minutes. The host needs GNU coreutils timeout.`,
+    ].filter(Boolean);
+    return <span className="block space-y-3">{paragraphs.map(paragraph => <span className="block" key={paragraph}>{paragraph}</span>)}</span>;
 }
 
 /** Account-free hardening workspace: deliberate execution, short setup and progressive report detail. */
@@ -76,14 +77,14 @@ export function SecurityPanel({ connectionId }: { connectionId: string }) {
             {busy && <div role="status" aria-live="polite" className="flex items-start gap-3 rounded-lg border border-app-border bg-app-panel p-4">
                 <Loader2 size={17} className="shrink-0 animate-spin text-app-accent motion-reduce:animate-none" aria-hidden="true" />
                 <div>
-                    <p className="text-sm font-medium">{state.status === 'stopping' ? 'Stopping assessment…' : state.status === 'running' && state.authenticationRequired ? 'Waiting for sudo authentication…' : 'Assessing your host…'}</p>
-                    <p className="mt-1 text-xs leading-relaxed text-app-muted">{state.status === 'stopping' ? 'Closing owned work. No interrupted report will be retained.' : 'Reading host facts and evaluating hardening checks. Your terminals remain available.'}</p>
+                    <p className="text-sm font-medium">{state.status === 'stopping' ? 'Stopping assessment…' : state.status === 'running' && state.authenticationRequired ? 'Waiting for your sudo password…' : 'Checking your host…'}</p>
+                    <p className="mt-1 text-xs leading-relaxed text-app-muted">{state.status === 'stopping' ? 'Stopping this run. Incomplete results will not be saved.' : 'Reading Linux settings and running hardening checks. You can keep using your terminals.'}</p>
                 </div>
             </div>}
             {state.status === 'failed' && <div role="alert" className="flex gap-3 rounded-lg border border-app-danger/30 bg-app-danger/5 p-4">
-                <AlertCircle size={17} className="shrink-0 text-app-danger" aria-hidden="true" /><div><p className="text-sm font-medium">Assessment not completed</p><p className="mt-1 break-words text-xs text-app-muted">{state.message}</p></div>
+                <AlertCircle size={17} className="shrink-0 text-app-danger" aria-hidden="true" /><div><p className="text-sm font-medium">Assessment could not finish</p><p className="mt-1 break-words text-xs text-app-muted">{state.message}</p></div>
             </div>}
-            {state.status === 'cancelled' && <p role="status" className="py-3 text-xs text-app-muted">Assessment cancelled. No completed report was retained.</p>}
+            {state.status === 'cancelled' && <p role="status" className="py-3 text-xs text-app-muted">Assessment cancelled. Incomplete results were not saved.</p>}
 
             {result ? <div className="space-y-4 border-t border-app-border pt-5">
                 <div className="flex items-center justify-between gap-3">
@@ -92,7 +93,7 @@ export function SecurityPanel({ connectionId }: { connectionId: string }) {
                 </div>
                 <ReportOverview result={result} onRetryWithSudo={canRetryWithSudo ? handleRetryWithSudo : undefined} />
                 <FindingResults key={result.completedAt} report={result.report} onRetryWithSudo={canRetryWithSudo ? handleRetryWithSudo : undefined} />
-                <p className="text-[11px] leading-relaxed text-app-muted">Reports stay in this pane until another run, close or reconnect. Exports contain host and system metadata; share carefully.</p>
+                <p className="text-[11px] leading-relaxed text-app-muted">Results stay here until you run again, close the pane or reconnect. Exported reports include host and system information; share carefully.</p>
             </div> : null}
         </div>
         <ConfirmModal isOpen={confirmation !== null} onClose={() => setConfirmation(null)}

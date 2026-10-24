@@ -24,9 +24,9 @@ function ScopeDetails({ compact }: { compact: boolean }) {
             <ChevronRight size={13} aria-hidden="true" className="transition-transform group-open/setup-scope:rotate-90 motion-reduce:transition-none" />Scope &amp; access
         </summary>
         <div className="mt-3 space-y-3 rounded-lg border border-app-border bg-app-panel p-4 text-left leading-relaxed text-app-muted">
-            <p>{BASELINE_CHECK_COUNT} baseline checks across kernel, accounts, SSH, network, mounts, updates and services. Requires a Linux SSH host and GNU coreutils timeout.</p>
-            <p>Read-only and on demand. No external assessment lookup, agent installation or automatic changes. This is not a complete security or compliance audit.</p>
-            <p>Uses your SSH account’s existing privileges. Sudo is optional and approved for this run only. If required, its password stays in memory—not saved, synced or logged. Server policy still applies; some evidence may remain unavailable.</p>
+            <p>{BASELINE_CHECK_COUNT} checks cover selected Linux, account, SSH, network, mount, update and service settings. Requires a Linux SSH host with GNU coreutils timeout.</p>
+            <p>Checks run only when you approve them. They read settings without making changes, installing an agent or contacting an external service. This is not a full security or compliance audit.</p>
+            <p>Uses your SSH account’s permissions. Sudo is optional and allowed for this run only. If needed, its password stays in memory—not saved, synced or logged. Server policy still applies; some information may remain unreadable.</p>
         </div>
     </details>;
 }
@@ -47,12 +47,12 @@ export function HardeningSetup({ connected, local, compact, busy, stopping, elev
                 </div>}
                 <h2 className={cn('font-semibold tracking-tight', compact ? 'text-sm' : 'text-xl')}>{title}</h2>
                 <p role={!connected ? 'status' : undefined} className={cn('text-xs leading-relaxed text-app-muted', compact ? 'mt-1' : 'mt-2')}>{description}</p>
-                {!compact && <p className="mt-3 text-[11px] text-app-muted">{BASELINE_CHECK_COUNT} baseline checks</p>}
+                {!compact && <p className="mt-3 text-[11px] text-app-muted">{BASELINE_CHECK_COUNT} security checks</p>}
             </div>
 
             <div className={cn(compact ? 'flex flex-wrap items-center gap-3' : 'mt-6 flex flex-col gap-3')}>
                 {connected && <Switch label="Use sudo" checked={elevationConsent} onCheckedChange={onElevationChange}
-                    disabled={busy} showLabel description={compact ? undefined : 'Protected checks · this run only'}
+                    disabled={busy} showLabel description={compact ? undefined : 'Read protected information · this run only'}
                     className={cn('border border-app-border bg-app-panel', compact ? 'w-auto gap-4 px-3 py-1.5' : 'w-full')} />}
                 {busy ? <Button variant="secondary" size="sm" onClick={onCancel} disabled={stopping}>
                     <Square size={12} className="mr-2" aria-hidden="true" />{stopping ? 'Stopping…' : 'Cancel assessment'}
