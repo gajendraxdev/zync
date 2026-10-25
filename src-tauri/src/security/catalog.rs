@@ -37,6 +37,11 @@ pub(super) enum SshValue {
 }
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Evaluation {
+    SshPolicy(super::modules::ssh_policy::Check),
+    DockerWorkload(super::modules::workloads::Check),
+    Runtime(super::runtime::Check),
+    ExtendedHost(super::modules::system::Check),
+    Application(super::modules::applications::Check),
     KernelRange {
         setting: KernelSetting,
         minimum: u32,

@@ -1,10 +1,16 @@
 //! Bounded, inert report contract for read-only host hardening.
-use super::profile::Profile;
+use super::{
+    modules::{ModuleDefinition, ModuleId},
+    policy::{EvidenceKind, PolicyMetadata, Priority, RoleId},
+    profile::Profile,
+};
 use serde::{Deserialize, Serialize};
 
 pub const MAX_REPORT_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_FINDINGS: usize = 1000;
-pub const BASELINE: &str = "zync-linux-5 (2026-10-25)";
+pub const MAX_REMEDIATION_FIELD_CHARS: usize = 4096;
+pub const MAX_SCOPE_SUMMARY_CHARS: usize = 500;
+pub const BASELINE: &str = "zync-linux-7 (2026-10-25)";
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -18,6 +24,11 @@ pub struct Request {
     pub kind: Kind,
     #[serde(default)]
     pub elevation_consent: bool,
+    /// Omitted scope preserves the original host-only behavior; empty/unknown scopes fail closed.
+    #[serde(default)]
+    pub modules: Option<Vec<ModuleId>>,
+    #[serde(default)]
+    pub preset_id: RoleId,
 }
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -40,9 +51,20 @@ pub struct Admission {
     pub id: String,
     pub identity: HostIdentity,
 }
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Finding {
+    #[serde(default)]
+    pub target_key: String,
+    #[serde(default)]
+    pub evidence_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence_kind: Option<EvidenceKind>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub priority: Option<Priority>,
+    #[serde(default)]
+    pub module_id: String,
     pub id: String,
     pub category: String,
     pub needs_elevated_access: bool,
@@ -51,26 +73,49 @@ pub struct Finding {
     pub status: String,
     pub title: String,
     pub target: String,
+    #[serde(default)]
     pub observed: String,
+    #[serde(default)]
     pub expected: String,
+    #[serde(default)]
     pub rationale: String,
+    #[serde(default)]
     pub scope: String,
+    /// Authored short scope retains decisive limits; full scope stays available for inspection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope_summary: Option<String>,
+    #[serde(default)]
     pub rule_version: String,
+    #[serde(default)]
     pub reviewed_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub applicability_reason: Option<String>,
     pub evidence: String,
     pub recommendation: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remediation: Option<RemediationGuide>,
     pub reference: String,
+}
+/// Optional inert guidance for an evidenced finding; historical reports need not carry it.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RemediationGuide {
+    pub change: String,
+    pub impact: String,
+    pub verification: String,
+    pub rollback: String,
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Report {
+    pub policy: PolicyMetadata,
+    pub transport_fingerprint: Option<String>,
     pub kind: Kind,
     pub version: String,
     pub target: String,
     pub os: String,
     pub profile: Profile,
+    pub modules: Vec<ModuleDefinition>,
     pub findings: Vec<Finding>,
     pub total_findings: usize,
     pub truncated: bool,
@@ -82,11 +127,14 @@ impl Report {
     /// Reports describe a bounded scope, never a certification or an inferred clean host.
     pub fn new(kind: Kind, os: String, profile: Profile) -> Self {
         Self {
+            policy:RoleId::General.metadata(),
+            transport_fingerprint:None,
             kind,
             version: BASELINE.into(),
             target: "Connected Linux host".into(),
             os,
             profile,
+            modules: vec![],
             findings: vec![],
             total_findings: 0,
             truncated: false,

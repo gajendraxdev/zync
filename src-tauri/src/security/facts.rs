@@ -7,8 +7,28 @@ pub struct Fact {
     pub status: u32,
 }
 pub struct Facts(pub BTreeMap<String, Fact>);
+
+/// Named-file checks share exact numeric metadata parsing without duplicating permission policy.
+pub(super) fn file_metadata(source: &str, kind: u32) -> Option<(u32, u32, u32)> {
+    let mut fields = source.split_whitespace();
+    let raw = fields.next()?;
+    if raw.is_empty() || raw.len() > 4 || !raw.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    let mode = u32::from_str_radix(raw, 16).ok()?;
+    let number = |value: &str| {
+        (!value.is_empty() && value.len() <= 10 && value.bytes().all(|byte| byte.is_ascii_digit()))
+            .then(|| value.parse::<u32>().ok())
+            .flatten()
+    };
+    let uid = number(fields.next()?)?;
+    let gid = number(fields.next()?)?;
+    (fields.next().is_none() && mode & 0o170000 == kind).then_some((mode, uid, gid))
+}
 /// Share the fixed protected-read allowlist across access evidence, sudo prompts and retry eligibility.
 pub(super) fn is_protected_read(key: &str) -> bool {
+    if key == "docker_workload_list" || key.strip_prefix("docker_workload_")
+        .is_some_and(|slot| slot.len()==2 && slot.bytes().all(|byte|byte.is_ascii_digit()) && slot.parse::<u8>().is_ok_and(|slot|slot<20)) {return true;}
     matches!(
         key,
         "hardlinks"
@@ -18,6 +38,16 @@ pub(super) fn is_protected_read(key: &str) -> bool {
             | "nft"
             | "iptables"
             | "ip6tables"
+            | "ext_apparmor"
+            | "ext_audit"
+            | "ext_lsm"
+            | "docker_info"
+            | "nginx_config"
+            | "redis_config"
+            | "nginx_config_meta"
+            | "redis_config_meta"
+            | "ssh_preview_base"
+            | "ssh_preview_policy"
     )
 }
 impl Facts {
@@ -28,10 +58,9 @@ impl Facts {
     /// Offer an approved attempt for failed protected reads without claiming their cause is permission denial.
     pub fn can_retry_with_sudo(&self, key: &str) -> bool {
         is_protected_read(key)
-            && self
-                .0
-                .get(key)
-                .is_some_and(|fact| matches!(fact.status, 1..=123) && fact.status != 65)
+            && self.0.get(key).is_some_and(|fact| {
+                matches!(fact.status, 1..=123) && !matches!(fact.status, 65 | 66)
+            })
             && self
                 .get("privilege")
                 .and_then(|value| value.strip_suffix(" user"))
@@ -47,6 +76,7 @@ impl Facts {
                 0 => "The command finished, but its response was missing, malformed or not understood by this check.".into(),
                 77 => if self.get("privilege").is_some_and(|value| value.ends_with(" sudo")) { "The server denied access to the required information even though sudo was allowed. Ask the administrator to review access rules; allowing sudo does not guarantee access.".into() } else { "The server denied access to the required information. Review the access restriction with the administrator; a separately approved sudo run may help where available.".into() },
                 126 => "The required system command could not be executed (exit 126).".into(),
+                66 => "The required file or local endpoint was not available at the checked location. This does not establish that the application is absent or access was denied.".into(),
                 127 => "The required tool was not found in the standard system paths (exit 127). It may be missing or installed elsewhere.".into(),
                 124 | 137 => "This check took too long and reached its command deadline.".into(),
                 status => format!("The command failed (exit {status}); the cause is not confirmed. Its error output is withheld to avoid exposing sensitive information.{}", if self.get("privilege").is_some_and(|value| value.ends_with(" sudo")) { " Sudo was allowed, but authentication or the command may have failed. This is not a failed security check." } else { " This does not establish a permission problem or a security weakness." }),
@@ -64,6 +94,7 @@ impl Facts {
         match self.0.get(key).map(|fact| fact.status) {
             Some(77) => "Ask the administrator to review the access restriction, then run the assessment again. Do not weaken access controls; allowing sudo does not guarantee access.",
             Some(126) => "Ask the administrator why the required command could not run, then repeat the assessment. This result alone does not justify changing security settings.",
+            Some(66) => "Check the module's named files, service units and local endpoints with the administrator. Other installation layouts are not discovered automatically.",
             Some(127) => "Check whether the required tool is available in the standard system paths, then run the assessment again. A missing tool does not establish a security weakness.",
             Some(124 | 137) => "Ask the administrator why the check took too long before trying again. Do not change security settings based on an unavailable result.",
             Some(0) => "Ask the administrator to review the missing, malformed or unrecognized response, then run the assessment again. This result alone does not justify changing security settings.",
@@ -89,6 +120,7 @@ impl Facts {
                 0 => "The check did not return usable information (missing or malformed response).",
                 77 => "The server denied access to the required information.",
                 126 => "The required command could not run.",
+                66 => "The required input was unavailable at the checked location.",
                 127 => "The required tool was not found in the standard system paths.",
                 124 | 137 => "This check took too long.",
                 _ => "The command failed; the cause is not confirmed.",

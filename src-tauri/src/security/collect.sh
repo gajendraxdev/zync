@@ -17,7 +17,7 @@ collect() {
     label=$1
     shift
     printf '%s\000' "$label"
-    case "$label" in hardlinks|symlinks|ssh_defaults|shadow_empty|nft|iptables|ip6tables)
+    case "$label" in hardlinks|symlinks|ssh_defaults|shadow_empty|nft|iptables|ip6tables|ext_apparmor|ext_audit|ext_lsm|docker_info|nginx_config|redis_config|nginx_config_meta|redis_config_meta|docker_workload_list|docker_workload_0[0-9]|docker_workload_1[0-9]|ssh_preview_base|ssh_preview_policy)
         printf 'ZYNC-ACCESS-%s-begin-%s:' "$sudo_nonce" "$label" >&3
         "$@" 2>&3
         result=$?
@@ -66,7 +66,7 @@ account_counts() {
     awk -F: 'NF != 7 || $3 !~ /^[0-9]+$/ {bad=1} {total++; if ($3 == 0) root++; seen[$3]++} END {if (bad || !total) exit 65; for (uid in seen) if (seen[uid] > 1) duplicate++; printf "%d %d\n", root, duplicate}' /etc/passwd
 }
 shadow_counts() {
-    if [ "$collection_mode" != sudo ] && [ ! -r /etc/shadow ]; then return 77; fi
+    # The actual framed reader distinguishes denial from a missing/dangling named file.
     protected awk -F: 'NF != 9 {bad=1} {total++; if ($2 == "") empty++} END {if (bad || !total) exit 65; printf "%d\n", empty}' /etc/shadow
 }
 # Resolve only the local shadow group's numeric ID; never emit membership or use network NSS.
@@ -92,35 +92,4 @@ os_identity() {
 }
 collect os os_identity
 collect privilege privilege
-collect aslr sysctl -n kernel.randomize_va_space
-collect ptrace sysctl -n kernel.yama.ptrace_scope
-collect kptr sysctl -n kernel.kptr_restrict
-collect dmesg sysctl -n kernel.dmesg_restrict
-collect hardlinks protected sysctl -n fs.protected_hardlinks
-collect symlinks protected sysctl -n fs.protected_symlinks
-collect bpf sysctl -n kernel.unprivileged_bpf_disabled
-collect redirects sysctl -n net.ipv4.conf.all.accept_redirects
-collect send_redirects sysctl -n net.ipv4.conf.all.send_redirects
-collect source_route sysctl -n net.ipv4.conf.all.accept_source_route
-collect rp_filter sysctl -n net.ipv4.conf.all.rp_filter
-collect ipv6_redirects sysctl -n net.ipv6.conf.all.accept_redirects
-collect dumps sysctl -n fs.suid_dumpable
-collect passwd stat -Lc '%f %u %g' -- /etc/passwd
-collect shadow stat -Lc '%f %u %g' -- /etc/shadow
-collect shadow_group shadow_group
-collect ssh_config stat -Lc '%f %u %g' -- /etc/ssh/sshd_config
-collect ssh_defaults ssh_defaults
-collect accounts account_counts
-collect shadow_empty shadow_counts
-collect listeners ss -H -lntu
-collect nft protected nft -j -n -s -t list ruleset
-collect iptables protected iptables-save
-collect ip6tables protected ip6tables-save
-collect tmp_mount findmnt --noheadings --raw --output TARGET,OPTIONS --target /tmp
-collect shm_mount findmnt --noheadings --raw --output TARGET,OPTIONS --target /dev/shm
-collect apt_policy apt-config shell Periodic APT::Periodic::Update-Package-Lists/i Upgrade APT::Periodic::Unattended-Upgrade/i
-collect package_health dpkg --audit
-collect reboot reboot_state
-collect journal systemctl show systemd-journald.service --property=LoadState,ActiveState --no-pager
-collect ssh_service systemctl show ssh.service sshd.service --property=Id,LoadState,ActiveState,NoNewPrivileges,ProtectSystem,PrivateTmp --no-pager
-printf 'complete\000'
+# Compiled selected fragments and the completion marker are appended by modules::script.

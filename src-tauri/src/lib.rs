@@ -1,4 +1,10 @@
 mod ai;
+// Tauri links its generated Windows resource into app binaries only. Unit tests
+// also need that manifest to load rfd's Common Controls v6 imports at startup.
+#[cfg(all(test, target_os = "windows", target_env = "msvc"))]
+#[link(name = "resource", kind = "static")]
+unsafe extern "C" {}
+
 mod atomic_io;
 mod commands;
 mod connection_latency;
@@ -94,6 +100,7 @@ pub fn run() {
             let app_state = AppState::new(data_dir.clone(), app_handle.clone());
             app.manage(app_state);
             app.manage(security::SecurityJobs::default());
+            app.manage(std::sync::Arc::new(security::snapshots::library::ReportLibrary::new(data_dir.join("security-reports.redb"))));
             app.manage(feedback_inbox::TransportState::default());
             app.manage(plugins::broker::PluginBrokerState::new());
             app.manage(plugins::pane_document::PaneDocuments::default());
@@ -182,6 +189,19 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             security::runner::security_assessment_begin,
+            security::runner::security_assessment_modules,
+            security::runner::security_assessment_catalog,
+            security::snapshots::security_assessment_import_report,
+            security::snapshots::security_assessment_import_annotations,
+            security::snapshots::security_assessment_import_package,
+            security::snapshots::library::security_assessment_saved_reports,
+            security::snapshots::library::risks::security_assessment_accepted_risks,
+            security::snapshots::library::risks::security_assessment_save_accepted_risks,
+            security::snapshots::library::risks::security_assessment_remove_accepted_risk,
+            security::snapshots::library::security_assessment_load_report,
+            security::snapshots::library::security_assessment_save_report,
+            security::snapshots::library::security_assessment_delete_report,
+            security::snapshots::export::security_assessment_export,
             security::runner::security_assessment_run,
             security::runner::security_assessment_cancel,
             security::runner::security_assessment_needs_password,

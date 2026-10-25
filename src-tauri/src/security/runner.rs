@@ -1,6 +1,7 @@
 use super::{
     facts, hardening,
     jobs::{Lease, SecurityJobs},
+    modules::{self, ModuleDefinition, ModuleId},
     report::{Admission, HostIdentity, Kind, Report, Request, MAX_REPORT_BYTES},
 };
 use crate::commands::{shell_quote, AppState};
@@ -9,11 +10,29 @@ use tauri::State;
 use zeroize::Zeroizing;
 
 /// Match existing administrator-review boundaries; plugin/secondary windows cannot authorize credentials.
-fn main_window(window: &tauri::WebviewWindow) -> Result<(), String> {
+pub(super) fn main_window(window: &tauri::WebviewWindow) -> Result<(), String> {
     if window.label() != "main" {
         return Err("Security assessments are available only in the main window.".into());
     }
     Ok(())
+}
+
+/// Return compiled local choices without opening a connection or collecting host information.
+#[tauri::command]
+pub fn security_assessment_modules(
+    window: tauri::WebviewWindow,
+) -> Result<Vec<ModuleDefinition>, String> {
+    main_window(&window)?;
+    Ok(modules::definitions())
+}
+
+/// Presets and choices are compiled local policy, never host discovery or implicit execution.
+#[tauri::command]
+pub fn security_assessment_catalog(
+    window: tauri::WebviewWindow,
+) -> Result<super::policy::Catalog, String> {
+    main_window(&window)?;
+    Ok(super::policy::catalog())
 }
 
 /// Bind an explicit run to the current transport, not a later reconnect with the same host id.
@@ -92,14 +111,14 @@ pub fn security_assessment_authenticate(
 }
 
 /// Only reviewed collectors and fixed arguments can reach the SSH exec boundary.
-fn command(kind: Kind, nonce: &str, elevation: bool) -> String {
+fn command(kind: Kind, nonce: &str, elevation: bool, selected: &[ModuleId]) -> String {
     let kind = match kind {
         Kind::Hardening => "hardening",
     };
     // GNU timeout's default process group covers ordinary descendants, even if SSH is lost.
     // The empty environment avoids startup hooks, custom PATH and inherited scanner settings.
-    format!("exec /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=C /usr/bin/timeout --signal=TERM --kill-after=2s {}s /bin/sh -c {} sh {} {} {}",
-        if elevation { 150 } else { 45 }, shell_quote(include_str!("collect.sh")), kind, shell_quote(nonce), if elevation { "sudo" } else { "user" })
+    format!("exec /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=C ZYNC_SSH_CONNECTION=\"$SSH_CONNECTION\" /usr/bin/timeout --signal=TERM --kill-after=2s {}s /bin/sh -c {} sh {} {} {}",
+        if elevation { 240 } else { 150 }, shell_quote(&modules::script(selected)), kind, shell_quote(nonce), if elevation { "sudo" } else { "user" })
 }
 
 /// Drain a single collector channel with explicit status, byte and time bounds; no global lock is held.
@@ -107,6 +126,7 @@ async fn collect(
     lease: &Lease<'_>,
     state: &AppState,
     request: &Request,
+    selected: &[ModuleId],
     jobs: &SecurityJobs,
 ) -> Result<facts::Facts, String> {
     let mut cancel = lease.cancel.clone();
@@ -125,12 +145,13 @@ async fn collect(
         channel
             .exec(
                 true,
-                command(request.kind, &nonce, request.elevation_consent),
+                command(request.kind, &nonce, request.elevation_consent, selected),
             )
             .await
             .map_err(|_| "The SSH server refused to start the assessment commands.")?;
         let mut output = Output::default();
-        let mut prompts = super::sudo::Prompts::new(&nonce);
+        let keys = modules::keys(selected);
+        let mut prompts = super::sudo::Prompts::for_keys(&nonce, &keys);
         let mut access = super::access::AccessEvidence::new(&nonce);
         let mut password: Option<Zeroizing<String>> = None;
         loop {
@@ -198,7 +219,7 @@ async fn collect(
                 _ => {}
             }
         }
-        let mut facts = output.finish(&nonce, facts::HARDENING_KEYS)?;
+        let mut facts = output.finish(&nonce, &keys)?;
         access.apply(&mut facts);
         Ok(facts)
     };
@@ -214,7 +235,7 @@ async fn collect(
         biased;
         _ = async { let _ = cancel.wait_for(|value| *value).await; } => Err("Assessment cancelled.".into()),
         _ = monitor => Err("The SSH connection changed. Start a new assessment.".into()),
-        result = tokio::time::timeout(Duration::from_secs(if request.elevation_consent { 160 } else { 50 }), work) => result.unwrap_or_else(|_| Err("The server took too long to finish the checks. No completed report is available. Sudo methods requiring multiple prompts or an interactive terminal are not supported.".into())),
+        result = tokio::time::timeout(Duration::from_secs(if request.elevation_consent { 250 } else { 160 }), work) => result.unwrap_or_else(|_| Err("The server took too long to finish the checks. No completed report is available. Sudo methods requiring multiple prompts or an interactive terminal are not supported.".into())),
     };
     // Cleanup always precedes releasing admission. A remote timeout remains the independent
     // backstop; SSH signal requests are best effort, not a sandbox.
@@ -248,18 +269,24 @@ pub async fn security_assessment_run(
     window: tauri::WebviewWindow,
     id: String,
     request: Request,
+    credentials: Option<Vec<super::runtime::RuntimeCredential>>,
     state: State<'_, AppState>,
     jobs: State<'_, SecurityJobs>,
 ) -> Result<Report, String> {
     main_window(&window)?;
+    let selected = modules::selection(request.modules.as_deref())?;
+    let credentials = credentials.unwrap_or_default();
+    super::runtime::validate_credentials(&credentials, &selected)?;
     let lease = jobs.claim(&id)?;
     let mut cancel = lease.cancel.clone();
     let started = std::time::Instant::now();
     // Collection owns its channel cleanup; do not drop that future on user cancellation.
-    let facts = collect(&lease, &state, &request, &jobs).await?;
+    let mut facts = collect(&lease, &state, &request, &selected, &jobs).await?;
     let work = async {
+        let runtime = super::runtime::collect(&lease, &credentials).await?;
+        facts.0.extend(runtime.0);
         match request.kind {
-            Kind::Hardening => hardening::assess(&facts),
+            Kind::Hardening => hardening::assess_policy(&facts, &selected, request.preset_id),
         }
     };
     tokio::pin!(work);
@@ -269,15 +296,31 @@ pub async fn security_assessment_run(
     loop {
         tokio::select! {
             biased;
-            _ = async { let _ = cancel.wait_for(|value| *value).await; } => return Err("Assessment cancelled. No completed report is available.".into()),
-            _ = &mut deadline => return Err("Assessment reached its five-minute deadline. No completed report is available.".into()),
+            _ = async { let _ = cancel.wait_for(|value| *value).await; } => {
+                let _=tokio::time::timeout(Duration::from_secs(5),&mut work).await;
+                return Err("Assessment cancelled. No completed report is available.".into());
+            },
+            _ = &mut deadline => {
+                jobs.cancel(&id);
+                let _=tokio::time::timeout(Duration::from_secs(5),&mut work).await;
+                return Err("Assessment reached its five-minute deadline. No completed report is available.".into());
+            },
             _ = monitor.tick() => {
-                if !current(&lease, &state).await { return Err("The SSH connection changed. Start a new assessment.".into()); }
+                if !current(&lease, &state).await {
+                    jobs.cancel(&id);
+                    let _=tokio::time::timeout(Duration::from_secs(5),&mut work).await;
+                    return Err("The SSH connection changed. Start a new assessment.".into());
+                }
             },
             result = &mut work => {
                 let still_current = current(&lease, &state).await;
                 if !still_current || *cancel.borrow() { return Err("Assessment cancelled or SSH connection changed.".into()); }
-                return result;
+                let mut report=result?;
+                report.transport_fingerprint=state.connections.lock().await.get(&lease.connection)
+                    .filter(|connection|connection.session.as_ref().is_some_and(|session|Arc::ptr_eq(session,&lease.session)))
+                    .map(|connection|connection.host_key_fingerprint.clone());
+                if report.transport_fingerprint.is_none() || *cancel.borrow() {return Err("The SSH connection changed. Start a new assessment.".into());}
+                return Ok(report);
             },
         }
     }
@@ -338,9 +381,10 @@ mod tests {
         let mut output = Output::default();
         output.push(&vec![0; MAX_REPORT_BYTES], true).unwrap();
         assert!(output.push(b"x", false).is_err());
-        assert!(!command(Kind::Hardening, "nonce", false).contains("python"));
-        assert!(command(Kind::Hardening, "nonce", false).contains("--kill-after=2s 45s"));
-        assert!(command(Kind::Hardening, "nonce", false).ends_with(" user"));
-        assert!(command(Kind::Hardening, "nonce", true).ends_with(" sudo"));
+        assert!(!command(Kind::Hardening, "nonce", false, &[ModuleId::Host]).contains("python"));
+        assert!(command(Kind::Hardening, "nonce", false, &[ModuleId::Host])
+            .contains("--kill-after=2s 150s"));
+        assert!(command(Kind::Hardening, "nonce", false, &[ModuleId::Host]).ends_with(" user"));
+        assert!(command(Kind::Hardening, "nonce", true, &[ModuleId::Host]).ends_with(" sudo"));
     }
 }

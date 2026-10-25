@@ -132,17 +132,10 @@ fn file_observation(facts: &Facts, key: &'static str, restricted: bool) -> Obser
             value.parse::<u32>().ok().map(Some)
         }
     });
-    let parsed = facts.get(key).and_then(|value| {
-        let mut fields = value.split_whitespace();
-        let mode = u32::from_str_radix(fields.next()?, 16).ok()?;
-        let uid = fields.next()?.parse::<u32>().ok()?;
-        let gid = fields.next()?.parse::<u32>().ok()?;
-        (fields.next().is_none() && mode <= 0xffff && mode & 0o170000 == 0o100000).then_some((
-            mode & 0o7777,
-            uid,
-            gid,
-        ))
-    });
+    let parsed = facts
+        .get(key)
+        .and_then(|value| super::facts::file_metadata(value, 0o100000))
+        .map(|(mode, uid, gid)| (mode & 0o7777, uid, gid));
     let mode_accepted = parsed.is_some_and(|(mode, uid, _)| {
         uid == 0 && mode & 0o022 == 0 && (!restricted || mode & 0o007 == 0)
     });
@@ -185,6 +178,7 @@ pub(super) fn evaluate(facts: &Facts, rule: &RuleDefinition) -> Observation {
     let key = rule.fact_key;
     let raw = facts.get(key);
     let (value, outcome) = match rule.evaluation {
+        Evaluation::ExtendedHost(_) | Evaluation::Application(_) | Evaluation::DockerWorkload(_) | Evaluation::Runtime(_) | Evaluation::SshPolicy(_) => (None, Outcome::Informational),
         Evaluation::KernelRange { minimum, maximum, .. } => {
             let number = raw.and_then(|value| value.parse::<u32>().ok());
             (number.and(raw).map(str::to_string), Outcome::baseline(number.is_some_and(|value| (minimum..=maximum).contains(&value))))

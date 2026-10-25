@@ -272,6 +272,7 @@ fn service(value: &str, ssh_service: bool) -> String {
 /// Format each typed evaluation family independently of rule IDs, status decisions and raw evidence.
 pub(super) fn observed(evaluation: Evaluation, value: &str, outcome: Outcome) -> String {
     match evaluation {
+        Evaluation::ExtendedHost(_) | Evaluation::Application(_) | Evaluation::DockerWorkload(_) | Evaluation::Runtime(_) | Evaluation::SshPolicy(_) => value.into(),
         Evaluation::KernelRange { setting, .. } | Evaluation::KernelObservation(setting) => kernel(setting, value),
         Evaluation::File { .. } => file(value),
         Evaluation::Ssh { setting, .. } => ssh(setting, value),

@@ -406,7 +406,7 @@ fn contextual_observations_and_maintenance_signals() {
         "notAssessed"
     ]
     .contains(&item.status.as_str())));
-    assert_eq!(report.version, "zync-linux-5 (2026-10-25)");
+    assert_eq!(report.version, "zync-linux-7 (2026-10-25)");
 }
 
 /// Collection failures cannot retain a rule's configuration recommendation, including in compatible JSON exports.
@@ -531,7 +531,7 @@ fn sudo_retry_eligibility_is_bounded_to_protected_unelevated_reads() {
                 let expected = facts::is_protected_read(key)
                     && privilege == "1000 user"
                     && (1..=123).contains(&status)
-                    && status != 65;
+                    && !matches!(status, 65 | 66);
                 assert_eq!(
                     values.can_retry_with_sudo(key),
                     expected,

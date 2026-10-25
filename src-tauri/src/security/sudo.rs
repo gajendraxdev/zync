@@ -16,15 +16,26 @@ pub struct Prompts {
     tail: Zeroizing<Vec<u8>>,
     seen: BTreeSet<String>,
     active: Option<String>,
+    allowed: BTreeSet<String>,
 }
 impl Prompts {
-    /// Each collector has a random nonce; only the seven fixed protected-call labels may request input.
+    /// Tests retain the legacy host scope; production always supplies the selected record keys.
+    #[cfg(test)]
     pub fn new(nonce: &str) -> Self {
+        Self::for_keys(nonce, super::facts::HARDENING_KEYS)
+    }
+    /// A nonce-bound prompt must belong to a fixed protected read in this run's selected scope.
+    pub fn for_keys(nonce: &str, keys: &[&str]) -> Self {
         Self {
             prefix: format!("ZYNC-SUDO-{nonce}-").into_bytes(),
             tail: Zeroizing::new(Vec::new()),
             seen: BTreeSet::new(),
             active: None,
+            allowed: keys
+                .iter()
+                .filter(|key| is_protected_read(key))
+                .map(|key| key.to_string())
+                .collect(),
         }
     }
 
@@ -58,7 +69,7 @@ impl Prompts {
                     } else {
                         (token.as_str(), None)
                     };
-                    if !is_protected_read(key) {
+                    if !self.allowed.contains(key) {
                         return Err(
                             "This sudo password request is not supported. No password was sent."
                                 .into(),
