@@ -4,7 +4,8 @@ import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
 import { Select } from '../../../components/ui/Select';
 import { cn } from '../../../lib/utils';
-import { filterFindings, findingStatusLabel, findingSummary, type AssessmentReport, type SudoRetryLabel } from '../domain/assessment';
+import { filterFindings, findingStatusLabel, findingSummary, type AssessmentReport, type Finding, type SudoRetryLabel } from '../domain/assessment';
+import type { RiskException } from '../domain/review';
 import { FindingDetails } from './FindingDetails';
 
 const PAGE_SIZE = 25;
@@ -15,18 +16,29 @@ function FindingStatusBadge({ label }: { label: string }) {
 }
 
 /** Search and pagination bound DOM work independently of the native 1,000-finding report cap. */
-export function FindingResults({ report, onRetryWithSudo }: { report: AssessmentReport; onRetryWithSudo?: (label: SudoRetryLabel) => void }) {
+export function FindingResults({ report, onRetryWithSudo, accepted, onAcceptRisk, onRemoveRisk, historical = false }: {
+    report: AssessmentReport; onRetryWithSudo?: (label: SudoRetryLabel) => void;
+    accepted?: ReadonlyMap<Finding, RiskException>; onAcceptRisk?: (finding: Finding) => void; onRemoveRisk?: (id: string) => void; historical?: boolean;
+}) {
     const [query, setQuery] = useState('');
     const [status, setStatus] = useState('all');
     const [category, setCategory] = useState('all');
+    const [moduleId, setModuleId] = useState('all');
     const [page, setPage] = useState(0);
-    const findings = useMemo(() => filterFindings(report.findings, query, status, category), [report.findings, query, status, category]);
+    const findings = useMemo(() => {
+        const filtered = filterFindings(report.findings, query, status === 'accepted' ? 'all' : status, category, moduleId);
+        return status === 'accepted' ? filtered.filter(finding => accepted?.has(finding)) : filtered;
+    }, [report.findings, query, status, category, moduleId, accepted]);
     const categories = useMemo(() => [...new Set(report.findings.map(item => item.category).filter((value): value is string => Boolean(value)))].sort(), [report.findings]);
     const findingKeys = useMemo(() => new Map(report.findings.map((finding, index) => [finding, index])), [report.findings]);
     const lastPage = Math.max(0, Math.ceil(findings.length / PAGE_SIZE) - 1);
     const currentPage = Math.min(page, lastPage);
     const visible = findings.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
     return <section aria-label="Assessment findings" className="overflow-hidden rounded-xl border border-app-border bg-app-panel">
+        <div role="group" aria-label="Result view" className="flex flex-wrap gap-1 border-b border-app-border px-3 py-2">
+            {[['attention', 'Needs attention'], ['informational', 'Observations'], ['all', 'All checks']].map(([value, label]) => <Button key={value} size="sm" variant={status === value ? 'secondary' : 'ghost'}
+                aria-pressed={status === value} onClick={() => { setStatus(value); setPage(0); }}>{label}</Button>)}
+        </div>
         <div className="flex flex-wrap items-end gap-3 border-b border-app-border p-4">
             <div className="min-w-40 flex-1"><Input label="Search findings" placeholder="Check, observation or ID" value={query} maxLength={256}
                 onChange={event => { setQuery(event.target.value); setPage(0); }} rightElement={<Search size={14} aria-hidden="true" />} /></div>
@@ -35,18 +47,22 @@ export function FindingResults({ report, onRetryWithSudo }: { report: Assessment
                 { value: 'informational', label: 'Informational' }, { value: 'passed', label: 'Passed' },
                 { value: 'needsElevatedAccess', label: 'Needs elevated access' }, { value: 'evidenceUnavailable', label: 'Evidence unavailable' },
                 { value: 'notApplicable', label: 'Not applicable' },
+                ...(accepted?.size ? [{ value: 'accepted', label: 'Accepted risk' }] : []),
             ]} /></div>
             {categories.length > 1 && <div className="w-40"><Select label="Category" value={category} onChange={value => { setCategory(value); setPage(0); }} options={[{ value: 'all', label: 'All categories' }, ...categories.map(value => ({ value, label: value }))]} /></div>}
+            {report.modules && report.modules.length > 1 && <div className="w-44"><Select label="Check area" value={moduleId} onChange={value => { setModuleId(value); setPage(0); }}
+                options={[{ value: 'all', label: 'All check areas' }, ...report.modules.map(module => ({ value: module.id, label: module.label }))]} /></div>}
         </div>
         <div className="divide-y divide-app-border">
             {visible.map(finding => <details key={findingKeys.get(finding)} data-assessment-finding className="group/finding">
                 <summary className="flex cursor-pointer list-none items-start gap-3 px-4 py-3.5 text-sm hover:bg-app-surface/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-control-focus [&::-webkit-details-marker]:hidden">
-                    <span className="mt-0.5 max-w-[45%] shrink-0"><FindingStatusBadge label={findingStatusLabel(finding)} /></span>
+                    <span className="mt-0.5 max-w-[45%] shrink-0"><FindingStatusBadge label={findingStatusLabel(finding)} />
+                        {accepted?.has(finding) && <span className="mt-1 block text-[10px] text-app-muted">{historical ? 'Recorded acceptance' : 'Accepted risk'}</span>}</span>
                     <span className="min-w-0 flex-1"><span className="block break-words font-medium">{finding.title || finding.id}</span>
                         <span className="mt-1 block break-words text-xs leading-relaxed text-app-muted">{findingSummary(finding)}</span></span>
                     <ChevronRight size={15} aria-hidden="true" className="mt-1 shrink-0 text-app-muted transition-transform group-open/finding:rotate-90 motion-reduce:transition-none" />
                 </summary>
-                <FindingDetails finding={finding} onRetryWithSudo={onRetryWithSudo} />
+                <FindingDetails finding={finding} onRetryWithSudo={onRetryWithSudo} acceptedRisk={accepted?.get(finding)} onAcceptRisk={onAcceptRisk} onRemoveRisk={onRemoveRisk} historical={historical} />
             </details>)}
             {visible.length === 0 && <div className="px-6 py-12 text-center text-sm text-app-muted">
                 {report.findings.length === 0 ? 'No check results were returned. Review what this assessment covers; an empty report does not mean the host is secure.' : 'No results match your filters.'}
