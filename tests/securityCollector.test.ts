@@ -9,8 +9,9 @@ const os = await import(osModule);
 const path = await import(pathModule);
 const { spawnSync } = await import(childModule);
 const { default: assert } = await import(assertModule);
-const script = path.join(process.cwd(), 'src-tauri/src/security/collect.sh');
-const collectorSource: string = await fs.readFile(script, 'utf8');
+const sourceRoot = path.join(process.cwd(), 'src-tauri/src/security');
+const collectorSource: string = await fs.readFile(path.join(sourceRoot, 'collect.sh'), 'utf8') + '\n'
+    + await fs.readFile(path.join(sourceRoot, 'collectors/host.sh'), 'utf8') + "\nprintf 'complete\\000'\n";
 assert.equal(collectorSource.includes('\r'), false, 'Embedded POSIX collector must retain LF on Windows checkouts');
 const nativeFactsSource: string = await fs.readFile(path.join(process.cwd(), 'src-tauri/src/security/facts.rs'), 'utf8');
 const keySection = nativeFactsSource.match(/pub const HARDENING_KEYS: &\[&str\] = &\[([\s\S]*?)\];/)?.[1] ?? '';
@@ -24,6 +25,8 @@ if (process.platform !== 'linux') {
 } else {
     const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'zync-collector-test-'));
     try {
+        const script = path.join(folder, 'collector.sh');
+        await fs.writeFile(script, collectorSource);
         const command = '#!/bin/sh\ncase "${0##*/}" in\nuname) printf "Linux\\n";;\nid) printf "1000\\n";;\nsed) printf "ID=ubuntu\\nVERSION_ID=24.04\\n";;\nsysctl) printf "2\\n";;\nstat) printf "81a4 0 0\\n";;\nsshd) exit 1;;\nawk) printf "0\\n";;\nsudo) printf "%s\\n" "$*" >> "$ZYNC_COLLECTOR_LOG"; [ "$ZYNC_DENY_SUDO" = 1 ] && exit 1; if [ "$ZYNC_REQUIRE_PASSWORD" = 1 ]; then printf "%s" "$5" >&2; IFS= read -r answer; [ "$answer" = fixture-secret ] || exit 1; fi; shift 6; exec "$@";;\n*) exit 127;;\nesac\n';
         for (const name of ['uname', 'id', 'sed', 'sysctl', 'stat', 'sshd', 'awk', 'sudo', 'ss', 'nft', 'iptables-save', 'ip6tables-save', 'findmnt', 'apt-config', 'dpkg', 'systemctl']) await fs.writeFile(path.join(folder, name), command, { mode: 0o700 });
         const log = path.join(folder, 'sudo.log');
@@ -98,6 +101,20 @@ if (process.platform !== 'linux') {
         assert.notEqual(identityResult.status, 0);
         assert.equal(identityResult.stdout.length, 0, 'A dangling /etc identity entry is not silently replaced by vendor data');
         await fs.unlink(etcIdentity);
+
+        // Missing and dangling files are not proven access denials; let the actual reader report errors.
+        const shadowFunction = collectorSource.match(/\nshadow_counts\(\) \{\n[\s\S]*?\n\}/)?.[0];
+        if (!shadowFunction) throw new Error('Missing production shadow aggregate reader');
+        const shadowReader = 'protected() { "$@"; }\n' + shadowFunction.replaceAll('/etc/shadow', '"$ZYNC_SHADOW_FIXTURE"') + '\nshadow_counts\n';
+        const shadowFixture = path.join(folder, 'shadow-missing');
+        const shadowEnv = { PATH: '/usr/bin:/bin', LC_ALL: 'C', ZYNC_SHADOW_FIXTURE: shadowFixture, collection_mode: 'user' };
+        let shadowRead = spawnSync('/bin/sh', ['-c', shadowReader], { env: shadowEnv, timeout: 3000 });
+        assert.notEqual(shadowRead.status, 0);
+        assert.notEqual(shadowRead.status, 77, 'Missing shadow input must not invent confirmed denial');
+        await fs.symlink(path.join(folder, 'missing-shadow-target'), shadowFixture);
+        shadowRead = spawnSync('/bin/sh', ['-c', shadowReader], { env: shadowEnv, timeout: 3000 });
+        assert.notEqual(shadowRead.status, 0);
+        assert.notEqual(shadowRead.status, 77, 'Dangling shadow symlink must not invent confirmed denial');
 
         const groupFixture = path.join(folder, 'group-fixture');
         const groupFunction = (await fs.readFile(script, 'utf8')).match(/\nshadow_group\(\) \{\n[\s\S]*?\n\}/)?.[0];

@@ -23,6 +23,8 @@
     "include": [
         "tests/securityAssessment.test.ts",
         "tests/securityCollector.test.ts",
+        "tests/hardeningQualification.test.ts",
+        "tests/docker/hardening-runtime/qualify.ts",
         "tests/securityAssessment.browser.tsx",
         "tests/securityAssessment.browser.test.ts",
         "tests/vaultSshCertificate.browser.tsx",
