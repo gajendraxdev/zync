@@ -1,9 +1,11 @@
 import type { AssessmentAdmission, AssessmentReport, AssessmentRequest, AssessmentState, AssessmentSubject } from '../domain/assessment';
 import { requestError } from '../domain/assessment';
+import { sameModuleSelection } from '../domain/modules';
+import { credentialError, type RuntimeCredential } from '../domain/modules';
 
 export interface AssessmentPort {
     begin(subject: AssessmentSubject): Promise<AssessmentAdmission>;
-    run(id: string, request: AssessmentRequest): Promise<AssessmentReport>;
+    run(id: string, request: AssessmentRequest, credentials?: readonly RuntimeCredential[]): Promise<AssessmentReport>;
     cancel(id: string): Promise<void>;
     needsPassword?(id: string): Promise<boolean>;
     authenticate?(id: string, password: string): Promise<void>;
@@ -30,12 +32,16 @@ export class AssessmentController {
     private publish(state: AssessmentState): void { this.state = state; this.listeners.forEach(listener => listener()); }
 
     /** Register first so a cancel during admission cannot accidentally launch collectors. */
-    async start(request: AssessmentRequest): Promise<void> {
+    async start(request: AssessmentRequest, credentials: readonly RuntimeCredential[] = []): Promise<void> {
         if (this.owned) return;
         const error = requestError(request);
         if (error) { this.publish({ status: 'failed', message: error }); return; }
+        if (credentials.length > 4 || new Set(credentials.map(item => item.kind)).size !== credentials.length || credentials.some(item => credentialError(item))) {
+            this.publish({ status: 'failed', message: 'Review the application access details before running.' }); return;
+        }
         const run: Run = { cancelled: false };
-        const captured = { ...request };
+        const captured = { ...request, ...(request.modules ? { modules: [...request.modules] } : {}) };
+        const capturedCredentials = credentials.map(item => ({ ...item }));
         const subject = { ...this.subject };
         const startedAt = Date.now();
         let next: AssessmentState | undefined;
@@ -66,14 +72,17 @@ export class AssessmentController {
                     } finally { pending = false; }
                 }, 250);
             }
-            const report = await this.port.run(run.id, captured);
+            const report = await this.port.run(run.id, captured, capturedCredentials);
             if (!run.cancelled) {
                 if (report.kind !== captured.kind) throw new Error('Zync received a different assessment type than requested. Run the assessment again.');
+                if (captured.modules && !sameModuleSelection(captured.modules, report.modules)) throw new Error('The returned check areas differ from your approved selection. Run the assessment again.');
+                if (captured.presetId && report.policy?.id !== captured.presetId) throw new Error('The returned policy differs from your approved preset. Run the assessment again.');
                 next = { status: 'completed', result: { report, subject: boundSubject, startedAt, completedAt: Date.now() } };
             }
         } catch (error) {
             if (!run.cancelled) next = { status: 'failed', message: (error instanceof Error ? error.message : String(error)).slice(0, 1000) };
         } finally {
+            capturedCredentials.forEach(item => { item.secret = ''; });
             if (polling) clearInterval(polling);
             if (run.id) { try { await this.port.cancel(run.id); } catch { /* Native and remote deadlines are the fallback. */ } }
             if (this.owned === run) {
