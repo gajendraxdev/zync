@@ -92,6 +92,33 @@ All notable changes to Zync are documented in this file. The format is based on 
   SSH policy prefers config-only OpenSSH `-G` when supported, with a bounded probe
   and legacy `-T` fallback. Linux collection requires GNU coreutils `timeout`.
 
+### Fixed
+
+- **Disconnected workspace actions:** Audit setup, Dashboard and per-host Port
+  Forwarding share explicit Connect/Reconnect/Retry controls. Saved reports,
+  accepted risks and tunnel configurations remain usable offline; audit scope
+  and in-memory completed reports survive reconnect without starting a scan.
+  Offline audit setup shows only the connection card; assessment controls return
+  after connecting.
+  Connection cards offer Cancel during connection and concise failure reasons;
+  audit reconnect restores keyboard focus without interrupting another control.
+- **Consistent tunnel starts:** Per-host and global single/group starts connect
+  through the existing host flow, respect cancellation and avoid duplicate starts
+  after automatic tunnel restoration. Browsing no longer reconciles by stopping
+  tunnels, and stopping a forward no longer disconnects other host panes.
+- **Focused reconnect shortcuts:** Only the focused restored terminal or Files
+  pane owns reconnect autofocus and the Enter shortcut. Offline dashboards hide
+  live metrics and remote actions until the host is connected.
+- **Reconnect state:** Visible but unfocused Files panes no longer take keyboard
+  focus. Sudo retry stays unavailable while an assessment runs or stops. Tunnel
+  group starts recheck runtime status after connecting, and disconnect cleanup
+  clears stale active flags while retaining reconnect restoration choices.
+  Feature connections preserve shell inventory and canvas selection. Fresh tunnel
+  starts after cancellation wait for cleanup, and keyboard pane navigation cancels
+  pending reconnect focus recovery.
+- **Docker workload checks:** Fixed jq 1.6 compatibility so inventory parsing,
+  bounded inspection and transfer-status handling work on hosts using that version.
+
 ## [2.37.0] - 2026-10-22
 
 ### Added

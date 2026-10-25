@@ -5,6 +5,17 @@ Open **Hardening audit** from a Linux SSH host's workspace **+** menu, then choo
 adjust **Areas**, then select **Run assessment** and approve the host, scope and
 access. No account, scanner, agent or Python installation is required.
 
+Saved reports and accepted risks remain available while the host is offline.
+New assessment shows a connection card until you use **Connect** or **Reconnect**.
+Assessment controls appear after connecting, with any previous preset and area
+choices retained. Running still needs separate approval; connecting does not
+start an assessment.
+Use **Cancel** to stop a pending connection. Connection failures show a short
+reason, with diagnostic information under **Connection details**. After connecting,
+keyboard focus moves to the setup heading if you stayed in the connection card.
+Switching panes also cancels that focus handoff. Connecting from this card keeps
+your current shell tabs and workspace selection.
+
 ## Choose what to check
 
 The native catalog contains **183 checks and observations across 15 areas**.
