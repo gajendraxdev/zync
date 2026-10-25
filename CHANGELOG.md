@@ -6,8 +6,65 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Added
 
-- **Security hardening:** Open an on-demand Security pane in a Linux SSH workspace
-  for a first-party, read-only baseline of 38 host checks and observations.
+- **Actionable hardening guidance:** Attention findings show a concise recommended
+  next step, with expandable change, impact, verification and recovery guidance
+  where available. Unavailable checks retain collection next steps. Saved reports
+  and JSON, CSV and Excel exports preserve the recorded guidance. Expanded findings
+  use larger text and roomier line, label and section spacing for easier reading.
+  Observations appear once, technical metadata adapts to pane width, and concise
+  scope notes retain full scope details. Change and verification guidance uses
+  ordered steps that survive saving and importing reports.
+  Readable audit-rule, OS-profile and preset labels replace internal identifiers in
+  report metadata and accepted-risk details.
+- **Simpler audit navigation:** Keep Reports and Accepted risks in the library,
+  with a separate New assessment view and one Back control for setup/report review.
+  Back retains list filters, pages and the latest unsaved report. Saved report rows
+  open by click, Enter or Space; Compare, Export and Delete remain separate actions.
+  Leaving setup retains scope choices while clearing one-run credentials and sudo consent.
+  Delete preparation uses row-local progress, and background refresh preserves the
+  visible list instead of replacing it with a loading placeholder.
+- **Independent accepted risks:** Keep host-scoped acceptances separately from
+  reports, with search, reason/expiry details and confirmed removal. Report deletion
+  keeps them by default; an optional checkbox atomically removes matching unchanged
+  acceptances too. Existing saved notes migrate once; revoked entries cannot be
+  restored by browsing old snapshots. Historical notes remain recorded and read-only.
+  Report exports support up to 1,000 notes within a 1 MiB annotation budget.
+  Stale actions remain blocked after deletion and reacceptance, and spreadsheet
+  exports honor the newest matching decision before checking its expiry.
+- **Saved hardening reports:** Explicitly save a new report or replace a selected
+  saved copy, including accepted-risk reasons and expiry. Open, compare and delete
+  dated reports locally across app restarts. Saved summaries appear inline by default,
+  with row exports and pagination; browsing requires no history modal and starts no assessment.
+  Bounded transactional storage detects conflicting replacements. The report toolbar
+  adds JSON, CSV and formatted Excel exports with all retained findings; JSON keeps
+  risk notes and spreadsheet exports treat evidence as text. Excel keeps Baseline
+  and Preset in Summary and Area in Findings; CSV retains all three columns.
+  JSON roundtrips preserve the report/import size budget near its limit.
+- **Focused hardening workflow:** Compact role presets and an areas editor replace
+  the text-heavy setup. The catalog now contains 183 checks across 15 areas,
+  including a bounded sample of running Docker containers, a current-file SSH
+  connection-policy preview and optional PostgreSQL, MySQL, Redis and Jenkins
+  runtime observations. Application access is explicit and memory-only per run;
+  credentials are never saved, synced or exported. Source labels and review priorities
+  explain evidence without claiming complete application coverage or live SSH policy.
+  Complete sampled workload outcomes bind comparisons and risk decisions, including
+  matches beyond the displayed ID list. Setup controls adapt to narrow split panes.
+- **Local hardening review:** Explicit report comparison binds host-key, account,
+  policy, target and rule identity; missing or unavailable checks never appear
+  resolved. Standard/sudo comparisons show newly assessed and no-longer-assessed
+  checks separately, with before/after evidence and clear unchanged/skipped counts.
+  Expiring accepted-risk annotations require a reason, bind to exact
+  evidence and preserve native status/counts. Reports/notes can be explicitly saved
+  locally or exported, with no automatic saving or upload.
+- **Selectable hardening areas:** Run the original 38-check host baseline or
+  choose additional host protections and optional Nginx, Apache, Docker Engine,
+  PostgreSQL, MySQL, Redis and Jenkins modules, with selected areas captured in approval,
+  results, filters, JSON export and sudo retries. Unselected modules run no commands.
+  Application results distinguish named service-unit/file checks from local daemon
+  observations; they do not claim complete application or database policy coverage.
+- **Hardening audit:** Open an on-demand Hardening audit pane with scan corners,
+  an OS icon and a magnifier in a Linux SSH workspace for a first-party, read-only baseline
+  of 38 host checks and observations.
   Covers kernel, SSH, account, file, network, mount, update and service settings,
   with evidence, contextual recommendations, searchable/paginated results,
   cancellation and local JSON export. No scanner/agent installation, account,
@@ -19,7 +76,7 @@ All notable changes to Zync are documented in this file. The format is based on 
   eligible uncertain protected-read failures offer **Try with sudo**. Both require
   approval and rerun the full assessment, without guaranteeing successful access.
   Focused idle setup keeps scope/access details expandable; compact findings retain
-  complete evidence and guidance under **Technical details**.
+  complete evidence under **Technical details**, with contextual guidance alongside results.
   Results separate **Needs attention**, **Informational**, **Passed**,
   **Not applicable** and unavailable evidence, with matching counts and filters.
   Contextual observations no longer

@@ -44,6 +44,8 @@ When **Settings → General → Share anonymous usage** is on (default), the des
 
 - Hardening is account-free, explicitly confirmed, and read-only over an existing
   Linux SSH connection. No scanner/agent/Python installation or automatic remediation.
+  Native module choices determine the exact collector scope; unselected modules
+  run no commands. Approval, results, export and sudo retries retain that scope.
   Optional per-run approval permits sudo for fixed protected read-only commands,
   never a root shell. A run-bound masked dialog accepts a sudo password only when
   challenged and sends it through SSH standard input, not command arguments.
@@ -51,22 +53,45 @@ When **Settings → General → Share anonymous usage** is on (default), the des
   Native secret buffers are cleared on drop; JavaScript/transport erasure is not
   guaranteed. Rejected/expired challenges are not retried. MFA/TTY-only rules are
   unsupported; normal server cache/logging policies apply. Sudoers is not modified.
-- A versioned 38-check host baseline makes no external assessment lookup.
+- Versioned host/service/container areas and optional local application observations
+  make no external assessment lookup. Runtime credentials are separate from
+  requests/reports, memory-only and never persisted or exported. PostgreSQL, Redis
+  and Jenkins use SSH direct-tcpip; MySQL uses a supported existing client with
+  secrets only on framed stdin. No desktop database listener is opened.
   Unavailable evidence is not a pass or failure; default SSH observations require
   contextual review. Reports distinguish Standard access, Root session and Sudo allowed.
   Approval does not prove that every protected command succeeded.
 - Confirmed protected-read denials on unelevated non-root runs show **Needs elevated
   access** and may offer **Retry with sudo**. Eligible uncertain protected-read failures
   retain **Evidence unavailable** and may offer **Try with sudo**. Both require approval,
-  rerun the full assessment and replace rather than merge old evidence.
+  rerun the report's selected assessment and replace rather than merge old evidence.
   Missing tools, deadlines and malformed evidence do not receive speculative badges.
   Local account evidence contains counts only, never password hashes.
-- Results remain pane-local. Explicit local JSON exports contain captured host and
-  system metadata; review before sharing. No automatic report history, sync or upload.
+- Unsaved results and imported annotation drafts remain pane-local. Explicit comparison
+  imports are bounded unsigned data, not authenticated reports. Host-key/account,
+  policy, target and evidence binding prevent unrelated acceptance or inferred
+  resolutions from unavailable checks. Annotations expire and never change status.
+  **Save report** explicitly retains normalized evidence and risk notes in a local
+  transactional library, outside Vault encryption and sync. New/replace/delete
+  actions are explicit, bounded and revision-checked. Its limit is 50 reports/64 MiB
+  of report data, with an 8 MiB database cache. **Accept risk** explicitly saves an
+  independent host/evidence-bound acceptance in the same database; its searchable
+  list supports confirmed removal. Its separate limit is 5,000 records/64 MiB.
+  Report deletion keeps acceptances unless their matching revisions are explicitly
+  selected for atomic deletion too. Recorded historical notes are retained in other
+  reports and never silently reactivate a removed acceptance. Local JSON/CSV/Excel exports contain
+  host/system metadata; review before sharing. Spreadsheet evidence is text, and
+  CSV protects formula-like prefixes for spreadsheet viewing. No automatic saves,
+  report sync or upload occur; credentials never enter stored reports.
   Cancellation/reconnect fences late results, with bounded cleanup and a remote
   collector deadline. This is not a hostile-host sandbox or hard remote CPU/RAM quota.
-- Passed checks are not a security/compliance certification. Vulnerability,
-  application, database and container-image assessments are outside this feature's scope.
+- Passed checks are not a security/compliance certification. Application modules
+  cover named service-unit/file protections and narrow local runtime observations;
+  Docker coverage is a disclosed sample of at most 20 running containers. SSH
+  connection-policy previews calculate current-file settings, not already-loaded
+  daemon policy, and never receive Passed.
+  Vulnerability scanning, complete application/database policy audits and
+  container-image assessments are outside this feature's scope.
 
 See [Security assessments](SECURITY_ASSESSMENTS.md) for requirements, access
 boundaries, concrete resource limits and hardening coverage.

@@ -123,8 +123,10 @@ See vendor websites for current pricing and plan details.
 - **xterm 6** terminal with WebGL/DOM rendering, multi-tab shells, optional idle suspend, and **ghost suggestions**
 - **SFTP file manager** with drag-and-drop and an in-app **CodeMirror 6** editor
 - **Dashboard**, **snippets**, and **session persistence** (tabs, terminals, working directory)
-- **Security hardening** for Linux SSH hosts: 38 first-party checks and observations,
-  with explicit sudo approval for protected reads. No scanner install, external
+- **Hardening audit** for Linux SSH hosts: editable role presets and 183 scoped
+  host, service, container and optional application-runtime checks across 15 areas,
+  with explicit sudo approval for protected reads, saved local reports, comparison,
+  independently managed, expiring accepted risks and JSON/CSV/Excel exports. No scanner install, external
   assessment lookup or automatic fixes; account-free and on demand
   ([guide](docs/SECURITY_ASSESSMENTS.md))
 

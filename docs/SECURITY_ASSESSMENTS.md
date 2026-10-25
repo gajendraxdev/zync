@@ -1,216 +1,274 @@
-# Security hardening
+# Hardening audit
 
-Open **Security** from a connected host's workspace **+** menu. This account-free
-feature runs only after you choose **Run assessment** and confirm. It does not
-require Trivy, Lynis, Python or an agent on the host.
+Open **Hardening audit** from a Linux SSH host's workspace **+** menu, then choose
+**New assessment**. Choose a preset,
+adjust **Areas**, then select **Run assessment** and approve the host, scope and
+access. No account, scanner, agent or Python installation is required.
 
-## Requirements and scope
+## Choose what to check
 
-The target must be Linux over an existing SSH connection, with `/bin/sh`, GNU
-coreutils `/usr/bin/timeout` and ordinary system utilities in standard paths.
-Checks use the connected user's existing privileges, including root if that is
-the SSH account. Missing permissions or collectors are disclosed, not treated as passes.
+The native catalog contains **183 checks and observations across 15 areas**.
+Only selected areas run. Opening the pane, changing choices and reconnecting do
+not start an assessment.
 
-The versioned baseline contains **38 checks/observations** across kernel
-protections, three named-file permissions, default SSH policy, local account
-counts, listening sockets, firewall backends, mount policy, dpkg/APT maintenance
-and systemd logging/SSH isolation. Availability depends on host tools and OS;
-this is not a full host or compliance audit.
+| Area | Checks | What it covers |
+| --- | ---: | --- |
+| Host baseline | 38 | Kernel, named-file permissions, SSH defaults, accounts, network, mounts and maintenance |
+| Additional host protections | 26 | Account hygiene, isolation, audit, clock and runtime controls |
+| SSH connection-policy preview | 8 | Current standard configuration with captured connection inputs |
+| Nginx | 13 | Standard service unit and named configuration file |
+| Apache | 8 | Standard service unit |
+| Docker Engine | 13 | Standard unit, default local socket and daemon observations |
+| Docker containers | 16 | Aggregate settings for a sample of up to 20 running containers |
+| PostgreSQL | 8 | Standard service unit |
+| MySQL | 8 | Standard mysql.service unit |
+| Redis | 13 | Standard service unit and named configuration file |
+| Jenkins | 8 | Standard service unit |
+| PostgreSQL runtime | 8 | Selected settings, login counts and current HBA-file diagnostics |
+| MySQL runtime | 6 | Selected settings and optional administrative-account count |
+| Redis runtime | 6 | Selected settings and simulated default-user command permissions |
+| Jenkins runtime | 4 | Security flag, controller executors, CSRF context and anonymous metadata access |
 
-No external assessment lookup or report upload occurs. The collector does not
-install software, upgrade packages, change settings, recursively scan the
-filesystem or create report/temp files. Existing SSH and operating-system
-services may perform their normal logging. Vulnerability scanning, application
-and database audits, and container image analysis are **not included**.
+Presets are editable starting scopes: **General host** and **Router** select 72
+checks, **Web server** 93, **Database server** 101 and **CI / build host** 109.
+Authenticated runtime areas are always an explicit additional choice. Router
+expects IPv4 forwarding to be enabled; other presets keep that setting contextual.
+A preset expresses intended use, not automatic role detection.
 
-## Run and review
+This is a focused configuration review, not a full host/application audit,
+compliance certification, vulnerability scan, container-image analysis or penetration
+test. A passed condition does not establish that the host is secure.
 
-1. Connect to your Linux SSH host and open **Security**.
-2. Optionally enable **Use sudo** for protected checks in this run.
-3. Choose **Run assessment**, review the host and access request, then confirm.
-4. Review coverage and expand individual observations where needed.
+## Access and application connections
 
-The starting view keeps only the run action and optional sudo switch visible.
-Open **Scope & access** for requirements, coverage and access details. Disconnected
-or local views explain which SSH connection is needed without showing unusable
-sudo controls. Setup becomes a compact toolbar during a run or above results;
-the confirmation still describes the exact read-only access being approved.
+Host checks use the SSH account's existing privileges, including root when already
+logged in as root. The host needs `/bin/sh`, GNU coreutils `/usr/bin/timeout` and
+utilities used by selected areas in standard paths. Missing tools, permissions
+or uninterpretable responses stay unevaluated.
 
-The report identifies its recorded access mode:
+**Use sudo** is optional, off by default and approved for each run. It permits only
+fixed protected reads, never a root shell or sudoers changes. If sudo challenges,
+Zync asks for the connected user's password in a masked dialog and sends it through
+the owned SSH channel's stdin. Existing sudo cache/passwordless rules can avoid a
+prompt. MFA, multiple prompts and TTY-only rules are unsupported. Rejected/expired
+challenges stop without automatic retries; closing the dialog cancels the run.
+Normal server authentication and logging policies still apply.
 
-- **Standard access:** a non-root connection without sudo approval.
-- **Root session:** connected as root without requesting sudo.
-- **Sudo allowed:** approved, but individual protected commands may still fail.
-- **Access not recorded:** sufficient access metadata is unavailable.
+Runtime areas show **Add access** for the selected service. Enter its local port,
+username and password or Jenkins API token; PostgreSQL also needs a database.
+Use a dedicated observation account with only required read permissions. Optional
+privileged views can remain unavailable; do not grant broad administrative access
+just to evaluate every row. Blank PostgreSQL passwords and blank Redis credentials
+are allowed only when explicitly configured for the run.
 
-The report identifies the detected platform and the selected Zync baseline:
+Application connections target **127.0.0.1 on the SSH host**:
 
-- **Checks for this OS version:** a profile authored for Ubuntu 22.04/24.04 or Debian
-  12/13. Selection identifies rule scope; it does not imply complete host coverage,
-  certification or validation against a full VM test matrix.
-- **Limited coverage for this OS version:** another valid OS ID/release, or a missing
-  release version. Useful generic Linux observations remain available. Related-distribution
-  hints do not establish support for a derivative.
+- PostgreSQL and Redis use native clients over SSH direct-tcpip, without opening a
+  desktop listening port. PostgreSQL uses the SSH-protected local connection;
+  inner TLS-only database rules may reject it. Redis observes plaintext local
+  endpoints only. Zync does not weaken server TLS policy.
+- MySQL uses an existing supported Oracle MySQL client for Linux in a dedicated
+  non-PTY SSH channel, with option/login files disabled and TLS required. Passwords
+  go only to a framed stdin prompt, never arguments, environment or temporary files.
+  The client observer supports at most **79 UTF-8 password bytes**. Longer values
+  are rejected without truncation; keep the password unchanged and use service checks.
+- Jenkins uses fixed local HTTP metadata GETs over SSH, without redirects or script
+  console calls. Custom context paths and HTTPS-only local endpoints are unsupported.
+  Public metadata can remain observable when the supplied token is not verified;
+  the evidence says so. A true security flag does not prove correct authorization.
 
-Open **About this assessment** for the profile ID, platform, baseline version and
-exact coverage qualification. Profile selection is automatic and does not start a scan.
+Sudo passwords and application secrets stay in memory for this run. They are not
+logged, saved to Vault, synced, exported or reused automatically for retries.
+Native owned secret buffers clear on drop; JavaScript/transport erasure cannot
+be guaranteed. Application authentication can create normal server logs.
 
-The coverage summary separates four disjoint groups:
+## Read the results
 
-- **Evaluated:** usable evidence exists, with needs-attention, informational and
-  passed subtotals.
-- **Needs elevated access:** confirmed access denial for a protected read on an
-  unelevated non-root run.
-- **Evidence unavailable:** other missing, failed or uninterpretable evidence.
-- **Not applicable:** an established platform-scope exclusion. For example,
-  Debian/Ubuntu package observations do not apply to a known non-Debian OS.
-  An unfamiliar derivative remains unqualified; missing tools, denied access and
-  failed reads on an applicable platform remain unavailable.
+The report records the scope and preset that ran. Editing the next run's choices
+does not relabel it. Use quick triage, search and result/category/area filters;
+expand rows for explanations and technical evidence.
 
-Result filters match these groups. Counts describe retained baseline checks,
-not a security score:
+| Result | Meaning |
+| --- | --- |
+| Needs attention | Evidence meets an authored review condition; not a confirmed vulnerability |
+| Informational | Contextual observation without an automatic pass/fail decision |
+| Passed | Only the named condition met the baseline |
+| Needs elevated access | A protected read was denied on an unelevated non-root run |
+| Evidence unavailable | Information was missing, failed or could not be interpreted |
+| Not applicable | Evidence establishes an exclusion from the stated scope |
 
-- **Needs attention:** a baseline deviation, a specific SSH default policy worth
-  checking, or a maintenance signal such as a reboot-required marker. This is not
-  a confirmed vulnerability or an instruction to change settings automatically.
-- **Informational:** contextual evidence without an automatic pass/fail decision,
-  including firewall/listener observations, mount policies, logging and APT
-  configuration. Alternative patching and logging systems may be in use.
-- **Passed:** only the named baseline condition was met.
+Coverage separates evaluated, elevated-access, other unavailable and not-applicable
+checks. Counts are not a security score. Priority ranks evidenced attention findings,
+not vulnerability severity. Source labels distinguish runtime values, calculated
+policy, named files, metadata, services and containers. **Technical details** retains
+exact evidence, rule version and guidance-review date. **Read source guidance**
+appears inside **How to address it** when available, otherwise in Technical details.
 
-SSH results describe default configuration, not running-daemon overrides or
-connection-specific Match rules. Restrictive defaults are informational, never
-passed. Explicit defaults such as unrestricted root login, password/empty-password
-or host-based authentication, X11 forwarding, or disabled StrictModes need attention;
-whether they should change depends on the host's requirements.
+Expand a **Needs attention** finding for its **Recommended next step**. Where a
+guide is available, **How to address it** shows ordered change and verification
+steps, with impact and recovery explained separately. Review the finding's scope and adapt the advice
+to your workload before changing the host. Zync does not apply these changes.
+Unavailable checks show a collection **Next step** instead of a configuration fix.
+Older saved/imported reports retain their recorded advice; missing guides are not
+added retrospectively.
 
-Unavailable and not-applicable checks are neither passed nor failed. Not-applicable
-checks are excluded from evaluated/unavailable totals and cannot offer sudo retry.
-Result filters expose each group independently. Informational details use
-**Guidance**; attention findings use **Recommendation**.
-New runs use baseline `zync-linux-5 (2026-10-25)`; existing exported reports retain
-their original results and baseline version.
+**About this assessment** shows the audit-rule revision and its recorded date,
+with a readable check-profile name such as **Ubuntu 24.04** or **General Linux
+checks**. General Linux coverage remains limited. Machine identifiers remain in
+exported metadata for traceability.
 
-Search by ID, check, target or recommendation; filter by result/category. Rows show
-the observed value or a short collection explanation. The first expansion shows
-**What we found**, **What we look for** (or **What to consider** for contextual
-observations), why it matters and **What was checked**. Conditions are Zync's
-own narrow rules; contextual observations do not invent a universal pass threshold.
-**Technical details** contains the complete target/evidence, guidance or collection
-next step, rule version, source-review date and documentation reference. The review
-date, shown as **Guidance reviewed**, identifies rule metadata review, not when a
-host value was collected. JSON exports retain the full normalized report and
-captured run timestamps.
+The observation appears once in the row heading. Expanded results keep the expected
+condition, next step and context together. New reports include a concise scope note;
+the complete scope remains in **Technical details**. Older reports show their original
+scope text. Technical metadata uses two columns on wide panes and stacks on narrow
+panes, with evidence and full scope spanning the available width.
 
-Result explanations use plain language for settings, counts and missing information.
-The short wording explains the observed value; it does not decide whether a check
-passes. Exact values, paths, flags, limits and system-command details remain available
-under **Technical details** and in the exported `evidence` field. Unknown failures
-do not imply a security weakness or a confirmed need for administrator permissions.
+**Retry with sudo** handles confirmed protected-read denials. **Try with sudo**
+handles eligible protected-read failures with an unconfirmed cause. Both require
+approval, repeat the report's entire selected scope and replace its results. They
+do not guarantee access. Missing tools, named inputs, deadlines and malformed
+evidence do not get speculative elevation badges. Root and already sudo-approved
+reports do not offer elevated retries. Runtime areas need fresh application access.
 
-Unavailable checks show **Next step**, not a recommendation to change settings
-without evidence. Guidance distinguishes missing tools, execution failures,
-deadlines, malformed output and verified access restrictions.
+Profiles authored for Ubuntu 22.04/24.04 and Debian 12/13 identify OS-specific scope;
+other releases use limited generic coverage. Selection does not prove full host
+qualification or certification. New runs use **zync-linux-7 (2026-10-25)**.
 
-## Explicit elevated retries
+## Evidence limits
 
-Confirmed protected-read denials offer **Retry with sudo**. Eligible failed
-protected reads with an unconfirmed cause offer **Try with sudo**, without claiming
-that permissions caused the failure or that sudo will resolve it.
+- SSH defaults describe configuration defaults. The optional connection preview
+  applies numeric addresses and the username to current `/etc/ssh/sshd_config`,
+  using supported `-G -T` or legacy `-T`. It cannot establish daemon arguments,
+  custom configuration or already-loaded policy. Unknown DNS-dependent Match
+  context stays unavailable. Neither SSH view receives Passed.
+- Service areas check named units/files. Custom layouts and applications inside
+  containers need separate review. An unloaded unit is outside that unit's scope,
+  not proof the application is absent. Nginx/Redis file declarations do not establish
+  included or running configuration.
+- Docker uses fixed local Engine API GETs through `/var/run/docker.sock` with curl/jq;
+  no CLI plugins, remote contexts or rootless sockets. Container checks sample at
+  most 20 running IDs and disclose limits. Names, environments, commands, labels and
+  mount paths are not exported. Aggregate observations cannot identify every
+  affected container or establish fleet coverage.
+  Comparison and acceptance identities include every sampled check outcome and
+  unavailable inspection, including IDs outside the displayed matching-ID list.
+- PostgreSQL HBA diagnostics describe the **current file**, not last loaded policy,
+  and may need extra view access. TLS support does not prove enforced TLS.
+  Runtime checks do not establish complete authorization or application security.
+  Redis ACL simulation executes no simulated command and reads no ACL hashes.
+- Network checks cover the current namespace, not internet reachability or cloud
+  firewalls. Account evidence contains counts, not names/passwords/hashes. File
+  checks do not cover extended ACLs or all parents/includes. A clean package audit
+  does not establish patch freshness or absence of vulnerabilities.
 
-Both require confirmation, rerun the **full hardening assessment**, and replace
-rather than merge the previous report. Dismissing approval preserves the report.
-No automatic or single-row execution occurs.
+## Save reports and export
 
-Missing records/tools, execution failures, deadlines, known data-format failures
-and malformed successful output do not get optional retries. Root, unknown-access
-and already sudo-approved reports do not offer elevated retries. The setup option
-can also be used to approve a new run.
+After an assessment, choose **Save report** and give it a name. **Save as new**
+keeps a separate copy. **Replace saved report** explicitly updates a chosen copy
+for the same host/account and recorded SSH key, including its accepted-risk notes. Replacement
+detects changes from another pane instead of silently overwriting them.
 
-### Sudo authentication and boundaries
+**Saved reports** appears inline by default when you open Hardening audit, with this
+host/account's dated records and check counts. The report list loads local summaries
+instead of retaining all report bodies. The one-time acceptance-note migration
+reads saved bodies to separate their notes. Click a report row, or focus it and press
+Enter/Space, to review it. Compare, Export and Delete are independent row actions.
+The list shows five records per page. Setup and report details each have one **Back**
+button; the library retains the selected view, risk search and page. **Latest assessment**
+returns to the unsaved latest report. Reports can be opened without a live SSH connection and
+survive app restarts. Opening, importing, saving and comparing never start checks.
+Save/replace and delete confirmations still use dialogs. Runs are never saved automatically.
+The setup card appears only in **New assessment**, with its cancel control during
+a run. Back preserves scope choices and clears one-run credentials and sudo consent.
 
-**Use sudo** is off by default and resets after starting a
-run or changing the connection. Only fixed protected sysctl reads, SSH configuration
-reads, firewall listings and count-only local shadow inspection may use
-`sudo -S -u root`. Each protected command uses a four-second GNU timeout and a
-one-second kill grace after authentication.
+The local library holds up to **50 reports / 64 MiB of report data**, with a bounded
+database cache. When full, replace or delete a report; nothing is silently evicted.
+Reports contain host/system metadata and are stored outside Vault, without Vault
+encryption or sync. Device file permissions apply.
 
-If sudo requests authentication, a masked dialog accepts the connected user's
-sudo password for that assessment. It is sent through the owned SSH channel's
-standard input, never command arguments. It stays only in memory until collection
-ends: not logged, saved to Vault, synced or exported. Native secret buffers clear
-on drop; JavaScript/SSH transport erasure cannot be guaranteed.
+The **Export** menu includes every retained finding, regardless of UI filters/pages:
 
-Existing sudo cache or passwordless rules may avoid prompting. The server's
-authentication-cache and logging policies apply. Zync does not run `sudo -v`,
-open a root shell, modify sudoers or configure passwordless access. MFA, custom
-multi-prompt and TTY-only policies are unsupported. Authentication has a 90-second
-wait limit. Rejected, repeated or expired challenges stop without password retries.
-A protected-command failure after password submission also stops collection
-conservatively: it cannot safely be distinguished from authentication rejection.
-Closing the password dialog cancels the assessment.
+- **JSON:** version-3 Zync report with complete normalized evidence and accepted-risk
+  reasons/expiry. Import JSON to preview it or use it for comparison. Older version-2
+  reports remain supported without inventing missing identity or notes.
+- **CSV:** one row per check, with host, date, result, priority, evidence, guidance
+  and active accepted-risk information. Fields are quoted; formula-like text is
+  prefixed for spreadsheet viewing. Use JSON when exact programmatic values matter.
+- **Excel (.xlsx):** formatted Summary and Findings sheets, frozen headings and
+  filterable results. Baseline and Preset appear once in Summary; Area stays with
+  each finding. CSV retains all three columns for combining exports. Evidence is
+  written as text, not spreadsheet formulas.
 
-Do not weaken access controls to make an assessment pass. Approval does not prove
-every protected command succeeded. Raw stderr is not displayed or exported.
+JSON retains any structured guidance recorded with a finding. CSV and Excel
+include it in one **How to address it** column with labeled change, impact,
+verification and recovery sections.
 
-## Interpretation limits
+All exports are local and require a destination. No account or Google Sheets
+connection is required. Separate accepted-risk JSON import/export remains available
+under **Report actions**.
 
-- SSH policy prefers config-only OpenSSH `-G` after a bounded unelevated probe
-  using an empty configuration. Older OpenSSH falls back to `-T`. Its ambiguous
-  “no hostkeys available” error is not a verified permission denial. Host-key
-  validity is not assessed. Command-restricted sudo policies may need administrator
-  review; Zync does not change them.
-- Default SSH observations require review: daemon arguments, custom config paths
-  and connection-specific `Match` rules are not established.
-- Local account checks export counts, not names, GECOS, passwords or hashes.
-  They do not assess LDAP/NSS identities, PAM policy or sudo authorization.
-- Named-file permission checks use numeric type, UID and GID, so empty regular
-  files are handled consistently. Group-readable `/etc/shadow` passes only with
-  GID 0 or the locally defined `shadow` group's GID. If needed group evidence is
-  unavailable, the check remains unavailable. Group membership, extended ACLs,
-  included files and parent-directory permissions are not assessed.
-- Network observations cover only the current namespace. Listening addresses and
-  local firewall rules do not prove internet reachability or cloud-policy coverage.
-- Firewall backends can describe overlapping rules. Rule counts do not prove
-  protection. Mount, update and service policy remains contextual.
-- A clean `dpkg --audit` result does not establish patch freshness or absence of
-  vulnerabilities. Baseline rules change through reviewed Zync releases.
+## Compare and annotate
 
-## Resource limits and cancellation
+Use a saved report's compare action or **Report actions → Compare imported report**.
+Comparison
+requires matching endpoint/account, verified SSH host key, preset revision and
+per-finding target/rule identities. A later report cannot become an earlier baseline.
+Missing, unavailable, unselected, revised or recreated targets never become
+**Resolved**; only comparable earlier attention followed by Passed does. Legacy
+reports missing provenance remain inspectable without invented comparison identity.
+Comparing standard-access and sudo reports also shows **Now assessed** and
+**No longer assessed** when a matching check gains or loses readable evidence.
+These are coverage changes, not fixes. Both appear in the default **Changes** view.
+Expand a comparison row for the earlier/current result and evidence. If comparable
+checks are unchanged, the view says so and offers access to checks not compared.
+Imports are unsigned user-provided data, not authenticated evidence.
 
-Host collection has a 45-second remote deadline, or 150 seconds including
-authentication when sudo is approved, plus a two-second forced-kill grace.
-Native collection has a 50/160-second deadline and bounded cleanup; the whole
-run has a five-minute work budget. GNU timeout governs ordinary descendants,
-not malicious detached processes or uninterruptible kernel I/O. Host tools and
-the SSH host are trusted; this is not a hostile-host sandbox or hard CPU/RAM quota.
+An **Accepted risk** adds a reason and an expiry of at most 90 days to an attention
+finding. It binds to that host, preset, target, rule and exact evidence. Changed
+evidence or expiry makes it inactive. It never changes status, priority or coverage.
+**Accept risk** saves an independent acceptance on this device. Open **Accepted
+risks** beside Reports to search the host/account's saved acceptances, inspect
+reasons and expiry, or remove one. Only matching, unexpired evidence is accepted;
+expired notes remain visible and removable. Imported notes are previewed in the
+current pane; **Save report** records them with that snapshot. Choose **Save accepted
+risks locally** to make them reusable entries in the list. **Export accepted risks** writes a file.
 
-At most two assessments run simultaneously, one per SSH connection, without a
-queue. Output is capped at 8 MiB, individual interpreted evidence at 512 KiB
-(measured in raw UTF-8 bytes before trimming),
-retained observations at 1,000 and rendered rows at 25 per page. Capped reports
-do not imply complete coverage.
+An expired newer acceptance never reactivates an older one in the report or its
+spreadsheet export. Conflicting actions from another pane require a refresh,
+including when an acceptance was removed and created again.
 
-**Cancel**, closing the pane, disconnecting or reconnecting prevents late-result
-publication. Cleanup signals/closes the owned SSH channel; the remote deadline
-is the fallback if transport is lost. Hiding a running pane does not restart it.
-Failures do not publish a successful empty report.
+Deleting a report keeps acceptances by default. Its optional **Also remove matching
+accepted risks** checkbox removes only unchanged acceptances recorded by
+that report; separately renewed acceptances are kept. Conflicting changes stop
+the deletion instead of partially deleting data. Historical reports keep their
+read-only **Recorded acceptance** notes even after an acceptance is removed.
+Existing embedded notes are copied into the independent list once, without
+reactivating acceptances that were later removed. Expiry/removal never changes
+the underlying check status. Saving/exporting includes no sudo or application credentials.
 
-## Export and privacy
+## Limits, cancellation and privacy
 
-**Export JSON** saves a local version-2 hardening report with captured host identity,
-timestamps, baseline, coverage notes and complete normalized checks. Exports contain
-sensitive system metadata; review before sharing.
+Remote collection has a 150-second deadline, or 240 seconds including sudo entry,
+plus a two-second kill grace. Protected producers receive four seconds after
+authentication and a one-second grace; bounded projections can wait for entry.
+Native collection has a 160/250-second limit. Each application observer has a
+shared 25-second budget and five-second channel-open limit. Received data is capped
+at 512 KiB per owned connection/exec call; native clients also cap outgoing data
+at 512 KiB per connection. Jenkins/MySQL can make several bounded calls within
+the observer deadline. The whole run has a five-minute budget with bounded cleanup.
 
-`notAssessed` covers unavailable evidence. `needsElevatedAccess` records verified
-access restrictions; `sudoRetryEligible` independently records optional elevated
-attempt eligibility, not a proven permission error. For unavailable checks,
-`recommendation` contains collection guidance.
+At most two assessments run, one per SSH connection, without a queue. Reports are
+capped at 8 MiB, individual interpreted evidence at 512 KiB, retained findings at
+1,000 and rendered rows at 25 per page. Cancel, pane close and transport change
+prevent late publication and close owned channels. GNU timeout is the fallback
+if SSH is lost; this is not a hostile-host sandbox or hard host CPU/RAM quota.
 
-Exports also retain the selected `profile`, per-rule `observed`, `expected`,
-`rationale`, `scope`, `ruleVersion`, `reviewedAt`, and any `applicabilityReason`.
-These are first-party rule definitions and evidence qualifications, not benchmark
-certification or a security score.
-
-Reports stay in this pane until another run, pane close or connection identity/epoch
-change. There is no automatic history, sync, scheduling, upload or remediation.
+No settings, packages or services are changed. The collector installs nothing,
+does not recursively scan files or create remote report/temp files. No external
+assessment lookup or upload occurs. Exports contain host/system metadata; review
+before sharing. Imports are capped at 8 MiB of report data plus 1 MiB/1,000 annotations.
+There is no automatic saving, scheduling, sync or remediation. Pane close or
+connection identity change clears unsaved report/review state and access. Explicitly
+saved reports remain in the local library until deleted.
+Independent acceptances use the same local database/cache, with a separate
+5,000-record / 64 MiB payload limit. They stay outside Vault encryption and sync.
