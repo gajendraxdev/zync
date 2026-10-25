@@ -21,6 +21,22 @@ const MAX_FORWARDED_AGENT_PACKET_SIZE: usize = 256 * 1024;
 const AGENT_CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_AUTH_BANNER_CHARS: usize = 16 * 1024;
 
+/// Connect only to an owned loopback test server with an exact generated key, without touching durable trust.
+#[cfg(test)]
+pub(crate) async fn connect_runtime_fixture(port:u16,expected:PublicKey,username:&str,password:&str)->Result<client::Handle<Client>> {
+    if port==0 || username.is_empty() {return Err(anyhow!("Invalid disposable SSH fixture endpoint"));}
+    let (failure_tx,_failure_rx)=tokio::sync::mpsc::unbounded_channel::<String>();
+    let handler=Client {
+        tunnel_manager:Arc::new(TunnelManager::new(failure_tx)),connection_id:"security-qualification".into(),
+        kept_alive_session:None,forwarded_agent:None,host:"127.0.0.1".into(),port,host_key_approval:None,
+        auth_banner:Arc::new(Mutex::new(String::new())),presented_key:Arc::new(Mutex::new(None)),fixture_key:Some(expected),
+    };
+    let mut session=tokio::time::timeout(Duration::from_secs(10),client::connect(Arc::new(client::Config::default()),("127.0.0.1",port),handler)).await??;
+    let authenticated=tokio::time::timeout(Duration::from_secs(10),session.authenticate_password(username,password)).await??;
+    if !authenticated.success() {return Err(anyhow!("Disposable SSH fixture authentication failed"));}
+    Ok(session)
+}
+
 #[derive(Clone, Copy)]
 enum AgentSignatureDecision {
     Deny,
@@ -183,6 +199,9 @@ pub struct Client {
     pub port: u16,
     pub host_key_approval: Option<HostKeyApproval>,
     auth_banner: Arc<Mutex<String>>,
+    presented_key: Arc<Mutex<Option<String>>>,
+    #[cfg(test)]
+    fixture_key:Option<PublicKey>,
 }
 
 impl std::fmt::Debug for Client {
@@ -231,13 +250,23 @@ impl client::Handler for Client {
                 "SSH host certificates are not configured for this connection"
             ));
         };
-        verify_server_key(
+        #[cfg(test)]
+        if let Some(expected)=self.fixture_key.as_ref() {
+            if key.key_data()!=expected.key_data() {return Err(anyhow!("Disposable SSH fixture key mismatch"));}
+            *self.presented_key.lock().unwrap_or_else(|poisoned|poisoned.into_inner())=Some(key.fingerprint(HashAlg::Sha256).to_string());
+            return Ok(true);
+        }
+        let accepted=verify_server_key(
             &self.connection_id,
             &self.host,
             self.port,
             key,
             self.host_key_approval.as_ref(),
-        )
+        )?;
+        if accepted {
+            *self.presented_key.lock().unwrap_or_else(|poisoned|poisoned.into_inner())=Some(key.fingerprint(HashAlg::Sha256).to_string());
+        }
+        Ok(accepted)
     }
 
     /// Accept forwarded-agent channels only for the explicitly selected key.
@@ -732,6 +761,15 @@ impl SshManager {
         config: ConnectionConfig,
         tunnel_manager: Arc<crate::tunnels::TunnelManager>,
     ) -> Result<(client::Handle<Client>, Option<String>)> {
+        self.connect_with_identity(config,tunnel_manager).await.map(|(session,banner,_)|(session,banner))
+    }
+
+    /// Capture the key accepted for this exact transport, separately from persisted host approvals.
+    pub async fn connect_with_identity(
+        &self,
+        config: ConnectionConfig,
+        tunnel_manager: Arc<crate::tunnels::TunnelManager>,
+    )->Result<(client::Handle<Client>,Option<String>,String)> {
         // Keep-alive: send a heartbeat every 60s to prevent NAT/firewall timeouts on idle sessions
         let client_config = client::Config {
             keepalive_interval: Some(std::time::Duration::from_secs(60)),
@@ -741,6 +779,7 @@ impl SshManager {
         let client_config = Arc::new(client_config);
         let forwarded_agent = self.load_forwarded_agent(&config).await?;
         let auth_banner = Arc::new(Mutex::new(String::new()));
+        let presented_key=Arc::new(Mutex::new(None));
 
         // Recursive Jump Host Logic
         if let Some(ref jump_host_config) = config.jump_host {
@@ -779,6 +818,9 @@ impl SshManager {
                 port: config.port,
                 host_key_approval: config.host_key_approval.clone(),
                 auth_banner: auth_banner.clone(),
+                presented_key:presented_key.clone(),
+                #[cfg(test)]
+                fixture_key:None,
             };
 
             // russh::client::connect_stream takes stream and handler
@@ -791,7 +833,8 @@ impl SshManager {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .clone();
-            return Ok((session, (!banner.is_empty()).then_some(banner)));
+            let key=presented_key.lock().unwrap_or_else(|poisoned|poisoned.into_inner()).clone().ok_or_else(||anyhow!("The authenticated SSH server key was not recorded"))?;
+            return Ok((session, (!banner.is_empty()).then_some(banner),key));
         }
 
         // Direct Connection Logic
@@ -804,6 +847,9 @@ impl SshManager {
             port: config.port,
             host_key_approval: config.host_key_approval.clone(),
             auth_banner: auth_banner.clone(),
+            presented_key:presented_key.clone(),
+            #[cfg(test)]
+            fixture_key:None,
         };
 
         let stream = crate::network_interfaces::connect(
@@ -823,7 +869,8 @@ impl SshManager {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone();
-        Ok((session, (!banner.is_empty()).then_some(banner)))
+        let key=presented_key.lock().unwrap_or_else(|poisoned|poisoned.into_inner()).clone().ok_or_else(||anyhow!("The authenticated SSH server key was not recorded"))?;
+        Ok((session, (!banner.is_empty()).then_some(banner),key))
     }
 
     /// Authenticate only the configured credential and require complete success.

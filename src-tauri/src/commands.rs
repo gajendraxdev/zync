@@ -681,6 +681,8 @@ pub struct ConnectionHandle {
     pub detected_shell: Option<String>,
     /// SSH userauth banner, shown once when this connection opens its first terminal.
     pub auth_banner: Option<String>,
+    /// Public key accepted for this authenticated transport, used to bind explicit assessment comparisons.
+    pub host_key_fingerprint:String,
     pub uses_vault_auth: bool,
     /// Bumped on each new connect/reconnect; stale in-flight reconnects must match before replacing.
     pub reconnect_generation: u64,
@@ -711,8 +713,8 @@ async fn reconnect_connection(
     ssh_manager: &crate::ssh::SshManager,
     tunnel_manager: &crate::tunnels::TunnelManager,
 ) -> Result<ConnectionHandle, String> {
-    let (session, auth_banner) = ssh_manager
-        .connect_with_banner(config.clone(), Arc::new(tunnel_manager.clone()))
+    let (session, auth_banner, host_key_fingerprint) = ssh_manager
+        .connect_with_identity(config.clone(), Arc::new(tunnel_manager.clone()))
         .await
         .map_err(|e| format!("Failed to connect: {}", e))?;
 
@@ -726,6 +728,7 @@ async fn reconnect_connection(
         detected_kernel_os: None,
         detected_shell: None,
         auth_banner,
+        host_key_fingerprint,
         uses_vault_auth: config_uses_vault_auth(config),
         reconnect_generation: 0,
         reconnect_lock: Arc::new(tokio::sync::Mutex::new(())),

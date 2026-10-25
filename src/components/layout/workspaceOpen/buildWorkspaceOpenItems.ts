@@ -19,6 +19,7 @@ const FEATURE_ORDER: FeatureId[] = [
     'port-forwarding',
     'dashboard',
     'snippets',
+    'security',
 ];
 
 function uniqueKeywords(...parts: Array<string | undefined>): string[] {

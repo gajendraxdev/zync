@@ -1,7 +1,7 @@
 # Security Notes
 
-**Last updated:** 2026-09-27
-**Scope:** Vault, Google Drive sync, Public URLs (Beta), plugins, credential handling, anonymous usage, and operator guidance, including the Zync 2.33.0 release candidate.
+**Last updated:** 2026-10-24
+**Scope:** Vault, Google Drive sync, Public URLs (Beta), plugins, credential handling, anonymous usage, optional host assessments, and operator guidance. Host assessments described here are unreleased.
 
 ---
 
@@ -39,6 +39,62 @@ Zync’s core security surface is **encrypted local vaulting**, optional **remem
 ### Anonymous usage (optional)
 
 When **Settings → General → Share anonymous usage** is on (default), the desktop app may POST to the Zync analytics API (`/api/v1/usage`). A random install id is stored on this device and sent in that request so the same install can be counted across days. The **payload** also has app version, OS, UTC day, and feature names you opened (Files, terminal, split, tunnels, vault, Public URLs, snippets, dashboard, plugins) with a use count. The payload does **not** include an IP address, hostnames, paths, commands, vault contents, or terminal output. Turn the setting off to stop sending. The queue stays local until a flush on open, close, or every 15 minutes.
+
+### Host security hardening (unreleased)
+
+- Hardening is account-free, explicitly confirmed, and read-only over an existing
+  Linux SSH connection. No scanner/agent/Python installation or automatic remediation.
+  Native module choices determine the exact collector scope; unselected modules
+  run no commands. Approval, results, export and sudo retries retain that scope.
+  Optional per-run approval permits sudo for fixed protected read-only commands,
+  never a root shell. A run-bound masked dialog accepts a sudo password only when
+  challenged and sends it through SSH standard input, not command arguments.
+  Passwords are memory-only for collection: never logged, saved, synced or exported.
+  Native secret buffers are cleared on drop; JavaScript/transport erasure is not
+  guaranteed. Rejected/expired challenges are not retried. MFA/TTY-only rules are
+  unsupported; normal server cache/logging policies apply. Sudoers is not modified.
+- Versioned host/service/container areas and optional local application observations
+  make no external assessment lookup. Runtime credentials are separate from
+  requests/reports, memory-only and never persisted or exported. PostgreSQL, Redis
+  and Jenkins use SSH direct-tcpip; MySQL uses a supported existing client with
+  secrets only on framed stdin. No desktop database listener is opened.
+  Unavailable evidence is not a pass or failure; default SSH observations require
+  contextual review. Reports distinguish Standard access, Root session and Sudo allowed.
+  Approval does not prove that every protected command succeeded.
+- Confirmed protected-read denials on unelevated non-root runs show **Needs elevated
+  access** and may offer **Retry with sudo**. Eligible uncertain protected-read failures
+  retain **Evidence unavailable** and may offer **Try with sudo**. Both require approval,
+  rerun the report's selected assessment and replace rather than merge old evidence.
+  Missing tools, deadlines and malformed evidence do not receive speculative badges.
+  Local account evidence contains counts only, never password hashes.
+- Unsaved results and imported annotation drafts remain pane-local. Explicit comparison
+  imports are bounded unsigned data, not authenticated reports. Host-key/account,
+  policy, target and evidence binding prevent unrelated acceptance or inferred
+  resolutions from unavailable checks. Annotations expire and never change status.
+  **Save report** explicitly retains normalized evidence and risk notes in a local
+  transactional library, outside Vault encryption and sync. New/replace/delete
+  actions are explicit, bounded and revision-checked. Its limit is 50 reports/64 MiB
+  of report data, with an 8 MiB database cache. **Accept risk** explicitly saves an
+  independent host/evidence-bound acceptance in the same database; its searchable
+  list supports confirmed removal. Its separate limit is 5,000 records/64 MiB.
+  Report deletion keeps acceptances unless their matching revisions are explicitly
+  selected for atomic deletion too. Recorded historical notes are retained in other
+  reports and never silently reactivate a removed acceptance. Local JSON/CSV/Excel exports contain
+  host/system metadata; review before sharing. Spreadsheet evidence is text, and
+  CSV protects formula-like prefixes for spreadsheet viewing. No automatic saves,
+  report sync or upload occur; credentials never enter stored reports.
+  Cancellation/reconnect fences late results, with bounded cleanup and a remote
+  collector deadline. This is not a hostile-host sandbox or hard remote CPU/RAM quota.
+- Passed checks are not a security/compliance certification. Application modules
+  cover named service-unit/file protections and narrow local runtime observations;
+  Docker coverage is a disclosed sample of at most 20 running containers. SSH
+  connection-policy previews calculate current-file settings, not already-loaded
+  daemon policy, and never receive Passed.
+  Vulnerability scanning, complete application/database policy audits and
+  container-image assessments are outside this feature's scope.
+
+See [Security assessments](SECURITY_ASSESSMENTS.md) for requirements, access
+boundaries, concrete resource limits and hardening coverage.
 
 ### Plugins and granted capabilities (2.33.0)
 

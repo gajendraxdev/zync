@@ -35,6 +35,9 @@ jobs:
           npm run type-check
           npm test
 
+      - name: Test fixed assessment collector (synthetic commands only)
+        run: npm run test:security-collector
+
   vault-crypto-known-answer:
     name: Focused Rust security (${{ matrix.platform }})
     strategy:
@@ -105,6 +108,7 @@ jobs:
           cargo test --frozen file_transfers
           cargo test --frozen sftp_read
           cargo test --frozen folder_sizes
+          cargo test --frozen security::
           cargo test --frozen terminal_output
           cargo test --frozen pty_output
           cargo test --frozen plugins::terminal::policy

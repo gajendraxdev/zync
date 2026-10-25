@@ -183,6 +183,7 @@ const SplashScreen = () => (
 );
 
 const CORE_TAB_VIEWS = [
+    'security',
     'dashboard',
     'files',
     'port-forwarding',

@@ -77,6 +77,10 @@ When you add SSH hosts later, local and remote sessions share the same workspace
 
 No Zync account is required to use the app. Install it, work offline, unlock the vault when you need secrets, and turn on sync only if you want encrypted backup across your own devices.
 
+Optional security-hardening assessments run read-only checks over your existing
+SSH connection. They do not contact an external assessment service or upload
+reports. Sudo for protected checks requires explicit per-run approval.
+
 **Roadmap:** additional cloud providers for personal multi-device sync, plus an optional **self-hosted team backend** for orgs that want shared sync without sending credentials to Zync infrastructure. Today ships with Google Drive; team hosting is not available yet.
 
 Details: [docs/SECURITY.md](docs/SECURITY.md)
@@ -119,6 +123,12 @@ See vendor websites for current pricing and plan details.
 - **xterm 6** terminal with WebGL/DOM rendering, multi-tab shells, optional idle suspend, and **ghost suggestions**
 - **SFTP file manager** with drag-and-drop and an in-app **CodeMirror 6** editor
 - **Dashboard**, **snippets**, and **session persistence** (tabs, terminals, working directory)
+- **Hardening audit** for Linux SSH hosts: editable role presets and 183 scoped
+  host, service, container and optional application-runtime checks across 15 areas,
+  with explicit sudo approval for protected reads, saved local reports, comparison,
+  independently managed, expiring accepted risks and JSON/CSV/Excel exports. No scanner install, external
+  assessment lookup or automatic fixes; account-free and on demand
+  ([guide](docs/SECURITY_ASSESSMENTS.md))
 
 ### Secure
 

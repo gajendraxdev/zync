@@ -26,6 +26,7 @@ const FEATURE_ICON: Record<FeatureId, typeof FolderOpen> = {
     'port-forwarding': Waypoints,
     dashboard: LayoutDashboard,
     snippets: Braces,
+    security: FEATURE_META.security.icon,
 };
 
 export function WorkspaceOpenMenu({
