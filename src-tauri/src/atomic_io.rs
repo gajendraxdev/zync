@@ -182,3 +182,112 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 }
+
+/// Atomically replace a user-selected file without deleting unrelated backup siblings.
+pub(crate) fn atomic_replace_external(path: &Path, content: &[u8]) -> anyhow::Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if !metadata.file_type().is_file() => {
+            return Err(anyhow::anyhow!(
+                "Selected destination is not a regular file"
+            ))
+        }
+        Err(error) if error.kind() != ErrorKind::NotFound => return Err(error.into()),
+        _ => {}
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("Selected file has no parent folder"))?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| anyhow::anyhow!("Selected file name is invalid"))?;
+    let suffix = uuid::Uuid::new_v4().simple();
+    let temp_path = parent.join(format!(".{file_name}.zync-plugin-tmp-{suffix}"));
+    let backup_path = parent.join(format!(".{file_name}.zync-plugin-bak-{suffix}"));
+
+    let write_result = (|| -> std::io::Result<()> {
+        let mut temp = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)?;
+        temp.write_all(content)?;
+        temp.sync_all()?;
+        drop(temp);
+
+        match fs::rename(&temp_path, path) {
+            Ok(()) => sync_external_file(path),
+            Err(error)
+                if path.exists()
+                    && matches!(
+                        error.kind(),
+                        ErrorKind::AlreadyExists | ErrorKind::PermissionDenied
+                    ) =>
+            {
+                fs::rename(path, &backup_path)?;
+                match fs::rename(&temp_path, path) {
+                    Ok(()) => {
+                        let _ = fs::remove_file(&backup_path);
+                        sync_external_file(path)
+                    }
+                    Err(replace_error) => {
+                        let restore_error = fs::rename(&backup_path, path).err();
+                        let _ = fs::remove_file(&temp_path);
+                        if let Some(restore_error) = restore_error {
+                            Err(std::io::Error::other(format!(
+                                "replacement failed ({replace_error}); backup restoration failed ({restore_error})"
+                            )))
+                        } else {
+                            Err(replace_error)
+                        }
+                    }
+                }
+            }
+            Err(error) => Err(error),
+        }
+    })();
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    write_result.map_err(Into::into)
+}
+
+fn sync_external_file(path: &Path) -> std::io::Result<()> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    options.write(true);
+    options.open(path)?.sync_all()?;
+    sync_external_parent(path)
+}
+
+#[cfg(not(windows))]
+fn sync_external_parent(path: &Path) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        OpenOptions::new().read(true).open(parent)?.sync_all()?;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn sync_external_parent(_path: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+
+#[cfg(test)]
+mod external_export_tests {
+    use super::*;
+    /// A malformed file-dialog destination must never stage, rename or replace an existing directory.
+    #[test]
+    fn export_rejects_directory_without_touching_its_contents() {
+        let folder = tempfile::tempdir().unwrap();
+        let destination = folder.path().join("keep");
+        fs::create_dir(&destination).unwrap();
+        fs::write(destination.join("original.txt"), b"original").unwrap();
+        assert!(atomic_replace_external(&destination, b"export").is_err());
+        assert_eq!(
+            fs::read(destination.join("original.txt")).unwrap(),
+            b"original"
+        );
+        assert_eq!(fs::read_dir(folder.path()).unwrap().count(), 1);
+    }
+}
