@@ -102,22 +102,23 @@ All notable changes to Zync are documented in this file. The format is based on 
   after connecting.
   Connection cards offer Cancel during connection and concise failure reasons;
   audit reconnect restores keyboard focus without interrupting another control.
+  ([87e62bb], [9ee6ba5])
 - **Consistent tunnel starts:** Per-host and global single/group starts connect
   through the existing host flow, respect cancellation and avoid duplicate starts
   after automatic tunnel restoration. Browsing no longer reconciles by stopping
-  tunnels, and stopping a forward no longer disconnects other host panes.
+  tunnels, and stopping a forward no longer disconnects other host panes. ([fa7ad8c])
 - **Focused reconnect shortcuts:** Only the focused restored terminal or Files
   pane owns reconnect autofocus and the Enter shortcut. Offline dashboards hide
-  live metrics and remote actions until the host is connected.
+  live metrics and remote actions until the host is connected. ([9ee6ba5])
 - **Reconnect state:** Visible but unfocused Files panes no longer take keyboard
   focus. Sudo retry stays unavailable while an assessment runs or stops. Tunnel
   group starts recheck runtime status after connecting, and disconnect cleanup
   clears stale active flags while retaining reconnect restoration choices.
   Feature connections preserve shell inventory and canvas selection. Fresh tunnel
   starts after cancellation wait for cleanup, and keyboard pane navigation cancels
-  pending reconnect focus recovery.
+  pending reconnect focus recovery. ([87e62bb], [fa7ad8c], [9ee6ba5], [2fa623e])
 - **Docker workload checks:** Fixed jq 1.6 compatibility so inventory parsing,
-  bounded inspection and transfer-status handling work on hosts using that version.
+  bounded inspection and transfer-status handling work on hosts using that version. ([94d4f06])
 
 ## [2.37.0] - 2026-10-22
 
@@ -3120,3 +3121,8 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [bcfe6f4]: https://github.com/zync-sh/zync/commit/bcfe6f42dd3f00b3ff650da0f3622b1bb60154d1
 [387ddc7]: https://github.com/zync-sh/zync/commit/387ddc7efa2905cc29e1842730daa5f2aa6b3c4e
 [354db7d]: https://github.com/zync-sh/zync/commit/354db7d2cf43a04d42c6dc7213d078a7be1eca3b
+[94d4f06]: https://github.com/zync-sh/zync/commit/94d4f06296ea8fb61b8c846994c19970b4ae07dc
+[87e62bb]: https://github.com/zync-sh/zync/commit/87e62bb600b36f3f0e95e4b419ff6d34057ad284
+[fa7ad8c]: https://github.com/zync-sh/zync/commit/fa7ad8c9db8fba55e6f3769f4cb148fda8844d4f
+[9ee6ba5]: https://github.com/zync-sh/zync/commit/9ee6ba5bfac0689fb5f8f98873758428b938d96a
+[2fa623e]: https://github.com/zync-sh/zync/commit/2fa623e546e10356133ae6a6b0f8d379aee53653
