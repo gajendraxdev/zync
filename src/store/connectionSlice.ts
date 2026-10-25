@@ -150,7 +150,12 @@ export interface ConnectionSlice {
     clearConnections: () => void;
 
     // Connection Actions
-    connect: (id: string, options?: { skipVaultPrompt?: boolean; skipCredentialPull?: boolean }) => Promise<void>;
+    connect: (id: string, options?: {
+        skipVaultPrompt?: boolean;
+        skipCredentialPull?: boolean;
+        /** Connect host-backed content without creating or selecting a shell. */
+        preserveWorkspace?: boolean;
+    }) => Promise<void>;
     cancelConnect: (id: string) => Promise<void>;
     disconnect: (id: string) => Promise<void>;
     /** WiFi drop / SSH EOF — stop active tunnels, keep terminal tabs and scrollback. */
@@ -502,10 +507,13 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
             }
             markConnectionBackendOffline(id);
             if (disconnectBackend) {
+                snapshotActiveTunnelsForReconnect(id, get().tunnels[id] || []);
                 try {
                     await disconnectIpc(id);
                 } catch (error) {
                     console.error('Failed to cleanup cancelled connection:', error);
+                } finally {
+                    get().markAllTunnelsStoppedForConnection(id);
                 }
                 // Same as disconnect/transport-lost: freeze PTYs and keep tabs
                 // pendingRestore so a late cancel cannot leave live terminals
@@ -652,7 +660,11 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
             for (const termId of existingTermIds) {
                 resetTerminalPtyForReconnect(termId);
             }
-            const primaryTermId = get().ensureTerminal(id);
+            // Feature actions only reconnect existing shells; terminal actions may
+            // bootstrap the first one through the normal workspace selection flow.
+            const primaryTermId = options?.preserveWorkspace
+                ? get().activeTerminalIds[id] ?? null
+                : get().ensureTerminal(id);
             const startupTermId = terminalForConnectionStartup(get(), id, primaryTermId);
 
             set(state => {
@@ -842,7 +854,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                     get().showToast('success', `Saved "${label}" to Vault. Connecting...`);
                     if (await finishCancelledConnect()) return;
                     queueMicrotask(() => {
-                        void get().connect(id, { skipVaultPrompt: true, skipCredentialPull });
+                        void get().connect(id, { ...options, skipVaultPrompt: true, skipCredentialPull });
                     });
                 } catch (vaultError: unknown) {
                     clearVaultRequestedPassphrase(error.connectionId, error.keyPath);
@@ -866,7 +878,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                 const unlocked = await useVaultStore.getState().requestUnlock();
                 if (shouldScheduleUnlockRetry(unlocked, cancelledConnectAttempts, attemptId)) {
                     queueMicrotask(() => {
-                        void get().connect(id, { skipVaultPrompt: true, skipCredentialPull });
+                        void get().connect(id, { ...options, skipVaultPrompt: true, skipCredentialPull });
                     });
                     return;
                 }
@@ -907,6 +919,8 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
             cancelledAttempts: cancelledConnectAttempts,
         });
         markConnectionBackendOffline(id);
+        snapshotActiveTunnelsForReconnect(id, get().tunnels[id] || []);
+        get().markAllTunnelsStoppedForConnection(id);
         set(state => ({
             connections: markConnectionStatus(state.connections, id, 'disconnected'),
         }));
@@ -972,6 +986,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
         } finally {
             // Suspend PTYs but keep xterm scrollback/tabs — avoids WebGL teardown blank screens.
             suspendAllTerminalsForConnection(get().terminals[id]);
+            get().markAllTunnelsStoppedForConnection(id);
         }
 
         // Preserve pendingRestore metadata on SSH tabs so reconnect can respawn PTY without losing tab list (roadmap 5.9)
