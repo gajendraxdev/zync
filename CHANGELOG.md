@@ -11,6 +11,7 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **File Manager Up button:** Go to the parent folder beside Back and Forward.
   The shortcut hint follows your keybinding, and the button is disabled at filesystem
   roots and while the folder is loading or the host is offline. ([484ca1c])
+  Unresolved or relative locations also keep the button disabled. ([c96d801])
 
 - **Global security hardening audit library:** Browse saved reports from all hosts
   from global navigation, the **+** menu or command palette. Search, filter by host,
@@ -3171,3 +3172,4 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [36327af]: https://github.com/zync-sh/zync/commit/36327afc287c18cc741b0746d380301a47ef2c31
 [484ca1c]: https://github.com/zync-sh/zync/commit/484ca1cabd76e7a919a3d3cd5743f368a236da34
 [1fa69c8]: https://github.com/zync-sh/zync/commit/1fa69c86635fda49d8bf35ee606d158fcff9a0ca
+[c96d801]: https://github.com/zync-sh/zync/commit/c96d8019256821dddbcc3dfc9a0920f13c669129
