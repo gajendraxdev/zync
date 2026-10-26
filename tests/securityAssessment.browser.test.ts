@@ -41,7 +41,7 @@ try {
     assert.equal(await liveHeading.evaluate((element: HTMLElement) => element === document.activeElement), false, 'Returning to the audit pane does not revive a relinquished handoff');
 
     await page.goto(fixtureUrl);
-    await page.getByRole('heading', { name: 'Hardening audit', exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Security hardening audit', exact: true }).waitFor();
     const setup = page.getByRole('region', { name: 'Assessment setup', exact: true });
     const run = setup.getByRole('button', { name: 'Run assessment', exact: true });
     const findings = page.getByRole('region', { name: 'Assessment findings', exact: true });

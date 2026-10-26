@@ -58,7 +58,7 @@ export function runSecurityPanelRetryChecks(loadSource: SourceLoader): void {
                 { ...eligible.subject, id: 'fixture', status: connectionStatus, lastConnected: 1 },
                 { ...eligible.subject, id: 'other', status: connectionStatus, lastConnected: 1 },
             ] }) },
-            '../../workspace/domain/registrations': { builtinWorkspaceViewLabel: () => 'Hardening audit' },
+            '../../workspace/domain/registrations': { builtinWorkspaceViewLabel: () => 'Security hardening audit' },
             '../application/useAssessment': { useAssessment: () => ({ state: currentState, controller }) },
             '../application/useAssessmentModules': { useAssessmentModules: () => ({ modules: [], selected: [], presets: [], presetId: 'general', status: 'ready' }) },
             '../domain/assessment': assessment, '../domain/modules': modules,

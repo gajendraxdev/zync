@@ -22,7 +22,9 @@ interface Approval {
 type CredentialDrafts = Partial<Record<RuntimeCredentialKind, RuntimeCredential>>;
 
 /** Account-free hardening workspace: compact setup, explicit access and pane-owned evidence review. */
-export function SecurityPanel({ connectionId, visible = true, focused = true }: { connectionId: string; visible?: boolean; focused?: boolean }) {
+export function SecurityPanel({ connectionId, visible = true, focused = true, setupRequest, onBackToLibrary }: {
+    connectionId: string; visible?: boolean; focused?: boolean; setupRequest?: object; onBackToLibrary?(): void;
+}) {
     const connection = useAppStore(state => state.connections.find(item => item.id === connectionId));
     const connected = connection?.status === 'connected' && connectionId !== 'local';
     // Local browsing and nonsecret scope belong to the host, independently of live transport epochs.
@@ -96,7 +98,7 @@ export function SecurityPanel({ connectionId, visible = true, focused = true }: 
                 <HardeningAuditIcon osIcon={connection?.icon} size={28} className="shrink-0 text-app-accent" />
                 <div className="min-w-0"><h1 className="text-base font-semibold tracking-tight">{builtinWorkspaceViewLabel('security')}</h1><p className="mt-1 break-all text-xs text-app-muted">{host}</p></div>
             </header>
-            <AssessmentReports owner={subject} presets={scope.presets} subject={subject}
+            <AssessmentReports owner={subject} presets={scope.presets} subject={subject} setupRequest={setupRequest} onBackToLibrary={onBackToLibrary}
                 liveResult={result} running={busy} onLeaveSetup={() => { closeApproval(); setElevationConsent(false); }} onRetryWithSudo={canRetryWithSudo ? handleRetryWithSudo : undefined} setup={<>
             <HardeningSetup connectionId={connectionId} connected={connected} local={connectionId === 'local'} visible={visible} focused={focused}
                 compact={busy || state.status === 'failed'} busy={busy} stopping={state.status === 'stopping'}

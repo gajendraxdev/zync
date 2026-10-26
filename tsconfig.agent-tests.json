@@ -28,6 +28,8 @@
         "tests/docker/hardening-runtime/qualify.ts",
         "tests/securityAssessment.browser.tsx",
         "tests/securityAssessment.browser.test.ts",
+        "tests/globalSecurityAudits.browser.tsx",
+        "tests/globalSecurityAudits.browser.test.ts",
         "tests/dashboardConnection.browser.tsx",
         "tests/dashboardConnection.browser.test.ts",
         "tests/tunnelConnection.browser.tsx",
