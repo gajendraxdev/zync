@@ -9,11 +9,11 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Remote command responsiveness:** Improved responsiveness across hosts while
   remote commands or AI file writes are running. Remote command requests now
   have a 30-second timeout, and cancelling or timing out a request keeps the shared
-  SSH connection available.
+  SSH connection available. ([acc34dc1])
 - **Reliable AI remote writes:** Failed directory creation and failed or
   unconfirmed writes now return errors with available server diagnostics.
   Streamed writes also report early server failures without waiting to send the
-  remaining file input.
+  remaining file input. ([acc34dc1])
 
 ## [2.38.0] - 2026-10-26
 
@@ -3184,3 +3184,4 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [484ca1c]: https://github.com/zync-sh/zync/commit/484ca1cabd76e7a919a3d3cd5743f368a236da34
 [1fa69c8]: https://github.com/zync-sh/zync/commit/1fa69c86635fda49d8bf35ee606d158fcff9a0ca
 [c96d801]: https://github.com/zync-sh/zync/commit/c96d8019256821dddbcc3dfc9a0920f13c669129
+[acc34dc1]: https://github.com/zync-sh/zync/commit/acc34dc133a2c301aa56a73df1a39b48d41717e1
