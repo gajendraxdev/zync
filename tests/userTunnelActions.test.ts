@@ -72,6 +72,37 @@ const two = { id: 'two', connectionId: 'host' };
     await state.actions.start(one);
     check(state.calls.filter(call => call === 'connect:host').length === 2, 'Failed admission releases its singleflight for a later explicit retry');
 }
+for (const publishConnecting of [false, true]) {
+    const state = fixture();
+    // The store reports ordinary connection failures through status and resolves its promise.
+    state.work.connect = async id => {
+        if (publishConnecting) state.statuses.set(id, 'connecting');
+        state.statuses.set(id, 'error');
+    };
+    await rejects(() => state.actions.start(one), 'A resolved connect with final error status rejects instead of reporting cancellation');
+    check(state.calls.join(',') === 'connect:host', 'Recorded connection failure cannot refresh or start a forward');
+    check(state.listenerCount() === 0, 'Recorded connection failure releases its status observer');
+    state.work.connect = async id => { state.statuses.set(id, 'connected'); };
+    check(await state.actions.start(one) === 'started', 'A later explicit retry can recover from a recorded connection failure');
+    check(state.listenerCount() === 0, 'Recovery after recorded failure releases its status observer');
+}
+{
+    const state = fixture(); const failure = new Error('Authentication declined');
+    state.work.connect = async id => { state.statuses.set(id, 'connecting'); state.statuses.set(id, 'error'); throw failure; };
+    let caught: unknown;
+    try { await state.actions.start(one); } catch (error) { caught = error; }
+    check(caught === failure, 'Publishing error before rejection preserves the original connection failure');
+    check(state.calls.join(',') === 'connect:host' && state.listenerCount() === 0, 'Rejected connection failure performs no tunnel work and releases its observer');
+}
+{
+    const state = fixture(); const gate = deferred();
+    state.work.connect = async id => { state.statuses.set(id, 'connecting'); await gate.promise; state.statuses.set(id, 'error'); };
+    const original = state.actions.start(one);
+    state.statuses.set('host', 'disconnected');
+    gate.resolve();
+    check(await original === 'cancelled', 'An error arriving after Cancel does not replace the existing cancellation');
+    check(state.calls.join(',') === 'connect:host' && state.listenerCount() === 0, 'Late errors after Cancel perform no tunnel work and release their observer');
+}
 {
     const state = fixture(); state.statuses.delete('host');
     await rejects(() => state.actions.start(one), 'A removed host cannot be started');
@@ -220,6 +251,14 @@ const two = { id: 'two', connectionId: 'host' };
     const result = await state.actions.startGroup([one, two, { id: 'three', connectionId: 'other' }]);
     check(result.failed === 2 && result.started === 1, 'A failed host group leaves unrelated host actions available');
     check(state.calls.filter(call => call === 'connect:host').length === 1, 'A failed host group authenticates at most once');
+}
+{
+    const state = fixture(); state.statuses.set('other', 'disconnected'); state.forwards.set('three', 'stopped');
+    state.work.connect = async id => { state.statuses.set(id, 'connecting'); state.statuses.set(id, id === 'host' ? 'error' : 'connected'); };
+    const result = await state.actions.startGroup([one, two, { id: 'three', connectionId: 'other' }]);
+    check(result.failed === 2 && result.started === 1 && result.cancelled === 0, 'A recorded connection error counts host rows as failed and leaves unrelated host groups available');
+    check(state.calls.join(',') === 'connect:host,connect:other,refresh:other,start:three:other', 'A failed host group connects once without refreshing or starting its forwards');
+    check(state.listenerCount() === 0, 'Failed and successful host groups both release their status observers');
 }
 {
     const state = fixture();

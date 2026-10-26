@@ -63,11 +63,14 @@ export function createUserTunnelActions(port: UserTunnelPort) {
                 let observedActive = status === 'connected';
                 admission.unsubscribe = port.subscribeConnectionStatus(connectionId, next => {
                     if (next === 'connecting' || next === 'connected') observedActive = true;
-                    else if (observedActive) admission.cancelled = true;
+                    else if (observedActive && next !== 'error') admission.cancelled = true;
                 });
                 if (status === 'connected') return true;
                 await port.connect(connectionId);
-                if (admission.cancelled || port.connectionStatus(connectionId) !== 'connected') return false;
+                if (admission.cancelled) return false;
+                const finalStatus = port.connectionStatus(connectionId);
+                if (finalStatus === 'error') throw new Error('Could not connect to the host for this forward.');
+                if (finalStatus !== 'connected') return false;
                 await port.refreshTunnels(connectionId);
                 return !admission.cancelled && port.connectionStatus(connectionId) === 'connected';
             } catch (error) {
