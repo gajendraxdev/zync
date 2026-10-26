@@ -25,6 +25,7 @@ All notable changes to Zync are documented in this file. The format is based on 
   ordered steps that survive saving and importing reports.
   Readable audit-rule, OS-profile and preset labels replace internal identifiers in
   report metadata and accepted-risk details.
+  ([2dc52de], [a5a7894], [cc27338])
 - **Simpler audit navigation:** Keep Reports and Accepted risks in the library,
   with a separate New assessment view and one Back control for setup/report review.
   Back retains list filters, pages and the latest unsaved report. Saved report rows
@@ -32,6 +33,7 @@ All notable changes to Zync are documented in this file. The format is based on 
   Leaving setup retains scope choices while clearing one-run credentials and sudo consent.
   Delete preparation uses row-local progress, and background refresh preserves the
   visible list instead of replacing it with a loading placeholder.
+  ([cc27338])
 - **Independent accepted risks:** Keep host-scoped acceptances separately from
   reports, with search, reason/expiry details and confirmed removal. Report deletion
   keeps them by default; an optional checkbox atomically removes matching unchanged
@@ -40,6 +42,7 @@ All notable changes to Zync are documented in this file. The format is based on 
   Report exports support up to 1,000 notes within a 1 MiB annotation budget.
   Stale actions remain blocked after deletion and reacceptance, and spreadsheet
   exports honor the newest matching decision before checking its expiry.
+  ([2dc52de], [a5a7894], [cc27338])
 - **Saved hardening reports:** Explicitly save a new report or replace a selected
   saved copy, including accepted-risk reasons and expiry. Open, compare and delete
   dated reports locally across app restarts. Saved summaries appear inline by default,
@@ -49,6 +52,7 @@ All notable changes to Zync are documented in this file. The format is based on 
   risk notes and spreadsheet exports treat evidence as text. Excel keeps Baseline
   and Preset in Summary and Area in Findings; CSV retains all three columns.
   JSON roundtrips preserve the report/import size budget near its limit.
+  ([2dc52de], [a5a7894], [cc27338])
 - **Focused hardening workflow:** Compact role presets and an areas editor replace
   the text-heavy setup. The catalog now contains 183 checks across 15 areas,
   including a bounded sample of running Docker containers, a current-file SSH
@@ -58,6 +62,7 @@ All notable changes to Zync are documented in this file. The format is based on 
   explain evidence without claiming complete application coverage or live SSH policy.
   Complete sampled workload outcomes bind comparisons and risk decisions, including
   matches beyond the displayed ID list. Setup controls adapt to narrow split panes.
+  ([2dc52de], [a5a7894], [cc27338])
 - **Local hardening review:** Explicit report comparison binds host-key, account,
   policy, target and rule identity; missing or unavailable checks never appear
   resolved. Standard/sudo comparisons show newly assessed and no-longer-assessed
@@ -65,15 +70,18 @@ All notable changes to Zync are documented in this file. The format is based on 
   Expiring accepted-risk annotations require a reason, bind to exact
   evidence and preserve native status/counts. Reports/notes can be explicitly saved
   locally or exported, with no automatic saving or upload.
+  ([2dc52de], [a5a7894], [cc27338])
 - **Selectable hardening areas:** Run the original 38-check host baseline or
   choose additional host protections and optional Nginx, Apache, Docker Engine,
   PostgreSQL, MySQL, Redis and Jenkins modules, with selected areas captured in approval,
   results, filters, JSON export and sudo retries. Unselected modules run no commands.
   Application results distinguish named service-unit/file checks from local daemon
   observations; they do not claim complete application or database policy coverage.
+  ([2dc52de], [a5a7894], [cc27338])
 - **Security hardening audit:** Open an on-demand Security hardening audit pane with scan corners,
   an OS icon and a magnifier in a Linux SSH workspace for a first-party, read-only baseline
   of 38 host checks and observations.
+  ([b81abbd], [50978eb], [9ca8e2b])
   Covers kernel, SSH, account, file, network, mount, update and service settings,
   with evidence, contextual recommendations, searchable/paginated results,
   cancellation and local JSON export. No scanner/agent installation, account,
@@ -98,6 +106,7 @@ All notable changes to Zync are documented in this file. The format is based on 
   essential findings appear before expandable technical details.
   Plain-language results explain settings and next steps while retaining exact
   technical evidence for inspection and export.
+  ([c1fb5bd], [36327af])
   SSH policy prefers config-only OpenSSH `-G` when supported, with a bounded probe
   and legacy `-T` fallback. Linux collection requires GNU coreutils `timeout`.
 
@@ -3141,3 +3150,11 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [9272802]: https://github.com/zync-sh/zync/commit/92728022a340136c4e95d613d73df09c8abe1c04
 [a9c29d6]: https://github.com/zync-sh/zync/commit/a9c29d687d552078cbaa02233f02e064719468d9
 [e6b3bbc]: https://github.com/zync-sh/zync/commit/e6b3bbce5b03baf5180f06030c93f0bd5f8db3c3
+[2dc52de]: https://github.com/zync-sh/zync/commit/2dc52def4487e719f18c1f7e10d37b3141553181
+[a5a7894]: https://github.com/zync-sh/zync/commit/a5a7894a2c7879a902dee029bf527961d1c5d0bc
+[cc27338]: https://github.com/zync-sh/zync/commit/cc273385dde498cc9b0a19e576ff7d66372c1eb2
+[b81abbd]: https://github.com/zync-sh/zync/commit/b81abbd030036fd8e693f1f33e89076f78dd58f8
+[50978eb]: https://github.com/zync-sh/zync/commit/50978ebe6d5fff1cbed86ff2b0827c1aa5538555
+[9ca8e2b]: https://github.com/zync-sh/zync/commit/9ca8e2bff37fbd3f0fdb23d85c14eeddb74778d2
+[c1fb5bd]: https://github.com/zync-sh/zync/commit/c1fb5bd41b9bcb6aa08957cb929ac6a45fdd65ca
+[36327af]: https://github.com/zync-sh/zync/commit/36327afc287c18cc741b0746d380301a47ef2c31
