@@ -4,6 +4,17 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Remote command responsiveness:** Improved responsiveness across hosts while
+  remote commands or AI file writes are running. Remote command requests now
+  have a 30-second timeout, and cancelling or timing out a request keeps the shared
+  SSH connection available.
+- **Reliable AI remote writes:** Failed directory creation and failed or
+  unconfirmed writes now return errors with available server diagnostics.
+  Streamed writes also report early server failures without waiting to send the
+  remaining file input.
+
 ## [2.38.0] - 2026-10-26
 
 ### Added
