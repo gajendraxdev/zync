@@ -6,6 +6,15 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Added
 
+- **Global security hardening audit library:** Browse saved reports from all hosts
+  from global navigation, the **+** menu or command palette. Search, filter by host,
+  open reports offline, export or delete saved copies. Removed hosts' reports remain
+  available. The feature is now named **Security hardening audit**. **New audit**
+  selects a host and opens the existing setup, with explicit connection and run
+  approval. Back preserves the current in-memory draft through **Resume audit**.
+  Browse labels respect host-address privacy, removed host filters clear after
+  confirmed changes, and deleting a draft's host leaves Back available.
+  ([9272802], [a9c29d6], [e6b3bbc])
 - **Actionable hardening guidance:** Attention findings show a concise recommended
   next step, with expandable change, impact, verification and recovery guidance
   where available. Unavailable checks retain collection next steps. Saved reports
@@ -62,7 +71,7 @@ All notable changes to Zync are documented in this file. The format is based on 
   results, filters, JSON export and sudo retries. Unselected modules run no commands.
   Application results distinguish named service-unit/file checks from local daemon
   observations; they do not claim complete application or database policy coverage.
-- **Hardening audit:** Open an on-demand Hardening audit pane with scan corners,
+- **Security hardening audit:** Open an on-demand Security hardening audit pane with scan corners,
   an OS icon and a magnifier in a Linux SSH workspace for a first-party, read-only baseline
   of 38 host checks and observations.
   Covers kernel, SSH, account, file, network, mount, update and service settings,
@@ -3129,3 +3138,6 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [9ee6ba5]: https://github.com/zync-sh/zync/commit/9ee6ba5bfac0689fb5f8f98873758428b938d96a
 [2fa623e]: https://github.com/zync-sh/zync/commit/2fa623e546e10356133ae6a6b0f8d379aee53653
 [b534c07]: https://github.com/zync-sh/zync/commit/b534c07a886f16fa22fefbf040ca6bd3dd12f400
+[9272802]: https://github.com/zync-sh/zync/commit/92728022a340136c4e95d613d73df09c8abe1c04
+[a9c29d6]: https://github.com/zync-sh/zync/commit/a9c29d687d552078cbaa02233f02e064719468d9
+[e6b3bbc]: https://github.com/zync-sh/zync/commit/e6b3bbce5b03baf5180f06030c93f0bd5f8db3c3
