@@ -3,6 +3,7 @@ import { terminalForConnectionStartup } from '../features/workspace/application/
 import type { AppStore } from './useAppStore';
 import { scheduleSaveSession } from './sessionSlice';
 import { normalizeDisplayAlias } from '../features/workspace/domain/presentation';
+import { builtinWorkspaceViewLabel } from '../features/workspace/domain/registrations';
 import { assertSupportedMainTabPresentations, changeMainTabPresentation, parseMainTabPresentation, reorderMainTabsById, stablePinnedMainTabs, type MainTabPresentationAction } from '../features/workspace/domain/mainTabPresentation';
 import { isPaneLayoutCloseBlocked } from '../lib/paneCloseBlockers';
 import type { Connection, CoreTabView, Folder, Tab } from '../features/connections/domain/types.js';
@@ -164,6 +165,7 @@ export interface ConnectionSlice {
     // Tab Actions
     openTab: (connectionId: string, startView?: CoreTabView) => void;
     openPortForwardingTab: () => void;
+    openSecurityAuditsTab: () => void;
     openPublicUrlsTab: () => void;
     openSnippetsTab: () => void;
     openReleaseNotesTab: () => void;
@@ -216,7 +218,7 @@ export interface ConnectionSlice {
 }
 
 const VALID_RESTORABLE_VIEWS = new Set<CoreTabView>(['terminal', 'files', 'port-forwarding', 'snippets', 'dashboard', 'security']);
-const RESTORABLE_TAB_TYPES = new Set(['connection', 'port-forwarding', 'release-notes', 'snippets', 'settings', 'vault', 'sync', 'public-urls']);
+const RESTORABLE_TAB_TYPES = new Set(['connection', 'port-forwarding', 'security-audits', 'release-notes', 'snippets', 'settings', 'vault', 'sync', 'public-urls']);
 
 type PersistedConnection = Omit<Connection, 'status'> & Partial<Pick<Connection, 'status'>>;
 
@@ -1066,6 +1068,18 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
         get().saveSession();
     },
 
+    /** Reuse one offline audit library without creating a host session or shell. */
+    openSecurityAuditsTab: () => {
+        get().setGlobalSidebarSection(null);
+        set(state => ({ ...ensureSingleTabByType(state.tabs, 'security-audits', () => ({
+            id: crypto.randomUUID(),
+            type: 'security-audits',
+            title: builtinWorkspaceViewLabel('security'),
+            view: 'security',
+        })), showWelcomeScreen: false }));
+        get().saveSession();
+    },
+
     openPublicUrlsTab: () => {
         set(state => {
             return { ...ensureSingleTabByType(state.tabs, 'public-urls', () => ({
@@ -1345,7 +1359,7 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                         ...(presentation && { presentation }),
                         connectionId: isLegacySnippetsTab
                             ? GLOBAL_SNIPPETS_CONNECTION_ID
-                            : s.connectionId,
+                            : s.tabType === 'security-audits' ? undefined : s.connectionId,
                         vaultProfileId: s.tabType === 'vault'
                             ? (isVaultProfileId(s.vaultProfileId)
                                 ? s.vaultProfileId
@@ -1374,7 +1388,8 @@ export const createConnectionSlice: StateCreator<AppStore, [], [], ConnectionSli
                 activeConnectionId === 'local' ||
                 state.connections.some(c => c.id === activeConnectionId);
             const resolvedConnId =
-                resolvedTab?.connectionId ?? (activeConnectionIdValid ? activeConnectionId : null);
+                resolvedTab?.type === 'security-audits' ? null
+                    : resolvedTab?.connectionId ?? (activeConnectionIdValid ? activeConnectionId : null);
 
             // When the restored active tab is the global snippets tab (a pseudo-tab with
             // no real connection), fall back to the most recent real connection tab so

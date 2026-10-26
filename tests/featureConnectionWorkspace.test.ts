@@ -33,10 +33,11 @@ export async function runFeatureConnectionWorkspaceChecks(loadSource: LoadSource
             './sessionSlice': { scheduleSaveSession: () => calls.push('save-session') },
             '../features/workspace/application/reconnectTerminal': pure('features/workspace/application/reconnectTerminal.ts'),
             '../features/workspace/domain/presentation': pure('features/workspace/domain/presentation.ts'),
+            '../features/workspace/domain/registrations': pure('features/workspace/domain/registrations.ts'),
             '../features/workspace/domain/mainTabPresentation': pure('features/workspace/domain/mainTabPresentation.ts'),
             '../lib/paneCloseBlockers': {},
             '../features/connections/application/connectionService': {},
-            '../features/connections/application/tabService': {},
+            '../features/connections/application/tabService': pure('features/connections/application/tabService.ts'),
             '../features/connections/application/connectionLifecycleService': pure('features/connections/application/connectionLifecycleService.ts'),
             '../features/connections/application/tunnelAutoStartService': {},
             '../features/usage': { track: () => {}, trackConnectSuccess: () => {}, trackConnectFailure: () => {} },
@@ -84,6 +85,7 @@ export async function runFeatureConnectionWorkspaceChecks(loadSource: LoadSource
         const globals = { console: { error: () => {} }, window: { ipcRenderer: {} }, performance: { now: () => 0 },
             crypto: { randomUUID: () => `fixture-${++serial}` }, queueMicrotask: (task: () => void) => microtasks.push(task) };
         const connectionSlice = loadSource('store/connectionSlice.ts', dependencies, globals);
+        const uiSlice = loadSource('store/uiSlice.ts', {}, globals);
         const terminalSlice = loadSource('store/terminalSlice.ts', {
             '../features/usage': dependencies['../features/usage'], '../lib/terminal': {}, './sessionSlice': dependencies['./sessionSlice'],
             '../lib/paneCloseBlockers': {}, '../lib/paneLayout': layout, '../lib/paneLayout/groups': pure('lib/paneLayout/groups.ts'),
@@ -100,7 +102,7 @@ export async function runFeatureConnectionWorkspaceChecks(loadSource: LoadSource
         const dashboard = layout.singleFeaturePane('dashboard', 'dashboard-pane', 'dashboard-instance');
         const dashboardKey = layout.paneContentKey(dashboard.root.content, dashboard.root.id);
         const set = (patch: any) => { state = { ...state, ...(typeof patch === 'function' ? patch(state) : patch) }; };
-        state = { ...connectionSlice.createConnectionSlice(set, () => state), ...terminalSlice.createTerminalSlice(set, () => state),
+        state = { ...connectionSlice.createConnectionSlice(set, () => state), ...terminalSlice.createTerminalSlice(set, () => state), ...uiSlice.createUiSlice(set, () => state),
             connections: [{ id, name: id, host: 'fixture.invalid', username: 'fixture', port: 22, status: 'disconnected', privateKeyPath: '/fixture/key' }],
             tabs: [{ id: 'host-tab', type: 'connection', connectionId: id, view: 'security' }], activeTabId: 'host-tab', activeConnectionId: id,
             terminals: { [id]: terminals ? [{ id: 'retained-shell', title: 'Existing shell', pendingRestore: true }] : [] }, activeTerminalIds: {},
@@ -136,6 +138,32 @@ export async function runFeatureConnectionWorkspaceChecks(loadSource: LoadSource
         equal(subject.get().activeTabId, 'host-tab', 'Selected host tab remains active');
         equal(subject.get().connections[0].status, 'connected', 'Shared connection flow completes');
         equal(subject.get().connections[0].homePath, '/home/fixture', 'Connection metadata still loads');
+    }
+
+    {
+        const subject = fixture();
+        subject.get().openSecurityAuditsTab();
+        const first = subject.get().tabs.find((tab: any) => tab.type === 'security-audits');
+        equal(subject.get().globalSidebarSection, null, 'Direct audit opening clears the default sidebar selection so the audit tab is highlighted');
+        equal(subject.get().lastGlobalSidebarSection, 'hosts', 'Opening audits retains the sidebar destination for later reopening');
+        equal(subject.get().globalSidebarSelectionRevision, 1, 'Audit opening advances sidebar action ownership through the shared setter');
+        subject.get().setGlobalSidebarSection('plugins');
+        subject.get().openSecurityAuditsTab();
+        equal(subject.get().globalSidebarSection, null, 'Reopening the existing audit tab also clears a subsequently selected sidebar section');
+        equal(subject.get().lastGlobalSidebarSection, 'plugins', 'Repeated audit opening preserves the latest remembered sidebar destination');
+        equal(subject.get().globalSidebarSelectionRevision, 3, 'Repeated audit opening cannot be rolled back by an older sidebar action');
+        equal(subject.get().tabs.length, 2, 'Global audit navigation reuses one library tab alongside the host workspace');
+        equal(subject.get().activeTabId, first.id, 'Repeated global audit navigation selects the same tab');
+        equal(first.title, 'Security hardening audit', 'The global library uses the canonical feature name');
+        equal(subject.get().activeConnectionId, null, 'The global audit library owns no live host connection');
+        equal(subject.connects, [], 'Opening the global audit library never connects a host');
+        equal(subject.get().terminals[subject.id], [], 'Opening the global audit library creates no shell');
+        subject.get().restoreTabState([{ ...first, tabType: first.type, connectionId: subject.id }], first.id, subject.id);
+        equal(subject.get().tabs[0].type, 'security-audits', 'The global audit destination survives session restoration');
+        equal(subject.get().tabs[0].view, 'security', 'Restored global audit tabs retain their stable view identity');
+        equal(subject.get().activeConnectionId, null, 'Restoring the global audit library does not select or connect a host');
+        equal(subject.get().tabs[0].connectionId, undefined, 'Restored global audit tabs never inherit a stale host association');
+        equal(subject.connects, [], 'Session restoration never starts an audit host connection');
     }
 
     for (const terminals of [false, true]) {
