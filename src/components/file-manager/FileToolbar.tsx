@@ -18,7 +18,7 @@ import { FilePathBar } from './FilePathBar';
 import { FileActionMenu } from './FileActionMenu';
 import type { FileFolderLoader } from './fileFolderOptions';
 import { FilePathEditor, type FilePathRestoreFocus } from './FilePathEditor';
-import { parentFilePath } from './filePathNav';
+import { isAbsoluteFilePath, parentFilePath } from './filePathNav';
 
 interface FileToolbarProps {
   currentPath: string;
@@ -75,7 +75,7 @@ function FileToolbarInner({
 }: FileToolbarProps) {
   const compactMode = useAppStore((state) => state.settings.compactMode);
   const upShortcut = useAppStore((state) => shortcutHint('fmUp', state.settings.keybindings ?? {}));
-  const parentPath = parentFilePath(currentPath);
+  const parentPath = isAbsoluteFilePath(currentPath) ? parentFilePath(currentPath) : null;
   const barRef = useRef<HTMLDivElement>(null);
   const restorePathFocusRef = useRef<FilePathRestoreFocus>(null);
 

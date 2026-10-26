@@ -184,6 +184,7 @@ const tests = [
   'tests/fileListPresentation.test.mjs',
   'tests/fileMarquee.test.mjs',
   'tests/filePathNav.test.mjs',
+  '.tmp-agent-tests/tests/filePathAbsolute.test.js',
   'tests/fileVolumes.test.mjs',
   'tests/themedIconSrc.test.mjs',
   'tests/materialIconTheme.test.mjs',

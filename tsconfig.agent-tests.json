@@ -21,6 +21,7 @@
         "sourceMap": false
     },
     "include": [
+        "tests/filePathAbsolute.test.ts",
         "tests/securityAssessment.test.ts",
         "tests/securityPanelRetry.test.ts",
         "tests/securityCollector.test.ts",
