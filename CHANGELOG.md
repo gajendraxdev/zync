@@ -107,6 +107,8 @@ All notable changes to Zync are documented in this file. The format is based on 
   through the existing host flow, respect cancellation and avoid duplicate starts
   after automatic tunnel restoration. Browsing no longer reconciles by stopping
   tunnels, and stopping a forward no longer disconnects other host panes. ([fa7ad8c])
+  Connection failures surface as errors and count as failures in group starts;
+  errors arriving after Cancel still count as cancellations. ([b534c07])
 - **Focused reconnect shortcuts:** Only the focused restored terminal or Files
   pane owns reconnect autofocus and the Enter shortcut. Offline dashboards hide
   live metrics and remote actions until the host is connected. ([9ee6ba5])
@@ -3126,3 +3128,4 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [fa7ad8c]: https://github.com/zync-sh/zync/commit/fa7ad8c9db8fba55e6f3769f4cb148fda8844d4f
 [9ee6ba5]: https://github.com/zync-sh/zync/commit/9ee6ba5bfac0689fb5f8f98873758428b938d96a
 [2fa623e]: https://github.com/zync-sh/zync/commit/2fa623e546e10356133ae6a6b0f8d379aee53653
+[b534c07]: https://github.com/zync-sh/zync/commit/b534c07a886f16fa22fefbf040ca6bd3dd12f400
