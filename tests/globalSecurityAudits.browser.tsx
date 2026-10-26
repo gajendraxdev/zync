@@ -1,4 +1,4 @@
-import { StrictMode } from 'react';
+import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Provider as TooltipProvider } from '@radix-ui/react-tooltip';
 import { GlobalSecurityAuditsPanel } from '../src/features/security/ui/GlobalSecurityAuditsPanel';
@@ -171,4 +171,17 @@ useAppStore.setState({ connections: auditHosts.map(item => ({ ...item })), activ
 } });
 publishCounts();
 document.body.dataset.overlayGalleryTheme = 'dark';
-createRoot(document.getElementById('root')!).render(<StrictMode><TooltipProvider><GlobalSecurityAuditsPanel /></TooltipProvider></StrictMode>);
+
+/** Keep the panel mounted across simulated workspace-tab switches, as the real layout does. */
+function GlobalAuditsFixture() {
+    const [active, setActive] = useState(!new URLSearchParams(location.search).has('inactive'));
+    useEffect(() => {
+        const changeActive = (event: Event) => setActive((event as CustomEvent<boolean>).detail);
+        window.addEventListener('fixture-audits-active', changeActive);
+        return () => window.removeEventListener('fixture-audits-active', changeActive);
+    }, []);
+    useEffect(() => { document.body.dataset.auditsActive = String(active); }, [active]);
+    return <GlobalSecurityAuditsPanel active={active} />;
+}
+
+createRoot(document.getElementById('root')!).render(<StrictMode><TooltipProvider><GlobalAuditsFixture /></TooltipProvider></StrictMode>);

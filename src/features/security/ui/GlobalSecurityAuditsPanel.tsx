@@ -40,7 +40,9 @@ export function GlobalSecurityAuditsPanel({ active = true }: { active?: boolean 
     const choice = useRef(0);
     const subject = useMemo(() => selected ? savedReportSubject(selected) : undefined, [selected]);
 
-    useEffect(() => { void library.refresh(); }, [owner]);
+    useEffect(() => {
+        if (active && !selected && !draftVisible) void library.refresh();
+    }, [owner, active, selected, draftVisible]);
     useLayoutEffect(() => {
         if (!selected && !draftVisible && restoreFocus.current) {
             const active = document.activeElement;
@@ -69,7 +71,7 @@ export function GlobalSecurityAuditsPanel({ active = true }: { active?: boolean 
             && (!text || `${row.name} ${reportHostLabelText(labels.get(savedReportHostKey(row)))} ${savedReportHostLabel(row)}`.toLocaleLowerCase().includes(text)));
     }, [library.rows, query, effectiveHost, labels]);
 
-    /** Back retains search, host filter and pagination; changes made in the shared reviewer refresh only metadata. */
+    /** Back retains filters/page and starts the metadata refresh before the keyboard-focus handoff. */
     const backToLibrary = () => { setSelected(undefined); setDraftVisible(false); restoreFocus.current = true; void library.refresh(); };
 
     /** Export only the selected saved body and keep its endpoint/account scope explicit. */

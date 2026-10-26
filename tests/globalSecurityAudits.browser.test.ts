@@ -9,13 +9,17 @@ try {
     const errors: string[] = [];
     page.on('pageerror', (error: Error) => errors.push(error.message));
     const fixtureUrl = (process.env.ZYNC_BROWSER_BASE_URL || 'http://127.0.0.1:1426') + '/tests/globalSecurityAudits.browser.html';
-    await page.goto(fixtureUrl);
+    await page.goto(fixtureUrl + '?inactive=1');
     await page.getByRole('heading', { name: 'Security hardening audit', exact: true }).waitFor();
     const library = page.getByRole('region', { name: 'Saved reports', exact: true });
     const search = page.getByLabel('Search saved reports', { exact: true });
     const hostFilter = page.getByLabel('Filter reports by host', { exact: true });
     const count = async (key: string) => Number(await page.locator('body').getAttribute('data-' + key) || 0);
     const event = (name: string) => page.evaluate((value: string) => window.dispatchEvent(new Event(value)), name);
+    async function setPanelActive(active: boolean) {
+        await page.evaluate((value: boolean) => window.dispatchEvent(new CustomEvent('fixture-audits-active', { detail: value })), active);
+        await page.waitForFunction((value: boolean) => document.body.dataset.auditsActive === String(value), active);
+    }
     async function chooseHost(text: string) {
         await hostFilter.click();
         await page.getByRole('option').filter({ hasText: text }).click();
@@ -27,6 +31,9 @@ try {
             return Boolean(titleId && document.getElementById(titleId)?.textContent === label);
         }, name);
     }
+    await page.waitForFunction(() => document.body.dataset.auditsActive === 'false');
+    assert.equal(await count('global-list-calls'), 0, 'An inactive mounted library does not load metadata');
+    await setPanelActive(true);
     await library.getByRole('button', { name: 'Alpha audit 1', exact: true }).waitFor();
     assert.equal(await library.getByRole('listitem').count(), 5, 'The global library reuses bounded report pagination');
     await library.getByText('1–5 of 9', { exact: true }).waitFor();
@@ -34,6 +41,19 @@ try {
     assert.equal(await count('risk-reads'), 0, 'Global landing does not request or migrate host acceptance data');
     assert.equal(await count('host-list-calls'), 0, 'Global landing uses one aggregate metadata API rather than host fan-out');
     assert.equal(await count('remote-calls'), 0, 'Global listing needs no SSH connection');
+
+    const initialListCalls = await count('global-list-calls');
+    await setPanelActive(false);
+    await event('fixture-hide-alpha-summaries');
+    assert.equal(await count('global-list-calls'), initialListCalls, 'Leaving the library does not refresh its metadata');
+    await setPanelActive(true);
+    await library.getByText('On this device · 3 saved', { exact: true }).waitFor();
+    assert.equal(await count('global-list-calls'), initialListCalls + 1, 'Returning to the library refreshes its saved-report snapshot once');
+    assert.equal(await library.getByRole('button', { name: 'Alpha audit 1', exact: true }).count(), 0, 'The refreshed list reflects changes made while another tab was active');
+    await setPanelActive(false);
+    await event('fixture-restore-alpha-summaries');
+    await setPanelActive(true);
+    await library.getByText('1–5 of 9', { exact: true }).waitFor();
 
     await event('fixture-hide-host-addresses');
     assert.doesNotMatch(await library.innerText(), /alpha\.invalid|observer@/, 'Private report rows show host labels rather than endpoints');
@@ -86,13 +106,20 @@ try {
     await library.getByRole('button', { name: 'Alpha audit 6', exact: true }).focus();
     await page.keyboard.press('Enter');
     await page.getByRole('heading', { name: 'Report preview', exact: true }).waitFor();
+    const previewListCalls = await count('global-list-calls');
+    await setPanelActive(false);
+    await setPanelActive(true);
+    assert.equal(await count('global-list-calls'), previewListCalls, 'Reactivating a report preview does not refresh the hidden library');
+    await page.getByRole('heading', { name: 'Report preview', exact: true }).waitFor();
     const loadedIds = JSON.parse(await page.locator('body').getAttribute('data-loaded-ids') || '[]') as string[];
     assert.deepEqual([...new Set(loadedIds)], ['00000000-0000-4000-8000-000000000006'], 'Opening fetches only the explicitly selected report body, including StrictMode effect replay');
     assert.equal(await count('remote-calls'), 0);
+    const beforeBackListCalls = await count('global-list-calls');
     await event('fixture-hold-global-list');
     await page.getByRole('button', { name: 'Back', exact: true }).click();
     await library.getByText('6–6 of 6', { exact: true }).waitFor();
     await page.waitForFunction(() => document.body.dataset.globalListPending === 'true');
+    assert.equal(await count('global-list-calls'), beforeBackListCalls + 1, 'Back and activation share one in-flight metadata refresh');
     assert.match(await hostFilter.innerText(), /alpha\.invalid/, 'Global Back retains the host filter');
     await event('fixture-release-global-list');
     await page.waitForFunction(() => document.body.dataset.globalListPending === '');
@@ -221,6 +248,10 @@ try {
     await picker.waitFor({ state: 'hidden' });
     const setup = page.getByRole('region', { name: 'Assessment setup', exact: true });
     await setup.getByRole('heading', { name: 'Host hardening', exact: true }).waitFor();
+    const draftListCalls = await count('global-list-calls');
+    await setPanelActive(false);
+    await setPanelActive(true);
+    assert.equal(await count('global-list-calls'), draftListCalls, 'Reactivating an audit draft does not refresh the hidden library');
     assert.equal(await count('connect-calls'), 0, 'Choosing a connected saved host reuses its transport without reconnecting');
     assert.equal(await count('begins'), 0, 'Choosing a host opens setup without native assessment admission');
     assert.equal(await count('runs'), 0, 'Choosing a host never starts an assessment');
