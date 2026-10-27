@@ -31,6 +31,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Fixed
 
+- **SOCKS connection lifetime:** Apply the five-second timeout to negotiation and
+  SSH channel setup, allowing established connections to continue relaying until
+  they close or the tunnel stops. ([984adfe8])
+
 - **Public URL backpressure:** Bound outgoing buffering and pause response producers
   on slow relay connections. Preserve the relay's existing 256-stream capacity and
   coalesce heartbeat replies during stalls. Excess requests receive 503 without
@@ -3249,3 +3253,4 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [3a0eb5da]: https://github.com/zync-sh/zync/commit/3a0eb5da3a916d3586fb836f027a700eecc1e14f
 [6e19291c]: https://github.com/zync-sh/zync/commit/6e19291c1b7c29313bfb40052cd2030bb2ba2be6
 [093f96cc]: https://github.com/zync-sh/zync/commit/093f96cc62b09924e0c86488994152d86c7ae72f
+[984adfe8]: https://github.com/zync-sh/zync/commit/984adfe8d455ca2267dc9309cf679d5339e8312d
