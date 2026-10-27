@@ -134,6 +134,29 @@ for (const method of ['run', 'runTest', 'check']) {
         `${legacy}\nworker.${method}('old harness command', () => {});`,
     );
 }
+for (const expression of [
+    '/ready/.test(value)',
+    '(/ready/).test(value)',
+    'pattern.test(value)',
+    "new RegExp('ready').test(value)",
+]) {
+    accepts('tests/legacy.test.mjs', `const matched = ${expression};`, 'const matched = false;');
+}
+accepts(
+    'tests/legacy.test.mjs',
+    'const matched = /ready/.test(value);',
+    'const matched = /pending/.test(value);',
+);
+accepts('tests/helpers/regex.mjs', 'const matched = /ready/.test(value);');
+accepts('tests/legacy.test.mjs', 'pattern.test(() => value);', '');
+rejects('tests/legacy.test.mjs', "api.test('new', () => {});", '');
+rejects('tests/legacy.test.mjs', "api.describe('new', function () {});", '');
+rejects('tests/legacy.test.mjs', "t.test('new', existingBody);", '');
+rejects(
+    'tests/legacy.test.mjs',
+    "import { test as scenario } from 'node:test'; scenario('new', existingBody);",
+    '',
+);
 for (const registration of ['run', 'runTest', 't.test', 'test.only', 'describe', 'suite']) {
     rejects('tests/legacy.test.mjs', `${legacy}\n${registration}('new', () => {});`, legacy);
 }

@@ -18,6 +18,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Fixed
 
+- **Accurate test-language checks:** Ordinary regular-expression `.test()` calls
+  no longer count as new JavaScript test cases. Recognized registrations and
+  registration-shaped callbacks remain checked.
+
 - **Single Vite configuration:** Removed stale generated config and TypeScript
   cache files that shadowed `vite.config.ts`. Builds now check the config without
   emitting duplicate files, and obsolete Monaco settings have been removed.

@@ -31,11 +31,15 @@ function syntaxKey(node) {
 
 /** Resolve chained calls such as test.only(), t.test() and expect(value).toEqual(). */
 function callNames(expression) {
+    if (ts.isParenthesizedExpression(expression)) {
+        return callNames(expression.expression);
+    }
     if (ts.isIdentifier(expression)) {
         return [expression.text];
     }
     if (ts.isPropertyAccessExpression(expression)) {
-        return [...callNames(expression.expression), expression.name.text];
+        const receiver = callNames(expression.expression);
+        return receiver.length ? [...receiver, expression.name.text] : [];
     }
     if (ts.isCallExpression(expression)) {
         return callNames(expression.expression);
@@ -101,7 +105,19 @@ function testLogic(source, file) {
     function visit(node) {
         if (ts.isCallExpression(node)) {
             const names = callNames(node.expression);
-            if (cases.has(names[0]) || registrationTailNames.has(names.at(-1))) {
+            const tail = ts.isPropertyAccessExpression(node.expression)
+                ? node.expression.name.text
+                : names.at(-1);
+            const registrationTail = registrationTailNames.has(tail);
+            const hasRegistrationBody = node.arguments
+                .slice(1)
+                .some(
+                    (argument) => ts.isArrowFunction(argument) || ts.isFunctionExpression(argument),
+                );
+            if (
+                cases.has(names[0]) ||
+                (registrationTail && (names[0] === 't' || hasRegistrationBody))
+            ) {
                 const argumentsWithoutBodies = node.arguments.filter(
                     (argument) =>
                         !ts.isArrowFunction(argument) && !ts.isFunctionExpression(argument),
