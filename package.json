@@ -9,10 +9,10 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "npm run type-check && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "type-check": "tsc --noEmit",
+    "type-check": "tsc --noEmit && tsc --project tsconfig.node.json",
     "prepare": "node scripts/install-git-hooks.mjs",
     "format:staged": "node scripts/pre-commit.mjs",
     "check:test-language": "node scripts/check-test-language.mjs",

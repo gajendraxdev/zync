@@ -11,6 +11,11 @@ node_modules
 dist
 dist-ssr
 *.local
+
+# Vite uses the TypeScript source; generated copies must not shadow it.
+/vite.config.js
+/vite.config.d.ts
+*.tsbuildinfo
 target-agent-check/
 src-tauri/target-agent-check/
 # Editor directories and files

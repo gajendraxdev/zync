@@ -18,6 +18,10 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Fixed
 
+- **Single Vite configuration:** Removed stale generated config and TypeScript
+  cache files that shadowed `vite.config.ts`. Builds now check the config without
+  emitting duplicate files, and obsolete Monaco settings have been removed.
+
 - **Closed Files pane cleanup:** Permanently closed Files panes release their
   browsing state and stop receiving refreshes. Late results cannot restore closed
   pane state; retained panes keep their existing resources. ([c24a24ab])
