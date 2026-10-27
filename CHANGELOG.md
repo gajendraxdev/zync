@@ -20,11 +20,11 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 - **Accurate test-language checks:** Ordinary regular-expression `.test()` calls
   no longer count as new JavaScript test cases. Recognized registrations and
-  registration-shaped callbacks remain checked.
+  registration-shaped callbacks remain checked. ([ab4820be])
 
 - **Single Vite configuration:** Removed stale generated config and TypeScript
   cache files that shadowed `vite.config.ts`. Builds now check the config without
-  emitting duplicate files, and obsolete Monaco settings have been removed.
+  emitting duplicate files, and obsolete Monaco settings have been removed. ([5d65c1f8])
 
 - **Closed Files pane cleanup:** Permanently closed Files panes release their
   browsing state and stop receiving refreshes. Late results cannot restore closed
@@ -3215,3 +3215,5 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [148a5d26]: https://github.com/zync-sh/zync/commit/148a5d26af8a85739bb927cfe840d1277c0f0d49
 [c24a24ab]: https://github.com/zync-sh/zync/commit/c24a24ab8207ce23b1d7151a08804cda7f4d0971
 [fcc5d546]: https://github.com/zync-sh/zync/commit/fcc5d5468ba729b2b5ffd3adc01b15de8f81fef0
+[5d65c1f8]: https://github.com/zync-sh/zync/commit/5d65c1f80bb333ca8125b6fc4f2cf29c2ec243ed
+[ab4820be]: https://github.com/zync-sh/zync/commit/ab4820be6590188c702bbd35cab9891fe9e1524f
