@@ -4,6 +4,13 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ## [Unreleased]
 
+### Changed
+
+- **Consistent contribution checks:** Added staged JavaScript/TypeScript formatting,
+  organized imports and a TypeScript test policy, preserving existing hooks and
+  partially staged edits. Hook installation supports shell options and safely
+  skips checkouts without the project runner; committed checks use a merge base.
+
 ### Fixed
 
 - **Remote command responsiveness:** Improved responsiveness across hosts while
