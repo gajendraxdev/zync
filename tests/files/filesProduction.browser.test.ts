@@ -15,6 +15,7 @@ import { runFilesWorkspaceMotionChecks } from './helpers/filesWorkspaceMotionChe
 const transferSafetyOnly = process.argv.includes('--transfer-safety-only');
 const listSpacingOnly = process.argv.includes('--list-spacing-only');
 const listControlsOnly = process.argv.includes('--list-controls-only');
+const gridAlignmentOnly = process.argv.includes('--grid-alignment-only');
 const focusOnly = process.argv.includes('--focus-only');
 const permissionsOnly = process.argv.includes('--permissions-only');
 const administratorOnly = process.argv.includes('--admin-permissions-only');
@@ -141,7 +142,183 @@ try {
         await mkdir(process.env.ZYNC_FILES_SCREENSHOTS, { recursive: true });
         await page.screenshot({ path: `${process.env.ZYNC_FILES_SCREENSHOTS}/${name}.png` });
     };
-    if (listControlsOnly) {
+    if (gridAlignmentOnly) {
+        await listing.waitFor();
+        await page.getByRole('button', { name: 'Hide places', exact: true }).click();
+        await page.getByRole('button', { name: 'View', exact: true }).click();
+        await page.getByRole('menuitemradio', { name: 'Grid view', exact: true }).click();
+        await page.mouse.move(0, 0);
+        await listing.focus();
+        await page.keyboard.press('Escape');
+        await page.locator('[data-zync-tooltip]').waitFor({ state: 'detached' });
+        const nativeBefore = await page.evaluate(() => window.filesUiTest.calls.length);
+        for (const count of [31, 1000]) {
+            await page.evaluate((count) => window.filesUiTest.gridAlignmentFiles(count), count);
+            await listing.locator(`[aria-setsize="${count}"]`).first().waitFor();
+            for (const [zoom, icon] of [
+                [0, 48],
+                [1, 64],
+                [2, 96],
+                [3, 168],
+                [4, 256],
+            ]) {
+                await page.evaluate(
+                    (gridZoom) => window.filesUiTest.preference({ gridZoom }),
+                    zoom,
+                );
+                for (const width of [240, 280, 320, 380, 480, 640, 900, 1200, 1600]) {
+                    await page.setViewportSize({ width, height: 800 });
+                    await page.waitForFunction((icon) => {
+                        const viewport = document.querySelector<HTMLElement>(
+                            '.files-selection > div > [role="presentation"]',
+                        )!;
+                        const first = viewport.querySelector<HTMLElement>('[data-file-name]')!;
+                        const grid = first.parentElement!.parentElement!;
+                        const tracks = getComputedStyle(grid)
+                            .gridTemplateColumns.split(' ')
+                            .map(parseFloat);
+                        const gap = parseFloat(getComputedStyle(grid).columnGap);
+                        const artwork = first.querySelector<HTMLElement>('.files-grid-artwork')!;
+                        return (
+                            parseFloat(artwork.style.getPropertyValue('--files-grid-icon-size')) ===
+                                icon &&
+                            tracks.length ===
+                                Math.max(
+                                    1,
+                                    Math.floor((viewport.clientWidth + gap) / (tracks[0] + gap)),
+                                )
+                        );
+                    }, icon);
+                    const geometry = await listing.evaluate((el, icon) => {
+                        const viewport = el.querySelector<HTMLElement>(
+                            ':scope > div > [role="presentation"]',
+                        )!;
+                        const bounds = viewport.getBoundingClientRect();
+                        const options = [
+                            ...viewport.querySelectorAll<HTMLElement>('[data-file-name]'),
+                        ];
+                        const grid = options[0].parentElement!.parentElement!;
+                        const style = getComputedStyle(grid);
+                        const tracks = style.gridTemplateColumns.split(' ').map(parseFloat);
+                        const gap = parseFloat(style.columnGap);
+                        const cells = options.map((option) =>
+                            option.parentElement!.getBoundingClientRect(),
+                        );
+                        const start = cells[0].left;
+                        const span =
+                            tracks.reduce((sum, track) => sum + track, 0) +
+                            gap * (tracks.length - 1);
+                        const left = start - bounds.left;
+                        const right = viewport.clientWidth - left - span;
+                        const align = cells.every(
+                            (cell, index) =>
+                                Math.abs(
+                                    cell.left - start - (index % tracks.length) * (tracks[0] + gap),
+                                ) <= 1,
+                        );
+                        const fits = options.every((option, index) => {
+                            const tile = option.getBoundingClientRect();
+                            const art = option
+                                .querySelector<HTMLElement>('.files-grid-artwork')!
+                                .getBoundingClientRect();
+                            return (
+                                tile.left >= cells[index].left - 1 &&
+                                tile.right <= cells[index].right + 1 &&
+                                tile.bottom <= cells[index].bottom + 1 &&
+                                art.left >= tile.left - 1 &&
+                                art.right <= tile.right + 1 &&
+                                art.bottom <= tile.bottom + 1 &&
+                                (viewport.clientWidth < icon + 16 ||
+                                    Math.abs(art.width - icon) <= 1)
+                            );
+                        });
+                        return {
+                            columns: tracks.length,
+                            left,
+                            right,
+                            align,
+                            fits,
+                            rendered: options.length,
+                            noOverflow:
+                                viewport.scrollWidth <= viewport.clientWidth &&
+                                el.scrollWidth <= el.clientWidth,
+                            noAnimation:
+                                viewport.getAnimations({ subtree: true }).length === 0 &&
+                                options.every(
+                                    (option) => getComputedStyle(option).transform === 'none',
+                                ),
+                        };
+                    }, icon);
+                    check(
+                        `${count} files, ${width}px, zoom ${zoom}: fixed columns align with balanced outer space (${JSON.stringify(geometry)})`,
+                        geometry.align &&
+                            Math.abs(geometry.left - geometry.right) <= 1 &&
+                            geometry.left >= -1,
+                    );
+                    check(
+                        `${count} files, ${width}px, zoom ${zoom}: artwork and long captions fit their rows`,
+                        geometry.fits,
+                    );
+                    check(
+                        `${count} files, ${width}px, zoom ${zoom}: wrapping has no animation or horizontal overflow`,
+                        geometry.noAnimation &&
+                            geometry.noOverflow &&
+                            (count !== 1000 || geometry.rendered < count),
+                    );
+                    if (count === 31 && zoom === 0 && [280, 380, 640, 1200].includes(width)) {
+                        await screenshot(`files-grid-alignment-${width}`);
+                    }
+                }
+            }
+            await page.evaluate(() => window.filesUiTest.preference({ gridZoom: 0 }));
+            await page.setViewportSize({ width: 380, height: 800 });
+            await page.waitForFunction(
+                () =>
+                    document
+                        .querySelector<HTMLElement>('.files-grid-artwork')
+                        ?.style.getPropertyValue('--files-grid-icon-size') === '48px',
+            );
+            const band = await listing.evaluate((el) => {
+                const viewport = el.querySelector<HTMLElement>(
+                    ':scope > div > [role="presentation"]',
+                )!;
+                viewport.scrollTop = 0;
+                const first = viewport.querySelector<HTMLElement>('[data-file-name]')!;
+                const box = first.getBoundingClientRect();
+                return {
+                    start: viewport.getBoundingClientRect().left + 1,
+                    end: box.right - 2,
+                    top: box.top + 2,
+                    bottom: box.bottom - 2,
+                    name: first.dataset.fileName,
+                };
+            });
+            await page.mouse.move(band.start, band.top);
+            await page.mouse.down();
+            await page.mouse.move(band.end, band.bottom, { steps: 8 });
+            await page.mouse.up();
+            const selected = await listing
+                .locator('[aria-selected="true"]')
+                .evaluateAll((nodes) =>
+                    nodes.map((node) => (node as HTMLElement).dataset.fileName),
+                );
+            check(
+                `${count}-file centered grid marquee selects only the first visual cell`,
+                selected.length === 1 && selected[0] === band.name,
+            );
+            await page.keyboard.press('Escape');
+        }
+        check(
+            'responsive grid alignment adds no native requests',
+            await page.evaluate(
+                (before) => window.filesUiTest.calls.length === before,
+                nativeBefore,
+            ),
+        );
+        assert.deepEqual(errors, []);
+        assert.deepEqual(requests, []);
+        console.log(`Responsive Files grid alignment checks passed (${checks}).`);
+    } else if (listControlsOnly) {
         await listing.waitFor();
         await page.getByRole('button', { name: 'Hide places', exact: true }).click();
         await page.setViewportSize({ width: 380, height: 800 });

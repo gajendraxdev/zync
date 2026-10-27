@@ -390,6 +390,21 @@ const filesUiTest = {
                 ),
             },
         }),
+    gridAlignmentFiles: (count: number) =>
+        useAppStore.setState({
+            files: {
+                [host]: Array.from({ length: count }, (_, index) =>
+                    entry(
+                        index === 0
+                            ? 'antigravity-server'
+                            : index % 3 === 0
+                              ? `folder-${index}-with-a-long-name`
+                              : `file-${index}-with-a-long-name.ts`,
+                        index % 3 === 0 ? 'd' : '-',
+                    ),
+                ),
+            },
+        }),
     marqueeFiles: () =>
         useAppStore.setState({
             files: {

@@ -38,6 +38,7 @@ import {
     type FileSortColumn,
     type FileSortDirection,
     fileGridColumnPitch,
+    fileGridInlineOffset,
     fileGridScrollTarget,
     fileIconGridTemplateColumns,
     formatFileIdentity,
@@ -139,6 +140,8 @@ const FileGridItem = memo(
             ref,
         ) => {
             const isFolder = file.type === 'd';
+            const renderedIconSize =
+                iconSize ?? (viewMode === 'grid' ? (compactMode ? 40 : 56) : compactMode ? 16 : 22);
 
             return (
                 <div
@@ -268,22 +271,20 @@ const FileGridItem = memo(
                     <div
                         className={cn(
                             'flex items-center justify-center shrink-0',
-                            viewMode === 'grid' ? 'w-full' : 'w-10 mr-4',
+                            viewMode === 'grid' ? 'files-grid-artwork' : 'w-10 mr-4',
                             isFolder ? 'drop-shadow-sm' : 'text-app-muted/80',
                         )}
+                        style={
+                            viewMode === 'grid'
+                                ? ({
+                                      '--files-grid-icon-size': `${renderedIconSize}px`,
+                                  } as CSSProperties)
+                                : undefined
+                        }
                     >
                         <FileIcon
                             file={file}
-                            size={
-                                iconSize ??
-                                (viewMode === 'grid'
-                                    ? compactMode
-                                        ? 40
-                                        : 56
-                                    : compactMode
-                                      ? 16
-                                      : 22)
-                            }
+                            size={renderedIconSize}
                         />
                     </div>
 
@@ -680,6 +681,7 @@ function FileGridRow({
                 ...style,
                 display: 'grid',
                 gridTemplateColumns: fileIconGridTemplateColumns(minTrack, columnCount),
+                justifyContent: 'safe center',
                 columnGap: gap,
                 paddingBottom: gap,
                 contain: 'layout',
@@ -973,7 +975,7 @@ export const FileGrid = memo(function FileGrid({
             gridTemplateColumns: fileIconGridTemplateColumns(zoomTrack.minTrack, gridColumnCount),
             gridAutoRows: `${gridTileHeight}px`,
             gap: zoomTrack.gap,
-            justifyContent: 'start',
+            justifyContent: 'safe center',
             alignContent: 'start',
         }),
         [gridColumnCount, gridTileHeight, zoomTrack.gap, zoomTrack.minTrack],
@@ -1008,7 +1010,13 @@ export const FileGrid = memo(function FileGrid({
                     gridColumnCount,
                     fileGridColumnPitch(gridEl.clientWidth, zoomTrack.minTrack, zoomTrack.gap),
                     gridRowHeight,
-                    box.left,
+                    box.left +
+                        fileGridInlineOffset(
+                            gridEl.clientWidth,
+                            zoomTrack.minTrack,
+                            zoomTrack.gap,
+                            gridColumnCount,
+                        ),
                     box.top,
                     gridEl.scrollTop,
                     rect,

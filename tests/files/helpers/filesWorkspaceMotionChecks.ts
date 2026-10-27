@@ -48,6 +48,9 @@ async function sampleMotion(page: Page, listing: Locator, action: () => Promise<
                 width: bounds.width,
                 scrollTop: viewport.scrollTop,
                 contentAnimations: animations.length,
+                inlineOffset: options[0]
+                    ? options[0].parentElement!.getBoundingClientRect().left - bounds.left
+                    : 0,
                 tiles: options
                     .filter((node) => {
                         const box = node.getBoundingClientRect();

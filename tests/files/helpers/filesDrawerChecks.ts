@@ -224,6 +224,11 @@ export async function runFilesDrawerChecks({
                         tileTrackWidth:
                             firstOption?.parentElement!.getBoundingClientRect().width ?? null,
                         viewportWidth: scroll?.clientWidth ?? null,
+                        inlineOffset:
+                            firstOption && scrollBounds
+                                ? firstOption.parentElement!.getBoundingClientRect().left -
+                                  scrollBounds.left
+                                : 0,
                         tiles,
                         contentAnimations: activeContentAnimations.length,
                         drawerTiming: widthTransition

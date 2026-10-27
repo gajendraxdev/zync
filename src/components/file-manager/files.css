@@ -15,6 +15,9 @@
 /* Fixed columns scroll together; the virtual viewport keeps its vertical scrollbar visible. */
 .files-list-columns { grid-template-columns: var(--files-list-columns); }
 .files-list-heading-viewport > .files-list-columns { min-width: var(--files-list-width); }
+/* Fixed artwork scales down only when a pane cannot fit its selected zoom size. */
+.files-grid-artwork { width: min(100%, var(--files-grid-icon-size)); aspect-ratio: 1; }
+.files-grid-artwork > *, .files-grid-artwork :is(svg, img) { width: 100% !important; height: 100% !important; }
 /* Larger native targets are scoped to Files, including the horizontal list scrollbar. */
 .files-listing [role="presentation"] { scrollbar-width: auto; }
 .files-listing [role="presentation"]::-webkit-scrollbar { width: 10px; height: 10px; }
