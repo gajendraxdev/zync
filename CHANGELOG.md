@@ -13,6 +13,13 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Fixed
 
+- **Closed Files pane cleanup:** Permanently closed Files panes release their
+  browsing state and stop receiving refreshes. Late results cannot restore closed
+  pane state; retained panes keep their existing resources.
+- **Reliable pane navigation:** Keyboard navigation stays within the selected
+  layout when pane IDs collide or the remembered owner is stale, including
+  focus repair after hiding a pane.
+
 - **Remote command responsiveness:** Improved responsiveness across hosts while
   remote commands or AI file writes are running. Remote command requests now
   have a 30-second timeout, and cancelling or timing out a request keeps the shared

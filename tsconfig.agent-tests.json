@@ -61,7 +61,7 @@
         "tests/workspaceSplitControls.test.ts",
         "tests/fileDestinationReservations.test.ts",
         "tests/transferOperations.test.ts",
-        "tests/fileSystemRefresh.test.ts",
+        "tests/files/fileSystemRefresh.test.ts",
         "tests/filesProduction.browser.tsx",
         "tests/paneTabRelease.browser.tsx",
         "tests/themeFiles.browser.tsx",
@@ -305,6 +305,7 @@
         "src/vault/syncPassphrase.ts",
         "src/vault/connectionsRestore.ts",
         "src/vault/vaultUnlockPrompt.ts",
-        "tests/tooling/**/*.ts"
+        "tests/tooling/**/*.ts",
+        "tests/workspace/**/*.ts"
     ]
 }
