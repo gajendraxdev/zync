@@ -31,6 +31,11 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Fixed
 
+- **Public URL cleanup:** Stopping a share or ending its relay session cancels
+  pending requests and active local proxy connections, preventing them from
+  accumulating across reconnects. Stopped agents cannot publish late Online updates.
+  Overlapping Start, Stop and Stop All actions preserve replacement agent status. ([6e19291c])
+
 - **Files keyboard focus:** Remove the large listing outline and use a thinner
   row indicator. Resize handles own their keyboard shortcuts while preserving
   Escape, and list headings realign when zoom changes the scrollbar gutter. ([7850716a])
@@ -3237,3 +3242,4 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 
 [7850716a]: https://github.com/zync-sh/zync/commit/7850716ad541d9afa50a983ca670361492b7980c
 [3a0eb5da]: https://github.com/zync-sh/zync/commit/3a0eb5da3a916d3586fb836f027a700eecc1e14f
+[6e19291c]: https://github.com/zync-sh/zync/commit/6e19291c1b7c29313bfb40052cd2030bb2ba2be6
