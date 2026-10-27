@@ -101,17 +101,8 @@ runTest('fileGridScrollTarget rejects a cell past the live grid', () => {
     assert.equal(fileGridScrollTarget(0, 8, 0), null);
 });
 
-runTest('FILE_LIST_COLUMNS includes name flex track and size column', () => {
-    assert.equal(
-        FILE_LIST_COLUMNS.includes('min(var(--files-name-limit, 25rem), calc(100% - 14rem))'),
-        true,
-    );
-    assert.equal(FILE_LIST_COLUMNS.includes('5rem'), true);
-    assert.equal(
-        FILE_LIST_COLUMNS.endsWith('9rem'),
-        true,
-        'default has only Name, Size and Modified',
-    );
+runTest('FILE_LIST_COLUMNS preserves fixed Name, Modified and Size tracks', () => {
+    assert.equal(FILE_LIST_COLUMNS, '25rem 9rem 5rem');
 });
 
 runTest('formatFileListDate uses time today and short date otherwise', () => {
