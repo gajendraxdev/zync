@@ -6,6 +6,11 @@ All notable changes to Zync are documented in this file. The format is based on 
 
 ### Changed
 
+- **Feature-based tests:** Grouped Files suites, browser helpers, fixtures and
+  native harnesses under `tests/files/`, converted JavaScript test logic to strict
+  TypeScript and removed redundant launchers. Added focused Files commands and a
+  test-folder guide for future changes.
+
 - **Consistent contribution checks:** Added staged JavaScript/TypeScript formatting,
   organized imports and a TypeScript test policy, preserving existing hooks and
   partially staged edits. Hook installation supports shell options and safely

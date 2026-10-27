@@ -47,6 +47,13 @@ function normalizeEmittedImports(directory) {
     }
 }
 
+const [feature, ...testArguments] = process.argv.slice(2);
+const browserRun = feature === 'files' && testArguments[0] === '--browser';
+if ((feature && feature !== 'files') || (testArguments.length > 0 && !browserRun)) {
+    console.error('Usage: node tests/runAllAgentTests.mjs [files [--browser [browser flags]]]');
+    process.exit(1);
+}
+
 normalizeEmittedImports(path.resolve('.tmp-agent-tests'));
 
 const tests = [
@@ -67,22 +74,22 @@ const tests = [
     'tests/terminalRendererLifecycle.test.mjs',
     'tests/ghostCwdSafety.test.mjs',
     'tests/ghostPromptSafety.test.mjs',
-    'tests/folderSizes.test.mjs',
-    'tests/filePermissions.test.mjs',
-    'tests/editorSaveAccess.test.mjs',
-    'tests/fileDestinationReservations.test.mjs',
-    'tests/fileActivationFocus.test.mjs',
-    'tests/transferState.test.mjs',
-    'tests/transferOperations.test.mjs',
+    '.tmp-agent-tests/tests/files/folderSizes.test.js',
+    '.tmp-agent-tests/tests/files/filePermissions.test.js',
+    '.tmp-agent-tests/tests/files/editorSaveAccess.test.js',
+    '.tmp-agent-tests/tests/files/fileDestinationReservations.test.js',
+    '.tmp-agent-tests/tests/files/fileActivationFocus.test.js',
+    '.tmp-agent-tests/tests/files/transferState.test.js',
+    '.tmp-agent-tests/tests/files/transferOperations.test.js',
     '.tmp-agent-tests/tests/files/fileSystemRefresh.test.js',
     'tests/layoutMotion.test.mjs',
-    'tests/filePanelLayout.test.mjs',
-    'tests/fileViewportAnchor.test.mjs',
+    '.tmp-agent-tests/tests/files/filePanelLayout.test.js',
+    '.tmp-agent-tests/tests/files/fileViewportAnchor.test.js',
     'tests/uiControls.test.mjs',
-    'tests/fileBreadcrumbLayout.test.mjs',
-    'tests/fileSelectionSummary.test.mjs',
-    'tests/fileFolderOptions.test.mjs',
-    'tests/filePathCompletion.test.mjs',
+    '.tmp-agent-tests/tests/files/fileBreadcrumbLayout.test.js',
+    '.tmp-agent-tests/tests/files/fileSelectionSummary.test.js',
+    '.tmp-agent-tests/tests/files/fileFolderOptions.test.js',
+    '.tmp-agent-tests/tests/files/filePathCompletion.test.js',
     'tests/uiSurfaces.test.mjs',
     'tests/uiLayoutPrimitives.test.mjs',
     'tests/sidebarControls.test.mjs',
@@ -157,9 +164,9 @@ const tests = [
     'tests/plainDocumentState.test.mjs',
     'tests/paneCloseBlockers.test.mjs',
     'tests/paneCloseEditorGuard.test.mjs',
-    'tests/editorReadPolicy.test.mjs',
-    'tests/fileManagerDisconnectedSave.test.mjs',
-    'tests/fileManagerEditorIdentity.test.mjs',
+    '.tmp-agent-tests/tests/files/editorReadPolicy.test.js',
+    '.tmp-agent-tests/tests/files/fileManagerDisconnectedSave.test.js',
+    '.tmp-agent-tests/tests/files/fileManagerEditorIdentity.test.js',
     'tests/pluginPanelSshConfirmation.test.mjs',
     'tests/pluginCommandBridge.test.mjs',
     'tests/pluginShortcuts.test.mjs',
@@ -195,17 +202,17 @@ const tests = [
     'tests/ghostSuggestionsHelpers.test.mjs',
     'tests/terminalOutputStream.test.mjs',
     'tests/fileDropToTerminal.test.mjs',
-    'tests/fileGridLayout.test.mjs',
-    'tests/fileListPresentation.test.mjs',
-    'tests/fileMarquee.test.mjs',
-    'tests/filePathNav.test.mjs',
-    '.tmp-agent-tests/tests/filePathAbsolute.test.js',
-    'tests/fileVolumes.test.mjs',
+    '.tmp-agent-tests/tests/files/fileGridLayout.test.js',
+    '.tmp-agent-tests/tests/files/fileListPresentation.test.js',
+    '.tmp-agent-tests/tests/files/fileMarquee.test.js',
+    '.tmp-agent-tests/tests/files/filePathNav.test.js',
+    '.tmp-agent-tests/tests/files/filePathAbsolute.test.js',
+    '.tmp-agent-tests/tests/files/fileVolumes.test.js',
     'tests/themedIconSrc.test.mjs',
     'tests/materialIconTheme.test.mjs',
     'tests/iconThemeRegistry.test.mjs',
-    'tests/fileSearchFilter.test.mjs',
-    'tests/fileSystemBrowsingContracts.test.mjs',
+    '.tmp-agent-tests/tests/files/fileSearchFilter.test.js',
+    '.tmp-agent-tests/tests/files/fileSystemBrowsingContracts.test.js',
     'tests/errorBoundary.test.mjs',
     'tests/releaseNotesMarkdown.test.mjs',
     'tests/tauriAssetScope.test.mjs',
@@ -269,14 +276,20 @@ const tests = [
     'tests/updaterFlow.test.mjs',
 ];
 
-for (const file of tests) {
+const selectedTests = browserRun
+    ? ['.tmp-agent-tests/tests/files/filesProduction.browser.test.js']
+    : feature === 'files'
+      ? tests.filter((file) => file.startsWith('.tmp-agent-tests/tests/files/'))
+      : tests;
+
+for (const file of selectedTests) {
     const args = file.startsWith('tests/terminal')
         ? [
               '--input-type=module',
               '--eval',
               `globalThis.window={ipcRenderer:{invoke:async()=>undefined,send:()=>{},on:()=>()=>{}},dispatchEvent:()=>true};await import(${JSON.stringify(pathToFileURL(path.resolve(file)).href)})`,
           ]
-        : [file];
+        : [file, ...(browserRun ? testArguments.slice(1) : [])];
     const result = spawnSync(process.execPath, args, { stdio: 'inherit' });
     if (result.status !== 0) {
         process.exit(result.status ?? 1);

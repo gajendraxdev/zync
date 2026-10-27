@@ -100,9 +100,17 @@ the same checks before committing. The hook never creates a commit.
 
 ### Test language
 
+Read [the test folder guide](tests/README.md) before adding or changing tests.
+
 Write new tests and new assertions in **TypeScript (`.ts` or `.tsx`)**. When adding
 cases to a legacy JavaScript test, move that logic into TypeScript first. Include
 the typed test in `tsconfig.agent-tests.json` and wire it into the existing runner.
+Group suites by feature under `tests/<feature>/`, with feature-specific helpers
+and fixtures inside that folder. Files tests use `tests/files/`. Move other
+feature suites when working on that feature; a repository-wide migration is
+not required. Register typed suites directly in the shared runner without adding
+per-suite JavaScript launchers. Existing assertion-free `.mjs` launchers may
+remain for unmigrated features.
 
 `npm run check:test-language` checks staged snapshots before formatting. It rejects
 new JavaScript test sources and detects common new cases/assertions added to
@@ -114,6 +122,16 @@ tests before committing.
 For committed changes, `node scripts/check-test-language.mjs --base REF` compares
 `HEAD` with its merge base against `REF`. Fetch enough history for that common
 ancestor to exist; the frontend CI checkout fetches full history.
+
+From the app repository, run `npm run test:files` for the Files unit suites, or
+`npm run test:all-agent` for all registered frontend suites. Run
+`npm run test:files:browser` for the separate real-component browser checks; this
+uses installed Microsoft Edge by default. Set `ZYNC_BROWSER_CHANNEL` to another
+installed Playwright Chromium channel if needed. Focused browser modes are
+forwarded, for example `npm run test:files:browser -- --folder-sizes-only`.
+These commands compile the typed tests and prepare their Node imports before
+running them. The browser preview is `/tests/files/filesProduction.browser.html`
+on the development server.
 
 ## Pull Request Guidelines
 

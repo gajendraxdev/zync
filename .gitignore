@@ -28,6 +28,7 @@ src-tauri/target-agent-check/
 release/
 .tmp-agent-tests/
 .npm-cache/
+tests/files/native-permissions/target/
 # Written by Snap CI on the runner only — never commit
 snap/ci-build-env.sh
 # Prebuilt .deb downloaded for snap packaging — never commit
