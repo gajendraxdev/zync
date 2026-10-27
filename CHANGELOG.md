@@ -9,21 +9,21 @@ All notable changes to Zync are documented in this file. The format is based on 
 - **Feature-based tests:** Grouped Files suites, browser helpers, fixtures and
   native harnesses under `tests/files/`, converted JavaScript test logic to strict
   TypeScript and removed redundant launchers. Added focused Files commands and a
-  test-folder guide for future changes.
+  test-folder guide for future changes. ([fcc5d546])
 
 - **Consistent contribution checks:** Added staged JavaScript/TypeScript formatting,
   organized imports and a TypeScript test policy, preserving existing hooks and
   partially staged edits. Hook installation supports shell options and safely
-  skips checkouts without the project runner; committed checks use a merge base.
+  skips checkouts without the project runner; committed checks use a merge base. ([148a5d26])
 
 ### Fixed
 
 - **Closed Files pane cleanup:** Permanently closed Files panes release their
   browsing state and stop receiving refreshes. Late results cannot restore closed
-  pane state; retained panes keep their existing resources.
+  pane state; retained panes keep their existing resources. ([c24a24ab])
 - **Reliable pane navigation:** Keyboard navigation stays within the selected
   layout when pane IDs collide or the remembered owner is stale, including
-  focus repair after hiding a pane.
+  focus repair after hiding a pane. ([c24a24ab])
 
 - **Remote command responsiveness:** Improved responsiveness across hosts while
   remote commands or AI file writes are running. Remote command requests now
@@ -3204,3 +3204,6 @@ Partial draft: desktop builds, AppImage Wayland strip, and APT `2.25.4` publishe
 [1fa69c8]: https://github.com/zync-sh/zync/commit/1fa69c86635fda49d8bf35ee606d158fcff9a0ca
 [c96d801]: https://github.com/zync-sh/zync/commit/c96d8019256821dddbcc3dfc9a0920f13c669129
 [acc34dc1]: https://github.com/zync-sh/zync/commit/acc34dc133a2c301aa56a73df1a39b48d41717e1
+[148a5d26]: https://github.com/zync-sh/zync/commit/148a5d26af8a85739bb927cfe840d1277c0f0d49
+[c24a24ab]: https://github.com/zync-sh/zync/commit/c24a24ab8207ce23b1d7151a08804cda7f4d0971
+[fcc5d546]: https://github.com/zync-sh/zync/commit/fcc5d5468ba729b2b5ffd3adc01b15de8f81fef0
