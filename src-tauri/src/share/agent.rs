@@ -1,9 +1,10 @@
 use super::api::{ApiClient, ShareRecord};
 use super::auth::AuthStore;
 use super::config::{to_ws_url, ShareConfig};
+use super::outbound::OutboundSender;
 use super::protocol::{
-    self, decode_data_frame, encode_data_frame, AgentOut, DataMsg, Envelope, ErrorMsg, Hello,
-    OkMsg, Open, TYPE_CLOSE, TYPE_DATA, TYPE_ERROR, TYPE_OPEN, TYPE_PING,
+    self, decode_data_frame, DataMsg, Envelope, ErrorMsg, Hello, OkMsg, Open, MAX_MESSAGE_BYTES,
+    TYPE_CLOSE, TYPE_DATA, TYPE_ERROR, TYPE_OPEN, TYPE_PING,
 };
 use super::proxy::handle_open;
 use super::stream::Stream;
@@ -18,13 +19,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{watch, Mutex};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Message;
 
-const WS_MAX_MESSAGE_BYTES: usize = 1 << 20;
+// Match the relay's existing per-share admission limit.
+const MAX_ACTIVE_STREAMS: usize = 256;
 const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
 const STABLE_SESSION: Duration = Duration::from_secs(30);
@@ -437,8 +439,9 @@ async fn run_session(
         }
     }
     let mut ws_config = WebSocketConfig::default();
-    ws_config.max_message_size = Some(WS_MAX_MESSAGE_BYTES);
-    ws_config.max_frame_size = Some(WS_MAX_MESSAGE_BYTES);
+    ws_config.max_message_size = Some(MAX_MESSAGE_BYTES);
+    ws_config.max_frame_size = Some(MAX_MESSAGE_BYTES);
+    ws_config.max_write_buffer_size = 2 * MAX_MESSAGE_BYTES;
 
     let connect = tokio_tungstenite::connect_async_with_config(request, Some(ws_config), false);
     let (ws, _) = match tokio::time::timeout(HANDSHAKE_TIMEOUT, connect).await {
@@ -551,40 +554,29 @@ where
     on_online.await;
     let binary_data = negotiated == 2;
 
-    let (tx, mut rx) = mpsc::unbounded_channel::<AgentOut>();
-    let write = {
-        let tx = tx.clone();
-        move |v: AgentOut| tx.send(v).map_err(|_| "agent write closed".to_string())
-    };
+    let (write, mut rx) = OutboundSender::data_channel(binary_data);
+    let (control, mut control_rx) = OutboundSender::control_channel();
+    // A watch version coalesces a burst into one pending reply. Pings received
+    // during a Pong flush leave one further notification for the next iteration.
+    let (pong_tx, mut pong_rx) = watch::channel(());
     let target = target.to_string();
 
     let writer_task = async {
-        while let Some(out) = rx.recv().await {
-            let sent = match out {
-                AgentOut::Json(value) => {
-                    let Ok(payload) = serde_json::to_string(&value) else {
-                        continue;
-                    };
-                    sink.send(Message::Text(payload.into())).await
+        loop {
+            let frame = tokio::select! {
+                changed = pong_rx.changed() => {
+                    if changed.is_err()
+                        || sink.send(Message::Text(r#"{"type":"pong"}"#.into())).await.is_err()
+                    {
+                        break;
+                    }
+                    continue;
                 }
-                AgentOut::Data { stream_id, chunk } if binary_data => {
-                    sink.send(Message::Binary(encode_data_frame(stream_id, &chunk).into()))
-                        .await
-                }
-                AgentOut::Data { stream_id, chunk } => {
-                    use base64::Engine;
-                    let payload = serde_json::json!({
-                        "type": "data",
-                        "stream_id": stream_id,
-                        "chunk": base64::engine::general_purpose::STANDARD.encode(chunk),
-                    });
-                    let Ok(text) = serde_json::to_string(&payload) else {
-                        continue;
-                    };
-                    sink.send(Message::Text(text.into())).await
-                }
+                Some(frame) = control_rx.recv() => frame,
+                Some(frame) = rx.recv() => frame,
+                else => break,
             };
-            if sent.is_err() {
+            if frame.write_to(&mut sink).await.is_err() {
                 break;
             }
         }
@@ -597,6 +589,7 @@ where
         let mut proxies = FuturesUnordered::new();
         loop {
             let msg = tokio::select! {
+                biased;
                 Some(stream_id) = proxies.next(), if !proxies.is_empty() => {
                     streams.remove(&stream_id);
                     continue;
@@ -616,12 +609,12 @@ where
                         match tx.try_send(bytes::Bytes::copy_from_slice(chunk)) {
                             Ok(()) => {}
                             Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                                if let Some(st) = streams.remove(&stream_id) {
+                                if let Some(st) = streams.get(&stream_id) {
                                     st.cancel();
                                 }
                             }
                             Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                                streams.remove(&stream_id);
+                                // HTTP can discard body input while its response is pending.
                             }
                         }
                     }
@@ -662,13 +655,23 @@ where
             };
             match env.kind.as_str() {
                 TYPE_PING => {
-                    let _ = tx.send(AgentOut::Json(serde_json::json!({ "type": "pong" })));
+                    pong_tx.send_replace(());
                 }
                 TYPE_OPEN => {
                     let open: Open = match serde_json::from_str(&data) {
                         Ok(v) => v,
                         Err(_) => continue,
                     };
+                    if streams.contains_key(&open.stream_id) {
+                        return SessionResult::Err("duplicate active stream id".into());
+                    }
+                    // Count cancelled/output-blocked proxies until they finish.
+                    if proxies.len() >= MAX_ACTIVE_STREAMS {
+                        if let Err(e) = reject_open(&control, open.stream_id) {
+                            return SessionResult::Err(e);
+                        }
+                        continue;
+                    }
                     let (st, readers) = Stream::new(open.stream_id);
                     streams.insert(open.stream_id, st);
                     let write = write.clone();
@@ -693,14 +696,14 @@ where
                         match tx.try_send(bytes::Bytes::from(raw)) {
                             Ok(()) => {}
                             Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                                // Slow/local stream backlog — drop only this stream so
+                                // Slow/local stream backlog — cancel only this stream so
                                 // the session keeps handling other streams and pings.
-                                if let Some(st) = streams.remove(&msg.stream_id) {
+                                if let Some(st) = streams.get(&msg.stream_id) {
                                     st.cancel();
                                 }
                             }
                             Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                                streams.remove(&msg.stream_id);
+                                // HTTP can discard body input while its response is pending.
                             }
                         }
                     }
@@ -736,6 +739,15 @@ where
         }
         _ = wait_cancel(&cancel) => SessionResult::Ok(ok),
     }
+}
+
+/// Refuse excess work using existing protocol frames without blocking the reader.
+fn reject_open(control: &OutboundSender, stream_id: i64) -> Result<(), String> {
+    control.try_json(serde_json::json!({
+        "type": "end", "stream_id": stream_id, "status": 503,
+        "headers": { "Content-Length": ["0"], "X-Zync-Error": ["overloaded"] },
+    }))?;
+    control.try_json(serde_json::json!({ "type": "close", "stream_id": stream_id }))
 }
 
 fn resume_path(data_dir: &Path, share_id: &str) -> PathBuf {
